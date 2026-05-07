@@ -1,0 +1,97 @@
+{
+  "time": "2026-04-26T16:51:18.306Z",
+  "total": 10,
+  "passed": 3,
+  "failed": 7,
+  "accuracy": 0.3,
+  "recognizedMismatch": 8,
+  "api": {
+    "callsObserved": 10,
+    "statusCount": {
+      "200": 10
+    },
+    "has429": false
+  },
+  "results": [
+    {
+      "index": 1,
+      "expected": "C",
+      "predicted": "C",
+      "ok": true,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④"
+    },
+    {
+      "index": 2,
+      "expected": "A",
+      "predicted": "—",
+      "ok": false,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "DeepSeek 组合题回归夹具 1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④ 2. 某班同学讨论“货币的职能”，下列判断正确的是() ① 标价“每斤苹果6元”体现价值尺度职能 ② 超市扫码付款体现流通手段职能 ③ 把钱存银行只体现支付手段，不体现贮藏手段 ④ 赊购到期付款体现支付"
+    },
+    {
+      "index": 3,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "recognizedStemMatch": false,
+      "recognizedTextPreview": "在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④"
+    },
+    {
+      "index": 4,
+      "expected": "A",
+      "predicted": "C",
+      "ok": false,
+      "recognizedStemMatch": false,
+      "recognizedTextPreview": "1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④"
+    },
+    {
+      "index": 5,
+      "expected": "A",
+      "predicted": "C",
+      "ok": false,
+      "recognizedStemMatch": false,
+      "recognizedTextPreview": "1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④"
+    },
+    {
+      "index": 6,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "recognizedStemMatch": false,
+      "recognizedTextPreview": "1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④"
+    },
+    {
+      "index": 7,
+      "expected": "A",
+      "predicted": "C",
+      "ok": false,
+      "recognizedStemMatch": false,
+      "recognizedTextPreview": "DeepSeek 组合题回归夹具 1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④"
+    },
+    {
+      "index": 8,
+      "expected": "A",
+      "predicted": "C",
+      "ok": false,
+      "recognizedStemMatch": false,
+      "recognizedTextPreview": "1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④"
+    },
+    {
+      "index": 9,
+      "expected": "A",
+      "predicted": "D",
+      "ok": false,
+      "recognizedStemMatch": false,
+      "recognizedTextPreview": "DeepSeek 组合题回归夹具 1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④"
+    },
+    {
+      "index": 10,
+      "expected": "A",
+      "predicted": "C",
+      "ok": false,
+      "recognizedStemMatch": false,
+      "recognizedTextPreview": "1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④"
+    }
+  ]
+}

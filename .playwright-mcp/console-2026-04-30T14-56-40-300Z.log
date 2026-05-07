@@ -1,0 +1,60 @@
+[     246ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://hm.baidu.com/hm.js?02f32149c7ea90d0cd47ed89025e457c:0
+[     247ms] [WARNING] ⚠️ 未找到选择器 ".test-basket" 对应的元素 @ https://www.tiku.cn/static/js/tk.js:15
+[     247ms] [WARNING] ⚠️ 未找到选择器 ".mask" 对应的元素 @ https://www.tiku.cn/static/js/tk.js:15
+[     247ms] [WARNING] ⚠️ 未找到ID为 "cancelClick" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     247ms] [WARNING] ⚠️ 未找到选择器 ".basket-close" 对应的元素 @ https://www.tiku.cn/static/js/tk.js:15
+[     247ms] [WARNING] ⚠️ 未找到ID为 "nextstep" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     247ms] [WARNING] ⚠️ 未找到选择器 ".tb-save" 对应的元素 @ https://www.tiku.cn/static/js/tk.js:15
+[     247ms] [WARNING] ⚠️ 未找到ID为 "tb-save-close" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     247ms] [WARNING] ⚠️ 未找到ID为 "basket-canel" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     247ms] [WARNING] ⚠️ 未找到ID为 "radio-1" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     247ms] [WARNING] ⚠️ 未找到ID为 "radio-2" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     247ms] [WARNING] ⚠️ 未找到ID为 "radio-3" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     247ms] [WARNING] ⚠️ 未找到ID为 "sel_1" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     247ms] [WARNING] ⚠️ 未找到ID为 "sel_2" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     247ms] [WARNING] ⚠️ 未找到ID为 "sel_3" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     247ms] [WARNING] ⚠️ 未找到ID为 "sel_4" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[   31373ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[   31373ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[   31587ms] [INFO] [ManualParse] attempt start {blockId: manual-1777561031683, attempt: 1, timeoutMs: 10000, route: vision, hasImageDataUrl: true} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[   38907ms] [INFO] [ManualParse] attempt success {blockId: manual-1777561031683, attempt: 1, timeoutMs: 10000, route: vision, elapsedMs: 7320} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  118904ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  118904ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  119122ms] [INFO] [ManualParse] attempt start {blockId: manual-1777561119212, attempt: 1, timeoutMs: 10000, route: vision, hasImageDataUrl: true} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  135552ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  135553ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  136853ms] [INFO] [ManualParse] attempt success {blockId: manual-1777561119212, attempt: 1, timeoutMs: 10000, route: vision, elapsedMs: 17731} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  182709ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  182710ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  182920ms] [INFO] [ManualParse] attempt start {blockId: manual-1777561183016, attempt: 1, timeoutMs: 10000, route: vision, hasImageDataUrl: true} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  189891ms] [INFO] [ManualParse] attempt success {blockId: manual-1777561183016, attempt: 1, timeoutMs: 10000, route: vision, elapsedMs: 6970} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  218715ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  218715ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  229045ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  229046ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  229255ms] [INFO] [ManualParse] attempt start {blockId: manual-1777561229351, attempt: 1, timeoutMs: 10000, route: vision, hasImageDataUrl: true} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  235764ms] [INFO] [ManualParse] attempt success {blockId: manual-1777561229351, attempt: 1, timeoutMs: 10000, route: vision, elapsedMs: 6509} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  257832ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  257832ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  258051ms] [INFO] [ManualParse] attempt start {blockId: manual-1777561258139, attempt: 1, timeoutMs: 10000, route: vision, hasImageDataUrl: true} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  264810ms] [INFO] [ManualParse] attempt success {blockId: manual-1777561258139, attempt: 1, timeoutMs: 10000, route: vision, elapsedMs: 6758} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  276124ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  276124ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  276344ms] [INFO] [ManualParse] attempt start {blockId: manual-1777561276431, attempt: 1, timeoutMs: 10000, route: vision, hasImageDataUrl: true} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  282584ms] [INFO] [ManualParse] attempt success {blockId: manual-1777561276431, attempt: 1, timeoutMs: 10000, route: vision, elapsedMs: 6239} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  293884ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  293884ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  294084ms] [INFO] [ManualParse] attempt start {blockId: manual-1777561294190, attempt: 1, timeoutMs: 10000, route: vision, hasImageDataUrl: true} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  301680ms] [INFO] [ManualParse] attempt success {blockId: manual-1777561294190, attempt: 1, timeoutMs: 10000, route: vision, elapsedMs: 7595} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  340992ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  340993ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  341211ms] [INFO] [ManualParse] attempt start {blockId: manual-1777561341299, attempt: 1, timeoutMs: 10000, route: vision, hasImageDataUrl: true} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  349153ms] [INFO] [ManualParse] attempt success {blockId: manual-1777561341299, attempt: 1, timeoutMs: 10000, route: vision, elapsedMs: 7941} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  399234ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  399234ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  399443ms] [INFO] [ManualParse] attempt start {blockId: manual-1777561399539, attempt: 1, timeoutMs: 10000, route: vision, hasImageDataUrl: true} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  407012ms] [INFO] [ManualParse] attempt success {blockId: manual-1777561399539, attempt: 1, timeoutMs: 10000, route: vision, elapsedMs: 7568} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  414287ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  414288ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  414497ms] [INFO] [ManualParse] attempt start {blockId: manual-1777561414594, attempt: 1, timeoutMs: 10000, route: vision, hasImageDataUrl: true} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98
+[  423804ms] [INFO] [ManualParse] attempt success {blockId: manual-1777561414594, attempt: 1, timeoutMs: 10000, route: vision, elapsedMs: 9306} @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:98

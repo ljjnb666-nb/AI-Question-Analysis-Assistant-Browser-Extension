@@ -1,0 +1,490 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - link "首页" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "tiku.com(合作网站)" [ref=e6] [cursor=pointer]:
+      - /url: https://www.tiku.com
+    - button [ref=e7] [cursor=pointer]
+  - generic [ref=e10]:
+    - text: 
+    - generic [ref=e11] [cursor=pointer]:
+      - generic [ref=e12]:
+        - generic [ref=e13]: 
+        - text: 试题篮 ( 0 )
+        - generic [ref=e14]: 
+      - text:     
+  - generic [ref=e15]:
+    - list [ref=e17]:
+      - listitem [ref=e18]:
+        - generic [ref=e19]: "试题检索 :"
+        - generic [ref=e20]:
+          - link "按章节" [ref=e21] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1
+          - link "按知识点" [ref=e22] [cursor=pointer]:
+            - /url: /knowledgeq?cid=13&cno=2
+      - listitem [ref=e23]:
+        - generic [ref=e24]: "教材版本 :"
+        - generic [ref=e25]:
+          - link "人教版" [ref=e26] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015
+          - link "浙科版" [ref=e27] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800029
+          - link "苏教版" [ref=e28] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800061
+          - link "中图版" [ref=e29] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800072
+          - link "沪科版" [ref=e30] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800077
+          - link "山东版" [ref=e31] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800102
+      - listitem [ref=e32]:
+        - generic [ref=e33]: "课本 :"
+        - generic [ref=e34]:
+          - link "必修1" [ref=e35] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800088
+          - link "必修2" [ref=e36] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800086
+          - link "必修3" [ref=e37] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800096
+          - link "选修1" [ref=e38] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800101
+          - link "选修2" [ref=e39] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800103
+          - link "选修3" [ref=e40] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800109
+      - listitem [ref=e41]:
+        - generic [ref=e42]: "题型 :"
+        - generic [ref=e43]:
+          - link "全部" [ref=e44] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "单选题" [ref=e45] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "多选题" [ref=e46] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "判断题" [ref=e47] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "填空题" [ref=e48] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "解答题" [ref=e49] [cursor=pointer]:
+            - /url: javascript:void(0)
+      - listitem [ref=e50]:
+        - generic [ref=e51]: "难易度 :"
+        - generic [ref=e52]:
+          - link "全部" [ref=e53] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "易" [ref=e54] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "中" [ref=e55] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "难" [ref=e56] [cursor=pointer]:
+            - /url: javascript:void(0)
+    - generic [ref=e57]:
+      - list [ref=e60]:
+        - listitem [ref=e61]:
+          - generic [ref=e62]: 
+          - link "第1章 走近细胞" [ref=e63] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e64]:
+          - generic [ref=e65]: 
+          - link "第2章 组成细胞的分子" [ref=e66] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:    
+        - listitem [ref=e67]:
+          - generic [ref=e68]: 
+          - link "第3章 细胞的基本结构" [ref=e69] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:   
+        - listitem [ref=e70]:
+          - generic [ref=e71]: 
+          - link "第4章 细胞的物质输入和输出" [ref=e72] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e73]:
+          - generic [ref=e74]: 
+          - link "第5章 细胞的能量供应和利用" [ref=e75] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:    
+        - listitem [ref=e76]:
+          - generic [ref=e77]: 
+          - link "第6章 细胞的生命历程" [ref=e78] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:    
+      - generic [ref=e79]:
+        - alert [ref=e80]:
+          - generic [ref=e81] [cursor=pointer]: 组卷预览
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - generic [ref=e84]:
+              - generic [ref=e85]:
+                - text: "难度:"
+                - link "0.56" [ref=e86] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e88]:
+                - listitem [ref=e89]:
+                  - generic [ref=e90]: "答案: A"
+                - listitem [ref=e91]:
+                  - link " 查看解析" [ref=e92] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e93]: 
+                    - text: 查看解析
+                - listitem [ref=e94]:
+                  - link " 收藏" [ref=e95] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e96]: 
+                    - text: 收藏
+                - listitem [ref=e97]:
+                  - link "试题篮" [ref=e98] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e99]: 
+                    - text: 试题篮
+            - generic [ref=e100]:
+              - generic [ref=e101]:
+                - text: 如右图表示细胞中各种化合物或基本元素占细胞鲜重的含量，以下按①②③④顺序排列正确的是( )
+                - img [ref=e102]
+              - generic [ref=e104]:
+                - generic [ref=e105]: A、蛋白质、水、脂质、糖类，C、O、H、N
+                - generic [ref=e106]: B、蛋白质、糖类、脂质、水，N、H、O、C
+                - generic [ref=e107]: C、O、H、NB.蛋白质、糖类、脂质、水，N、H、O、CC.水、蛋白质、脂质、糖类，H、O、N、C
+                - generic [ref=e108]: D、水、蛋白质、糖类、脂质，N、H、C、O
+          - generic [ref=e109]:
+            - generic [ref=e110]:
+              - generic [ref=e111]:
+                - text: "难度:"
+                - link "0.82" [ref=e112] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e114]:
+                - listitem [ref=e115]:
+                  - generic [ref=e116]: "答案: D"
+                - listitem [ref=e117]:
+                  - link " 查看解析" [ref=e118] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e119]: 
+                    - text: 查看解析
+                - listitem [ref=e120]:
+                  - link " 收藏" [ref=e121] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e122]: 
+                    - text: 收藏
+                - listitem [ref=e123]:
+                  - link "试题篮" [ref=e124] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e125]: 
+                    - text: 试题篮
+            - generic [ref=e126]:
+              - generic [ref=e127]: 在缺硼的土地上，最不适宜种植( )
+              - generic [ref=e129]:
+                - generic [ref=e130]: A、白菜
+                - generic [ref=e131]: B、甘蔗
+                - generic [ref=e132]: C、黄花
+                - generic [ref=e133]: D、黄豆
+          - generic [ref=e134]:
+            - generic [ref=e135]:
+              - generic [ref=e136]:
+                - text: "难度:"
+                - link "0.69" [ref=e137] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e139]:
+                - listitem [ref=e140]:
+                  - generic [ref=e141]: "答案: A"
+                - listitem [ref=e142]:
+                  - link " 查看解析" [ref=e143] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e144]: 
+                    - text: 查看解析
+                - listitem [ref=e145]:
+                  - link " 收藏" [ref=e146] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e147]: 
+                    - text: 收藏
+                - listitem [ref=e148]:
+                  - link "试题篮" [ref=e149] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e150]: 
+                    - text: 试题篮
+            - generic [ref=e151]:
+              - generic [ref=e152]: 淀粉、淀粉酶、淀粉酶基因的基本单位分别是( )
+              - generic [ref=e154]:
+                - generic [ref=e155]: A、葡萄糖、氨基酸、核苷酸
+                - generic [ref=e156]: B、单糖、核苷酸、碱基
+                - generic [ref=e157]: C、核苷酸、麦芽糖、氨基酸
+                - generic [ref=e158]: D、碱基、葡萄糖、氨基
+          - generic [ref=e159]:
+            - generic [ref=e160]:
+              - generic [ref=e161]:
+                - text: "难度:"
+                - link "0.24" [ref=e162] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e164]:
+                - listitem [ref=e165]:
+                  - generic [ref=e166]: "答案: D"
+                - listitem [ref=e167]:
+                  - link " 查看解析" [ref=e168] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e169]: 
+                    - text: 查看解析
+                - listitem [ref=e170]:
+                  - link " 收藏" [ref=e171] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e172]: 
+                    - text: 收藏
+                - listitem [ref=e173]:
+                  - link "试题篮" [ref=e174] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e175]: 
+                    - text: 试题篮
+            - generic [ref=e176]:
+              - generic [ref=e177]:
+                - text: 经检测，刚挤出的牛奶中有两种分子式分别为C
+                - subscript [ref=e178]: "1864"
+                - text: H
+                - subscript [ref=e179]: "3012"
+                - text: "N"
+                - subscript [ref=e180]: "168"
+                - text: O
+                - subscript [ref=e181]: "221"
+                - text: 和C
+                - subscript [ref=e182]: "12"
+                - text: H
+                - subscript [ref=e183]: "22"
+                - text: O
+                - subscript [ref=e184]: "11"
+                - text: 的化学物质，它们分别是( )
+              - generic [ref=e186]:
+                - generic [ref=e187]: A、蛋白质和葡萄糖
+                - generic [ref=e188]: B、蛋白质和蔗糖
+                - generic [ref=e189]: C、核酸和脂肪
+                - generic [ref=e190]: D、蛋白质和乳糖
+          - generic [ref=e191]:
+            - generic [ref=e192]:
+              - generic [ref=e193]:
+                - text: "难度:"
+                - link "0.14" [ref=e194] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e196]:
+                - listitem [ref=e197]:
+                  - generic [ref=e198]: "答案: B"
+                - listitem [ref=e199]:
+                  - link " 查看解析" [ref=e200] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e201]: 
+                    - text: 查看解析
+                - listitem [ref=e202]:
+                  - link " 收藏" [ref=e203] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e204]: 
+                    - text: 收藏
+                - listitem [ref=e205]:
+                  - link "试题篮" [ref=e206] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e207]: 
+                    - text: 试题篮
+            - generic [ref=e208]:
+              - generic [ref=e209]: 大海中的水母、海带，陆地上的蜥蜴、小麦等生物，都是由细胞构成的。这些生物细胞中含量最多的有机物是( )
+              - generic [ref=e211]:
+                - generic [ref=e212]: A、水分
+                - generic [ref=e213]: B、蛋白质
+                - generic [ref=e214]: C、脂质
+                - generic [ref=e215]: D、糖类
+          - generic [ref=e216]:
+            - generic [ref=e217]:
+              - generic [ref=e218]:
+                - text: "难度:"
+                - link "0.94" [ref=e219] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e221]:
+                - listitem [ref=e222]:
+                  - generic [ref=e223]: "答案: D"
+                - listitem [ref=e224]:
+                  - link " 查看解析" [ref=e225] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e226]: 
+                    - text: 查看解析
+                - listitem [ref=e227]:
+                  - link " 收藏" [ref=e228] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e229]: 
+                    - text: 收藏
+                - listitem [ref=e230]:
+                  - link "试题篮" [ref=e231] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e232]: 
+                    - text: 试题篮
+            - generic [ref=e233]:
+              - generic [ref=e234]:
+                - text: 生命世界多姿多彩，既统一又多样。下列有关说法中不正确的有( )
+                - text: ①没有细胞结构的生物是病毒 ②光合作用不一定要在叶绿体中进行 ③在细胞分裂过程中一定有DNA的复制④单倍体生物的细胞中不一定只有一个染色体组 ⑤人为因素是生物多样性面临威胁的主要原因 ⑥物种多样性越高的生态系统，其营养关系就越复杂，自动调节能力就越强⑦原核细胞与真核细胞的遗传物质都是DNA，体现了原核细胞与真核细胞的统一性
+              - generic [ref=e236]:
+                - generic [ref=e237]: A、一项
+                - generic [ref=e238]: B、两项
+                - generic [ref=e239]: C、三项
+                - generic [ref=e240]: D、零项
+          - generic [ref=e241]:
+            - generic [ref=e242]:
+              - generic [ref=e243]:
+                - text: "难度:"
+                - link "0.19" [ref=e244] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e246]:
+                - listitem [ref=e247]:
+                  - generic [ref=e248]: "答案: C"
+                - listitem [ref=e249]:
+                  - link " 查看解析" [ref=e250] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e251]: 
+                    - text: 查看解析
+                - listitem [ref=e252]:
+                  - link " 收藏" [ref=e253] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e254]: 
+                    - text: 收藏
+                - listitem [ref=e255]:
+                  - link "试题篮" [ref=e256] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e257]: 
+                    - text: 试题篮
+            - generic [ref=e258]:
+              - generic [ref=e259]: 若“淀粉→麦芽糖→葡萄糖→糖原”表示某生物体内糖类的某些转化过程,则下列说法正确的是( )
+              - generic [ref=e261]:
+                - generic [ref=e262]: A、此生物一定是植物,因为它含有淀粉和麦芽糖
+                - generic [ref=e263]: B、上述关于糖的转化可能发生在同一细胞内
+                - generic [ref=e264]: C、此生物是动物,因为能将淀粉转化为糖原
+                - generic [ref=e265]: D、上述糖类中的还原糖只有葡萄糖
+          - generic [ref=e266]:
+            - generic [ref=e267]:
+              - generic [ref=e268]:
+                - text: "难度:"
+                - link "0.84" [ref=e269] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e271]:
+                - listitem [ref=e272]:
+                  - generic [ref=e273]: "答案: C"
+                - listitem [ref=e274]:
+                  - link " 查看解析" [ref=e275] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e276]: 
+                    - text: 查看解析
+                - listitem [ref=e277]:
+                  - link " 收藏" [ref=e278] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e279]: 
+                    - text: 收藏
+                - listitem [ref=e280]:
+                  - link "试题篮" [ref=e281] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e282]: 
+                    - text: 试题篮
+            - generic [ref=e283]:
+              - generic [ref=e284]: 有关细胞中的有机物下列说法正确的是 ( )
+              - generic [ref=e286]:
+                - generic [ref=e287]: A、含有元素C、H、O、N的物质是核酸、酶、果糖、脂肪
+                - generic [ref=e288]: B、花生种子中没有蛋白质，只有脂肪，故用来作为检测脂肪的材料
+                - generic [ref=e289]: C、H、O、N的物质是核酸、酶、果糖、脂肪B.花生种子中没有蛋白质，只有脂肪，故用来作为检测脂肪的材料C.淀粉、蛋白质、脂肪在氧化分解时都能释放出能量
+                - generic [ref=e290]: D、蛋白质的检测可用斐林试剂，且要现配现用
+          - generic [ref=e291]:
+            - generic [ref=e292]:
+              - generic [ref=e293]:
+                - text: "难度:"
+                - link "0.44" [ref=e294] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e296]:
+                - listitem [ref=e297]:
+                  - generic [ref=e298]: "答案: D"
+                - listitem [ref=e299]:
+                  - link " 查看解析" [ref=e300] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e301]: 
+                    - text: 查看解析
+                - listitem [ref=e302]:
+                  - link " 收藏" [ref=e303] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e304]: 
+                    - text: 收藏
+                - listitem [ref=e305]:
+                  - link "试题篮" [ref=e306] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e307]: 
+                    - text: 试题篮
+            - generic [ref=e308]:
+              - generic [ref=e309]: 从一动物细胞中得到两类大分子有机物x、y，已知细胞中x的含量大于y，用胃液处理，x被分解而y不变。X含有化学元素N，有的还含有元素S，y含有化学元素N和P，它们与苏丹Ⅲ染液都没有颜色反应，细胞膜上有x而无y。下列有关x、y的叙述，错误的是( )
+              - generic [ref=e311]:
+                - generic [ref=e312]: A、x可能是蛋白质
+                - generic [ref=e313]: B、y的基本组成单位可能是核苷酸
+                - generic [ref=e314]: C、细胞膜上的x可能是载体
+                - generic [ref=e315]: D、y可能在核糖体上合成
+          - generic [ref=e316]:
+            - generic [ref=e317]:
+              - generic [ref=e318]:
+                - text: "难度:"
+                - link "0.47" [ref=e319] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e321]:
+                - listitem [ref=e322]:
+                  - generic [ref=e323]: "答案: B"
+                - listitem [ref=e324]:
+                  - link " 查看解析" [ref=e325] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e326]: 
+                    - text: 查看解析
+                - listitem [ref=e327]:
+                  - link " 收藏" [ref=e328] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e329]: 
+                    - text: 收藏
+                - listitem [ref=e330]:
+                  - link "试题篮" [ref=e331] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e332]: 
+                    - text: 试题篮
+            - generic [ref=e333]:
+              - generic [ref=e334]: 一种聚联乙炔细胞膜识别器已问世，它是通过物理力把类似于细胞膜上具有分子识别功能的物质镶嵌到聚联乙炔囊泡中，组装成纳米尺寸的生物传感器。在接触到细菌、病毒时可以发生颜色变化，用以检测细菌、病毒。这类被镶嵌进去的物质很可能含有( )
+              - generic [ref=e336]:
+                - generic [ref=e337]: A、磷脂和蛋白质
+                - generic [ref=e338]: B、多糖和蛋白质
+                - generic [ref=e339]: C、磷脂和多糖
+                - generic [ref=e340]: D、单链DNA
+        - list [ref=e342]:
+          - listitem [ref=e343]:
+            - link "第一页" [ref=e344] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&typeid=0
+          - listitem [ref=e345]:
+            - link "<" [ref=e346] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&typeid=0
+          - listitem [ref=e347]:
+            - link "1" [ref=e348] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&typeid=0
+          - listitem [ref=e349]:
+            - generic [ref=e350]: "2"
+          - listitem [ref=e351]:
+            - link "3" [ref=e352] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=3&typeid=0
+          - listitem [ref=e353]:
+            - link "4" [ref=e354] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=4&typeid=0
+          - listitem [ref=e355]:
+            - link "5" [ref=e356] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=5&typeid=0
+          - listitem [ref=e357]:
+            - link "6" [ref=e358] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=6&typeid=0
+          - listitem [ref=e359]:
+            - link "7" [ref=e360] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=7&typeid=0
+          - listitem [ref=e361]:
+            - link "8" [ref=e362] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=8&typeid=0
+          - listitem [ref=e363]:
+            - link "9" [ref=e364] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=9&typeid=0
+          - listitem [ref=e365]:
+            - link ">" [ref=e366] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=3&typeid=0
+          - listitem [ref=e367]:
+            - link "最后一页" [ref=e368] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=177&typeid=0
+  - contentinfo [ref=e369]:
+    - generic [ref=e373]:
+      - generic [ref=e374]: 商务联系
+      - paragraph [ref=e375]: "手机/微信 : 19829194929"
+      - paragraph [ref=e376]: "手机/微信 : 13474117172"
+      - paragraph [ref=e377]: "QQ : 416148514"

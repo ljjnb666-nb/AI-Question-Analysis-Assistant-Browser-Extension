@@ -1,0 +1,58 @@
+[     586ms] [WARNING] ⚠️ 未找到选择器 ".test-basket" 对应的元素 @ https://www.tiku.cn/static/js/tk.js:15
+[     586ms] [WARNING] ⚠️ 未找到选择器 ".mask" 对应的元素 @ https://www.tiku.cn/static/js/tk.js:15
+[     587ms] [WARNING] ⚠️ 未找到ID为 "cancelClick" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     587ms] [WARNING] ⚠️ 未找到选择器 ".basket-close" 对应的元素 @ https://www.tiku.cn/static/js/tk.js:15
+[     587ms] [WARNING] ⚠️ 未找到ID为 "nextstep" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     587ms] [WARNING] ⚠️ 未找到选择器 ".tb-save" 对应的元素 @ https://www.tiku.cn/static/js/tk.js:15
+[     587ms] [WARNING] ⚠️ 未找到ID为 "tb-save-close" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     587ms] [WARNING] ⚠️ 未找到ID为 "basket-canel" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     587ms] [WARNING] ⚠️ 未找到ID为 "radio-1" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     587ms] [WARNING] ⚠️ 未找到ID为 "radio-2" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     587ms] [WARNING] ⚠️ 未找到ID为 "radio-3" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     587ms] [WARNING] ⚠️ 未找到ID为 "sel_1" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     587ms] [WARNING] ⚠️ 未找到ID为 "sel_2" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     587ms] [WARNING] ⚠️ 未找到ID为 "sel_3" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     587ms] [WARNING] ⚠️ 未找到ID为 "sel_4" 的元素 @ https://www.tiku.cn/static/js/tk.js:10
+[     592ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://hm.baidu.com/hm.js?02f32149c7ea90d0cd47ed89025e457c:0
+[   46520ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[   46520ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[   46840ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[   46841ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[   90402ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[   90402ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  133857ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  133858ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  177439ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  177439ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  190844ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  190844ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  242704ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  242705ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  282645ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  282645ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  292518ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  292519ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  332492ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  332493ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  381626ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  381627ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  383384ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  383384ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  385135ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  385135ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  386900ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  386900ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  388661ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  388661ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  390433ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  390433ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  422196ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  422196ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  423966ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  423966ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  425711ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  425712ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  427476ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  427476ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  480354ms] [LOG] [CaptureOverlay] destroy() called, overlay exists: true @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0
+[  480354ms] [LOG] [CaptureOverlay] removing overlay from DOM @ chrome-extension://enkdihhbkonapcacjeiglddkddmbpfej/content/content-main.js:0

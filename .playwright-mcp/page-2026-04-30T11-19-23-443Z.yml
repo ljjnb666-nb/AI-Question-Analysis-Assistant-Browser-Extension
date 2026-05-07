@@ -1,0 +1,629 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - link "首页" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "tiku.com(合作网站)" [ref=e6] [cursor=pointer]:
+      - /url: https://www.tiku.com
+    - list [ref=e8]:
+      - listitem [ref=e9]:
+        - link "登录" [ref=e10] [cursor=pointer]:
+          - /url: /register
+      - listitem [ref=e11]:
+        - link "注册" [ref=e12] [cursor=pointer]:
+          - /url: /login
+  - generic [ref=e14]:
+    - link "题库中国" [ref=e16] [cursor=pointer]:
+      - /url: /
+      - img "题库中国" [ref=e17]
+    - generic [ref=e19]:
+      - link "免费" [ref=e424] [cursor=pointer]:
+        - /url: /usercenter/recharge
+        - img "免费" [ref=e425]
+      - button "下一张" [ref=e24] [cursor=pointer]:
+        - generic [ref=e26]: 下一张
+      - button "上一张" [ref=e27] [cursor=pointer]:
+        - generic [ref=e29]: 上一张
+    - img "关注我们 , 在微信中直接组卷" [ref=e31]
+  - generic [ref=e33]:
+    - generic [ref=e34] [cursor=pointer]:
+      - generic [ref=e35]:
+        - text: 当前 ：高中生物
+        - generic [ref=e36]: 
+      - generic [ref=e483]:
+        - generic [ref=e484]:
+          - generic [ref=e485]: 小学
+          - link "数学" [ref=e486]:
+            - /url: /chapterq?cid=14&cno=1
+          - link "语文" [ref=e487]:
+            - /url: /chapterq?cid=21&cno=1
+          - link "英语" [ref=e488]:
+            - /url: /chapterq?cid=23&cno=1
+        - generic [ref=e489]:
+          - generic [ref=e490]: 初中
+          - link "数学" [ref=e491]:
+            - /url: /chapterq?cid=10&cno=1
+          - link "语文" [ref=e492]:
+            - /url: /chapterq?cid=20&cno=1
+          - link "英语" [ref=e493]:
+            - /url: /chapterq?cid=24&cno=1
+          - link "物理" [ref=e494]:
+            - /url: /chapterq?cid=12&cno=1
+          - link "化学" [ref=e495]:
+            - /url: /chapterq?cid=15&cno=1
+          - link "生物" [ref=e496]:
+            - /url: /chapterq?cid=7&cno=1
+          - link "地理" [ref=e497]:
+            - /url: /chapterq?cid=5&cno=1
+          - link "历史" [ref=e498]:
+            - /url: /chapterq?cid=18&cno=1
+          - link "道德与法治" [ref=e499]:
+            - /url: /chapterq?cid=6&cno=1
+        - generic [ref=e500]:
+          - generic [ref=e501]: 高中
+          - link "数学" [ref=e502]:
+            - /url: /chapterq?cid=4&cno=1
+          - link "语文" [ref=e503]:
+            - /url: /chapterq?cid=19&cno=1
+          - link "英语" [ref=e504]:
+            - /url: /chapterq?cid=22&cno=1
+          - link "物理" [ref=e505]:
+            - /url: /chapterq?cid=11&cno=1
+          - link "化学" [ref=e506]:
+            - /url: /chapterq?cid=16&cno=1
+          - link "生物" [ref=e507]:
+            - /url: /chapterq?cid=13&cno=1
+          - link "地理" [ref=e508]:
+            - /url: /chapterq?cid=9&cno=1
+          - link "历史" [ref=e509]:
+            - /url: /chapterq?cid=17&cno=1
+          - link "政治" [ref=e510]:
+            - /url: /chapterq?cid=8&cno=1
+    - generic [ref=e37] [cursor=pointer]:
+      - generic [ref=e38]:
+        - generic [ref=e39]: 
+        - text: 试题篮 ( 0 )
+        - generic [ref=e40]: 
+      - text:     
+  - generic [ref=e41]:
+    - list [ref=e43]:
+      - listitem [ref=e44]:
+        - generic [ref=e45]: "试题检索 :"
+        - generic [ref=e46]:
+          - link "按章节" [ref=e47] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1
+          - link "按知识点" [ref=e48] [cursor=pointer]:
+            - /url: /knowledgeq?cid=13&cno=2
+      - listitem [ref=e49]:
+        - generic [ref=e50]: "教材版本 :"
+        - generic [ref=e51]:
+          - link "人教版" [ref=e52] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015
+          - link "浙科版" [ref=e53] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800029
+          - link "苏教版" [ref=e54] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800061
+          - link "中图版" [ref=e55] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800072
+          - link "沪科版" [ref=e56] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800077
+          - link "山东版" [ref=e57] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800102
+      - listitem [ref=e58]:
+        - generic [ref=e59]: "课本 :"
+        - generic [ref=e60]:
+          - link "必修1" [ref=e61] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800088
+          - link "必修2" [ref=e62] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800086
+          - link "必修3" [ref=e63] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800096
+          - link "选修1" [ref=e64] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800101
+          - link "选修2" [ref=e65] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800103
+          - link "选修3" [ref=e66] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800109
+      - listitem [ref=e67]:
+        - generic [ref=e68]: "题型 :"
+        - generic [ref=e69]:
+          - link "全部" [ref=e70] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "单选题" [ref=e71] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "多选题" [ref=e72] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "判断题" [ref=e73] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "填空题" [ref=e74] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "解答题" [ref=e75] [cursor=pointer]:
+            - /url: javascript:void(0)
+      - listitem [ref=e76]:
+        - generic [ref=e77]: "难易度 :"
+        - generic [ref=e78]:
+          - link "全部" [ref=e79] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "易" [ref=e80] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "中" [ref=e81] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "难" [ref=e82] [cursor=pointer]:
+            - /url: javascript:void(0)
+    - generic [ref=e83]:
+      - list [ref=e86]:
+        - listitem [ref=e87]:
+          - generic [ref=e88]: 
+          - link "第1章 遗传因子的发现" [ref=e89] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e90]:
+          - generic [ref=e91]: 
+          - link "第2章 基因和染色体的关系" [ref=e92] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:   
+        - listitem [ref=e93]:
+          - generic [ref=e94]: 
+          - link "第3章 基因的本质" [ref=e95] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:    
+        - listitem [ref=e96]:
+          - generic [ref=e97]: 
+          - link "第4章 基因的表达" [ref=e98] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e99]:
+          - generic [ref=e100]: 
+          - link "第5章 基因突变及其他变异" [ref=e101] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:   
+        - listitem [ref=e102]:
+          - generic [ref=e103]: 
+          - link "第6章 从杂交育种到基因工程" [ref=e104] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e105]:
+          - generic [ref=e106]: 
+          - link "第7章 现代生物进化理论" [ref=e107] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+      - generic [ref=e108]:
+        - alert [ref=e109]:
+          - generic [ref=e110] [cursor=pointer]: 组卷预览
+        - generic [ref=e111]:
+          - generic [ref=e112]:
+            - generic [ref=e113]:
+              - generic [ref=e114]:
+                - text: "难度:"
+                - link "0.56" [ref=e115] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e117]:
+                - listitem [ref=e118]
+                - listitem [ref=e120]:
+                  - link " 查看解析" [ref=e121] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e122]: 
+                    - text: 查看解析
+                - listitem [ref=e123]:
+                  - link " 收藏" [ref=e124] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e125]: 
+                    - text: 收藏
+                - listitem [ref=e126]:
+                  - link "试题篮" [ref=e127] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e128]: 
+                    - text: 试题篮
+            - generic [ref=e130]:
+              - text: 一生物兴趣小组对人群中遗传性高度近视的家系进行调查，调查结果如下表：
+              - img [ref=e131]
+              - text: (1)控制高度近视的基因位于_____________上，遗传方式是_____________性遗传。主要理由是①___________，②________。该基因不在细胞质中的理由是：________。
+              - text: (2)在调查中他们还发现了一个有趣现象，一对单眼皮的夫妻生下了一个双眼皮的孩子甲，而另一对双眼皮的夫妻却生下了一个单眼皮的孩子乙，并且这种现象在人群中多次出现。他们百思不得其解，询问有关专家后得知，该性状由一对位于常染色体上的等位基因A(双眼皮)和a(单眼皮)控制，在男性中杂合子表现为单眼皮，在女性中杂合子表现为双眼皮。
+              - text: ①．请写出此性状在男女两性中的各种表现型和相应的基因型：___________。
+              - text: ②．请判断甲、乙的性别和基因型：甲为________，基因型为________；乙为_________，基因型为_________。
+              - text: (3)简要说明这种判断的理由：___________________。
+          - generic [ref=e132]:
+            - generic [ref=e133]:
+              - generic [ref=e134]:
+                - text: "难度:"
+                - link "0.05" [ref=e135] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e137]:
+                - listitem [ref=e138]:
+                  - generic [ref=e139]: "答案: C"
+                - listitem [ref=e140]:
+                  - link " 查看解析" [ref=e141] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e142]: 
+                    - text: 查看解析
+                - listitem [ref=e143]:
+                  - link " 收藏" [ref=e144] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e145]: 
+                    - text: 收藏
+                - listitem [ref=e146]:
+                  - link "试题篮" [ref=e147] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e148]: 
+                    - text: 试题篮
+            - generic [ref=e149]:
+              - generic [ref=e150]:
+                - text: 某种品系的鼠毛色灰色和黄色是一对相对性状，科学家进行了大量的杂交实验得到了如下结果，由此推断不正确的是
+                - img [ref=e151]
+                - text: ( )
+              - generic [ref=e153]:
+                - generic [ref=e154]: A、杂交A后代不发生性状分离，亲本为纯合子
+                - generic [ref=e155]: B、由杂交B可判断鼠的黄色毛基因是显性基因
+                - generic [ref=e156]: C、杂交B后代黄色毛鼠既有杂合子也有纯合子
+                - generic [ref=e157]: D、鼠毛色这对相对性状的遗传符合基因的分离定律
+          - generic [ref=e158]:
+            - generic [ref=e159]:
+              - generic [ref=e160]:
+                - text: "难度:"
+                - link "0.25" [ref=e161] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e163]:
+                - listitem [ref=e164]
+                - listitem [ref=e166]:
+                  - link " 查看解析" [ref=e167] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e168]: 
+                    - text: 查看解析
+                - listitem [ref=e169]:
+                  - link " 收藏" [ref=e170] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e171]: 
+                    - text: 收藏
+                - listitem [ref=e172]:
+                  - link "试题篮" [ref=e173] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e174]: 
+                    - text: 试题篮
+            - generic [ref=e176]:
+              - text: “遗传学之父”孟德尔通过豌豆杂交实验发现了分离定律和自由组合定律，在实验过程中恰当地应用了假说一演绎等科学方法，结合豌豆杂交实验过程分析回答下列问题：
+              - text: (1)自由组合定律的发现：下图是孟德尔杂交实验过程及现象，补充完成下列图解。
+              - img [ref=e177]
+              - text: ①到⑦分别表示____________。
+              - text: (2)假设黄色和绿色分别由基因Y、y控制，圆粒和皱粒分别由基因R、r控制，则④的基因型及比例是___________。
+              - text: (3)⑥中的杂合子与纯合子的比例是__________。
+              - text: (4)孟德尔对图中实验现象的解释是：F
+              - subscript [ref=e178]: "1"
+              - text: 在产生配子时，_________。这样F
+              - subscript [ref=e179]: "1"
+              - text: 产生的雌配子和雄配子各有4种，雌雄配子的结合是随机的，雌雄配子的结合方式有16种。
+              - text: (5)以上的解释是否正确呢？孟德尔设计了_________实验，让_____与____杂交。
+          - generic [ref=e180]:
+            - generic [ref=e181]:
+              - generic [ref=e182]:
+                - text: "难度:"
+                - link "0.81" [ref=e183] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e185]:
+                - listitem [ref=e186]
+                - listitem [ref=e188]:
+                  - link " 查看解析" [ref=e189] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e190]: 
+                    - text: 查看解析
+                - listitem [ref=e191]:
+                  - link " 收藏" [ref=e192] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e193]: 
+                    - text: 收藏
+                - listitem [ref=e194]:
+                  - link "试题篮" [ref=e195] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e196]: 
+                    - text: 试题篮
+            - generic [ref=e198]:
+              - text: 某自花传粉植物灰种皮(Y)对白种皮(y)为显性，紫茎(A)对绿茎(a)为显性，抗病(B)对感病(b)为显性，各由一对等位基因控制，并分别位于三对同源染色体上，且当花粉含AB基因时不能萌发长出花粉管。请回答：
+              - text: (1)如果只考虑种皮颜色的遗传：将亲本植株(Yy)自交所结全部种子播种共得15株植株，其中有10株结灰色种子共300粒，有5株结白色种子共100粒，则子代的性状分离比与孟德尔定律预期分离比 __________(填相同或不相同)，最可能的原因是____________。
+              - text: (2)如果只考虑茎的颜色和抗病性状的遗传：让基因型为AaBb的植株和aabb的植株相互受粉(正交和反交)
+              - text: ①．子代性状分离比是否相同？为什么？____________ ；
+              - text: ②．写出以aabb为母本，AaBb为父本杂交的遗传图解。
+              - text: 亲本：♀aabb×♂AaBb
+              - text: 配子：
+              - text: 子代表现型及比例：
+              - text: (3)用基因型为AaBb的植株作材料，如何在较短时间内获得基因型为AABB的紫茎抗病植株？_________________________。
+          - generic [ref=e199]:
+            - generic [ref=e200]:
+              - generic [ref=e201]:
+                - text: "难度:"
+                - link "0.7" [ref=e202] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e204]:
+                - listitem [ref=e205]:
+                  - generic [ref=e206]: "答案: B"
+                - listitem [ref=e207]:
+                  - link " 查看解析" [ref=e208] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e209]: 
+                    - text: 查看解析
+                - listitem [ref=e210]:
+                  - link " 收藏" [ref=e211] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e212]: 
+                    - text: 收藏
+                - listitem [ref=e213]:
+                  - link "试题篮" [ref=e214] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e215]: 
+                    - text: 试题篮
+            - generic [ref=e216]:
+              - generic [ref=e217]:
+                - text: 果蝇的灰身和黑身受一对等位基因控制，该等位基因位于常染色体上；果蝇的红眼和白眼也受一对等位基因控制，该等位基因位于X染色体上。现用纯合的灰身红眼果蝇(雌)与黑身白眼果蝇(雄)杂交，得到下表实验结果，下列分析错误的是
+                - img [ref=e218]
+                - text: ( )
+              - generic [ref=e220]:
+                - generic [ref=e221]:
+                  - text: A、F
+                  - subscript [ref=e222]: "2"
+                  - text: 中红眼果蝇的性别是雌、雄，白眼果蝇的性别是雄
+                - generic [ref=e223]:
+                  - text: B、预期F
+                  - subscript [ref=e224]: "2"
+                  - text: 可能出现的基因型有9种
+                - generic [ref=e225]:
+                  - text: C、F
+                  - subscript [ref=e226]: "2"
+                  - text: 雄性中黑身白眼果蝇出现的概率是1/8
+                - generic [ref=e227]: D、实验结果表明这两对性状的遗传遵循基因的自由组合定律
+          - generic [ref=e228]:
+            - generic [ref=e229]:
+              - generic [ref=e230]:
+                - text: "难度:"
+                - link "0.11" [ref=e231] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e233]:
+                - listitem [ref=e234]:
+                  - generic [ref=e235]: "答案: D"
+                - listitem [ref=e236]:
+                  - link " 查看解析" [ref=e237] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e238]: 
+                    - text: 查看解析
+                - listitem [ref=e239]:
+                  - link " 收藏" [ref=e240] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e241]: 
+                    - text: 收藏
+                - listitem [ref=e242]:
+                  - link "试题篮" [ref=e243] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e244]: 
+                    - text: 试题篮
+            - generic [ref=e245]:
+              - generic [ref=e246]: 下列根据孟德尔的纯种黄色圆粒豌豆和绿色皱粒豌豆作亲本的杂交实验的分析中，不正确的有( )
+              - generic [ref=e248]:
+                - generic [ref=e249]: A、豌豆的粒色和豌豆的粒形是两种不同的性状
+                - generic [ref=e250]: B、豌豆的黄色和绿色、豌豆的圆粒和皱粒的遗传都遵循孟德尔分离定律
+                - generic [ref=e251]: C、测交实验可以用来验证孟德尔对分离现象和自由组合现象的解释
+                - generic [ref=e252]: D、该实验也验证了基因(遗传因子)在染色体上
+          - generic [ref=e253]:
+            - generic [ref=e254]:
+              - generic [ref=e255]:
+                - text: "难度:"
+                - link "0.69" [ref=e256] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e258]:
+                - listitem [ref=e259]:
+                  - generic [ref=e260]: "答案: B"
+                - listitem [ref=e261]:
+                  - link " 查看解析" [ref=e262] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e263]: 
+                    - text: 查看解析
+                - listitem [ref=e264]:
+                  - link " 收藏" [ref=e265] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e266]: 
+                    - text: 收藏
+                - listitem [ref=e267]:
+                  - link "试题篮" [ref=e268] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e269]: 
+                    - text: 试题篮
+            - generic [ref=e270]:
+              - generic [ref=e271]:
+                - text: 孟德尔用豌豆进行杂交实验，成功地揭示了遗传的两个基本规律，为遗传学的研究做出了杰出的贡献，被世人公认为“遗传学之父”。下列有关孟德尔一对相对性状杂交实验的说法中正确的是
+                - text: ①豌豆是自花传粉，实验过程免去了人工授粉的麻烦
+                - text: ②解释实验现象时，提出的“假说”是：F
+                - subscript [ref=e272]: "1"
+                - text: 产生配子时，成对的遗传因子分离
+                - text: ③解释性状分离现象的“演绎”过程是：若F
+                - subscript [ref=e273]: "1"
+                - text: 产生配子时，成对的遗传因子分离，则测交后代出现两种表现型，且比例接近1：1
+                - text: ④检测假设阶段完成的实验是：纯合亲本杂交和F
+                - subscript [ref=e274]: "1"
+                - text: 自交( )
+              - generic [ref=e276]:
+                - generic [ref=e277]: A、①③④
+                - generic [ref=e278]: B、②③
+                - generic [ref=e279]: C、②④
+                - generic [ref=e280]: D、①②
+          - generic [ref=e281]:
+            - generic [ref=e282]:
+              - generic [ref=e283]:
+                - text: "难度:"
+                - link "0.03" [ref=e284] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e286]:
+                - listitem [ref=e287]:
+                  - generic [ref=e288]: "答案: A"
+                - listitem [ref=e289]:
+                  - link " 查看解析" [ref=e290] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e291]: 
+                    - text: 查看解析
+                - listitem [ref=e292]:
+                  - link " 收藏" [ref=e293] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e294]: 
+                    - text: 收藏
+                - listitem [ref=e295]:
+                  - link "试题篮" [ref=e296] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e297]: 
+                    - text: 试题篮
+            - generic [ref=e298]:
+              - generic [ref=e299]:
+                - text: 一只雌鼠的一条染色体上某基因发生了突变，使野生型性状变为突变型性状。该雌鼠与野生型雄鼠杂交，F
+                - subscript [ref=e300]: "1"
+                - text: 的雌、雄中均既有野生型，又有突变型。若要通过一次杂交试验鉴别突变基因在X染色体还是在常染色体上，选择杂交的F
+                - subscript [ref=e301]: "1"
+                - text: 个体最好是( )
+              - generic [ref=e303]:
+                - generic [ref=e304]: A、野生型(雌)×突变型(雄)
+                - generic [ref=e305]: B、野生型(雄)×突变型(雌)
+                - generic [ref=e306]: C、野生型(雌)×野生型(雄)
+                - generic [ref=e307]: D、突变型(雌)×突变型(雄)
+          - generic [ref=e308]:
+            - generic [ref=e309]:
+              - generic [ref=e310]:
+                - text: "难度:"
+                - link "0.15" [ref=e311] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e313]:
+                - listitem [ref=e314]:
+                  - generic [ref=e315]: "答案: B"
+                - listitem [ref=e316]:
+                  - link " 查看解析" [ref=e317] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e318]: 
+                    - text: 查看解析
+                - listitem [ref=e319]:
+                  - link " 收藏" [ref=e320] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e321]: 
+                    - text: 收藏
+                - listitem [ref=e322]:
+                  - link "试题篮" [ref=e323] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e324]: 
+                    - text: 试题篮
+            - generic [ref=e325]:
+              - generic [ref=e326]: 一对夫妇为单眼皮，丈夫的父母均为双眼皮。这对夫妇经手术后均变为双眼皮，则他们所生的孩子一定是( )
+              - generic [ref=e328]:
+                - generic [ref=e329]: A、双眼皮
+                - generic [ref=e330]: B、单眼皮
+                - generic [ref=e331]: C、眼皮介于单双之间
+                - generic [ref=e332]: D、不能确定
+          - generic [ref=e333]:
+            - generic [ref=e334]:
+              - generic [ref=e335]:
+                - text: "难度:"
+                - link "0.64" [ref=e336] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e338]:
+                - listitem [ref=e339]:
+                  - generic [ref=e340]: "答案: B"
+                - listitem [ref=e341]:
+                  - link " 查看解析" [ref=e342] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e343]: 
+                    - text: 查看解析
+                - listitem [ref=e344]:
+                  - link " 收藏" [ref=e345] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e346]: 
+                    - text: 收藏
+                - listitem [ref=e347]:
+                  - link "试题篮" [ref=e348] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e349]: 
+                    - text: 试题篮
+            - generic [ref=e350]:
+              - generic [ref=e351]: 桃果实表面光滑对有毛为显性。现对毛桃的雌蕊授以纯合光桃的花粉，该雌蕊发育成的果实应为 ( )
+              - generic [ref=e353]:
+                - generic [ref=e354]: A、光桃
+                - generic [ref=e355]: B、毛桃
+                - generic [ref=e356]: C、光桃的概率为1/3
+                - generic [ref=e357]: D、毛桃的概率为1/3
+        - list [ref=e359]:
+          - listitem [ref=e360]:
+            - generic [ref=e361] [cursor=pointer]: 第一页
+          - listitem [ref=e362]:
+            - generic [ref=e363] [cursor=pointer]: <
+          - listitem [ref=e364]:
+            - generic [ref=e365]: "1"
+          - listitem [ref=e366]:
+            - link "2" [ref=e367] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=2&vid=800015
+          - listitem [ref=e368]:
+            - link "3" [ref=e369] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=3&vid=800015
+          - listitem [ref=e370]:
+            - link "4" [ref=e371] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=4&vid=800015
+          - listitem [ref=e372]:
+            - link "5" [ref=e373] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=5&vid=800015
+          - listitem [ref=e374]:
+            - link "6" [ref=e375] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=6&vid=800015
+          - listitem [ref=e376]:
+            - link "7" [ref=e377] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=7&vid=800015
+          - listitem [ref=e378]:
+            - link "8" [ref=e379] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=8&vid=800015
+          - listitem [ref=e380]:
+            - link "9" [ref=e381] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=9&vid=800015
+          - listitem [ref=e382]:
+            - link ">" [ref=e383] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=2&vid=800015
+          - listitem [ref=e384]:
+            - link "最后一页" [ref=e385] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=49&vid=800015
+  - contentinfo [ref=e386]:
+    - generic [ref=e387]:
+      - generic [ref=e388]:
+        - generic [ref=e390]:
+          - generic [ref=e391]: 本站特点
+          - paragraph [ref=e392]: 1. 致力于中小学题库开发
+          - paragraph [ref=e393]: 2. 提供优质的组卷服务
+        - generic [ref=e395]:
+          - generic [ref=e396]: 商务联系
+          - paragraph [ref=e397]: "手机/微信 : 19829194929"
+          - paragraph [ref=e398]: "手机/微信 : 13474117172"
+          - paragraph [ref=e399]: "QQ : 416148514"
+        - generic [ref=e401]:
+          - generic [ref=e402]: 帮助中心
+          - paragraph [ref=e403]:
+            - text: "1."
+            - link "注册与登录" [ref=e404] [cursor=pointer]:
+              - /url: https://www.kancloud.cn/tiku_cn/tiku-cn/496958
+          - paragraph [ref=e405]:
+            - text: "2."
+            - link "如何组卷?" [ref=e406] [cursor=pointer]:
+              - /url: https://www.kancloud.cn/tiku_cn/tiku-cn/497529
+          - paragraph [ref=e407]:
+            - text: "3."
+            - link "更新日志" [ref=e408] [cursor=pointer]:
+              - /url: https://www.kancloud.cn/tiku_cn/tiku-cn/497743
+        - generic [ref=e410]:
+          - generic [ref=e411]: 服务宗旨
+          - paragraph [ref=e412]: 认真的服务好每一个用户
+        - generic [ref=e414]:
+          - generic [ref=e415]: 官方群
+          - paragraph [ref=e416]: "题库中国教师群 : 17522170"
+          - paragraph [ref=e417]: "十年高考(物理) : 513519348"
+      - generic [ref=e420]:
+        - text: Copyright © 2013-2025
+        - link "西安必知必学网络科技有限公司" [ref=e421] [cursor=pointer]:
+          - /url: https://www.bizhibixue.com/
+        - text: 版权所有 未经授权禁止复制或建立镜像
+        - link "陕ICP备17009510号-3" [ref=e422] [cursor=pointer]:
+          - /url: https://beian.miit.gov.cn/
+  - generic [ref=e511]:
+    - generic [ref=e512]:
+      - generic [ref=e513]:
+        - generic [ref=e514]: 📘
+        - generic [ref=e515]: 题目解析助手
+      - generic [ref=e516]:
+        - button "—" [ref=e517] [cursor=pointer]
+        - button "✕" [ref=e518] [cursor=pointer]
+    - generic [ref=e520]:
+      - generic [ref=e521]: ⏳
+      - generic [ref=e522]: 正在解析题目…
+      - generic [ref=e523]: "▍ ```json { \"questionType\": \"unknown\", \"answer\": null, \"confidence\": 0.0, \"briefExplanation\": \"这不是一道完整的试题，而是一个试题检索和筛选界面的截图。\", \"detailedExplanation\": \"图像显示的是一个生物学在线题库的导航和筛选页面，包含教材版本选择、课本选择、题型选择等过滤选项，以及章节列表（第1-7章）。虽然下方示了一个数据表格和部分题目文本（关于遗传性高度近视的调查），但这不是一道独立的完整试题，缺少明确的问题陈述和选项。\", \"recognizedText\": \"试题检索界面，包含教材版本、课本、题型、难易度筛选选项，以及第1-7章的章节列表。下方可见一个关于遗传性高度近视调查的数据表格。\", \"warning\": \"无法识别完整试题。提供的内容是试题库的导航界面而非具体试题。需要提供完整的试题内容（包括问"

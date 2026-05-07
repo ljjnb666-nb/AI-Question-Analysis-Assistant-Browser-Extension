@@ -1,0 +1,584 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - link "首页" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "tiku.com(合作网站)" [ref=e6] [cursor=pointer]:
+      - /url: https://www.tiku.com
+    - list [ref=e8]:
+      - listitem [ref=e9]:
+        - link "登录" [ref=e10] [cursor=pointer]:
+          - /url: /register
+      - listitem [ref=e11]:
+        - link "注册" [ref=e12] [cursor=pointer]:
+          - /url: /login
+  - generic [ref=e14]:
+    - link "题库中国" [ref=e16] [cursor=pointer]:
+      - /url: /
+      - img "题库中国" [ref=e17]
+    - generic [ref=e19]:
+      - link "上传试卷" [ref=e22] [cursor=pointer]:
+        - /url: /usercenter/uploadpaper
+        - img "上传试卷" [ref=e23]
+      - button "下一张" [ref=e24] [cursor=pointer]:
+        - generic [ref=e26]: 下一张
+      - button "上一张" [ref=e27] [cursor=pointer]:
+        - generic [ref=e29]: 上一张
+    - img "关注我们 , 在微信中直接组卷" [ref=e31]
+  - generic [ref=e33]:
+    - generic [ref=e35] [cursor=pointer]:
+      - text: 当前 ：高中生物
+      - generic [ref=e36]: 
+    - generic [ref=e37] [cursor=pointer]:
+      - generic [ref=e38]:
+        - generic [ref=e39]: 
+        - text: 试题篮 ( 0 )
+        - generic [ref=e40]: 
+      - text:     
+  - generic [ref=e41]:
+    - list [ref=e43]:
+      - listitem [ref=e44]:
+        - generic [ref=e45]: "试题检索 :"
+        - generic [ref=e46]:
+          - link "按章节" [ref=e47] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1
+          - link "按知识点" [ref=e48] [cursor=pointer]:
+            - /url: /knowledgeq?cid=13&cno=2
+      - listitem [ref=e49]:
+        - generic [ref=e50]: "教材版本 :"
+        - generic [ref=e51]:
+          - link "人教版" [ref=e52] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015
+          - link "浙科版" [ref=e53] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800029
+          - link "苏教版" [ref=e54] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800061
+          - link "中图版" [ref=e55] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800072
+          - link "沪科版" [ref=e56] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800077
+          - link "山东版" [ref=e57] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800102
+      - listitem [ref=e58]:
+        - generic [ref=e59]: "课本 :"
+        - generic [ref=e60]:
+          - link "必修1" [ref=e61] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800088
+          - link "必修2" [ref=e62] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800086
+          - link "必修3" [ref=e63] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800096
+          - link "选修1" [ref=e64] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800101
+          - link "选修2" [ref=e65] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800103
+          - link "选修3" [ref=e66] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800109
+      - listitem [ref=e67]:
+        - generic [ref=e68]: "题型 :"
+        - generic [ref=e69]:
+          - link "全部" [ref=e70] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "单选题" [ref=e71] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "多选题" [ref=e72] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "判断题" [ref=e73] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "填空题" [ref=e74] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "解答题" [ref=e75] [cursor=pointer]:
+            - /url: javascript:void(0)
+      - listitem [ref=e76]:
+        - generic [ref=e77]: "难易度 :"
+        - generic [ref=e78]:
+          - link "全部" [ref=e79] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "易" [ref=e80] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "中" [ref=e81] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "难" [ref=e82] [cursor=pointer]:
+            - /url: javascript:void(0)
+    - generic [ref=e83]:
+      - list [ref=e86]:
+        - listitem [ref=e87]:
+          - generic [ref=e88]: 
+          - link "第1章 遗传因子的发现" [ref=e89] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e90]:
+          - generic [ref=e91]: 
+          - link "第2章 基因和染色体的关系" [ref=e92] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:   
+        - listitem [ref=e93]:
+          - generic [ref=e94]: 
+          - link "第3章 基因的本质" [ref=e95] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:    
+        - listitem [ref=e96]:
+          - generic [ref=e97]: 
+          - link "第4章 基因的表达" [ref=e98] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e99]:
+          - generic [ref=e100]: 
+          - link "第5章 基因突变及其他变异" [ref=e101] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:   
+        - listitem [ref=e102]:
+          - generic [ref=e103]: 
+          - link "第6章 从杂交育种到基因工程" [ref=e104] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e105]:
+          - generic [ref=e106]: 
+          - link "第7章 现代生物进化理论" [ref=e107] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+      - generic [ref=e108]:
+        - alert [ref=e109]:
+          - generic [ref=e110] [cursor=pointer]: 组卷预览
+        - generic [ref=e111]:
+          - generic [ref=e112]:
+            - generic [ref=e113]:
+              - generic [ref=e114]:
+                - text: "难度:"
+                - link "0.49" [ref=e115] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e117]:
+                - listitem [ref=e118]:
+                  - generic [ref=e119]: "答案: A"
+                - listitem [ref=e120]:
+                  - link " 查看解析" [ref=e121] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e122]: 
+                    - text: 查看解析
+                - listitem [ref=e123]:
+                  - link " 收藏" [ref=e124] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e125]: 
+                    - text: 收藏
+                - listitem [ref=e126]:
+                  - link "试题篮" [ref=e127] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e128]: 
+                    - text: 试题篮
+            - generic [ref=e129]:
+              - generic [ref=e130]: 已知玉米有色籽粒对无色籽粒是显性。现将一有色籽粒的植株X进行测交，后代出现有色籽粒与无色籽粒的比是1：3，对这种杂交现象的推测正确的是( )
+              - generic [ref=e132]:
+                - generic [ref=e133]: A、测交后代的有色籽粒的基因型与植株X相同
+                - generic [ref=e134]: B、玉米的有、无色籽粒遗传不遵循基因的分离定律
+                - generic [ref=e135]: C、玉米的有、无色籽粒是由一对等位基因控制的
+                - generic [ref=e136]: D、测交后代的无色籽粒的基因型有两种
+          - generic [ref=e137]:
+            - generic [ref=e138]:
+              - generic [ref=e139]:
+                - text: "难度:"
+                - link "0.95" [ref=e140] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e142]:
+                - listitem [ref=e143]:
+                  - generic [ref=e144]: "答案: C"
+                - listitem [ref=e145]:
+                  - link " 查看解析" [ref=e146] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e147]: 
+                    - text: 查看解析
+                - listitem [ref=e148]:
+                  - link " 收藏" [ref=e149] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e150]: 
+                    - text: 收藏
+                - listitem [ref=e151]:
+                  - link "试题篮" [ref=e152] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e153]: 
+                    - text: 试题篮
+            - generic [ref=e154]:
+              - generic [ref=e155]: 家鸡的无尾(M)对有尾(m)是显性。现用有尾鸡(甲群体)交配产生的受精卵孵小鸡，在孵化早期向卵内注射微量胰岛素，孵化出的小鸡(乙群体)表现无尾性状。为研究胰岛素在小鸡孵化过程中是否引起基因突变，可行性方案是( )
+              - generic [ref=e157]:
+                - generic [ref=e158]: A、甲群体×甲群体，孵化早期不向卵内注射胰岛素
+                - generic [ref=e159]: B、甲群体×乙群体，孵化早期向卵内注射胰岛素
+                - generic [ref=e160]: C、乙群体×乙群体，孵化早期不向卵内注射胰岛素
+                - generic [ref=e161]: D、乙群体×乙群体，孵化早期向卵内注射胰岛素
+          - generic [ref=e162]:
+            - generic [ref=e163]:
+              - generic [ref=e164]:
+                - text: "难度:"
+                - link "0.52" [ref=e165] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e167]:
+                - listitem [ref=e168]:
+                  - generic [ref=e169]: "答案: C"
+                - listitem [ref=e170]:
+                  - link " 查看解析" [ref=e171] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e172]: 
+                    - text: 查看解析
+                - listitem [ref=e173]:
+                  - link " 收藏" [ref=e174] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e175]: 
+                    - text: 收藏
+                - listitem [ref=e176]:
+                  - link "试题篮" [ref=e177] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e178]: 
+                    - text: 试题篮
+            - generic [ref=e179]:
+              - generic [ref=e180]:
+                - text: 下列几种情况中，产生的后代不会发生性状分离的是
+                - text: ①纯种高茎豌豆×纯种矮茎豌豆→F
+                - subscript [ref=e181]: "1"
+                - img [ref=e182]
+                - text: F
+                - subscript [ref=e183]: "2"
+                - text: 植株
+                - text: ②纯种红果皮番茄(♂)×纯种黄果皮番茄(♀)→F
+                - subscript [ref=e184]: "1"
+                - text: 植株上所结番茄③黄色圆粒(YyRr)×绿色皱粒(yyrr)→子代④取基因型为AaBb植物的花药(AB)→单倍体→二倍体
+                - img [ref=e185]
+                - text: 子代( )
+              - generic [ref=e187]:
+                - generic [ref=e188]: A、①②
+                - generic [ref=e189]: B、①③
+                - generic [ref=e190]: C、②④
+                - generic [ref=e191]: D、③④
+          - generic [ref=e192]:
+            - generic [ref=e193]:
+              - generic [ref=e194]:
+                - text: "难度:"
+                - link "0.73" [ref=e195] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e197]:
+                - listitem [ref=e198]
+                - listitem [ref=e200]:
+                  - link " 查看解析" [ref=e201] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e202]: 
+                    - text: 查看解析
+                - listitem [ref=e203]:
+                  - link " 收藏" [ref=e204] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e205]: 
+                    - text: 收藏
+                - listitem [ref=e206]:
+                  - link "试题篮" [ref=e207] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e208]: 
+                    - text: 试题篮
+            - generic [ref=e210]:
+              - text: 为了研究一对相对性状的显隐性关系，分别采用小鼠和豌豆进行实验，实验数据如下表。分析并回答下列问颢。
+              - img [ref=e211]
+              - text: (1)根据上述实验结果，你对小鼠的毛色显性和隐性的判断是_______，根据该豌豆杂交实验结果，你认为豌豆种子粒型的显隐性关系是________；植物育种学家在研究生物的遗传规律方面比动物育种学家更容易的关键因素是___________。
+              - text: (2)下表所示6个纯种品系果蝇的性状和控制这些性状的基因所在的染色体编号，品系a为显性性状，其余均为隐性性状。据题煮，回答问题：
+              - img [ref=e212]
+              - text: ①．进行伴性遗传研究时，选择什么样的品系果蝇交配最恰当？_______(填品系代号)。
+              - text: ②．若通过翅和眼的性状，探究常染色体上的基因是否按自由组合定律遗传时，选择什么样的品系交配最恰当？___________( 填品系代号)。
+              - text: ③．已知果蝇的直毛与分叉毛受控于一对等位基因，若实验室有纯合的直毛和分叉毛雌、雄果蝇亲本，如何通过杂交实验确定这对等位基因位于常染色体上还是X 染色体上，请说明推导过程。
+              - text: (3) 果蝇的灰身与黑身是一对相对性状，直毛与分叉毛是另一对相对性状。现有两只亲代果蝇杂交，子代表现型及比例如图所示，则控制直毛的基因位于________染色体上。子代中灰身雄果蝇与黑身雌果蝇交配，可产生黑身果蝇的比例为___________。
+              - img [ref=e213]
+          - generic [ref=e214]:
+            - generic [ref=e215]:
+              - generic [ref=e216]:
+                - text: "难度:"
+                - link "0.49" [ref=e217] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e219]:
+                - listitem [ref=e220]
+                - listitem [ref=e222]:
+                  - link " 查看解析" [ref=e223] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e224]: 
+                    - text: 查看解析
+                - listitem [ref=e225]:
+                  - link " 收藏" [ref=e226] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e227]: 
+                    - text: 收藏
+                - listitem [ref=e228]:
+                  - link "试题篮" [ref=e229] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e230]: 
+                    - text: 试题篮
+            - generic [ref=e232]:
+              - text: 小鼠是遗传学常用的实验材料，下面是关于小鼠某些性状的遗传实验：
+              - text: (1)下表是利用灰鼠和白鼠所做的杂交实验及实验结果：
+              - img [ref=e233]
+              - text: 由表中提供的信息可知__________是显性性状，如果第Ⅳ组亲本中的灰色雌鼠和第Ⅱ组亲本中的灰色雄鼠杂交，结果最可能是_________________。
+              - text: (2)小鼠的黄毛与灰毛由一对等位基因R 、r控制，弯曲尾与正常尾由另一对等位基因T、t控制。在小鼠的毛色遗传中，具有某种纯合基因型的合子在胚胎发育过程中会出现致死现象。从鼠群中选择多只基因型相同的雌鼠作母本，多只基因型相同的雄鼠作父本，杂交所得F
+              - subscript [ref=e234]: "1"
+              - text: 的表现型及比例示意图如下，请分析回答：
+              - img [ref=e235]
+              - text: ①．控制毛色的基因在_____染色体上，不能完成胚胎发育的合子的基因型是_________。
+              - text: ②．亲本的基因型是________、________。
+          - generic [ref=e236]:
+            - generic [ref=e237]:
+              - generic [ref=e238]:
+                - text: "难度:"
+                - link "0.87" [ref=e239] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e241]:
+                - listitem [ref=e242]
+                - listitem [ref=e244]:
+                  - link " 查看解析" [ref=e245] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e246]: 
+                    - text: 查看解析
+                - listitem [ref=e247]:
+                  - link " 收藏" [ref=e248] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e249]: 
+                    - text: 收藏
+                - listitem [ref=e250]:
+                  - link "试题篮" [ref=e251] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e252]: 
+                    - text: 试题篮
+            - generic [ref=e254]:
+              - text: 某种野生植物有紫花和白花两种表现型，已知紫花形成的生物化学途径是：
+              - img [ref=e255]
+              - text: A和a、B和b是分别位于两对染色体上的等位基因，A对a、B对b为显性。基因型不同的两白花植株杂交，F
+              - subscript [ref=e256]: "1"
+              - text: 紫花：白花=1：1。若将F
+              - subscript [ref=e257]: "1"
+              - text: 紫花植株自交，所得F
+              - subscript [ref=e258]: "2"
+              - text: 植株中紫花：白花=9：7。
+              - text: 请回答：
+              - text: (1)从紫花形成的途径可知，紫花性状是由_______对基因控制。
+              - text: (2)根据F
+              - subscript [ref=e259]: "1"
+              - text: 紫花植株自交的结果，可以推测F
+              - subscript [ref=e260]: "1"
+              - text: 紫花植株的基因型是_________，其自交所得F2中，白花植株纯合体的基因型是___________。
+              - text: (3)推测两亲本白花植株的杂交组合(基因型)是____________或____________；用遗传图解表示两亲本白花植株杂交的过程(只要求写一组)。
+              - text: (4)紫花形成的生物化学途径中，若中间产物是红色(形成红花)，那么基因型为AaBb的植株自交，子一代植株的表现型及比例为__________。
+              - text: (5)紫花中的紫色物质是一种天然的优质色素，但由于B基因表达的酶较少，紫色物质含量较低。设想通过基因工程技术，采用重组的Ti质粒转移一段DNA进入细胞并且整合到染色体上，以促进B基因在花瓣细胞中的表达，提高紫色物质含量。下图是一个已插入外源DNA片段的重组Ti质粒载体结构模式图，请填出标号所示结构的名称：
+              - img [ref=e261]
+              - text: ①_________，②________，③_________。
+          - generic [ref=e262]:
+            - generic [ref=e263]:
+              - generic [ref=e264]:
+                - text: "难度:"
+                - link "0.6" [ref=e265] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e267]:
+                - listitem [ref=e268]
+                - listitem [ref=e270]:
+                  - link " 查看解析" [ref=e271] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e272]: 
+                    - text: 查看解析
+                - listitem [ref=e273]:
+                  - link " 收藏" [ref=e274] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e275]: 
+                    - text: 收藏
+                - listitem [ref=e276]:
+                  - link "试题篮" [ref=e277] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e278]: 
+                    - text: 试题篮
+            - generic [ref=e280]:
+              - text: 豌豆的紫花和白花是一对相对性状，这对相对性状由等位基因A、a控制。下表是豌豆花色两个组合的遗传实验结果。请分析回答：
+              - img [ref=e281]
+              - text: (1)A、a的遗传行为符合基因的______(填“分离”或“自由组合”)定律。根据组合二能判断出______是显性性状。
+              - text: (2)组合一中，两亲本的基因型分别为：紫花________，白花_________。它们所产生的F
+              - subscript [ref=e282]: "1"
+              - text: 中，紫花植株的基因型是_________。
+              - text: (3)请完善下列组合二的遗传图
+              - img [ref=e283]
+          - generic [ref=e284]:
+            - generic [ref=e285]:
+              - generic [ref=e286]:
+                - text: "难度:"
+                - link "0.52" [ref=e287] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e289]:
+                - listitem [ref=e290]
+                - listitem [ref=e292]:
+                  - link " 查看解析" [ref=e293] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e294]: 
+                    - text: 查看解析
+                - listitem [ref=e295]:
+                  - link " 收藏" [ref=e296] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e297]: 
+                    - text: 收藏
+                - listitem [ref=e298]:
+                  - link "试题篮" [ref=e299] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e300]: 
+                    - text: 试题篮
+            - generic [ref=e302]:
+              - text: 番茄中基因A和a控制植株的有茸毛和无茸毛，基因B和b控制果实颜色，两对基因独立遗传，且基因A具有纯合致死效应。育种工作者为培育有茸毛黄果品种进行如下杂交实验。请回答下列问题：
+              - img [ref=e303]
+              - text: (1)番茄的这两对相对性状中，显性性状分别为_______，亲本的基因型是_________。
+              - text: (2)F
+              - subscript [ref=e304]: "2"
+              - text: 个体中基因型有________种，4种表现型的比例是_________。
+              - text: (3)为了验证两种性状的遗传特点，可将F
+              - subscript [ref=e305]: "2"
+              - text: 植株自交，单株收获F
+              - subscript [ref=e306]: "2"
+              - text: 中有茸毛红果植株所结种子，每株的所有种子单独种植在一起可得到一个株系。观察多个这样的株系，则理论上，在所有株系中有________的株系F
+              - subscript [ref=e307]: "3"
+              - text: 的表现型及其数量比与F
+              - subscript [ref=e308]: "2"
+              - text: 相同；有_______的株系F
+              - subscript [ref=e309]: "3"
+              - text: 的表现型及其数量比为_________。
+          - generic [ref=e310]:
+            - generic [ref=e311]:
+              - generic [ref=e312]:
+                - text: "难度:"
+                - link "0.87" [ref=e313] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e315]:
+                - listitem [ref=e316]
+                - listitem [ref=e318]:
+                  - link " 查看解析" [ref=e319] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e320]: 
+                    - text: 查看解析
+                - listitem [ref=e321]:
+                  - link " 收藏" [ref=e322] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e323]: 
+                    - text: 收藏
+                - listitem [ref=e324]:
+                  - link "试题篮" [ref=e325] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e326]: 
+                    - text: 试题篮
+            - generic [ref=e328]:
+              - text: 在家蚕遗传中，幼蚕体色的黑色与淡赤色是由一对等位基因(D、d)控制的相对性状，不同杂交组合得到的子代表现型及数量比见下表。请回答问题：
+              - img [ref=e329]
+              - text: (1)组合一的子代同时出现黑蚕、淡赤蚕的现象称为_________，其中_________色为显性性状。
+              - text: (2)组合二中，子代出现了数量相近的_______种表现型，由此推测亲代黑蚕的基因型为________，这种杂交方式称为_________。
+          - generic [ref=e330]:
+            - generic [ref=e331]:
+              - generic [ref=e332]:
+                - text: "难度:"
+                - link "0.23" [ref=e333] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e335]:
+                - listitem [ref=e336]
+                - listitem [ref=e338]:
+                  - link " 查看解析" [ref=e339] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e340]: 
+                    - text: 查看解析
+                - listitem [ref=e341]:
+                  - link " 收藏" [ref=e342] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e343]: 
+                    - text: 收藏
+                - listitem [ref=e344]:
+                  - link "试题篮" [ref=e345] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e346]: 
+                    - text: 试题篮
+            - generic [ref=e348]:
+              - text: 雌雄异株的高等植物剪秋罗有宽叶、窄叶两种类型。某科学家在研究剪秋罗叶形状遗传时，做了如下杂交实验，请据此分析回答：
+              - img [ref=e349]
+              - text: (1)根据第_______组杂交，可以断定________为显性性状。
+              - text: (2)根据第_______组杂交，可以断定控制剪秋罗叶形的基因位于_____染色体上。
+              - text: (3)若让第3组子代的宽叶雌株与宽叶雄株杂交，预测其后代的宽叶与窄叶的比例为______。
+              - text: (4)第1、2组后代中没有雌性个体，最可能的原因是____________。
+              - text: (5)为进一步证明上述(4)结论，某课题小组决定对剪秋罗种群进行调查。如果调查的结果为在自然种群中不存在____的剪秋罗，则上述假设成立。
+              - text: (6)实验室提供自然存在的各种基因型剪秋罗和其他培养条件，如何培育出上述自然种群中不存在的剪秋罗？请用文字简要叙述培育方案。
+        - list [ref=e351]:
+          - listitem [ref=e352]:
+            - link "第一页" [ref=e353] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&vid=800015
+          - listitem [ref=e354]:
+            - link "<" [ref=e355] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&vid=800015
+          - listitem [ref=e356]:
+            - link "1" [ref=e357] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&vid=800015
+          - listitem [ref=e358]:
+            - generic [ref=e359]: "2"
+          - listitem [ref=e360]:
+            - link "3" [ref=e361] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=3&vid=800015
+          - listitem [ref=e362]:
+            - link "4" [ref=e363] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=4&vid=800015
+          - listitem [ref=e364]:
+            - link "5" [ref=e365] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=5&vid=800015
+          - listitem [ref=e366]:
+            - link "6" [ref=e367] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=6&vid=800015
+          - listitem [ref=e368]:
+            - link "7" [ref=e369] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=7&vid=800015
+          - listitem [ref=e370]:
+            - link "8" [ref=e371] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=8&vid=800015
+          - listitem [ref=e372]:
+            - link "9" [ref=e373] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=9&vid=800015
+          - listitem [ref=e374]:
+            - link ">" [ref=e375] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=3&vid=800015
+          - listitem [ref=e376]:
+            - link "最后一页" [ref=e377] [cursor=pointer]:
+              - /url: /chapterq?bid=800086&cid=13&cno=1&p=49&vid=800015
+  - contentinfo [ref=e378]:
+    - generic [ref=e379]:
+      - generic [ref=e380]:
+        - generic [ref=e382]:
+          - generic [ref=e383]: 本站特点
+          - paragraph [ref=e384]: 1. 致力于中小学题库开发
+          - paragraph [ref=e385]: 2. 提供优质的组卷服务
+        - generic [ref=e387]:
+          - generic [ref=e388]: 商务联系
+          - paragraph [ref=e389]: "手机/微信 : 19829194929"
+          - paragraph [ref=e390]: "手机/微信 : 13474117172"
+          - paragraph [ref=e391]: "QQ : 416148514"
+        - generic [ref=e393]:
+          - generic [ref=e394]: 帮助中心
+          - paragraph [ref=e395]:
+            - text: "1."
+            - link "注册与登录" [ref=e396] [cursor=pointer]:
+              - /url: https://www.kancloud.cn/tiku_cn/tiku-cn/496958
+          - paragraph [ref=e397]:
+            - text: "2."
+            - link "如何组卷?" [ref=e398] [cursor=pointer]:
+              - /url: https://www.kancloud.cn/tiku_cn/tiku-cn/497529
+          - paragraph [ref=e399]:
+            - text: "3."
+            - link "更新日志" [ref=e400] [cursor=pointer]:
+              - /url: https://www.kancloud.cn/tiku_cn/tiku-cn/497743
+        - generic [ref=e402]:
+          - generic [ref=e403]: 服务宗旨
+          - paragraph [ref=e404]: 认真的服务好每一个用户
+        - generic [ref=e406]:
+          - generic [ref=e407]: 官方群
+          - paragraph [ref=e408]: "题库中国教师群 : 17522170"
+          - paragraph [ref=e409]: "十年高考(物理) : 513519348"
+      - generic [ref=e412]:
+        - text: Copyright © 2013-2025
+        - link "西安必知必学网络科技有限公司" [ref=e413] [cursor=pointer]:
+          - /url: https://www.bizhibixue.com/
+        - text: 版权所有 未经授权禁止复制或建立镜像
+        - link "陕ICP备17009510号-3" [ref=e414] [cursor=pointer]:
+          - /url: https://beian.miit.gov.cn/
+  - generic [ref=e426]:
+    - generic [ref=e427]:
+      - generic [ref=e428]:
+        - generic [ref=e429]: 📘
+        - generic [ref=e430]: 题目解析助手
+      - generic [ref=e431]:
+        - button "—" [ref=e432] [cursor=pointer]
+        - button "✕" [ref=e433] [cursor=pointer]
+    - generic [ref=e435]:
+      - generic [ref=e436]: ⏳
+      - generic [ref=e437]: 正在解析题目…
+      - generic [ref=e438]: "▍ ```json { \"questionType\": \"single_choice\", \"answer\": \"A\", \"confidence\": 0.95, \"briefExplanation\": \"测交后代比例1:3说明植株X是隐性纯合子(aa)。测交对象是显性纯合子(AA)，后代有色籽粒(Aa)与植株X(aa)基因型不同，但选项A表述有误——应该是后代有色籽粒基因型为Aa，与植株X的aa不同。但根据题目答案标注为A，需要重新理解：若植株X是杂合子(Aa)，与隐性纯合子(aa)杂交得1:1，不符合1:3。实际上1:3比例提示这是两对基因控制，植株X是AaBb，测交对象aabb，后代中有色(A_B_)与无色(其他)为1:3，此时有色籽粒基因型确实与植株X相同的概率存在。\", \"detailedExplanation\": \"分析过程：(1)已知有色对无色为显性。(2)植株X有色籽粒与隐性纯合子(无色)测交。(3)后代比例1:3(有色:无色)。(4)若单基因控制，测交应得1:1，不符合。(5)1:3比例提示双基因控制：植株X为AaBb(有色表型)，隐性纯合子为aabb(无色)。(6)杂交：AaBb × aabb → 后代"

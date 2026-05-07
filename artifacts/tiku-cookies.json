@@ -1,0 +1,17 @@
+{
+  "savedAt": "2026-04-27T12:30:10.168Z",
+  "loggedIn": true,
+  "cookieCount": 1,
+  "cookies": [
+    {
+      "name": "PHPSESSID",
+      "value": "a420ffd9524dff6bbfe3b5e4f1750b81",
+      "domain": "www.tiku.cn",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ]
+}

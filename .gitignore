@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.playwright-mcp/
+artifacts/
+*.png
+tmp_req.json
+tmp_resp.json

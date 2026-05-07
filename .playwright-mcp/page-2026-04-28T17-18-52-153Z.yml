@@ -1,0 +1,489 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - link "首页" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "tiku.com(合作网站)" [ref=e6] [cursor=pointer]:
+      - /url: https://www.tiku.com
+    - button [ref=e7] [cursor=pointer]
+  - generic [ref=e10]:
+    - text: 
+    - generic [ref=e11] [cursor=pointer]:
+      - generic [ref=e12]:
+        - generic [ref=e13]: 
+        - text: 试题篮 ( 0 )
+        - generic [ref=e14]: 
+      - text:     
+  - generic [ref=e15]:
+    - list [ref=e17]:
+      - listitem [ref=e18]:
+        - generic [ref=e19]: "试题检索 :"
+        - generic [ref=e20]:
+          - link "按章节" [ref=e21] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1
+          - link "按知识点" [ref=e22] [cursor=pointer]:
+            - /url: /knowledgeq?cid=13&cno=2
+      - listitem [ref=e23]:
+        - generic [ref=e24]: "教材版本 :"
+        - generic [ref=e25]:
+          - link "人教版" [ref=e26] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015
+          - link "浙科版" [ref=e27] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800029
+          - link "苏教版" [ref=e28] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800061
+          - link "中图版" [ref=e29] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800072
+          - link "沪科版" [ref=e30] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800077
+          - link "山东版" [ref=e31] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800102
+      - listitem [ref=e32]:
+        - generic [ref=e33]: "课本 :"
+        - generic [ref=e34]:
+          - link "必修1" [ref=e35] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800088
+          - link "必修2" [ref=e36] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800086
+          - link "必修3" [ref=e37] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800096
+          - link "选修1" [ref=e38] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800101
+          - link "选修2" [ref=e39] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800103
+          - link "选修3" [ref=e40] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800109
+      - listitem [ref=e41]:
+        - generic [ref=e42]: "题型 :"
+        - generic [ref=e43]:
+          - link "全部" [ref=e44] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "单选题" [ref=e45] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "多选题" [ref=e46] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "判断题" [ref=e47] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "填空题" [ref=e48] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "解答题" [ref=e49] [cursor=pointer]:
+            - /url: javascript:void(0)
+      - listitem [ref=e50]:
+        - generic [ref=e51]: "难易度 :"
+        - generic [ref=e52]:
+          - link "全部" [ref=e53] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "易" [ref=e54] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "中" [ref=e55] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "难" [ref=e56] [cursor=pointer]:
+            - /url: javascript:void(0)
+    - generic [ref=e57]:
+      - list [ref=e60]:
+        - listitem [ref=e61]:
+          - generic [ref=e62]: 
+          - link "第1章 走近细胞" [ref=e63] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e64]:
+          - generic [ref=e65]: 
+          - link "第2章 组成细胞的分子" [ref=e66] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:    
+        - listitem [ref=e67]:
+          - generic [ref=e68]: 
+          - link "第3章 细胞的基本结构" [ref=e69] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:   
+        - listitem [ref=e70]:
+          - generic [ref=e71]: 
+          - link "第4章 细胞的物质输入和输出" [ref=e72] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e73]:
+          - generic [ref=e74]: 
+          - link "第5章 细胞的能量供应和利用" [ref=e75] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:    
+        - listitem [ref=e76]:
+          - generic [ref=e77]: 
+          - link "第6章 细胞的生命历程" [ref=e78] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:    
+      - generic [ref=e79]:
+        - alert [ref=e80]:
+          - generic [ref=e81] [cursor=pointer]: 组卷预览
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - generic [ref=e84]:
+              - generic [ref=e85]:
+                - text: "难度:"
+                - link "0.44" [ref=e86] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e88]:
+                - listitem [ref=e89]:
+                  - generic [ref=e90]: "答案: D"
+                - listitem [ref=e91]:
+                  - link " 查看解析" [ref=e92] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e93]: 
+                    - text: 查看解析
+                - listitem [ref=e94]:
+                  - link " 收藏" [ref=e95] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e96]: 
+                    - text: 收藏
+                - listitem [ref=e97]:
+                  - link "试题篮" [ref=e98] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e99]: 
+                    - text: 试题篮
+            - generic [ref=e100]:
+              - generic [ref=e101]: 某人身体不适，全身浮肿，去医院做尿液检查时，化验师做了如下操作：①取稀释尿液2mL；②加0.1g/mLNaOH溶液2mL摇匀；③加0.01g/mLCuSO4 溶液3滴~4滴，摇匀；④观察结果有紫色出现。该人可能患( )
+              - generic [ref=e103]:
+                - generic [ref=e104]: A、糖尿病
+                - generic [ref=e105]: B、脂肪肝
+                - generic [ref=e106]: C、过敏性皮炎
+                - generic [ref=e107]: D、肾小球炎
+          - generic [ref=e108]:
+            - generic [ref=e109]:
+              - generic [ref=e110]:
+                - text: "难度:"
+                - link "0.46" [ref=e111] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e113]:
+                - listitem [ref=e114]:
+                  - generic [ref=e115]: "答案: B"
+                - listitem [ref=e116]:
+                  - link " 查看解析" [ref=e117] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e118]: 
+                    - text: 查看解析
+                - listitem [ref=e119]:
+                  - link " 收藏" [ref=e120] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e121]: 
+                    - text: 收藏
+                - listitem [ref=e122]:
+                  - link "试题篮" [ref=e123] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e124]: 
+                    - text: 试题篮
+            - generic [ref=e125]:
+              - generic [ref=e126]: 下列化合物中含有的化学元素种类最少的一组是( )
+              - generic [ref=e128]:
+                - generic [ref=e129]: A、抗体和糖蛋白
+                - generic [ref=e130]: B、纤维素和脱氧核糖
+                - generic [ref=e131]: C、性激素和tRNA
+                - generic [ref=e132]: D、质粒和呼吸酶
+          - generic [ref=e133]:
+            - generic [ref=e134]:
+              - generic [ref=e135]:
+                - text: "难度:"
+                - link "0.34" [ref=e136] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e138]:
+                - listitem [ref=e139]:
+                  - generic [ref=e140]: "答案: B"
+                - listitem [ref=e141]:
+                  - link " 查看解析" [ref=e142] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e143]: 
+                    - text: 查看解析
+                - listitem [ref=e144]:
+                  - link " 收藏" [ref=e145] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e146]: 
+                    - text: 收藏
+                - listitem [ref=e147]:
+                  - link "试题篮" [ref=e148] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e149]: 
+                    - text: 试题篮
+            - generic [ref=e150]:
+              - generic [ref=e151]:
+                - text: 下列有关表述正确的是
+                - text: ①磷脂是所有细胞必不可缺少的脂质 ②所有细胞的组成成分都有纤维素
+                - text: ③只有多糖、蛋白质、脂肪三类生物大分子以碳链为骨架
+                - text: ④被形容为“生命的燃料”的物质是指储存能量的多糖
+                - text: ⑤核酸是生物的遗传物质 ⑥核酸只存在于细胞核中( )
+              - generic [ref=e153]:
+                - generic [ref=e154]: A、①②⑥
+                - generic [ref=e155]: B、①⑤
+                - generic [ref=e156]: C、①②③④⑤⑥
+                - generic [ref=e157]: D、①②③⑤⑥
+          - generic [ref=e158]:
+            - generic [ref=e159]:
+              - generic [ref=e160]:
+                - text: "难度:"
+                - link "0.28" [ref=e161] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e163]:
+                - listitem [ref=e164]:
+                  - generic [ref=e165]: "答案: C"
+                - listitem [ref=e166]:
+                  - link " 查看解析" [ref=e167] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e168]: 
+                    - text: 查看解析
+                - listitem [ref=e169]:
+                  - link " 收藏" [ref=e170] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e171]: 
+                    - text: 收藏
+                - listitem [ref=e172]:
+                  - link "试题篮" [ref=e173] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e174]: 
+                    - text: 试题篮
+            - generic [ref=e175]:
+              - generic [ref=e176]:
+                - text: 甲学者将HIV病毒的遗传物质彻底水解后得到A、B、C三种化合物，乙学者将组成T
+                - subscript [ref=e177]: "2"
+                - text: 噬菌体的遗传物质彻底水解后得到了A、B、D三种化合物。你认为C、D两种化合物分别指的是( )
+              - generic [ref=e179]:
+                - generic [ref=e180]: A、尿嘧啶、胸腺嘧啶
+                - generic [ref=e181]: B、胸腺嘧啶、尿嘧啶
+                - generic [ref=e182]: C、核糖、脱氧核糖
+                - generic [ref=e183]: D、尿嘧啶、腺嘌呤
+          - generic [ref=e184]:
+            - generic [ref=e185]:
+              - generic [ref=e186]:
+                - text: "难度:"
+                - link "0.43" [ref=e187] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e189]:
+                - listitem [ref=e190]:
+                  - generic [ref=e191]: "答案: B"
+                - listitem [ref=e192]:
+                  - link " 查看解析" [ref=e193] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e194]: 
+                    - text: 查看解析
+                - listitem [ref=e195]:
+                  - link " 收藏" [ref=e196] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e197]: 
+                    - text: 收藏
+                - listitem [ref=e198]:
+                  - link "试题篮" [ref=e199] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e200]: 
+                    - text: 试题篮
+            - generic [ref=e201]:
+              - generic [ref=e202]: 下列关于组成细胞的化合物的叙述，不正确的是( )
+              - generic [ref=e204]:
+                - generic [ref=e205]: A、RNA与DNA的基本组成单位是核苷酸，都可以贮存遗传信息
+                - generic [ref=e206]: B、蛋白质肽链的盘曲和折叠被解开时，其特定功能并未发生改变
+                - generic [ref=e207]: C、DNA分子碱基的特定排列顺序，构成了DNA分子的特异性
+                - generic [ref=e208]: D、胆固醇是构成动物细胞膜的重要成分，在人体内参与血液中脂质的运输
+          - generic [ref=e209]:
+            - generic [ref=e210]:
+              - generic [ref=e211]:
+                - text: "难度:"
+                - link "0.14" [ref=e212] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e214]:
+                - listitem [ref=e215]:
+                  - generic [ref=e216]: "答案: A"
+                - listitem [ref=e217]:
+                  - link " 查看解析" [ref=e218] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e219]: 
+                    - text: 查看解析
+                - listitem [ref=e220]:
+                  - link " 收藏" [ref=e221] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e222]: 
+                    - text: 收藏
+                - listitem [ref=e223]:
+                  - link "试题篮" [ref=e224] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e225]: 
+                    - text: 试题篮
+            - generic [ref=e226]:
+              - generic [ref=e227]:
+                - text: 水是生命之源。下列关于水的叙述不正确的是
+                - text: ①．细胞内自由水和结合水的比值越大，代谢强度就越大，抗性也越大
+                - text: ②．细胞核、线粒体、叶绿体、核糖体等细胞器均可产生水
+                - text: ③．相同质量的糖类、脂肪，彻底氧化分解时生成水最多的是糖类
+                - text: ④．在一定温度范围内，升高温度，结合水可转化为自由水
+                - text: ⑤．生物体内的生化反应必须在水中进行
+                - text: ⑥．水在细胞中的存在形式及功能并不是一成不变的
+                - text: ⑦．由m个氨基酸构成2个环状多肽，水解需要(m－2)个水分子
+              - generic [ref=e229]:
+                - generic [ref=e230]: A、①②③⑦
+                - generic [ref=e231]: B、④⑤⑥
+                - generic [ref=e232]: C、①②③④⑤
+                - generic [ref=e233]: D、②③④⑤⑥
+          - generic [ref=e234]:
+            - generic [ref=e235]:
+              - generic [ref=e236]:
+                - text: "难度:"
+                - link "0.97" [ref=e237] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e239]:
+                - listitem [ref=e240]:
+                  - generic [ref=e241]: "答案: C"
+                - listitem [ref=e242]:
+                  - link " 查看解析" [ref=e243] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e244]: 
+                    - text: 查看解析
+                - listitem [ref=e245]:
+                  - link " 收藏" [ref=e246] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e247]: 
+                    - text: 收藏
+                - listitem [ref=e248]:
+                  - link "试题篮" [ref=e249] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e250]: 
+                    - text: 试题篮
+            - generic [ref=e251]:
+              - generic [ref=e252]: 下列广告语在科学性上没有错误的是( )
+              - generic [ref=e254]:
+                - generic [ref=e255]: A、本产品XX牌八宝粥由莲子、淀粉、桂圆等精制而成，适合糖尿病患者，绝对不含糖
+                - generic [ref=e256]: B、请放心饮用XX系列饮料，该饮料绝对不含任何化学物质
+                - generic [ref=e257]: C、服用鱼肝油（富含维生素D）有助于您的宝宝骨骼健康，促进骨骼发育
+                - generic [ref=e258]: D、这种口服液含有丰富的N、P、Zn等微量元素
+          - generic [ref=e259]:
+            - generic [ref=e260]:
+              - generic [ref=e261]:
+                - text: "难度:"
+                - link "0.85" [ref=e262] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e264]:
+                - listitem [ref=e265]:
+                  - generic [ref=e266]: "答案: A"
+                - listitem [ref=e267]:
+                  - link " 查看解析" [ref=e268] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e269]: 
+                    - text: 查看解析
+                - listitem [ref=e270]:
+                  - link " 收藏" [ref=e271] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e272]: 
+                    - text: 收藏
+                - listitem [ref=e273]:
+                  - link "试题篮" [ref=e274] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e275]: 
+                    - text: 试题篮
+            - generic [ref=e276]:
+              - generic [ref=e277]: 下列物质在元素组成上最相似的—组是( )
+              - generic [ref=e279]:
+                - generic [ref=e280]: A、ATP、DNA、RNA
+                - generic [ref=e281]: B、生长素、生长激素、性激素
+                - generic [ref=e282]: C、核糖、核糖核苷酸、核糖核酸
+                - generic [ref=e283]: D、淀粉、淀粉酶、控制淀粉酶合成的基因
+          - generic [ref=e284]:
+            - generic [ref=e285]:
+              - generic [ref=e286]:
+                - text: "难度:"
+                - link "0.93" [ref=e287] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e289]:
+                - listitem [ref=e290]
+                - listitem [ref=e292]:
+                  - link " 查看解析" [ref=e293] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e294]: 
+                    - text: 查看解析
+                - listitem [ref=e295]:
+                  - link " 收藏" [ref=e296] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e297]: 
+                    - text: 收藏
+                - listitem [ref=e298]:
+                  - link "试题篮" [ref=e299] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e300]: 
+                    - text: 试题篮
+            - generic [ref=e302]:
+              - text: 下图是人体细胞中两种重要有机物A和E的元素组成及相互关系图，请据图回答：
+              - img [ref=e303]
+              - text: (1)图中方框①表示的元素是__________②表示的元素是__________；
+              - text: (2)E具有多样性，其原因：从b分析是由于______________，从A分析是由于_________。
+              - text: (3)⑥过程是__________，若b的平均分子量为r，通过⑥反应过程形成m条肽链，经盘曲折叠构成分子量为e的E，则E分子中肽键的数目是____________________。
+          - generic [ref=e304]:
+            - generic [ref=e305]:
+              - generic [ref=e306]:
+                - text: "难度:"
+                - link "0.81" [ref=e307] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e309]:
+                - listitem [ref=e310]
+                - listitem [ref=e312]:
+                  - link " 查看解析" [ref=e313] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e314]: 
+                    - text: 查看解析
+                - listitem [ref=e315]:
+                  - link " 收藏" [ref=e316] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e317]: 
+                    - text: 收藏
+                - listitem [ref=e318]:
+                  - link "试题篮" [ref=e319] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e320]: 
+                    - text: 试题篮
+            - generic [ref=e322]:
+              - text: 如图所示的图解表示构成细胞的元素、化合物及其作用，a、b、c、d代表不同的小分子物质，A、B、C代表不同的大分子，请分析回答下列问题：
+              - img [ref=e323]
+              - text: (1)物质a是___________，在动物细胞内，与物质A作用最相近的物质是___________。若物质A在动物、植物细胞均含有，并作为细胞内的最理想的储存能量的物质不仅含能量多而且体积较小，则A是___________ ，这种情况下在细胞内合成A的细胞器是
+              - text: 。
+              - text: (2)物质C是_______________，组成它的碱基有哪几种
+              - text: 。
+              - text: (3)物质B的单体的结构通式是_______________。
+              - text: (4)d属于
+              - text: 的一种，除了d以外，还有
+              - text: 和
+              - text: 。
+        - list [ref=e325]:
+          - listitem [ref=e326]:
+            - link "第一页" [ref=e327] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&typeid=0
+          - listitem [ref=e328]:
+            - link "<" [ref=e329] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=8&typeid=0
+          - listitem [ref=e330]:
+            - link "5" [ref=e331] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=5&typeid=0
+          - listitem [ref=e332]:
+            - link "6" [ref=e333] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=6&typeid=0
+          - listitem [ref=e334]:
+            - link "7" [ref=e335] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=7&typeid=0
+          - listitem [ref=e336]:
+            - link "8" [ref=e337] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=8&typeid=0
+          - listitem [ref=e338]:
+            - generic [ref=e339]: "9"
+          - listitem [ref=e340]:
+            - link "10" [ref=e341] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=10&typeid=0
+          - listitem [ref=e342]:
+            - link "11" [ref=e343] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=11&typeid=0
+          - listitem [ref=e344]:
+            - link "12" [ref=e345] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=12&typeid=0
+          - listitem [ref=e346]:
+            - link "13" [ref=e347] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=13&typeid=0
+          - listitem [ref=e348]:
+            - link ">" [ref=e349] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=10&typeid=0
+          - listitem [ref=e350]:
+            - link "最后一页" [ref=e351] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=177&typeid=0
+  - contentinfo [ref=e352]:
+    - generic [ref=e356]:
+      - generic [ref=e357]: 商务联系
+      - paragraph [ref=e358]: "手机/微信 : 19829194929"
+      - paragraph [ref=e359]: "手机/微信 : 13474117172"
+      - paragraph [ref=e360]: "QQ : 416148514"

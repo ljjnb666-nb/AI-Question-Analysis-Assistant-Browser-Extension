@@ -1,0 +1,97 @@
+{
+  "time": "2026-04-26T16:52:45.203Z",
+  "total": 10,
+  "passed": 10,
+  "failed": 0,
+  "accuracy": 1,
+  "recognizedMismatch": 0,
+  "api": {
+    "callsObserved": 10,
+    "statusCount": {
+      "200": 10
+    },
+    "has429": false
+  },
+  "results": [
+    {
+      "index": 1,
+      "expected": "C",
+      "predicted": "C",
+      "ok": true,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④"
+    },
+    {
+      "index": 2,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "2. 某班同学讨论“货币的职能”，下列判断正确的是() ① 标价“每斤苹果6元”体现价值尺度职能 ② 超市扫码付款体现流通手段职能 ③ 把钱存银行只体现支付手段，不体现贮藏手段 ④ 赊购到期付款体现支付手段职能 A. ①②④ B. ①②③ C. ②③④ D. ①③④"
+    },
+    {
+      "index": 3,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "3. 关于价格与供求关系，下列说法正确的是() ① 供不应求时，商品价格一般上涨 ② 供过于求时，商品价格一般下降 ③ 价格上涨会抑制需求、刺激供给 ④ 价格由供求单方面决定，与价值无关 A. ①②③ B. ①③④ C. ②③④ D. ①②④"
+    },
+    {
+      "index": 4,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "4. 消费对生产具有反作用，下列体现该观点的是() ① 新能源汽车消费增长带动电池产业扩张 ② 居民健康消费升级推动有机食品供给增加 ③ 企业扩大再生产完全不受消费变化影响 ④ 网购需求扩大促进物流行业发展 A. ①②④ B. ①③④ C. ②③④ D. ①②③"
+    },
+    {
+      "index": 5,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "5. 关于企业经营成功的因素，下列分析正确的是() ① 提高自主创新能力，有利于形成竞争优势 ② 诚信经营有利于树立良好信誉和形象 ③ 只要降低工资成本，企业就一定盈利 ④ 制定正确经营战略有利于企业长期发展 A. ①②④ B. ①③④ C. ②③④ D. ①②③"
+    },
+    {
+      "index": 6,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "6. 关于劳动者就业与权益保障，下列说法正确的是() ① 劳动者享有平等就业和选择职业的权利 ② 签订劳动合同有利于维护劳动者合法权益 ③ 劳动者维权只能通过诉讼，不能协商调解 ④ 提高职业技能有助于增强就业竞争力 A. ①②④ B. ①③④ C. ②③④ D. ①②③"
+    },
+    {
+      "index": 7,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "7. 关于财政作用，下列说法正确的是() ① 财政可以促进资源合理配置 ② 财政可以促进社会公平、改善人民生活 ③ 财政具有促进国民经济平稳运行的作用 ④ 财政支出越多越好，不会带来任何风险 A. ①②③ B. ①③④ C. ②③④ D. ①②④"
+    },
+    {
+      "index": 8,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "8. 税收具有固定性、无偿性、强制性。下列认识正确的是() ① 国家征税必须有法律依据，体现强制性 ② 纳税人依法纳税后不直接获得等价回报，体现无偿性 ③ 税率和征税对象相对稳定，体现固定性 ④ 税收可以随意减免，不受法律约束 A. ①②③ B. ①③④ C. ②③④ D. ①②④"
+    },
+    {
+      "index": 9,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "9. 关于市场配置资源的优点，下列说法正确的是() ① 通过价格、供求、竞争引导资源流向效率较高领域 ② 能够及时反映市场需求变化 ③ 市场机制能完全避免垄断和外部性问题 ④ 有利于促进技术进步和管理创新 A. ①②④ B. ①③④ C. ②③④ D. ①②③"
+    },
+    {
+      "index": 10,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "recognizedStemMatch": true,
+      "recognizedTextPreview": "10. 关于社会主义市场经济特征，下列说法正确的是() ① 坚持公有制主体地位是其根本标志 ② 能够实行科学的宏观调控 ③ 以共同富裕为根本目标 ④ 只发挥市场作用，不需要政府调控 A. ①②③ B. ①③④ C. ②③④ D. ①②④"
+    }
+  ]
+}

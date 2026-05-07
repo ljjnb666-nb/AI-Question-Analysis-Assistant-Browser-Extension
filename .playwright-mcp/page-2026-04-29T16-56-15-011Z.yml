@@ -1,0 +1,79 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - heading "扩展程序" [level=1] [ref=e10]
+      - generic [ref=e13]:
+        - button [ref=e77] [cursor=pointer]
+        - generic [ref=e78]:
+          - generic [ref=e79]: 搜索扩展程序
+          - searchbox "搜索扩展程序" [ref=e80]
+      - generic [ref=e19]:
+        - generic [ref=e20]: 开发者模式
+        - button "开发者模式" [pressed] [ref=e21] [cursor=pointer]
+    - generic [ref=e25]:
+      - button "加载未打包的扩展程序" [ref=e26] [cursor=pointer]:
+        - generic [ref=e27]:
+          - generic: 加载未打包的扩展程序
+      - button "打包扩展程序" [ref=e28] [cursor=pointer]:
+        - generic [ref=e29]:
+          - generic: 打包扩展程序
+      - button "更新" [ref=e30] [cursor=pointer]:
+        - generic [ref=e31]:
+          - generic: 更新
+  - generic [ref=e32]:
+    - navigation [ref=e82]:
+      - menu [ref=e83]:
+        - generic:
+          - menuitem "我的扩展程序" [ref=e84] [cursor=pointer]:
+            - generic:
+              - img
+            - text: 我的扩展程序
+          - menuitem "键盘快捷键" [ref=e85] [cursor=pointer]:
+            - generic:
+              - img
+            - text: 键盘快捷键
+      - generic [ref=e88]:
+        - text: 正在开发扩展程序？请参阅 Chrome 扩展程序开发者文档，及时了解
+        - link "最新动态" [ref=e89] [cursor=pointer]:
+          - /url: https://developer.chrome.com/docs/extensions/whats-new?utm_source=ext_sidebar&hl=zh-CN
+        - text: 。
+      - generic [ref=e91]:
+        - generic:
+          - img
+        - generic [ref=e92]:
+          - text: 在
+          - link "Chrome 应用商店" [ref=e93] [cursor=pointer]:
+            - /url: https://chromewebstore.google.com/category/extensions?utm_source=ext_sidebar&hl=zh-CN
+          - text: 中发现更多扩展程序和主题
+    - main [ref=e33]:
+      - generic [ref=e37]:
+        - heading "所有扩展程序" [level=2] [ref=e38]
+        - generic [ref=e41]:
+          - generic [ref=e42]:
+            - generic [ref=e43]:
+              - img [ref=e44]
+              - img "未打包的扩展程序" [ref=e46]:
+                - generic [ref=e47]:
+                  - img
+            - generic [ref=e48]:
+              - generic [ref=e50]:
+                - heading "题目解析助手" [level=3] [ref=e51]
+                - generic [ref=e52]: 0.2.0
+              - generic [ref=e53]: 在当前网页中直接截图/识别题目，并用悬浮弹窗即时展示答案与解析
+              - generic [ref=e54]: ID：enkdihhbkonapcacjeiglddkddmbpfej
+              - generic [ref=e117]:
+                - generic [ref=e118]: 检查视图：
+                - link "Service Worker" [ref=e119] [cursor=pointer]
+          - generic [ref=e60]:
+            - generic [ref=e61]:
+              - button "详情" [ref=e62] [cursor=pointer]:
+                - generic [ref=e63]:
+                  - generic: 详情
+              - button "移除" [ref=e64] [cursor=pointer]:
+                - generic [ref=e65]:
+                  - generic: 移除
+              - button "错误" [ref=e73] [cursor=pointer]:
+                - generic [ref=e74]:
+                  - generic: 错误
+            - button "重新加载" [ref=e120] [cursor=pointer]
+            - button "开启，扩展程序已启用" [pressed] [ref=e123] [cursor=pointer]

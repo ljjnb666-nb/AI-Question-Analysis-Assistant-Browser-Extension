@@ -1,0 +1,88 @@
+{
+  "url": "https://www.tiku.cn/chapterq?bid=800070&cid=8&cno=1&p=9&typeid=600079&vid=800010",
+  "pageNo": 9,
+  "model": "deepseek-reasoner",
+  "time": "2026-04-27T12:16:07.691Z",
+  "modeSummary": {
+    "auto": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "accuracy": 1,
+      "statusCount": {
+        "200": 3
+      }
+    },
+    "full": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "accuracy": 1,
+      "statusCount": {
+        "200": 3
+      }
+    }
+  },
+  "rows": [
+    {
+      "mode": "auto",
+      "page": 9,
+      "qIndex": 0,
+      "expected": "T",
+      "predicted": "T",
+      "ok": true,
+      "status": 200,
+      "previewText": "刑事违法行为属于严重的违法行为，是犯罪行为。"
+    },
+    {
+      "mode": "auto",
+      "page": 9,
+      "qIndex": 1,
+      "expected": "T",
+      "predicted": "T",
+      "ok": true,
+      "status": 200,
+      "previewText": "如果说道德是人们追求的较高境界，那么不违法则是人们行为的底线。"
+    },
+    {
+      "mode": "auto",
+      "page": 9,
+      "qIndex": 2,
+      "expected": "F",
+      "predicted": "F",
+      "ok": true,
+      "status": 200,
+      "previewText": "司法保护的对象是有犯罪行为的未成年人。"
+    },
+    {
+      "mode": "full",
+      "page": 9,
+      "qIndex": 0,
+      "expected": "T",
+      "predicted": "T",
+      "ok": true,
+      "status": 200,
+      "previewText": "刑事违法行为属于严重的违法行为，是犯罪行为。"
+    },
+    {
+      "mode": "full",
+      "page": 9,
+      "qIndex": 1,
+      "expected": "T",
+      "predicted": "T",
+      "ok": true,
+      "status": 200,
+      "previewText": "如果说道德是人们追求的较高境界，那么不违法则是人们行为的底线。"
+    },
+    {
+      "mode": "full",
+      "page": 9,
+      "qIndex": 2,
+      "expected": "F",
+      "predicted": "F",
+      "ok": true,
+      "status": 200,
+      "previewText": "司法保护的对象是有犯罪行为的未成年人。"
+    }
+  ]
+}

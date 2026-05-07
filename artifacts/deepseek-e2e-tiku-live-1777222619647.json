@@ -1,0 +1,52 @@
+{
+  "url": "https://www.tiku.cn/chapterq?cid=8&cno=1",
+  "time": "2026-04-26T16:56:59.647Z",
+  "total": 5,
+  "passed": 2,
+  "failed": 3,
+  "accuracy": 0.4,
+  "api": {
+    "callsObserved": 5,
+    "statusCount": {
+      "200": 5
+    },
+    "has429": false
+  },
+  "perQuestion": [
+    {
+      "index": 1,
+      "expected": "C",
+      "predicted": "B",
+      "ok": false,
+      "recognizedTextPreview": "2011年3月23日，中国三一重工股份有限公司日本子公司总经理陈健与日本红十字会代表、东京电力公司代表出席泵车捐赠仪式。这台泵车价值100万美元，应日本东京电力公司要求，三一重工此次紧急向日方免费捐赠这台泵车，并提供全方位技术支持。这台泵车 ( ) A、是商品，它具有使用价值 B、是劳动产品，它具有使用价值 C、是商品，它具有价值 D、是劳动产品，它具有价值"
+    },
+    {
+      "index": 2,
+      "expected": "C",
+      "predicted": "C",
+      "ok": true,
+      "recognizedTextPreview": "答案: D 查看解析 收藏 试题篮 难度: 0.91 查看解析 试题篮 答案: C 查看解析 收藏 试题篮 难度: 0.56 查看解析 试题篮 第一页 < 1 2 3 4 5 6 7 8 9 > 最后一页 1"
+    },
+    {
+      "index": 3,
+      "expected": "C",
+      "predicted": "C",
+      "ok": true,
+      "recognizedTextPreview": "答案: D 查看解析 收藏 试题篮 难度: 0.91 查看解析 试题篮 答案: C 查看解析 收藏 试题篮 难度: 0.56 查看解析 试题篮 第一页 < 1 2 3 4 5 6 7 8 9 > 最后一页 1"
+    },
+    {
+      "index": 4,
+      "expected": "C",
+      "predicted": "D",
+      "ok": false,
+      "recognizedTextPreview": "答案: D 查看解析 收藏 试题篮 难度: 0.91 查看解析 试题篮 答案: C 查看解析 收藏 试题篮 难度: 0.56 查看解析 试题篮 第一页 < 1 2 3 4 5 6 7 8 9 > 最后一页 1"
+    },
+    {
+      "index": 5,
+      "expected": "C",
+      "predicted": "D",
+      "ok": false,
+      "recognizedTextPreview": "答案: D 查看解析 收藏 试题篮 难度: 0.91 查看解析 试题篮 答案: C 查看解析 收藏 试题篮 难度: 0.56 查看解析 试题篮"
+    }
+  ]
+}

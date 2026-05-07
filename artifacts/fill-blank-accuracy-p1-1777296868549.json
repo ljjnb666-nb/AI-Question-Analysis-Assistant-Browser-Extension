@@ -1,0 +1,110 @@
+{
+  "url": "https://www.tiku.cn/chapterq?bid=800067&cid=8&cno=1&typeid=600080&vid=800010",
+  "time": "2026-04-27T13:34:28.543Z",
+  "total": 10,
+  "passed": 9,
+  "failed": 1,
+  "accuracy": 0.9,
+  "rows": [
+    {
+      "qIndex": 0,
+      "qid": 1190572,
+      "blankCount": 1,
+      "expected": "有人说 “成功的最佳目标不是最有价值的那一个;而是最有可能实现的那一个。”从唯物论的角度分析;这种说法符合_ _ 一切从实际出发 _的观点。",
+      "predicted": "一切从实际出发",
+      "ok": true,
+      "reason": "deterministic_equivalent",
+      "status": 200
+    },
+    {
+      "qIndex": 1,
+      "qid": 1191080,
+      "blankCount": 13,
+      "expected": "什么是一切从实际出发;实事求是？ 就是我们做事情要尊重客观规律;从客观存在的事物出发;经过调查研究;找出事物本身固有的而不是臆造的规律性;以此作为行动的依据。;怎样才能做到一切从实际出发;实事求是？;充分发挥主观能动性;坚持用科学理论武装头脑;以求真务实的精神探求事物本质和规律;在实践中检验和发展真理；;把发挥主观能动性与尊重客观规律结合起来;把高度的革命热情同严谨踏实的科学态度结合起来；反对唯意志主义和片面强调客观条件;安于现状;因循守旧;无所作为的思想。",
+      "predicted": "主观能动性;科学理论;求真务实;实践;主观能动性;客观规律;革命热情;科学态度;唯意志主义;客观条件;安于现状;因循守旧;无所作为",
+      "ok": true,
+      "reason": "deterministic_equivalent",
+      "status": 200
+    },
+    {
+      "qIndex": 2,
+      "qid": 1191087,
+      "blankCount": 3,
+      "expected": "意识的本质是什么？ 意识是物质世界长期发展的产物；是人脑的机能；是客观存在的反映。",
+      "predicted": "物质世界长期发展;人脑;客观存在",
+      "ok": true,
+      "reason": "deterministic_equivalent",
+      "status": 200
+    },
+    {
+      "qIndex": 3,
+      "qid": 1191091,
+      "blankCount": 4,
+      "expected": "人能够能动地改造世界 意识对改造客观世界具有指导作用；对于人体生理活动具有调节和控制作用。人们在意识的指导下能动地改造世界。",
+      "predicted": "指导;调节;控制;意识",
+      "ok": true,
+      "reason": "deterministic_equivalent",
+      "status": 200
+    },
+    {
+      "qIndex": 4,
+      "qid": 1191096,
+      "blankCount": 7,
+      "expected": "人能够能动地认识世界 意识活动具有目的性和计划性;具有主动创造性和自觉选择性。人能够能动地认识世界;揭示事物的本质和规律。",
+      "predicted": "目的性;计划性;主动创造性;自觉选择性;认识世界;本质;规律",
+      "ok": true,
+      "reason": "deterministic_equivalent",
+      "status": 200
+    },
+    {
+      "qIndex": 5,
+      "qid": 1194299,
+      "blankCount": 3,
+      "expected": "物质世界长期发展的产物；人脑的机能；客观存在的主观映像。",
+      "predicted": "物质世界长期发展的产物;人脑的机能;客观存在的主观映像",
+      "ok": true,
+      "reason": "deterministic_equivalent",
+      "status": 200
+    },
+    {
+      "qIndex": 6,
+      "qid": 1194303,
+      "blankCount": 1,
+      "expected": "客观存在着的一切事物； 客观事物的内部联系或规律性。",
+      "predicted": "客观存在着的一切事物;客观事物的内部联系或规律性;探索",
+      "ok": false,
+      "reason": "模型答案包含3个空，标准答案只有2个空，数量不一致。",
+      "status": 200
+    },
+    {
+      "qIndex": 7,
+      "qid": 1196507,
+      "blankCount": 3,
+      "expected": "意识的本质是什么？ 意识是物质世界长期发展的产物；是人脑的机能；是客观存在的反映。",
+      "predicted": "物质世界长期发展;人脑;客观存在",
+      "ok": true,
+      "reason": "deterministic_equivalent",
+      "status": 200
+    },
+    {
+      "qIndex": 8,
+      "qid": 1196513,
+      "blankCount": 7,
+      "expected": "人能够能动地认识世界 意识活动具有目的性和计划性;具有主动创造性和自觉选择性。人能够能动地认识世界;揭示事物的本质和规律。",
+      "predicted": "目的性;计划性;主动创造性;自觉选择性;认识世界;本质;规律",
+      "ok": true,
+      "reason": "deterministic_equivalent",
+      "status": 200
+    },
+    {
+      "qIndex": 9,
+      "qid": 1196522,
+      "blankCount": 4,
+      "expected": "人能够能动地改造世界 意识对改造客观世界具有指导作用；对于人体生理活动具有调节和控制作用。人们在意识的指导下能动地改造世界。",
+      "predicted": "指导;调节;控制;意识",
+      "ok": true,
+      "reason": "deterministic_equivalent",
+      "status": 200
+    }
+  ]
+}

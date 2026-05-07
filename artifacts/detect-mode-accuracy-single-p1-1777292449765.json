@@ -1,0 +1,23 @@
+{
+  "url": "https://www.tiku.cn/chapterq?cid=8&cno=1&vid=800010&bid=800053&typeid=600080",
+  "pageNo": 1,
+  "model": "deepseek-chat",
+  "time": "2026-04-27T12:20:49.765Z",
+  "modeSummary": {
+    "auto": {
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "accuracy": 0,
+      "statusCount": {}
+    },
+    "full": {
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "accuracy": 0,
+      "statusCount": {}
+    }
+  },
+  "rows": []
+}

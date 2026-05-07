@@ -1,0 +1,75 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - button "候选题" [ref=e5] [cursor=pointer]
+    - button "历史" [ref=e6] [cursor=pointer]
+    - button "设置" [ref=e7] [cursor=pointer]
+  - generic [ref=e14]:
+    - generic [ref=e15]:
+      - generic [ref=e16]: AI 提供商
+      - generic [ref=e17]:
+        - button "Anthropic (Claude) 支持图片" [ref=e18] [cursor=pointer]:
+          - generic [ref=e19]: Anthropic (Claude)
+          - generic [ref=e20]: 支持图片
+        - button "OpenAI (GPT) 支持图片" [ref=e21] [cursor=pointer]:
+          - generic [ref=e22]: OpenAI (GPT)
+          - generic [ref=e23]: 支持图片
+        - button "DeepSeek 仅文本" [ref=e24] [cursor=pointer]:
+          - generic [ref=e25]: DeepSeek
+          - generic [ref=e26]: 仅文本
+        - button "Google Gemini 支持图片" [ref=e27] [cursor=pointer]:
+          - generic [ref=e28]: Google Gemini
+          - generic [ref=e29]: 支持图片
+        - button "阿里云通义千问 支持图片" [ref=e30] [cursor=pointer]:
+          - generic [ref=e31]: 阿里云通义千问
+          - generic [ref=e32]: 支持图片
+        - button "月之暗面 Kimi 仅文本" [ref=e33] [cursor=pointer]:
+          - generic [ref=e34]: 月之暗面 Kimi
+          - generic [ref=e35]: 仅文本
+        - button "智谱 GLM 支持图片" [ref=e36] [cursor=pointer]:
+          - generic [ref=e37]: 智谱 GLM
+          - generic [ref=e38]: 支持图片
+        - button "Ollama（本地） 支持图片 | 免 Key" [ref=e39] [cursor=pointer]:
+          - generic [ref=e40]: Ollama（本地）
+          - generic [ref=e41]: 支持图片 | 免 Key
+        - button "Custom（OpenAI兼容） 支持图片" [ref=e42] [cursor=pointer]:
+          - generic [ref=e43]: Custom（OpenAI兼容）
+          - generic [ref=e44]: 支持图片
+    - generic [ref=e45]:
+      - generic [ref=e46]: API Key *
+      - textbox "your_api_key" [ref=e47]: sk-twXIKnyyd46XC9mDhBmdG4JhaCirS1JCepm8MXeUL0DoxmS6
+      - link "前往 OpenAI Compatible API Docs 获取 Key" [ref=e48] [cursor=pointer]:
+        - /url: https://platform.openai.com/docs/api-reference/chat
+    - generic [ref=e49]:
+      - generic [ref=e50]: 模型
+      - textbox "手动输入模型名，如 gpt-4o-mini" [ref=e51]: claude-haiku-4-5-20251001
+    - generic [ref=e52]:
+      - generic [ref=e53]: 自定义协议
+      - generic [ref=e54] [cursor=pointer]:
+        - radio "OpenAI 兼容" [ref=e55]
+        - generic [ref=e56]: OpenAI 兼容
+      - generic [ref=e57] [cursor=pointer]:
+        - radio "Claude(Anthropic) 兼容" [checked] [ref=e58]
+        - generic [ref=e59]: Claude(Anthropic) 兼容
+    - generic [ref=e60]:
+      - generic [ref=e61]: 自定义 Base URL（可选）
+      - textbox "http://localhost:11434" [ref=e62]: http://127.0.0.1:3000
+      - generic [ref=e63]: 留空则使用默认地址，也可以填写代理或自托管地址。
+    - generic [ref=e64]:
+      - generic [ref=e65]: 解析路由
+      - generic [ref=e66] [cursor=pointer]:
+        - radio "自动判断（推荐）" [ref=e67]
+        - generic [ref=e68]: 自动判断（推荐）
+      - generic [ref=e69] [cursor=pointer]:
+        - radio "文本优先" [ref=e70]
+        - generic [ref=e71]: 文本优先
+      - generic [ref=e72] [cursor=pointer]:
+        - radio "视觉优先" [checked] [ref=e73]
+        - generic [ref=e74]: 视觉优先
+    - generic [ref=e75]:
+      - generic [ref=e76]: 界面语言
+      - generic [ref=e77]:
+        - button "中文" [ref=e78] [cursor=pointer]
+        - button "English" [ref=e79] [cursor=pointer]
+    - generic [ref=e80]:
+      - button "已保存" [active] [ref=e83] [cursor=pointer]
+      - button "连接测试" [ref=e82] [cursor=pointer]

@@ -1,0 +1,473 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - link "首页" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "tiku.com(合作网站)" [ref=e6] [cursor=pointer]:
+      - /url: https://www.tiku.com
+    - button [ref=e7] [cursor=pointer]
+  - generic [ref=e10]:
+    - text: 
+    - generic [ref=e11] [cursor=pointer]:
+      - generic [ref=e12]:
+        - generic [ref=e13]: 
+        - text: 试题篮 ( 0 )
+        - generic [ref=e14]: 
+      - text:       
+  - generic [ref=e15]:
+    - list [ref=e17]:
+      - listitem [ref=e18]:
+        - generic [ref=e19]: "试题检索 :"
+        - generic [ref=e20]:
+          - link "按章节" [ref=e21] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1
+          - link "按知识点" [ref=e22] [cursor=pointer]:
+            - /url: /knowledgeq?cid=8&cno=2
+      - listitem [ref=e23]:
+        - generic [ref=e24]: "教材版本 :"
+        - generic [ref=e25]:
+          - link "人教版" [ref=e26] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800010
+          - link "沪教版" [ref=e27] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800033
+      - listitem [ref=e28]:
+        - generic [ref=e29]: "课本 :"
+        - generic [ref=e30]:
+          - link "必修1" [ref=e31] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800010&bid=800049
+          - link "必修2" [ref=e32] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800010&bid=800051
+          - link "必修3" [ref=e33] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800010&bid=800053
+          - link "必修4" [ref=e34] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800010&bid=800055
+          - link "选修1" [ref=e35] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800010&bid=800057
+          - link "选修2" [ref=e36] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800010&bid=800061
+          - link "选修3" [ref=e37] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800010&bid=800063
+          - link "选修4" [ref=e38] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800010&bid=800067
+          - link "选修5" [ref=e39] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800010&bid=800070
+          - link "选修6" [ref=e40] [cursor=pointer]:
+            - /url: /chapterq?cid=8&cno=1&vid=800010&bid=800071
+      - listitem [ref=e41]:
+        - generic [ref=e42]: "题型 :"
+        - generic [ref=e43]:
+          - link "全部" [ref=e44] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "单选题" [ref=e45] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "不定项选择题" [ref=e46] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "判断题" [ref=e47] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "辨析题" [ref=e48] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "填空题" [ref=e49] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "材料题" [ref=e50] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "解答题" [ref=e51] [cursor=pointer]:
+            - /url: javascript:void(0)
+      - listitem [ref=e52]:
+        - generic [ref=e53]: "难易度 :"
+        - generic [ref=e54]:
+          - link "全部" [ref=e55] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "易" [ref=e56] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "中" [ref=e57] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "难" [ref=e58] [cursor=pointer]:
+            - /url: javascript:void(0)
+    - generic [ref=e59]:
+      - list [ref=e62]:
+        - listitem [ref=e63]:
+          - generic [ref=e64]: 
+          - link "第一单元 生活与消费" [ref=e65] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:   
+        - listitem [ref=e66]:
+          - generic [ref=e67]: 
+          - link "第二单元 生产、劳动与经营" [ref=e68] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:   
+        - listitem [ref=e69]:
+          - generic [ref=e70]: 
+          - link "第三单元 收入与分配" [ref=e71] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e72]:
+          - generic [ref=e73]: 
+          - link "第四单元 发展社会主义市场经济" [ref=e74] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:   
+      - generic [ref=e75]:
+        - alert [ref=e76]:
+          - generic [ref=e77] [cursor=pointer]: 组卷预览
+        - generic [ref=e78]:
+          - generic [ref=e79]:
+            - generic [ref=e80]:
+              - generic [ref=e81]:
+                - text: "难度:"
+                - link "0.24" [ref=e82] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e84]:
+                - listitem [ref=e85]:
+                  - generic [ref=e86]: "答案: C"
+                - listitem [ref=e87]:
+                  - link " 查看解析" [ref=e88] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e89]: 
+                    - text: 查看解析
+                - listitem [ref=e90]:
+                  - link " 收藏" [ref=e91] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e92]: 
+                    - text: 收藏
+                - listitem [ref=e93]:
+                  - link "试题篮" [ref=e94] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e95]: 
+                    - text: 试题篮
+            - generic [ref=e96]:
+              - generic [ref=e97]:
+                - text: 2011年3月11日，日本发生9.0级强烈地震并引发海啸。在地震中受损的福岛核电站出现核泄漏现象，核辐射超标，引起了作为日本近邻的中国的一些民众的恐慌。有人谣传食用碘盐可预防核辐射，海水被放射性物质污染而没法再提炼盐，广东、浙江、安徽、江西等多地市民抢购碘盐，导致食盐脱销。这一现象表明( )
+                - text: ①生产决定消费的质量、水平
+                - text: ②商品的质量、性能会影响消费者对该商品的需求
+                - text: ③消费者应当树立科学的消费观，避免盲从，理性消费
+                - text: ④消费对生产具有反作用，消费需求增加将扩大食盐生产
+              - generic [ref=e99]:
+                - generic [ref=e100]: A、①②
+                - generic [ref=e101]: B、①③
+                - generic [ref=e102]: C、②③
+                - generic [ref=e103]: D、③④
+          - generic [ref=e104]:
+            - generic [ref=e105]:
+              - generic [ref=e106]:
+                - text: "难度:"
+                - link "0.73" [ref=e107] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e109]:
+                - listitem [ref=e110]:
+                  - generic [ref=e111]: "答案: C"
+                - listitem [ref=e112]:
+                  - link " 查看解析" [ref=e113] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e114]: 
+                    - text: 查看解析
+                - listitem [ref=e115]:
+                  - link " 收藏" [ref=e116] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e117]: 
+                    - text: 收藏
+                - listitem [ref=e118]:
+                  - link "试题篮" [ref=e119] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e120]: 
+                    - text: 试题篮
+            - generic [ref=e121]:
+              - generic [ref=e122]:
+                - text: 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等等。这些物品的共同点是( )
+                - text: ①都是商品
+                - text: ②都具有使用价值和价值两个基本属性
+                - text: ③都是用于交换的劳动产品
+                - text: ④都是一般等价物
+              - generic [ref=e124]:
+                - generic [ref=e125]: A、①②③④
+                - generic [ref=e126]: B、①③④
+                - generic [ref=e127]: C、①②③
+                - generic [ref=e128]: D、②③④
+          - generic [ref=e129]:
+            - generic [ref=e130]:
+              - generic [ref=e131]:
+                - text: "难度:"
+                - link "0.75" [ref=e132] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e134]:
+                - listitem [ref=e135]:
+                  - generic [ref=e136]: "答案: B"
+                - listitem [ref=e137]:
+                  - link " 查看解析" [ref=e138] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e139]: 
+                    - text: 查看解析
+                - listitem [ref=e140]:
+                  - link " 收藏" [ref=e141] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e142]: 
+                    - text: 收藏
+                - listitem [ref=e143]:
+                  - link "试题篮" [ref=e144] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e145]: 
+                    - text: 试题篮
+            - generic [ref=e146]:
+              - generic [ref=e147]: 2011年3月23日，中国三一重工股份有限公司日本子公司总经理陈健与日本红十字会代表、东京电力公司代表出席泵车捐赠仪式。这台泵车价值100万美元，应日本东京电力公司要求，三一重工此次紧急向日方免费捐赠这台泵车，并提供全方位技术支持。这台泵车 ( )
+              - generic [ref=e149]:
+                - generic [ref=e150]: A、是商品，它具有使用价值
+                - generic [ref=e151]: B、是劳动产品，它具有使用价值
+                - generic [ref=e152]: C、是商品，它具有价值
+                - generic [ref=e153]: D、是劳动产品，它具有价值
+          - generic [ref=e154]:
+            - generic [ref=e155]:
+              - generic [ref=e156]:
+                - text: "难度:"
+                - link "0.76" [ref=e157] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e159]:
+                - listitem [ref=e160]:
+                  - generic [ref=e161]: "答案: D"
+                - listitem [ref=e162]:
+                  - link " 查看解析" [ref=e163] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e164]: 
+                    - text: 查看解析
+                - listitem [ref=e165]:
+                  - link " 收藏" [ref=e166] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e167]: 
+                    - text: 收藏
+                - listitem [ref=e168]:
+                  - link "试题篮" [ref=e169] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e170]: 
+                    - text: 试题篮
+            - generic [ref=e171]:
+              - generic [ref=e172]: 2010年某企业的生产条件处于全行业平均水平，其单位产品的价值量为132元，产量为10万件。如果2011年该企业的劳动生产率提高10%，而全行业的劳动生产率提高20%，其他条件不变，则该企业2011年生产的商品价值总量为( )
+              - generic [ref=e174]:
+                - generic [ref=e175]: A、1452万元
+                - generic [ref=e176]: B、1320万元
+                - generic [ref=e177]: C、1210万元
+                - generic [ref=e178]: D、1100万元
+          - generic [ref=e179]:
+            - generic [ref=e180]:
+              - generic [ref=e181]:
+                - text: "难度:"
+                - link "0.43" [ref=e182] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e184]:
+                - listitem [ref=e185]:
+                  - generic [ref=e186]: "答案: A"
+                - listitem [ref=e187]:
+                  - link " 查看解析" [ref=e188] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e189]: 
+                    - text: 查看解析
+                - listitem [ref=e190]:
+                  - link " 收藏" [ref=e191] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e192]: 
+                    - text: 收藏
+                - listitem [ref=e193]:
+                  - link "试题篮" [ref=e194] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e195]: 
+                    - text: 试题篮
+            - generic [ref=e196]:
+              - generic [ref=e197]: 在“商品一货币一商品”的流通过程中，“商品一货币”阶段的变化“是商品的惊险的跳跃”。 这个跳跃如果不成功，摔坏的不是商品，而是商品所有者。这说明( )
+              - generic [ref=e199]:
+                - generic [ref=e200]: A、商品生产者需要生产适销对路、质量上乘的商品
+                - generic [ref=e201]: B、商品生产者生产的商品就失去了使用价值和价值
+                - generic [ref=e202]: C、货币作为商品交换的媒介必须是观念上的货币
+                - generic [ref=e203]: D、货币作为一般等价物在物物交换中起决定作用
+          - generic [ref=e204]:
+            - generic [ref=e205]:
+              - generic [ref=e206]:
+                - text: "难度:"
+                - link "0.55" [ref=e207] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e209]:
+                - listitem [ref=e210]:
+                  - generic [ref=e211]: "答案: B"
+                - listitem [ref=e212]:
+                  - link " 查看解析" [ref=e213] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e214]: 
+                    - text: 查看解析
+                - listitem [ref=e215]:
+                  - link " 收藏" [ref=e216] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e217]: 
+                    - text: 收藏
+                - listitem [ref=e218]:
+                  - link "试题篮" [ref=e219] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e220]: 
+                    - text: 试题篮
+            - generic [ref=e221]:
+              - generic [ref=e222]: “绿色、健康、环保”已成为当今消费发展的主题。在服装市场，面料健康环保、生产过程无污染、产品废弃以后能够回收利用的绿色服装呈现出强劲的发展势头，成为热销商品。绿色商品之所以热销，是因为( )
+              - generic [ref=e224]:
+                - generic [ref=e225]: A、其价值和交换价值更大
+                - generic [ref=e226]: B、其使用价值更能满足消费者需求
+                - generic [ref=e227]: C、其生产量大，供过于求
+                - generic [ref=e228]: D、其广告宣传起了决定性作用
+          - generic [ref=e229]:
+            - generic [ref=e230]:
+              - generic [ref=e231]:
+                - text: "难度:"
+                - link "0.11" [ref=e232] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e234]:
+                - listitem [ref=e235]:
+                  - generic [ref=e236]: "答案: B"
+                - listitem [ref=e237]:
+                  - link " 查看解析" [ref=e238] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e239]: 
+                    - text: 查看解析
+                - listitem [ref=e240]:
+                  - link " 收藏" [ref=e241] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e242]: 
+                    - text: 收藏
+                - listitem [ref=e243]:
+                  - link "试题篮" [ref=e244] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e245]: 
+                    - text: 试题篮
+            - generic [ref=e246]:
+              - generic [ref=e247]: 近几年来，网购的出现让人们体验到了快捷、方便、优惠的购物模式，而团购更是以低于零售价格的团购折扣和单独购买得不到的优质服务而受到消费者热捧。网络购物的盛行 ( )
+              - generic [ref=e249]:
+                - generic [ref=e250]: A、使货币职能发生了本质性的变化
+                - generic [ref=e251]: B、没有改变商品交换的本质
+                - generic [ref=e252]: C、提高了人民群众的生活水平
+                - generic [ref=e253]: D、表明纸币已经由电子货币取代
+          - generic [ref=e254]:
+            - generic [ref=e255]:
+              - generic [ref=e256]:
+                - text: "难度:"
+                - link "0.11" [ref=e257] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e259]:
+                - listitem [ref=e260]:
+                  - generic [ref=e261]: "答案: C"
+                - listitem [ref=e262]:
+                  - link " 查看解析" [ref=e263] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e264]: 
+                    - text: 查看解析
+                - listitem [ref=e265]:
+                  - link " 收藏" [ref=e266] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e267]: 
+                    - text: 收藏
+                - listitem [ref=e268]:
+                  - link "试题篮" [ref=e269] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e270]: 
+                    - text: 试题篮
+            - generic [ref=e271]:
+              - generic [ref=e272]: 寻常的西红柿、豆角、小白菜一装进泡沫塑料盒子再蒙上一层薄薄的保鲜膜，身价顿时翻了几个筋斗。寻常蔬菜“一装”“一蒙”便身价倍增，其根本原因是( )
+              - generic [ref=e274]:
+                - generic [ref=e275]: A、包装过的蔬菜使用价值增加了
+                - generic [ref=e276]: B、包装过的蔬菜营养价值增加了
+                - generic [ref=e277]: C、包装过的蔬菜价值增加了
+                - generic [ref=e278]: D、包装过的蔬菜的劳动生产率提高了
+          - generic [ref=e279]:
+            - generic [ref=e280]:
+              - generic [ref=e281]:
+                - text: "难度:"
+                - link "0.91" [ref=e282] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e284]:
+                - listitem [ref=e285]:
+                  - generic [ref=e286]: "答案: D"
+                - listitem [ref=e287]:
+                  - link " 查看解析" [ref=e288] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e289]: 
+                    - text: 查看解析
+                - listitem [ref=e290]:
+                  - link " 收藏" [ref=e291] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e292]: 
+                    - text: 收藏
+                - listitem [ref=e293]:
+                  - link "试题篮" [ref=e294] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e295]: 
+                    - text: 试题篮
+            - generic [ref=e296]:
+              - generic [ref=e297]: 为了切实兑现中国政府加强保护上海世博会各参展方知识产权的国际承诺，4月15日上海成立了“世博会参展者知识产权服务中心”，并开展了以“创新与知识产权让世博会更精彩”为主题的2010年上海知识产权宣传周活动。下列对知识产权认识正确的是： ( )
+              - generic [ref=e299]:
+                - generic [ref=e300]: A、不是商品，因为它没有价值
+                - generic [ref=e301]: B、是商品，因为它具有价值和交换价值两个基本属性
+                - generic [ref=e302]: C、不是商品，因为它看不见、摸不着
+                - generic [ref=e303]: D、是商品，因为它是使用价值和价值的统一体
+          - generic [ref=e304]:
+            - generic [ref=e305]:
+              - generic [ref=e306]:
+                - text: "难度:"
+                - link "0.56" [ref=e307] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e309]:
+                - listitem [ref=e310]:
+                  - generic [ref=e311]: "答案: C"
+                - listitem [ref=e312]:
+                  - link " 查看解析" [ref=e313] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e314]: 
+                    - text: 查看解析
+                - listitem [ref=e315]:
+                  - link " 收藏" [ref=e316] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e317]: 
+                    - text: 收藏
+                - listitem [ref=e318]:
+                  - link "试题篮" [ref=e319] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e320]: 
+                    - text: 试题篮
+            - generic [ref=e321]:
+              - generic [ref=e322]: 某国去年的商品价格总额为16万亿元，流通中需要的货币量为2万亿元。假如今年该国商品价格总额增长10%，其他条件不变，理论上今年流通中需要的货币量为( )
+              - generic [ref=e324]:
+                - generic [ref=e325]: A、1．8万亿元
+                - generic [ref=e326]: B、2万亿元
+                - generic [ref=e327]: C、2．2万亿元
+                - generic [ref=e328]: D、2．4万亿元
+        - list [ref=e330]:
+          - listitem [ref=e331]:
+            - generic [ref=e332] [cursor=pointer]: 第一页
+          - listitem [ref=e333]:
+            - generic [ref=e334] [cursor=pointer]: <
+          - listitem [ref=e335]:
+            - generic [ref=e336]: "1"
+          - listitem [ref=e337]:
+            - link "2" [ref=e338] [cursor=pointer]:
+              - /url: /chapterq?cid=8&cno=1&p=2
+          - listitem [ref=e339]:
+            - link "3" [ref=e340] [cursor=pointer]:
+              - /url: /chapterq?cid=8&cno=1&p=3
+          - listitem [ref=e341]:
+            - link "4" [ref=e342] [cursor=pointer]:
+              - /url: /chapterq?cid=8&cno=1&p=4
+          - listitem [ref=e343]:
+            - link "5" [ref=e344] [cursor=pointer]:
+              - /url: /chapterq?cid=8&cno=1&p=5
+          - listitem [ref=e345]:
+            - link "6" [ref=e346] [cursor=pointer]:
+              - /url: /chapterq?cid=8&cno=1&p=6
+          - listitem [ref=e347]:
+            - link "7" [ref=e348] [cursor=pointer]:
+              - /url: /chapterq?cid=8&cno=1&p=7
+          - listitem [ref=e349]:
+            - link "8" [ref=e350] [cursor=pointer]:
+              - /url: /chapterq?cid=8&cno=1&p=8
+          - listitem [ref=e351]:
+            - link "9" [ref=e352] [cursor=pointer]:
+              - /url: /chapterq?cid=8&cno=1&p=9
+          - listitem [ref=e353]:
+            - link ">" [ref=e354] [cursor=pointer]:
+              - /url: /chapterq?cid=8&cno=1&p=2
+          - listitem [ref=e355]:
+            - link "最后一页" [ref=e356] [cursor=pointer]:
+              - /url: /chapterq?cid=8&cno=1&p=118
+  - contentinfo [ref=e357]:
+    - generic [ref=e361]:
+      - generic [ref=e362]: 商务联系
+      - paragraph [ref=e363]: "手机/微信 : 19829194929"
+      - paragraph [ref=e364]: "手机/微信 : 13474117172"
+      - paragraph [ref=e365]: "QQ : 416148514"

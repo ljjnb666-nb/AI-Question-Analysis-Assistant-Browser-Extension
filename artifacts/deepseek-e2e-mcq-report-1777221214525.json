@@ -1,0 +1,130 @@
+{
+  "time": "2026-04-26T16:33:34.525Z",
+  "total": 10,
+  "passed": 5,
+  "failed": 5,
+  "accuracy": 0.5,
+  "api": {
+    "callsObserved": 6,
+    "statusCount": {
+      "200": 6
+    },
+    "rateLimit429": false
+  },
+  "results": [
+    {
+      "index": 1,
+      "expected": "C",
+      "predicted": "C",
+      "ok": true,
+      "panelText": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; } button { font-family: inherit; cursor: pointer; } textarea, input, select { font-family: inherit; } details summary { cursor: pointer; } a { color: inherit; } 📘题目解析助手文字链路—✕答案C简短解析粮食、蔬菜、水果等用于交换的劳动产品，是商品，具有使用价值和价值，但一般等价物是货币的职能，这些物品不是一般等价物，所以①②③正确，④错误。▼ 展开详解识别文字1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④置信度95%复制答案再截一题反馈错误"
+    },
+    {
+      "index": 2,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "panelText": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; } button { font-family: inherit; cursor: pointer; } textarea, input, select { font-family: inherit; } details summary { cursor: pointer; } a { color: inherit; } 📘题目解析助手文字链路—✕答案A简短解析前三个选项都是商品的正确特征，而“一般等价物”是货币的本质，选项④错误。因此正确组合是①②③。▼ 展开详解识别文字1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④置信度95%复制答案再截一题反馈错误"
+    },
+    {
+      "index": 3,
+      "expected": "A",
+      "predicted": "",
+      "ok": false,
+      "panelText": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; } button { font-family: inherit; cursor: pointer; } textarea, input, select { font-family: inherit; } details summary { cursor: pointer; } a { color: inherit; } 📘题目解析助手—✕⏳正在解析题目…AI 正在分析截图内容"
+    },
+    {
+      "index": 4,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "panelText": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; } button { font-family: inherit; cursor: pointer; } textarea, input, select { font-family: inherit; } details summary { cursor: pointer; } a { color: inherit; } 📘题目解析助手文字链路—✕答案A简短解析粮食、蔬菜、水果都是商品，因此它们是用于交换的劳动产品，具有使用价值和价值。一般等价物是货币的本质，这些物品不是一般等价物，因此④错误。▼ 展开详解识别文字1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④置信度95%复制答案再截一题反馈错误"
+    },
+    {
+      "index": 5,
+      "expected": "A",
+      "predicted": "",
+      "ok": false,
+      "panelText": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; } button { font-family: inherit; cursor: pointer; } textarea, input, select { font-family: inherit; } details summary { cursor: pointer; } a { color: inherit; } 📘题目解析助手—✕⏳正在解析题目…AI 正在分析截图内容"
+    },
+    {
+      "index": 6,
+      "expected": "A",
+      "predicted": "D",
+      "ok": false,
+      "panelText": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; } button { font-family: inherit; cursor: pointer; } textarea, input, select { font-family: inherit; } details summary { cursor: pointer; } a { color: inherit; } 📘题目解析助手—✕⏳正在解析题目…▍ {\"questionType\":\"single_choice\",\"answer\":\"D\",\"confidence\":0.85,\"briefExplanation\":\"选项④错误，因为价格由价值决定，并非与价值无关；①②③正确。\",\"detailedExplanation\":\"本题考查价格与供求关系。①供不应求时，商品价格一般上涨，正确；②供过于求时，商品价格一般下降，正确；③价格上涨会抑制需求、刺激供给，正确；④价格由供求单方面决定，与价值无关，错误，价格由价值决定，受供求影响。因此，正确"
+    },
+    {
+      "index": 7,
+      "expected": "A",
+      "predicted": "D",
+      "ok": false,
+      "panelText": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; } button { font-family: inherit; cursor: pointer; } textarea, input, select { font-family: inherit; } details summary { cursor: pointer; } a { color: inherit; } 📘题目解析助手—✕⏳正在解析题目…▍ {\"questionType\":\"single_choice\",\"answer\":\"D\",\"confidence\":0.85,\"briefExplanation\":\"选项④错误，因为价格由价值决定，并非与价值无关；①②③正确。\",\"detailedExplanation\":\"本题考查价格与供求关系。①供不应求时，商品价格一般上涨，正确；②供过于求时，商品价格一般下降，正确；③价格上涨会抑制需求、刺激供给，正确；④价格由供求单方面决定，与价值无关，错误，价格由价值决定，受供求影响。因此，正确"
+    },
+    {
+      "index": 8,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "panelText": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; } button { font-family: inherit; cursor: pointer; } textarea, input, select { font-family: inherit; } details summary { cursor: pointer; } a { color: inherit; } 📘题目解析助手文字链路—✕答案A简短解析粮食、蔬菜、水果都是商品，具有使用价值和价值，是用于交换的劳动产品，但一般等价物是货币的本质，因此④错误。▼ 展开详解识别文字1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④置信度95%复制答案再截一题反馈错误"
+    },
+    {
+      "index": 9,
+      "expected": "A",
+      "predicted": "A",
+      "ok": true,
+      "panelText": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; } button { font-family: inherit; cursor: pointer; } textarea, input, select { font-family: inherit; } details summary { cursor: pointer; } a { color: inherit; } 📘题目解析助手文字链路—✕答案A简短解析粮食、蔬菜、水果都是商品，具有使用价值和价值，是用于交换的劳动产品，但一般等价物是货币的本质，因此④错误。▼ 展开详解识别文字1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④置信度95%复制答案再截一题反馈错误"
+    },
+    {
+      "index": 10,
+      "expected": "A",
+      "predicted": "C",
+      "ok": false,
+      "panelText": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; } button { font-family: inherit; cursor: pointer; } textarea, input, select { font-family: inherit; } details summary { cursor: pointer; } a { color: inherit; } 📘题目解析助手文字链路—✕答案C简短解析粮食、蔬菜、水果都是用于交换的劳动产品，因此是商品，具有使用价值和价值。一般等价物是货币的本质，这些物品不是一般等价物。▼ 展开详解识别文字1. 在日常生活中，我们经常到农贸市场购买粮食、蔬菜、水果等。这些物品的共同点是() ① 都是商品 ② 都具有使用价值和价值两个基本属性 ③ 都是用于交换的劳动产品 ④ 都是一般等价物 A. ①②③④ B. ①③④ C. ①②③ D. ②③④置信度95%复制答案再截一题反馈错误"
+    }
+  ],
+  "apiStats": [
+    {
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "status": 200,
+      "date": "Sun, 26 Apr 2026 16:33:09 GMT",
+      "ratelimitLimit": "",
+      "ratelimitRemaining": ""
+    },
+    {
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "status": 200,
+      "date": "Sun, 26 Apr 2026 16:33:14 GMT",
+      "ratelimitLimit": "",
+      "ratelimitRemaining": ""
+    },
+    {
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "status": 200,
+      "date": "Sun, 26 Apr 2026 16:33:18 GMT",
+      "ratelimitLimit": "",
+      "ratelimitRemaining": ""
+    },
+    {
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "status": 200,
+      "date": "Sun, 26 Apr 2026 16:33:22 GMT",
+      "ratelimitLimit": "",
+      "ratelimitRemaining": ""
+    },
+    {
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "status": 200,
+      "date": "Sun, 26 Apr 2026 16:33:28 GMT",
+      "ratelimitLimit": "",
+      "ratelimitRemaining": ""
+    },
+    {
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "status": 200,
+      "date": "Sun, 26 Apr 2026 16:33:32 GMT",
+      "ratelimitLimit": "",
+      "ratelimitRemaining": ""
+    }
+  ]
+}

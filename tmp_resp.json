@@ -1,0 +1,1 @@
+{"id":"msg_086f14adcaa0454e9b8f05b44d9ce504","type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":4602,"output_tokens":1}}

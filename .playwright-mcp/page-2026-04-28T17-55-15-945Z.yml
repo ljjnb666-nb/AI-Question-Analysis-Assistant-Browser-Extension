@@ -1,0 +1,492 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - link "首页" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "tiku.com(合作网站)" [ref=e6] [cursor=pointer]:
+      - /url: https://www.tiku.com
+    - button [ref=e7] [cursor=pointer]
+  - generic [ref=e10]:
+    - text: 
+    - generic [ref=e11] [cursor=pointer]:
+      - generic [ref=e12]:
+        - generic [ref=e13]: 
+        - text: 试题篮 ( 0 )
+        - generic [ref=e14]: 
+      - text:     
+  - generic [ref=e15]:
+    - list [ref=e17]:
+      - listitem [ref=e18]:
+        - generic [ref=e19]: "试题检索 :"
+        - generic [ref=e20]:
+          - link "按章节" [ref=e21] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1
+          - link "按知识点" [ref=e22] [cursor=pointer]:
+            - /url: /knowledgeq?cid=13&cno=2
+      - listitem [ref=e23]:
+        - generic [ref=e24]: "教材版本 :"
+        - generic [ref=e25]:
+          - link "人教版" [ref=e26] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015
+          - link "浙科版" [ref=e27] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800029
+          - link "苏教版" [ref=e28] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800061
+          - link "中图版" [ref=e29] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800072
+          - link "沪科版" [ref=e30] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800077
+          - link "山东版" [ref=e31] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800102
+      - listitem [ref=e32]:
+        - generic [ref=e33]: "课本 :"
+        - generic [ref=e34]:
+          - link "必修1" [ref=e35] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800088
+          - link "必修2" [ref=e36] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800086
+          - link "必修3" [ref=e37] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800096
+          - link "选修1" [ref=e38] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800101
+          - link "选修2" [ref=e39] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800103
+          - link "选修3" [ref=e40] [cursor=pointer]:
+            - /url: /chapterq?cid=13&cno=1&vid=800015&bid=800109
+      - listitem [ref=e41]:
+        - generic [ref=e42]: "题型 :"
+        - generic [ref=e43]:
+          - link "全部" [ref=e44] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "单选题" [ref=e45] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "多选题" [ref=e46] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "判断题" [ref=e47] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "填空题" [ref=e48] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "解答题" [ref=e49] [cursor=pointer]:
+            - /url: javascript:void(0)
+      - listitem [ref=e50]:
+        - generic [ref=e51]: "难易度 :"
+        - generic [ref=e52]:
+          - link "全部" [ref=e53] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "易" [ref=e54] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "中" [ref=e55] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - link "难" [ref=e56] [cursor=pointer]:
+            - /url: javascript:void(0)
+    - generic [ref=e57]:
+      - list [ref=e60]:
+        - listitem [ref=e61]:
+          - generic [ref=e62]: 
+          - link "第1章 走近细胞" [ref=e63] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e64]:
+          - generic [ref=e65]: 
+          - link "第2章 组成细胞的分子" [ref=e66] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:    
+        - listitem [ref=e67]:
+          - generic [ref=e68]: 
+          - link "第3章 细胞的基本结构" [ref=e69] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:   
+        - listitem [ref=e70]:
+          - generic [ref=e71]: 
+          - link "第4章 细胞的物质输入和输出" [ref=e72] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:  
+        - listitem [ref=e73]:
+          - generic [ref=e74]: 
+          - link "第5章 细胞的能量供应和利用" [ref=e75] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:    
+        - listitem [ref=e76]:
+          - generic [ref=e77]: 
+          - link "第6章 细胞的生命历程" [ref=e78] [cursor=pointer]:
+            - /url: javascript:void(0)
+          - text:    
+      - generic [ref=e79]:
+        - alert [ref=e80]:
+          - generic [ref=e81] [cursor=pointer]: 组卷预览
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - generic [ref=e84]:
+              - generic [ref=e85]:
+                - text: "难度:"
+                - link "0.64" [ref=e86] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e88]:
+                - listitem [ref=e89]:
+                  - generic [ref=e90]: "答案: C"
+                - listitem [ref=e91]:
+                  - link " 查看解析" [ref=e92] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e93]: 
+                    - text: 查看解析
+                - listitem [ref=e94]:
+                  - link " 收藏" [ref=e95] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e96]: 
+                    - text: 收藏
+                - listitem [ref=e97]:
+                  - link "试题篮" [ref=e98] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e99]: 
+                    - text: 试题篮
+            - generic [ref=e100]:
+              - generic [ref=e101]:
+                - text: 科研人员在研究某种植物时，从刚收获的种子开始作鲜重测定，绘出的曲线如右
+                - text: 图所示。下列对曲线变化的原因的分析中，不正确的是：( )
+                - img [ref=e102]
+              - generic [ref=e104]:
+                - generic [ref=e105]: A、a点之前鲜重减少的原因主要是自由水的减少
+                - generic [ref=e106]: B、ab段种子中的细胞基本处于休眠状态，物质变化量较小
+                - generic [ref=e107]: C、bc段鲜重增加的原因是有机物增多，种子开始萌发
+                - generic [ref=e108]: D、c点以后增幅较大，既有水的增加，又有有机物的增加
+          - generic [ref=e109]:
+            - generic [ref=e110]:
+              - generic [ref=e111]:
+                - text: "难度:"
+                - link "0.61" [ref=e112] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e114]:
+                - listitem [ref=e115]
+                - listitem [ref=e117]:
+                  - link " 查看解析" [ref=e118] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e119]: 
+                    - text: 查看解析
+                - listitem [ref=e120]:
+                  - link " 收藏" [ref=e121] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e122]: 
+                    - text: 收藏
+                - listitem [ref=e123]:
+                  - link "试题篮" [ref=e124] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e125]: 
+                    - text: 试题篮
+            - generic [ref=e127]:
+              - text: 下图甲是生物体内四种有机物的组成与功能关系图，请据图回答：
+              - img [ref=e128]
+              - text: (1)小麦种子细胞中，物质A是 ，物质E是_______________________。
+              - text: (2)相同质量的E和F彻底氧化分解，耗氧量较多的是 。
+              - text: (3)组成物质C的共同化学元素是 。若a个C物质组成b条链，组成某种物质G，该物质G至少含有氧原子的个数是_______。
+              - text: (4)图乙表示小麦开花数天后测定的种子中主要物质的变化图。请据图回答问题：
+              - text: ①小麦成熟种子中主要的有机营养物质是 。检测还原糖时，可溶性还原糖的多少可通过 来判断。
+              - text: ②种子成熟时，淀粉的形成与一种磷酸化酶的活性有密切关系，为验证磷酸化酶是否为蛋白质，实验过程中实验组试管中加入2 mL ，对照组试管中加入 ，然后加入等量的双缩脲试剂，如果实验组试管中同样出现 现象，则证明磷酸化酶是蛋白质。
+          - generic [ref=e129]:
+            - generic [ref=e130]:
+              - generic [ref=e131]:
+                - text: "难度:"
+                - link "0.11" [ref=e132] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e134]:
+                - listitem [ref=e135]:
+                  - generic [ref=e136]: "答案: D"
+                - listitem [ref=e137]:
+                  - link " 查看解析" [ref=e138] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e139]: 
+                    - text: 查看解析
+                - listitem [ref=e140]:
+                  - link " 收藏" [ref=e141] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e142]: 
+                    - text: 收藏
+                - listitem [ref=e143]:
+                  - link "试题篮" [ref=e144] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e145]: 
+                    - text: 试题篮
+            - generic [ref=e146]:
+              - generic [ref=e147]: 在生物组织中可溶性还原糖、脂肪、蛋白质的鉴定实验中，对实验材料的选择叙述中，错误的是( )
+              - generic [ref=e149]:
+                - generic [ref=e150]: A、鸡蛋清蛋白质多，可用于进行蛋白质的鉴定
+                - generic [ref=e151]: B、花生种子含脂肪多且肥厚，是用于脂肪鉴定的理想材料
+                - generic [ref=e152]: C、豆浆是进行蛋白质鉴定的理想的材料
+                - generic [ref=e153]: D、甘蔗茎的薄壁组织都含有较多的蔗糖，可以用于进行可溶性还原糖的鉴定
+          - generic [ref=e154]:
+            - generic [ref=e155]:
+              - generic [ref=e156]:
+                - text: "难度:"
+                - link "0.55" [ref=e157] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e159]:
+                - listitem [ref=e160]:
+                  - generic [ref=e161]: "答案: D"
+                - listitem [ref=e162]:
+                  - link " 查看解析" [ref=e163] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e164]: 
+                    - text: 查看解析
+                - listitem [ref=e165]:
+                  - link " 收藏" [ref=e166] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e167]: 
+                    - text: 收藏
+                - listitem [ref=e168]:
+                  - link "试题篮" [ref=e169] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e170]: 
+                    - text: 试题篮
+            - generic [ref=e171]:
+              - generic [ref=e172]: 在生物组织中还原糖、脂肪、蛋白质的鉴定实验中,对实验材料的选择,下列叙述错误的是( )
+              - generic [ref=e174]:
+                - generic [ref=e175]: A、可用斐林试剂甲液和乙液、蒸馏水来鉴定葡萄糖和尿液中的蛋白质
+                - generic [ref=e176]: B、花生种子含脂肪多且子叶肥厚,是用于脂肪鉴定的理想材料
+                - generic [ref=e177]: C、食用花生油最好选用苏丹Ⅳ染液来鉴定,而一般不选用苏丹Ⅲ染液来鉴定
+                - generic [ref=e178]: D、甘蔗茎的薄壁组织、甜菜的块根等,都含有较多糖且近于白色,因此可以用于进行还原糖的鉴定
+          - generic [ref=e179]:
+            - generic [ref=e180]:
+              - generic [ref=e181]:
+                - text: "难度:"
+                - link "0.26" [ref=e182] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e184]:
+                - listitem [ref=e185]
+                - listitem [ref=e187]:
+                  - link " 查看解析" [ref=e188] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e189]: 
+                    - text: 查看解析
+                - listitem [ref=e190]:
+                  - link " 收藏" [ref=e191] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e192]: 
+                    - text: 收藏
+                - listitem [ref=e193]:
+                  - link "试题篮" [ref=e194] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e195]: 
+                    - text: 试题篮
+            - generic [ref=e197]:
+              - text: 请设计一个简单的实验方案，验证组成染色体的主要成分是DNA和蛋白质。
+              - text: (1)实验原理：蛋白质遇双缩脲试剂发生紫色反应；DNA与二苯胺试剂在沸水浴的条件下呈现蓝色。
+              - text: (2)材料用具：染色体提取液、稀释的蛋清水溶液、DNA提取液等(其他材料用具自选)。
+              - text: (3)实验步骤：
+              - text: 第一步：取洁净的试管4支，分别
+              - text: 。
+              - text: 第二步：取1、2号试管，分别加入
+              - text: (2分)；取3、4号试管，分别加入
+              - text: 。(2分)
+              - text: 第三步：在1、2号试管中滴加
+              - text: ，摇匀；在3、4号试管中滴加
+              - text: ，摇匀后一起放到沸水浴中加热。
+              - text: 第四步：对比观察1号和2号、3号和4号试管中的颜色变化。
+              - text: (4)实验结果及分析：1号和2号试管都呈现
+              - text: ，证明
+              - text: ；3号和4号试管都呈现 ，证明
+              - text: 。
+          - generic [ref=e198]:
+            - generic [ref=e199]:
+              - generic [ref=e200]:
+                - text: "难度:"
+                - link "0.34" [ref=e201] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e203]:
+                - listitem [ref=e204]:
+                  - generic [ref=e205]: "答案: B"
+                - listitem [ref=e206]:
+                  - link " 查看解析" [ref=e207] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e208]: 
+                    - text: 查看解析
+                - listitem [ref=e209]:
+                  - link " 收藏" [ref=e210] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e211]: 
+                    - text: 收藏
+                - listitem [ref=e212]:
+                  - link "试题篮" [ref=e213] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e214]: 
+                    - text: 试题篮
+            - generic [ref=e215]:
+              - generic [ref=e216]:
+                - text: 有关下图中某蛋白质的叙述，正确的是
+                - img [ref=e217]
+              - generic [ref=e219]:
+                - generic [ref=e220]: A、形成该蛋白质时共脱掉126个水分子
+                - generic [ref=e221]: B、该蛋白质含有两条肽链
+                - generic [ref=e222]: C、该蛋白质的R基中共含16个氨基
+                - generic [ref=e223]: D、该蛋白质共有111个肽键
+          - generic [ref=e224]:
+            - generic [ref=e225]:
+              - generic [ref=e226]:
+                - text: "难度:"
+                - link "0.91" [ref=e227] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e229]:
+                - listitem [ref=e230]
+                - listitem [ref=e232]:
+                  - link " 查看解析" [ref=e233] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e234]: 
+                    - text: 查看解析
+                - listitem [ref=e235]:
+                  - link " 收藏" [ref=e236] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e237]: 
+                    - text: 收藏
+                - listitem [ref=e238]:
+                  - link "试题篮" [ref=e239] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e240]: 
+                    - text: 试题篮
+            - generic [ref=e242]:
+              - text: 下图表示细胞中四种有机物的组成及功能，请分析回答：
+              - img [ref=e243]
+              - text: (1)A是_______，E在动物体内是指______，在植物体内主要指____。
+              - text: (2)F是___________，除此之外，脂质还包括__________和__________等。
+              - text: (3)D是___________，人体细胞中D的种类有__________种。
+          - generic [ref=e244]:
+            - generic [ref=e245]:
+              - generic [ref=e246]:
+                - text: "难度:"
+                - link "0.09" [ref=e247] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e249]:
+                - listitem [ref=e250]
+                - listitem [ref=e252]:
+                  - link " 查看解析" [ref=e253] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e254]: 
+                    - text: 查看解析
+                - listitem [ref=e255]:
+                  - link " 收藏" [ref=e256] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e257]: 
+                    - text: 收藏
+                - listitem [ref=e258]:
+                  - link "试题篮" [ref=e259] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e260]: 
+                    - text: 试题篮
+            - generic [ref=e262]:
+              - text: 在使用斐林试剂鉴定还原糖的实验中，教材要求必须将斐林试剂的甲液和乙液混合均匀后使用，切勿分别使用。但在实验过程中，实验者设想按照不同的使用顺序先后使用甲液和乙液及是否混合后使用，结果是否一样？(7分)
+              - text: 实验猜想：用斐林试剂鉴定还原糖与其甲液、乙液使用顺序及是否混合使用无关。
+              - text: 实验设计：为探究以上猜想，实验按下列表格中的思路设计
+              - img [ref=e263]
+              - text: 请回答下列问题：
+              - text: (1)1、2、3号试管中空格处应加入的物质是
+              - text: A： B： C：
+              - text: (2)1、2、3号试管的设计主要体现了什么样的实验设计思路 。
+              - text: (3)1号和2号试管相比，实验变量是 。
+              - text: (4)理论预测及相关结论：
+              - text: ①当出现了什么样的实验现象时，实验猜想是正确的？ 。
+              - text: ②当出现了什么样的实验现象时，实验猜想是错误的？ 。
+          - generic [ref=e264]:
+            - generic [ref=e265]:
+              - generic [ref=e266]:
+                - text: "难度:"
+                - link "0.67" [ref=e267] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e269]:
+                - listitem [ref=e270]:
+                  - generic [ref=e271]: "答案: C"
+                - listitem [ref=e272]:
+                  - link " 查看解析" [ref=e273] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e274]: 
+                    - text: 查看解析
+                - listitem [ref=e275]:
+                  - link " 收藏" [ref=e276] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e277]: 
+                    - text: 收藏
+                - listitem [ref=e278]:
+                  - link "试题篮" [ref=e279] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e280]: 
+                    - text: 试题篮
+            - generic [ref=e281]:
+              - generic [ref=e282]:
+                - text: 右图表示细胞中4类有机化合物的关系，每个椭圆形代表一类有机物，则以下列出的这4种化合物名称中，最合理的一组是( )
+                - img [ref=e283]
+              - generic [ref=e285]:
+                - generic [ref=e286]: A、①~④：脂质、酶、蛋白质、激素
+                - generic [ref=e287]: B、①~④：激素、脂质、蛋白质、酶
+                - generic [ref=e288]: C、①~④：酶、蛋白质、激素、脂质
+                - generic [ref=e289]: D、①~④：激素、脂质、酶、蛋白质
+          - generic [ref=e290]:
+            - generic [ref=e291]:
+              - generic [ref=e292]:
+                - text: "难度:"
+                - link "0.32" [ref=e293] [cursor=pointer]:
+                  - /url: javascript:void(0)
+              - list [ref=e295]:
+                - listitem [ref=e296]:
+                  - generic [ref=e297]: "答案: B"
+                - listitem [ref=e298]:
+                  - link " 查看解析" [ref=e299] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e300]: 
+                    - text: 查看解析
+                - listitem [ref=e301]:
+                  - link " 收藏" [ref=e302] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e303]: 
+                    - text: 收藏
+                - listitem [ref=e304]:
+                  - link "试题篮" [ref=e305] [cursor=pointer]:
+                    - /url: javascript:void(0)
+                    - generic [ref=e306]: 
+                    - text: 试题篮
+            - generic [ref=e307]:
+              - generic [ref=e308]:
+                - text: 观察右图，下列叙述不正确的是
+                - img [ref=e309]
+              - generic [ref=e311]:
+                - generic [ref=e312]: A、如果该图为组成细胞的化合物，则A中含有的元素为H、O。
+                - generic [ref=e313]: B、如果该图表示的是组成细胞的各种化学元素，则A应该是C元素。
+                - generic [ref=e314]: C、如果该图是已经完全脱水后的细胞，则A是蛋白质。
+                - generic [ref=e315]: D、如果该图表示的是组成细胞的各种化学元素，则其中微量元素的总量不超过3%
+        - list [ref=e317]:
+          - listitem [ref=e318]:
+            - generic [ref=e319] [cursor=pointer]: 第一页
+          - listitem [ref=e320]:
+            - generic [ref=e321] [cursor=pointer]: <
+          - listitem [ref=e322]:
+            - generic [ref=e323]: "1"
+          - listitem [ref=e324]:
+            - link "2" [ref=e325] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=2&typeid=0
+          - listitem [ref=e326]:
+            - link "3" [ref=e327] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=3&typeid=0
+          - listitem [ref=e328]:
+            - link "4" [ref=e329] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=4&typeid=0
+          - listitem [ref=e330]:
+            - link "5" [ref=e331] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=5&typeid=0
+          - listitem [ref=e332]:
+            - link "6" [ref=e333] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=6&typeid=0
+          - listitem [ref=e334]:
+            - link "7" [ref=e335] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=7&typeid=0
+          - listitem [ref=e336]:
+            - link "8" [ref=e337] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=8&typeid=0
+          - listitem [ref=e338]:
+            - link "9" [ref=e339] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=9&typeid=0
+          - listitem [ref=e340]:
+            - link ">" [ref=e341] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=2&typeid=0
+          - listitem [ref=e342]:
+            - link "最后一页" [ref=e343] [cursor=pointer]:
+              - /url: /chapterq?cid=13&cno=1&p=177&typeid=0
+  - contentinfo [ref=e344]:
+    - generic [ref=e348]:
+      - generic [ref=e349]: 商务联系
+      - paragraph [ref=e350]: "手机/微信 : 19829194929"
+      - paragraph [ref=e351]: "手机/微信 : 13474117172"
+      - paragraph [ref=e352]: "QQ : 416148514"
