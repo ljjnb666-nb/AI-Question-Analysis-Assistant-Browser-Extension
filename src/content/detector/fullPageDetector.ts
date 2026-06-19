@@ -19,6 +19,11 @@ const OVERLAP_RATIO_THRESHOLD = 0.4;
 
 let running = false;
 let cancelled = false;
+export type ScanScrollRoot = Window | HTMLElement;
+
+function isWindowScrollRoot(scrollRoot: ScanScrollRoot): scrollRoot is Window {
+  return scrollRoot === window;
+}
 
 export function isFullPageScanRunning(): boolean {
   return running;
@@ -46,32 +51,30 @@ export async function detectCandidatesFullPage(
   running = true;
   cancelled = false;
 
-  const originalScrollY = window.scrollY;
+  const scrollRoot = resolveFullPageScrollRoot();
+  const originalScrollTop = getScrollTop(scrollRoot);
+  const originalScrollLeft = getScrollLeft(scrollRoot);
   const allBlocks: QuestionBlock[] = [];
 
   // Scroll to top first
-  window.scrollTo({ top: 0, behavior: "instant" });
+  setScrollPosition(scrollRoot, 0, originalScrollLeft);
   await pause(SCROLL_PAUSE_MS);
-
-  const totalHeight = Math.max(
-    document.body.scrollHeight,
-    document.documentElement.scrollHeight,
-  );
-  const viewportH = window.innerHeight;
-  const totalSteps = Math.min(
-    Math.ceil((totalHeight - viewportH) / SCROLL_STEP_PX) + 1,
-    MAX_SCROLL_STEPS,
-  );
 
   let step = 0;
 
   while (!cancelled) {
+    const metrics = getScrollMetrics(scrollRoot);
+    const totalSteps = Math.min(
+      Math.ceil(Math.max(0, metrics.scrollHeight - metrics.clientHeight) / SCROLL_STEP_PX) + 1,
+      MAX_SCROLL_STEPS,
+    );
+
     // Detect at current scroll position
     const viewport_blocks = detectCandidatesInViewport();
 
     for (const block of viewport_blocks) {
       // Convert viewport coords to page-absolute coords
-      const absoluteBlock = toAbsoluteCoords(block);
+      const absoluteBlock = toAbsoluteCoords(block, scrollRoot);
       const normalizedPreview = normalizePreviewText(absoluteBlock.previewText);
       if (!isLikelyUsefulPreview(normalizedPreview, absoluteBlock.questionTypeGuess)) continue;
       const normalizedBlock: QuestionBlock = {
@@ -86,17 +89,17 @@ export async function detectCandidatesFullPage(
     onProgress({ progress, found: allBlocks.length, currentStep: step, totalScrollSteps: totalSteps });
 
     // Check if we've reached the bottom
-    const currentBottom = window.scrollY + viewportH;
-    if (currentBottom >= totalHeight - 10) break;
+    const currentBottom = metrics.scrollTop + metrics.clientHeight;
+    if (currentBottom >= metrics.scrollHeight - 10) break;
     if (step >= MAX_SCROLL_STEPS) break;
 
     // Scroll down one step
-    window.scrollBy({ top: SCROLL_STEP_PX, behavior: "instant" });
+    setScrollPosition(scrollRoot, Math.min(metrics.scrollTop + SCROLL_STEP_PX, metrics.scrollHeight), metrics.scrollLeft);
     await pause(SCROLL_PAUSE_MS);
   }
 
   // Restore original scroll position
-  window.scrollTo({ top: originalScrollY, behavior: "instant" });
+  setScrollPosition(scrollRoot, originalScrollTop, originalScrollLeft);
 
   running = false;
 
@@ -115,16 +118,93 @@ export async function detectCandidatesFullPage(
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Convert a viewport-relative block to page-absolute coordinates */
-function toAbsoluteCoords(block: QuestionBlock): QuestionBlock {
+function toAbsoluteCoords(block: QuestionBlock, scrollRoot: ScanScrollRoot): QuestionBlock {
   return {
     ...block,
     bbox: {
-      x: block.bbox.x + window.scrollX,
-      y: block.bbox.y + window.scrollY,
+      x: block.bbox.x + getScrollLeft(scrollRoot),
+      y: block.bbox.y + getScrollTop(scrollRoot),
       width: block.bbox.width,
       height: block.bbox.height,
     },
   };
+}
+
+export function resolveFullPageScrollRoot(): ScanScrollRoot {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let best: HTMLElement | null = null;
+  let bestScore = 0;
+
+  const nodes = Array.from(document.querySelectorAll<HTMLElement>("body *"));
+  for (const el of nodes) {
+    if (!el.isConnected) continue;
+    if (el.id === "qs-highlight-layer" || el.closest("#qs-highlight-layer, #qs-overlay-root, #qs-floating-host, #qs-capture-toolbar")) continue;
+    const style = window.getComputedStyle(el);
+    if (!/(auto|scroll|overlay)/.test(style.overflowY)) continue;
+    const scrollDelta = el.scrollHeight - el.clientHeight;
+    if (scrollDelta < 200) continue;
+    if (el.clientHeight < Math.max(220, vh * 0.35)) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < Math.max(320, vw * 0.3)) continue;
+    if (rect.height < Math.max(220, vh * 0.3)) continue;
+
+    let score = scrollDelta;
+    score += Math.min(rect.width, vw) * 0.2;
+    score += Math.min(rect.height, vh) * 0.3;
+    if (/question|exam|scroll|content|main|body|list|paper/i.test(`${el.className} ${el.id}`)) score += 240;
+    if (rect.left < vw * 0.2) score += 60;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = el;
+    }
+  }
+
+  return best ?? window;
+}
+
+export function getScrollMetrics(scrollRoot: ScanScrollRoot): {
+  scrollTop: number;
+  scrollLeft: number;
+  scrollHeight: number;
+  clientHeight: number;
+} {
+  if (isWindowScrollRoot(scrollRoot)) {
+    const el = document.scrollingElement || document.documentElement;
+    return {
+      scrollTop: window.scrollY,
+      scrollLeft: window.scrollX,
+      scrollHeight: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, el.scrollHeight),
+      clientHeight: window.innerHeight,
+    };
+  }
+
+  const elementRoot = scrollRoot;
+  return {
+    scrollTop: elementRoot.scrollTop,
+    scrollLeft: elementRoot.scrollLeft,
+    scrollHeight: elementRoot.scrollHeight,
+    clientHeight: elementRoot.clientHeight,
+  };
+}
+
+export function getScrollTop(scrollRoot: ScanScrollRoot): number {
+  if (isWindowScrollRoot(scrollRoot)) return window.scrollY;
+  return scrollRoot.scrollTop;
+}
+
+export function getScrollLeft(scrollRoot: ScanScrollRoot): number {
+  if (isWindowScrollRoot(scrollRoot)) return window.scrollX;
+  return scrollRoot.scrollLeft;
+}
+
+export function setScrollPosition(scrollRoot: ScanScrollRoot, top: number, left: number): void {
+  if (isWindowScrollRoot(scrollRoot)) {
+    window.scrollTo({ top, left, behavior: "instant" });
+    return;
+  }
+  scrollRoot.scrollTo({ top, left, behavior: "instant" });
 }
 
 function overlapRatio(
@@ -138,7 +218,7 @@ function overlapRatio(
   return union > 0 ? intersection / union : 0;
 }
 
-function pause(ms: number): Promise<void> {
+export function pause(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 

@@ -1,7 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { saveSettings, loadSettings, addHistoryEntry, loadHistory, clearHistory } from "./storage";
+import { saveSettings, loadSettings, addHistoryEntry, loadHistory, clearHistory, sanitizeHistoryEntry } from "./storage";
 import { DEFAULT_SETTINGS } from "../types";
-import type { HistoryEntry } from "../types";
+import type { HistoryEntry, ParseResult, QuestionBlock } from "../types";
+
+const mockBlock: QuestionBlock = {
+  id: "block-1",
+  bbox: { x: 0, y: 0, width: 100, height: 100 },
+  previewText: "示例题目",
+  hasImage: true,
+  questionImageUrl: "https://example.com/question.png",
+  questionTypeGuess: "single_choice",
+  confidence: 0.8,
+  source: "manual_capture",
+  imageDataUrl: "data:image/png;base64,abc",
+};
+
+const mockResult: ParseResult = {
+  blockId: "block-1",
+  questionType: "single_choice",
+  answer: "B",
+  confidence: 0.95,
+  briefExplanation: "brief",
+  detailedExplanation: "detail",
+  recognizedText: "recognized",
+  routeUsed: "vision",
+};
 
 describe("storage", () => {
   beforeEach(() => {
@@ -60,8 +83,8 @@ describe("storage", () => {
         {
           id: "old-1",
           timestamp: Date.now() - 1000,
-          block: {} as any,
-          result: {} as any,
+          block: mockBlock,
+          result: mockResult,
           host: "example.com",
         },
       ];
@@ -73,8 +96,8 @@ describe("storage", () => {
       const newEntry: HistoryEntry = {
         id: "new-1",
         timestamp: Date.now(),
-        block: {} as any,
-        result: {} as any,
+        block: mockBlock,
+        result: mockResult,
         host: "test.com",
       };
 
@@ -83,14 +106,15 @@ describe("storage", () => {
       const savedHistory = vi.mocked(chrome.storage.local.set).mock.calls[0][0].parseHistory;
       expect(savedHistory[0].id).toBe("new-1");
       expect(savedHistory[1].id).toBe("old-1");
+      expect(savedHistory[0].block.imageDataUrl).toBeUndefined();
     });
 
     it("should limit history to 50 entries", async () => {
       const existingHistory: HistoryEntry[] = Array.from({ length: 50 }, (_, i) => ({
         id: `old-${i}`,
         timestamp: Date.now() - i * 1000,
-        block: {} as any,
-        result: {} as any,
+        block: mockBlock,
+        result: mockResult,
         host: "example.com",
       }));
 
@@ -101,8 +125,8 @@ describe("storage", () => {
       const newEntry: HistoryEntry = {
         id: "new-1",
         timestamp: Date.now(),
-        block: {} as any,
-        result: {} as any,
+        block: mockBlock,
+        result: mockResult,
         host: "test.com",
       };
 
@@ -129,8 +153,8 @@ describe("storage", () => {
         {
           id: "test-1",
           timestamp: Date.now(),
-          block: {} as any,
-          result: {} as any,
+          block: mockBlock,
+          result: mockResult,
           host: "example.com",
         },
       ];
@@ -141,7 +165,7 @@ describe("storage", () => {
 
       const history = await loadHistory();
 
-      expect(history).toEqual(mockHistory);
+      expect(history).toEqual(mockHistory.map(sanitizeHistoryEntry));
     });
   });
 
@@ -150,6 +174,50 @@ describe("storage", () => {
       await clearHistory();
 
       expect(chrome.storage.local.remove).toHaveBeenCalledWith("parseHistory");
+    });
+  });
+
+  describe("sanitizeHistoryEntry", () => {
+    it("removes data urls and keeps only lightweight history fields", () => {
+      const entry: HistoryEntry = {
+        id: "sanitize-1",
+        timestamp: Date.now(),
+        block: {
+          ...mockBlock,
+          previewText: "x".repeat(1200),
+          imageDataUrl: "data:image/png;base64,very-large",
+        },
+        result: {
+          ...mockResult,
+          recognizedText: "y".repeat(5000),
+        },
+        host: "example.com",
+      };
+
+      const sanitized = sanitizeHistoryEntry(entry);
+      expect(sanitized.block.imageDataUrl).toBeUndefined();
+      expect(sanitized.block.previewText.length).toBeLessThanOrEqual(801);
+      expect(sanitized.result.recognizedText.length).toBeLessThanOrEqual(4001);
+    });
+
+    it("downgrades placeholder non-choice answers in stored history", () => {
+      const entry: HistoryEntry = {
+        id: "sanitize-2",
+        timestamp: Date.now(),
+        block: {
+          ...mockBlock,
+          questionTypeGuess: "fill_blank",
+        },
+        result: {
+          ...mockResult,
+          questionType: "fill_blank",
+          answer: "按分点作答，详见解析",
+        },
+        host: "example.com",
+      };
+
+      const sanitized = sanitizeHistoryEntry(entry);
+      expect(sanitized.result.answer).toBe("需人工确认");
     });
   });
 });

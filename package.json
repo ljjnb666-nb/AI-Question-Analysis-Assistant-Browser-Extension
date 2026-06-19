@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "vite build --watch",
-    "build": "vite build",
+    "build": "node tools/build-extension.mjs",
+    "build:raw": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:ui": "vitest --ui",

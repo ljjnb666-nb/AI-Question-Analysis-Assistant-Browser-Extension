@@ -6,95 +6,12 @@ import type { QuestionBlock, ParseResult, RouteUsed, AppSettings } from "../type
 import { analyzeImageContent, detectVisualKeywords } from "./ocr";
 import { logEvent } from "./analytics";
 import { logError, logWarn } from "./errorLogger";
+import { PROVIDERS, getProvider } from "../ai/providers";
+import type { ProviderConfig, ProviderId } from "../ai/providers";
 
 // ---- Provider Definitions ----
-
-export type ProviderId =
-  | "anthropic" | "openai" | "deepseek" | "gemini"
-  | "qwen" | "moonshot" | "zhipu" | "ollama" | "custom";
-
-export interface ProviderConfig {
-  id: ProviderId;
-  name: string;
-  baseUrl: string;
-  defaultModel: string;
-  models: string[];
-  supportsVision: boolean;
-  openaiCompat: boolean;
-  authHeader: "bearer" | "x-api-key" | "none";
-  keyPlaceholder: string;
-  keyOptional?: boolean;
-}
-
-export const PROVIDERS: ProviderConfig[] = [
-  {
-    id: "anthropic", name: "Anthropic (Claude)",
-    baseUrl: "https://api.anthropic.com", defaultModel: "claude-opus-4-5",
-    models: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5-20251001"],
-    supportsVision: true, openaiCompat: false, authHeader: "x-api-key",
-    keyPlaceholder: "sk-ant-api03-...",
-  },
-  {
-    id: "openai", name: "OpenAI (GPT)",
-    baseUrl: "https://api.openai.com", defaultModel: "gpt-4o",
-    models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-    supportsVision: true, openaiCompat: true, authHeader: "bearer",
-    keyPlaceholder: "sk-...",
-  },
-  {
-    id: "deepseek", name: "DeepSeek",
-    baseUrl: "https://api.deepseek.com", defaultModel: "deepseek-chat",
-    models: ["deepseek-chat", "deepseek-reasoner"],
-    supportsVision: false, openaiCompat: true, authHeader: "bearer",
-    keyPlaceholder: "sk-...",
-  },
-  {
-    id: "gemini", name: "Google Gemini",
-    baseUrl: "https://generativelanguage.googleapis.com", defaultModel: "gemini-2.0-flash",
-    models: ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash"],
-    supportsVision: true, openaiCompat: false, authHeader: "none",
-    keyPlaceholder: "AIza...",
-  },
-  {
-    id: "qwen", name: "阿里云通义千问",
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode", defaultModel: "qwen-vl-max",
-    models: ["qwen-vl-max", "qwen-vl-plus", "qwen-max", "qwen-plus", "qwen-turbo"],
-    supportsVision: true, openaiCompat: true, authHeader: "bearer",
-    keyPlaceholder: "sk-...",
-  },
-  {
-    id: "moonshot", name: "月之暗面 Kimi",
-    baseUrl: "https://api.moonshot.cn", defaultModel: "moonshot-v1-8k",
-    models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
-    supportsVision: false, openaiCompat: true, authHeader: "bearer",
-    keyPlaceholder: "sk-...",
-  },
-  {
-    id: "zhipu", name: "智谱 GLM",
-    baseUrl: "https://open.bigmodel.cn/api/paas", defaultModel: "glm-4v-flash",
-    models: ["glm-4v-flash", "glm-4v-plus", "glm-4-flash", "glm-4-plus"],
-    supportsVision: true, openaiCompat: true, authHeader: "bearer",
-    keyPlaceholder: "your_api_key",
-  },
-  {
-    id: "ollama", name: "Ollama（本地）",
-    baseUrl: "http://localhost:11434", defaultModel: "llava",
-    models: ["llava", "llava:13b", "qwen2.5-vl", "gemma3", "llama3.2-vision"],
-    supportsVision: true, openaiCompat: true, authHeader: "none",
-    keyPlaceholder: "(本地无需 Key)", keyOptional: true,
-  },
-  {
-    id: "custom", name: "Custom（OpenAI兼容）",
-    baseUrl: "http://localhost:11434", defaultModel: "gpt-4o-mini",
-    models: ["gpt-4o-mini"],
-    supportsVision: true, openaiCompat: true, authHeader: "bearer",
-    keyPlaceholder: "your_api_key",
-  },
-];
-
-export function getProvider(id: string): ProviderConfig {
-  return PROVIDERS.find(p => p.id === id) ?? PROVIDERS[0];
-}
+export { PROVIDERS, getProvider };
+export type { ProviderConfig, ProviderId };
 
 // ---- Request Config ----
 
@@ -323,6 +240,20 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
   }
 }
 
+function buildApiUrl(baseUrlRaw: string, endpoint: string): string {
+  const baseUrl = String(baseUrlRaw || "").trim().replace(/\/+$/, "");
+  const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+
+  if (baseUrl.endsWith(normalizedEndpoint)) return baseUrl;
+  if (baseUrl.endsWith("/v1") && normalizedEndpoint.startsWith("/v1/")) {
+    return `${baseUrl}${normalizedEndpoint.slice(3)}`;
+  }
+  if (baseUrl.endsWith("/v1beta") && normalizedEndpoint.startsWith("/v1beta/")) {
+    return `${baseUrl}${normalizedEndpoint.slice(7)}`;
+  }
+  return `${baseUrl}${normalizedEndpoint}`;
+}
+
 // ---- System Prompt ----
 
 const SYSTEM_PROMPT = `You are a quiz-solving assistant.
@@ -334,7 +265,7 @@ Rules:
 2) single_choice: answer must be exactly one letter A-D
 3) multi_choice: answer must contain all correct letters in ascending order, comma-separated, e.g. A,C,D
 4) fill_blank/short_answer/judge: answer must be content answer, never force A-D letters
-5) For multi-part fill-blank questions like (1)(2)(3), provide numbered answers in order.
+5) For multi-part fill-blank questions like (1)(2)(3), answer must contain only the blank contents in order, separated by semicolons, e.g. "葡萄糖；淀粉；F". Do not include prefixes like 1., 1:, (1), 第1空.
 5) If image content and text snippet conflict, trust the image first
 6) If the stem/options are incomplete or ambiguous, set warning with a concise reason and lower confidence
 7) Do not output markdown, code fences, or extra text. JSON only.`;
@@ -444,15 +375,24 @@ function buildUserQuestionPrompt(block: QuestionBlock, route: RouteUsed, setting
   const imagePriorityHint = (route === "vision" || route === "hybrid")
     ? "Vision hint: prioritize the actual question image as primary source. Use text snippet only as auxiliary."
     : "";
+  const formulaHint = looksFormulaOrDiagramHeavy(questionText) || block.hasImage
+    ? [
+      "Formula/image hint:",
+      "1) Preserve mathematical symbols exactly when possible, such as G(s), H(s), G(jw), omega, sigma, fractions, superscripts, subscripts, and minus signs.",
+      "2) If the text snippet loses symbols, recover them from the image.",
+      "3) If the question contains a chart, diagram, waveform, geometry figure, or equation image, read that visual content before answering.",
+    ].join("\n")
+    : "";
   const nonChoiceHint = (typeHint === "fill_blank" || typeHint === "short_answer" || typeHint === "judge")
     ? "Detected non-choice question. Do NOT map answer to A/B/C/D unless options are explicitly present."
     : "";
   const nonChoiceFormatHint = (typeHint === "fill_blank" || typeHint === "short_answer" || /\(\s*1\s*\)|（\s*1\s*）|请据图回答|____|________/.test(questionText))
     ? [
       "Non-choice formatting rule:",
-      "1) answer must be compact and point-by-point, e.g. (1) ...；(2) ...；(3) ...",
-      "2) If some blanks are uncertain, keep known blanks and mark unknown parts as '不确定' rather than outputting option letters.",
-      "3) detailedExplanation must be numbered by sub-questions.",
+      "1) For multi-part fill-blank, answer must contain only blank contents in order, joined by semicolons, e.g. 葡萄糖；淀粉；F",
+      "2) Do not include numbering prefixes such as 1., 1:, (1), 第1空 in answer.",
+      "3) If some blanks are uncertain, keep known blanks and mark unknown parts as '不确定' rather than outputting option letters.",
+      "4) detailedExplanation must be numbered by sub-questions.",
     ].join("\n")
     : "";
 
@@ -460,6 +400,7 @@ function buildUserQuestionPrompt(block: QuestionBlock, route: RouteUsed, setting
     routeHint,
     languageHint,
     imagePriorityHint,
+    formulaHint,
     nonChoiceHint,
     nonChoiceFormatHint,
     getPagePromptHint(),
@@ -472,6 +413,12 @@ function buildUserQuestionPrompt(block: QuestionBlock, route: RouteUsed, setting
     "QUESTION>>>",
     "Return strict JSON only.",
   ].join("\n");
+}
+
+function looksFormulaOrDiagramHeavy(text: string): boolean {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  return /(g\(s\)|h\(s\)|g\(j|h\(j|f\(x\)|nyquist|bode|奈奎斯特|伯德图|传递函数|jw|jω|ω|σ|∫|Σ|√|≤|≥|≠|图中|如图|下图|上图)/i.test(t);
 }
 
 
@@ -512,7 +459,7 @@ async function callAnthropic(
     if (authMode === "x-api-key") headers["x-api-key"] = settings.apiKey;
     else headers.Authorization = `Bearer ${settings.apiKey}`;
 
-    return fetchWithTimeout(`${baseUrl}/v1/messages`, {
+    return fetchWithTimeout(buildApiUrl(baseUrl, "/v1/messages"), {
       method: "POST",
       headers,
       body: requestBody,
@@ -608,18 +555,27 @@ async function callOpenAICompat(
     headers["Authorization"] = `Bearer ${settings.apiKey}`;
   }
 
-  const res = await fetchWithTimeout(`${baseUrl}/v1/chat/completions`, {
+  const requestBody: Record<string, unknown> = {
+    model: settings.apiModel || provider.defaultModel,
+    stream: useStream,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userContent },
+    ],
+  };
+
+  if (provider.id === "minimax") {
+    requestBody.max_completion_tokens = 1024;
+    requestBody.thinking = { type: "adaptive" };
+    requestBody.reasoning_split = true;
+  } else {
+    requestBody.max_tokens = 1024;
+  }
+
+  const res = await fetchWithTimeout(buildApiUrl(baseUrl, "/v1/chat/completions"), {
     method: "POST",
     headers,
-    body: JSON.stringify({
-      model: settings.apiModel || provider.defaultModel,
-      max_tokens: 1024,
-      stream: useStream,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userContent },
-      ],
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!res.ok) throw new Error(`${provider.name} API ${res.status}: ${await res.text()}`);
@@ -732,9 +688,14 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
   const parsedRecognizedRaw = typeof parsed.recognizedText === "string" ? parsed.recognizedText : "";
   const parsedRecognized = sanitizeModelText(parsedRecognizedRaw);
   const previewSanitized = sanitizeModelText(block.previewText ?? "");
-  const recognizedText = shouldFallbackToPreview(parsedRecognized, previewSanitized)
+  const recognizedTextRaw = shouldFallbackToPreview(parsedRecognized, previewSanitized)
     ? previewSanitized
     : parsedRecognized;
+  const recognizedText = normalizeRecognizedQuestionText(
+    recognizedTextRaw,
+    questionType,
+    block.questionTypeGuess,
+  );
   const briefRaw = typeof parsed.briefExplanation === "string"
     ? parsed.briefExplanation
     : (parsedByFallback ? "已通过容错模式提取解析结果" : "(解析提取失败)");
@@ -755,12 +716,14 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     }
     if (isOptionLetterSet(answer)) {
       const extracted = extractNonChoiceAnswerFromText(`${corrected}\n${structured.brief}`);
-      answer = extracted || "见分点答案";
+      answer = extracted || "需人工确认";
     } else if (isWeakNonChoiceAnswer(answer)) {
       const extracted = extractNonChoiceAnswerFromText(`${answer}\n${corrected}\n${structured.brief}`);
-      answer = extracted || "见分点答案";
+      answer = extracted || "需人工确认";
     }
   }
+
+  answer = normalizePlaceholderAnswer(answer, questionType);
 
   if (questionType === "single_choice") {
     const correctedByRule = applyProbabilitySingleChoiceCorrection(
@@ -773,6 +736,11 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     }
   }
 
+  const warning = typeof parsed.warning === "string" ? parsed.warning : undefined;
+  const finalWarning = answer === "需人工确认"
+    ? [warning, "答案未提取到稳定的逐空结果，需人工确认后再填写。"].filter(Boolean).join(" ")
+    : warning;
+
   return {
     blockId: block.id,
     questionType,
@@ -783,7 +751,7 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     recognizedText,
     routeUsed: route,
     ocrQualityScore: 0.85,
-    warning: typeof parsed.warning === "string" ? parsed.warning : undefined,
+    warning: finalWarning || undefined,
   };
 }
 
@@ -797,6 +765,151 @@ function sanitizeModelText(input: string): string {
     .filter((line) => !isModelNoiseLine(line));
   const merged = lines.join("\n");
   return stripModelTrailingNoise(merged);
+}
+
+function normalizeRecognizedQuestionText(
+  text: string,
+  questionType: ParseResult["questionType"],
+  guessedType: QuestionBlock["questionTypeGuess"],
+): string {
+  const normalized = sanitizeModelText(text);
+  if (!normalized) return "";
+
+  const effectiveType = questionType === "unknown" ? guessedType : questionType;
+  if (effectiveType === "single_choice" || effectiveType === "multi_choice") {
+    return normalizeChoiceRecognizedText(normalized);
+  }
+  if (effectiveType === "judge") {
+    return normalizeJudgeRecognizedText(normalized);
+  }
+  if (effectiveType === "fill_blank") {
+    return normalizeFillBlankRecognizedText(normalized);
+  }
+  return trimTrailingQuestionNoise(normalized);
+}
+
+function normalizeChoiceRecognizedText(text: string): string {
+  const normalized = trimTrailingQuestionNoise(text);
+  const firstOptionIdx = normalized.search(/[A-D][\.\):：、]/);
+  if (firstOptionIdx < 0) return normalized;
+
+  const stem = dedupeRepeatedLead(normalizeTextLoose(normalized.slice(0, firstOptionIdx)));
+  const optionSegment = normalized.slice(firstOptionIdx);
+  const rawMatches = Array.from(optionSegment.matchAll(/([A-D])[\.\):：、]\s*([\s\S]*?)(?=(?:\s+[A-D][\.\):：、])|$)/g));
+  const dedup = new Map<string, string>();
+  for (const match of rawMatches) {
+    const key = match[1];
+    const value = sanitizeRecognizedOptionValue(match[2] || "");
+    if (!value) continue;
+    if (!dedup.has(key)) dedup.set(key, value);
+  }
+  if (dedup.size < 2) return normalized;
+  return normalizeTextLoose(`${stem} ${Array.from(dedup.entries()).map(([key, value]) => `${key}. ${value}`).join(" ")}`);
+}
+
+function normalizeJudgeRecognizedText(text: string): string {
+  let out = trimTrailingQuestionNoise(text);
+  const headerMatches = Array.from(out.matchAll(/\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?\s*\(\d+分\)/g));
+  const firstHeaderIndex = headerMatches[0]?.index ?? -1;
+  if (firstHeaderIndex > 0) out = out.slice(firstHeaderIndex).trim();
+  if (headerMatches.length >= 2 && typeof headerMatches[1].index === "number") {
+    out = out.slice(0, headerMatches[1].index!).trim();
+  }
+
+  const optionAt = out.search(/\b(?:对|错|正确|错误|true|false)\b/i);
+  const stem = dedupeRepeatedLead(normalizeTextLoose(optionAt > 0 ? out.slice(0, optionAt) : out));
+  const options: string[] = [];
+  if (/\btrue\b|\bfalse\b/i.test(out)) {
+    options.push("True", "False");
+  } else {
+    if (/(?:^|\s)(?:对|正确)(?:\s|$)/.test(out)) options.push("对");
+    if (/(?:^|\s)(?:错|错误)(?:\s|$)/.test(out)) options.push("错");
+  }
+  return normalizeTextLoose(`${stem}${options.length ? ` ${Array.from(new Set(options)).join(" ")}` : ""}`);
+}
+
+function normalizeFillBlankRecognizedText(text: string): string {
+  const normalized = trimTrailingQuestionNoise(text).replace(/请输入答案/g, " ").replace(/\s+/g, " ").trim();
+  return dedupeRepeatedLead(normalized);
+}
+
+function sanitizeRecognizedOptionValue(raw: string): string {
+  const normalized = trimTrailingQuestionNoise(raw);
+  return dedupeRepeatedLead(normalized);
+}
+
+function trimTrailingQuestionNoise(text: string): string {
+  let out = normalizeTextLoose(text);
+  if (!out) return "";
+
+  const noisePattern = /(?:返回|作业详情|提交作业|上一题|下一题|标记此题|课堂练习|总分|题目数|答题卡|在线客服|文件预览|submit|previous|next)/i;
+  const noiseMatch = noisePattern.exec(out);
+  if (noiseMatch && noiseMatch.index > 0) {
+    out = normalizeTextLoose(out.slice(0, noiseMatch.index));
+  }
+
+  out = out
+    .replace(/\s+[一二三四五六七八九十]+、\s*$/u, "")
+    .replace(/\s+\d{1,3}\s*[\.、．]\s*[\[【]?(?:单选题|多选题|判断题|填空题)?[\]】]?\s*$/u, "")
+    .replace(/\s+\d{1,3}\s*[\.、．]\s*[\[【]\s*$/u, "")
+    .replace(/\s+第\s*[一二三四五六七八九十\d]+\s*[章节题]\s*$/u, "")
+    .trim();
+
+  return out;
+}
+
+function dedupeRepeatedLead(text: string): string {
+  const normalized = normalizeTextLoose(text);
+  if (!normalized) return "";
+
+  const firstSentence = normalized.match(/^(.{8,}?[。！？!?])/);
+  if (firstSentence?.[1]) {
+    const sentence = normalizeTextLoose(firstSentence[1]);
+    const secondIndex = normalized.indexOf(sentence, sentence.length);
+    if (secondIndex > 0) {
+      return normalizeTextLoose(normalized.slice(0, secondIndex));
+    }
+  }
+
+  const probe = normalizeTextLoose(normalized.slice(0, Math.min(32, Math.max(12, Math.floor(normalized.length / 2)))));
+  if (probe.length >= 12) {
+    const repeatedAt = normalized.indexOf(probe, probe.length);
+    if (repeatedAt > 0) {
+      return normalizeTextLoose(normalized.slice(0, repeatedAt));
+    }
+  }
+
+  return normalized;
+}
+
+function normalizeTextLoose(text: string): string {
+  return normalizeMathDisplayText(String(text || "").replace(/\s+/g, " ").trim());
+}
+
+function normalizeMathDisplayText(text: string): string {
+  let out = String(text || "");
+  if (!out) return "";
+
+  out = out
+    .replace(/&infin;|&#8734;|\\infty/gi, "∞")
+    .replace(/负无穷/g, "-∞")
+    .replace(/正无穷/g, "+∞")
+    .replace(/&omega;|&#969;|\\omega/gi, "ω")
+    .replace(/&sigma;|&#963;|\\sigma/gi, "σ")
+    .replace(/&minus;|&#8722;/gi, "-")
+    .replace(/[−﹣－]/g, "-")
+    .replace(/[＋﹢]/g, "+")
+    .replace(/\b([+-])\s*infty\b/gi, "$1∞")
+    .replace(/\binfty\b/gi, "∞")
+    .replace(/由\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/g, "由-∞到+∞")
+    .replace(/从\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/g, "从-∞到+∞");
+
+  out = out.replace(
+    /((?:ω|w|omega)[^。；;,.，\n]{0,24}?由)\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/gi,
+    (_m, prefix) => `${prefix}-∞到+∞`,
+  );
+
+  return out;
 }
 
 function isModelNoiseLine(line: string): boolean {
@@ -952,6 +1065,7 @@ function isWeakNonChoiceAnswer(answer: string): boolean {
   const a = String(answer || "").trim();
   if (!a) return true;
   if (isOptionLetterSet(a)) return true;
+  if (looksLikePlaceholderAnswer(a)) return true;
   const hasPoint = /\(\s*\d+\s*\)|（\s*\d+\s*）|[①②③④⑤⑥⑦⑧⑨⑩]/.test(a);
   const uncertain = /(无法|不确定|看不清|不完整|信息不足|缺少|未完整|不能确定)/.test(a);
   if (uncertain && !hasPoint) return true;
@@ -972,6 +1086,7 @@ function extractNonChoiceAnswerFromText(text: string): string {
   if (answerLike.length > 0) {
     const joined = answerLike.slice(0, 3).join("；");
     if (/(无法判断|无法确定|题干不完整|信息不完整|看不清)/.test(joined)) return "";
+    if (looksLikePlaceholderAnswer(joined)) return "";
     if (/答案\s*[:：]?\s*[A-D](?:\s*[,，、/|]\s*[A-D])*/i.test(joined)) return "";
     return isOptionLetterSet(joined) ? "" : joined;
   }
@@ -981,9 +1096,57 @@ function extractNonChoiceAnswerFromText(text: string): string {
 function normalizeAnswerByType(raw: string, questionType: ParseResult["questionType"]): string {
   const t = questionType;
   if (t === "single_choice" || t === "multi_choice") return normalizeAnswer(raw);
+  if (t === "fill_blank") return normalizeFillBlankAnswer(raw);
   const s = String(raw || "").trim();
   if (!s) return "—";
   return s;
+}
+
+function normalizePlaceholderAnswer(answer: string, questionType: ParseResult["questionType"]): string {
+  if (questionType === "single_choice" || questionType === "multi_choice" || questionType === "judge") {
+    return answer;
+  }
+  const normalized = String(answer || "").trim();
+  if (!normalized) return "需人工确认";
+  if (looksLikePlaceholderAnswer(normalized)) return "需人工确认";
+  return normalized;
+}
+
+function looksLikePlaceholderAnswer(answer: string): boolean {
+  const a = String(answer || "").replace(/\s+/g, "");
+  if (!a) return true;
+  return /(见分点答案|见分点作答|按分点作答|分点作答|仅供参考|参考答案见解析|详见解析|示例答案|需人工确认|未给出逐空答案|未提取到稳定答案|需结合解析判断)/.test(a);
+}
+
+function normalizeFillBlankAnswer(raw: string): string {
+  const source = String(raw || "").replace(/\r\n?/g, "\n").trim();
+  if (!source) return "—";
+
+  const numberedMatches = Array.from(
+    source.matchAll(/(?:^|[\n;；])\s*(?:\(?\d+\)?[.)、]|第\s*\d+\s*空\s*[:：]?|\d+\.\d+\s*[:：]?|\d+\s*[:：.。．、]\s*)([^\n;；]+)/g),
+  );
+  if (numberedMatches.length >= 2) {
+    const parts = numberedMatches
+      .map((match) => sanitizeFillBlankPart(match[1] || ""))
+      .filter(Boolean);
+    if (parts.length) return parts.join("；");
+  }
+
+  const splitParts = source
+    .split(/[\n;；]+/)
+    .map((part) => sanitizeFillBlankPart(part))
+    .filter(Boolean);
+  if (splitParts.length >= 2) return splitParts.join("；");
+
+  return sanitizeFillBlankPart(source) || "—";
+}
+
+function sanitizeFillBlankPart(part: string): string {
+  return String(part || "")
+    .replace(/^\s*(?:\(?\d+\)?[.)、]|第\s*\d+\s*空\s*[:：]?|\d+\.\d+\s*[:：]?|\d+\s*[:：.。．、]\s*)/, "")
+    .replace(/^答案\s*[:：]?\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function formatMultiPartExplanation(

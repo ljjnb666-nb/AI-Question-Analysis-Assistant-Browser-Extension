@@ -5,12 +5,19 @@
  * - Filters control-panel/navigation blocks
  */
 
-import type { QuestionBlock, QuestionType, BoundingBox } from "@/shared/types";
+import type { QuestionBlock, QuestionType, BoundingBox, QuestionDisplaySegment } from "@/shared/types";
 import { logWarn } from "@/shared/utils/errorLogger";
+import {
+  extractSemanticSvgLikeText,
+  findNearbySemanticFormulaTextForImage,
+  hasNearbyLargeVisualImageForSemanticNode,
+} from "../formulaEmbedFallback";
 
 const OPTION_RE = /[A-D][\.\):\uFF1A\u3001]/g;
 const CIRCLED_RE = /[\u2460\u2461\u2462\u2463]/g;
 const QUESTION_RE = /[?\uFF1F]|下列|哪项|正确的是|错误的是|属于|不属于/;
+const JUDGE_HEADER_RE = /\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?\s*\(\d+分\)/g;
+const JUDGE_HEADER_START_RE = /\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?/;
 
 let mutationObserver: MutationObserver | null = null;
 let pendingRescan = false;
@@ -49,8 +56,9 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
   const vh = window.innerHeight;
   const viewportArea = Math.max(1, vw * vh);
   const hostRightCutX = getHostRightSidebarCutX(vw, vh);
+  const stableQuestionCards = getStableQuestionCardContainers();
   const structuredContainers = detectStructuredQuestionContainers();
-  const hasStructuredContainers = structuredContainers.length >= 2;
+  const hasStructuredContainers = structuredContainers.length >= 1;
 
   const grouped = new Map<string, QuestionBlock>();
   const groupRank = new Map<string, number>();
@@ -77,19 +85,21 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
     if (!inViewport(rect, vw, vh)) continue;
     if (rect.width < 80 || rect.height < 16) continue;
 
-    const text = normalizeText(el.textContent ?? "");
+    const text = getElementReadableText(el);
     if (!text || text.length < 10) continue;
     if (isLikelyControlPanelText(text)) continue;
 
-    const guessed = inferQuestionType(text);
-    const lockedCardBbox = clampRect(rect, vw, vh);
+    let candidateBbox = applyRightCutToBbox(refineCandidateRect(el, rect, vw, vh), hostRightCutX);
+    let previewText = buildPreviewTextForBbox(el, candidateBbox, text);
+    const guessed = inferQuestionType(previewText || text);
+    candidateBbox = refineBboxForDetectedType(el, candidateBbox, guessed, vw, vh);
+    previewText = sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), guessed);
+    if (!isLikelyCompleteQuestionText(previewText, guessed)) continue;
     const candidate: QuestionBlock = {
       id: `auto-direct-${Date.now()}-${directIndex}-${Math.random().toString(36).slice(2, 8)}`,
-      bbox: preferDirectCardMode
-        ? applyRightCutToBbox(lockedCardBbox, hostRightCutX)
-        : applyRightCutToBbox(refineCandidateRect(el, rect, vw, vh), hostRightCutX),
-      previewText: buildPreviewText(el, text).slice(0, 420),
-      hasImage: !!el.querySelector("img, canvas, svg, math, figure"),
+      bbox: candidateBbox,
+      previewText: previewText.slice(0, 420),
+      hasImage: !!el.querySelector("img, canvas, svg, math, figure, mjx-container, .MathJax, .katex, embed"),
       questionImageUrl: pickQuestionImageFromElement(el) ?? undefined,
       questionTypeGuess: guessed,
       confidence: 0.9,
@@ -105,11 +115,19 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
     }
   }
 
+  if (!preferDirectCardMode) {
+    const stableContainerBlocks = buildStableStructuredContainerCandidates(stableQuestionCards, hostRightCutX, vw, vh);
+    if (stableContainerBlocks.length > 0) {
+      return filterFragmentBlocks(deduplicateBlocks(stableContainerBlocks).sort((a, b) => a.bbox.y - b.bbox.y));
+    }
+  }
+
   const elements = collectCandidateElements();
   for (const el of elements) {
     if (preferDirectCardMode) break;
     if (isExtensionUiElement(el)) continue;
     if (hasStructuredContainers && !isInsideAnyContainer(el, structuredContainers)) continue;
+    if (hasStructuredContainers && structuredContainers.some((container) => container !== el && el.contains(container))) continue;
     const rawRect = el.getBoundingClientRect();
     const rect = applyRightCutToRect(rawRect, hostRightCutX);
     if (!rect) continue;
@@ -117,7 +135,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
     if (rect.width < 60 || rect.height < 16) continue;
     if (rect.width * rect.height > viewportArea * 0.75) continue;
 
-    const text = normalizeText(el.textContent ?? "");
+    const text = getElementReadableText(el);
     if (!text || text.length < 8 || text.length > 2500) continue;
     if (isLikelyControlPanelText(text)) continue;
     if (isLikelyNavigationElement(el, text)) continue;
@@ -128,22 +146,27 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
     const score = scoreElement(el, text);
     if (score.confidence < 0.35) continue;
 
-    const previewText = buildPreviewText(el, text);
-    if (!isLikelyCompleteQuestionText(previewText, score.type)) continue;
+    let candidateBbox = applyRightCutToBbox(refineCandidateRect(el, rect, vw, vh), hostRightCutX);
+    let previewText = buildPreviewTextForBbox(el, candidateBbox, text);
+    const previewType = inferQuestionType(previewText || text);
+    const candidateType = previewType !== "unknown" ? previewType : score.type;
+    candidateBbox = refineBboxForDetectedType(el, candidateBbox, candidateType, vw, vh);
+    previewText = sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), candidateType);
+    if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
 
     const candidate: QuestionBlock = {
       id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      bbox: applyRightCutToBbox(refineCandidateRect(el, rect, vw, vh), hostRightCutX),
+      bbox: candidateBbox,
       previewText: previewText.slice(0, 420),
       hasImage: score.hasImage,
       questionImageUrl: pickQuestionImageFromElement(el) ?? undefined,
-      questionTypeGuess: score.type,
+      questionTypeGuess: candidateType,
       confidence: score.confidence,
       source: "auto_dom",
     };
 
     const gid = getGroupId(el);
-    const rank = completenessScore(candidate.previewText, score.type, score.confidence);
+    const rank = completenessScore(candidate.previewText, candidateType, score.confidence);
     const prev = groupRank.get(gid) ?? -Infinity;
     if (rank > prev) {
       groupRank.set(gid, rank);
@@ -168,6 +191,83 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
 
   const merged = mergeAdjacentQuestionBlocks(deduplicateBlocks(blocks).sort((a, b) => a.bbox.y - b.bbox.y));
   return filterFragmentBlocks(merged);
+}
+
+function buildStableStructuredContainerCandidates(
+  containers: Element[],
+  hostRightCutX: number | null,
+  vw: number,
+  vh: number,
+): QuestionBlock[] {
+  if (!isPolymasOrZhihuishuHost()) return [];
+
+  const out: QuestionBlock[] = [];
+  const seen = new Set<Element>();
+  let index = 0;
+  for (const el of containers) {
+    const hostContainer = el as Element;
+    if (!(hostContainer instanceof HTMLElement)) continue;
+    if (!hostContainer.matches(".question-item, .questionBox, .base-question-component")) continue;
+    if (isExtensionUiElement(hostContainer)) continue;
+    if (seen.has(hostContainer)) continue;
+    seen.add(hostContainer);
+
+    const rawRect = hostContainer.getBoundingClientRect();
+    const rect = applyRightCutToRect(rawRect, hostRightCutX);
+    if (!rect) continue;
+    if (!inViewport(rect, vw, vh)) continue;
+    if (rect.width < 240 || rect.height < 120) continue;
+    if (getVisibleVerticalRatio(rawRect, vh) < 0.55) continue;
+
+    const readableText = extractStructuredQuestionText(hostContainer);
+    const displaySegments = extractStructuredQuestionDisplaySegments(hostContainer);
+    const previewText = sanitizePreviewTextByType(readableText, inferQuestionType(readableText));
+    const candidateType = inferQuestionType(previewText);
+    if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
+
+    out.push({
+      id: `auto-structured-${Date.now()}-${index++}`,
+      bbox: clampRectToBbox(rect, vw, vh),
+      previewText: previewText.slice(0, 420),
+      displaySegments,
+      hasImage: !!hostContainer.querySelector("img, canvas, svg, math, figure, mjx-container, .MathJax, .katex, embed, table"),
+      questionImageUrl: pickQuestionImageFromElement(hostContainer) ?? undefined,
+      questionTypeGuess: candidateType,
+      confidence: 0.94,
+      source: "auto_dom",
+    });
+  }
+
+  return out;
+}
+
+function getStableQuestionCardContainers(): Element[] {
+  const preferredSelectors = [
+    ".question-item",
+    ".questionBox",
+    ".base-question-component",
+  ];
+  const seen = new Set<Element>();
+  const out: Element[] = [];
+
+  for (const selector of preferredSelectors) {
+    const nodes = Array.from(document.querySelectorAll(selector));
+    for (const node of nodes) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (seen.has(node) || isExtensionUiElement(node)) continue;
+      if (!isElementVisible(node)) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 240 || rect.height < 120) continue;
+      seen.add(node);
+      out.push(node);
+    }
+  }
+
+  return out.filter((el) => {
+    if (el.matches(".question-item, .questionBox")) return true;
+    const host = el.closest(".question-item, .questionBox");
+    return !host;
+  });
 }
 
 function scanIframes(vw: number, vh: number): QuestionBlock[] {
@@ -219,6 +319,9 @@ function scoreElement(el: Element, text: string): { confidence: number; type: Qu
 
   const pageIsJudge = /typeid=600079/i.test(window.location.search);
   const optionCount = countOptionMarkersInText(text);
+  const blankControlCount = countBlankControls(el);
+  const blankMarkerCount = countBlankMarkersInText(text);
+  const judgeControlCount = countJudgeControls(el);
 
   if (/^(\d{1,3})[\.、。\)）]\s*/.test(text) || /^第\s*\d{1,3}\s*题/.test(text)) confidence += 0.35;
 
@@ -235,6 +338,9 @@ function scoreElement(el: Element, text: string): { confidence: number; type: Qu
   if (isJudgeLikeText(text)) {
     confidence += 0.3;
     type = "judge";
+  } else if (judgeControlCount >= 2) {
+    confidence += 0.28 + Math.min(judgeControlCount * 0.04, 0.12);
+    if (type === "unknown") type = "judge";
   } else if (pageIsJudge && type === "unknown") {
     const looksLikeJudgeStatement = text.length >= 10 && text.length <= 220 && /[。！？.!?)]$/.test(text);
     if (looksLikeJudgeStatement) {
@@ -247,15 +353,23 @@ function scoreElement(el: Element, text: string): { confidence: number; type: Qu
     confidence += 0.2;
     if (type === "unknown") type = "fill_blank";
   }
+  if (blankControlCount > 0 || blankMarkerCount >= 2) {
+    confidence += 0.28 + Math.min(blankControlCount * 0.06, 0.18);
+    if (type === "unknown" || type === "short_answer") type = "fill_blank";
+  }
 
   if (/简述|说明|解释|分析|列举/.test(text) && text.length > 30) {
     confidence += 0.15;
     if (type === "unknown") type = "short_answer";
   }
 
-  if (el.querySelector("img, canvas, svg, math, figure")) {
+  if (el.querySelector("img, canvas, svg, math, figure, mjx-container, .MathJax, .katex, embed")) {
     hasImage = true;
     confidence += 0.1;
+  }
+  if (containsMathLikeContent(el, text)) {
+    hasImage = true;
+    confidence += 0.08;
   }
 
   if (text.includes("?") || text.includes("？")) confidence += 0.05;
@@ -273,6 +387,7 @@ function pickQuestionImageFromElement(el: Element): string | null {
   for (const img of imgs) {
     const src = String(img.currentSrc || img.src || "").trim();
     if (!src || /^data:/i.test(src)) continue;
+    if (findNearbySemanticFormulaTextForImage(img)) continue;
     const rect = img.getBoundingClientRect();
     if (rect.width < 24 || rect.height < 24) continue;
     const area = rect.width * rect.height;
@@ -286,6 +401,7 @@ function inferQuestionType(text: string): QuestionType {
   const t = text.toLowerCase();
   if (["不定项", "多选", "multiple choice", "select all", "all that apply"].some(k => t.includes(k))) return "multi_choice";
   if (["单选", "single choice", "single-select"].some(k => t.includes(k))) return "single_choice";
+  if (/(填空|blank|请输入答案|_{3,}|[（(]\s*\d+\s*[)）])/.test(text)) return "fill_blank";
   const optCount = countOptionMarkersInText(text);
   if (optCount >= 2) {
     // Option markers are a stronger signal than judge-like wording.
@@ -315,6 +431,23 @@ function countOptionMarkersInText(text: string): number {
   return letterOptions.length + circled.length;
 }
 
+function countBlankMarkersInText(text: string): number {
+  const normalized = normalizeText(text);
+  const underscore = normalized.match(/_{3,}|—{2,}|﹍{2,}/g) || [];
+  const numbered = normalized.match(/(?:\d+\.\d+|[（(]\d+[)）])/g) || [];
+  return underscore.length + numbered.length;
+}
+
+function countBlankControls(el: Element): number {
+  return el.querySelectorAll("input:not([type='radio']):not([type='checkbox']):not([type='hidden']):not([type='button']):not([type='submit']),textarea,[contenteditable='true']").length;
+}
+
+function countJudgeControls(el: Element): number {
+  const controlCount = el.querySelectorAll("input[type='radio'],input[type='checkbox']").length;
+  const judgeWordCount = (normalizeText(el.textContent || "").match(/(?:对|错|正确|错误|true|false|t\/f)/gi) || []).length;
+  return controlCount + Math.min(judgeWordCount, 2);
+}
+
 function hasStrongQuestionSignal(text: string): boolean {
   const t = normalizeText(text);
   if (!t) return false;
@@ -322,7 +455,7 @@ function hasStrongQuestionSignal(text: string): boolean {
   if (optionCount >= 3) return true;
   if (QUESTION_RE.test(t)) return true;
   if (isJudgeLikeText(t)) return true;
-  if (/(?:_{2,}|填写|blank|简答|材料题)/i.test(t)) return true;
+  if (/(?:_{2,}|填写|blank|简答|材料题|请输入答案)/i.test(t)) return true;
   return false;
 }
 
@@ -348,6 +481,14 @@ function isLikelyNavigationElement(el: Element, text: string): boolean {
   return false;
 }
 
+function isElementVisible(el: HTMLElement): boolean {
+  if (el.offsetParent === null) return false;
+  const style = getComputedStyle(el);
+  if (style.visibility === "hidden" || style.display === "none") return false;
+  if (style.opacity === "0") return false;
+  return true;
+}
+
 function isInsideAnyContainer(el: Element, containers: Element[]): boolean {
   for (const c of containers) {
     if (c.contains(el)) return true;
@@ -357,9 +498,12 @@ function isInsideAnyContainer(el: Element, containers: Element[]): boolean {
 
 function detectStructuredQuestionContainers(): Element[] {
   const selectors = [
+    ".Classificationquestionall-div .questionBox",
+    ".questionBox",
+    ".question-item",
+    ".base-question-component",
     ".card.mb-3.q-detail.rounded-0",
     ".q-detail",
-    ".question-item",
     ".problem-item",
     ".exam-item",
     ".test-item",
@@ -381,7 +525,7 @@ function detectStructuredQuestionContainers(): Element[] {
       if (seen.has(el)) continue;
       const rect = (el as HTMLElement).getBoundingClientRect();
       if (rect.width < 120 || rect.height < 80) continue;
-      const text = normalizeText(el.textContent || "");
+      const text = getElementReadableText(el);
       if (text.length < 28) continue;
       const bodyLike = el.querySelector(".card-body,.question-body,.stem,article,section");
       const footerLike = el.querySelector(".card-footer,.question-footer,.actions,.tools");
@@ -393,12 +537,20 @@ function detectStructuredQuestionContainers(): Element[] {
     }
   }
 
-  // Keep top-level containers only (drop nested)
-  return out.filter((el) => !out.some((other) => other !== el && other.contains(el)));
+  // Prefer leaf-most containers so outer page shells do not become candidates.
+  return out.filter((el) => !out.some((other) => other !== el && el.contains(other)));
 }
 
 function collectCandidateElements(): Element[] {
   const selectors = [
+    ".Classificationquestionall-div .questionBox",
+    ".questionBox",
+    ".question-item",
+    ".base-question-component",
+    ".questionTit",
+    ".qeustion-content",
+    ".questionContent",
+    ".optionUl",
     ".card.mb-3.q-detail.rounded-0 .card-body",
     ".q-detail .card-body",
     "p", "div", "li", "section", "article", "blockquote",
@@ -423,13 +575,30 @@ function collectCandidateElements(): Element[] {
 }
 
 function normalizeText(raw: string): string {
-  return String(raw || "").replace(/\s+/g, " ").trim();
+  return normalizeMathDisplayText(stripSvgCssNoise(String(raw || "")).replace(/\s+/g, " ").trim());
+}
+
+function getElementReadableText(el: Element): string {
+  if (
+    el instanceof HTMLElement &&
+    (
+      el.matches(".question-item,.questionBox,.base-question-component,.questionContent,.qeustion-content,.markdown-latex-container,.ml-p,.option-item,.option-content") ||
+      !!el.querySelector("math,svg,mjx-container,.MathJax,.katex,embed,img")
+    )
+  ) {
+    return extractReadableNodeText(el);
+  }
+
+  const raw = el instanceof HTMLElement
+    ? (el.innerText || el.textContent || "")
+    : (el.textContent || "");
+  return normalizeText(raw);
 }
 
 function buildPreviewText(el: Element, fallbackText: string): string {
   const bodyLike = el.querySelector(".card-body,.q-body,.question-body,.stem,article,section");
   const sourceNode = bodyLike ?? el;
-  const normalized = normalizeText(sourceNode.textContent ?? "");
+  const normalized = extractReadableNodeText(sourceNode);
   if (!normalized) return "";
 
   const pieces = normalized
@@ -442,17 +611,618 @@ function buildPreviewText(el: Element, fallbackText: string): string {
   return compact.length >= 20 ? compact : fallbackText.slice(0, 420);
 }
 
+function buildPreviewTextForBbox(el: Element, bbox: BoundingBox, fallbackText: string): string {
+  const bodyLike = el.querySelector(".card-body,.q-body,.question-body,.stem,article,section");
+  const sourceNode = bodyLike ?? el;
+  const selector = "h1,h2,h3,h4,p,li,td,th,tr,table,label,span,div,img,svg,math,figure,mjx-container,.MathJax,.katex,embed";
+  const nodes = Array.from(sourceNode.querySelectorAll(selector));
+  const entries: Array<{ top: number; left: number; text: string }> = [];
+
+  for (const node of nodes) {
+    if (isExtensionUiElement(node)) continue;
+
+    const rect = (node as Element).getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) continue;
+    if (!bboxIntersectsRect(bbox, rect)) continue;
+
+    const tag = node.tagName.toLowerCase();
+    if (
+      ["div", "span", "p", "li", "label"].includes(tag) &&
+      node.childElementCount > 0 &&
+      !node.matches(".questionContent,.qeustion-content,.markdown-latex-container,.ml-p")
+    ) {
+      continue;
+    }
+
+    const text = extractReadableNodeText(node);
+    if (!text) continue;
+    if (text.length > 320) continue;
+    if (isLikelyActionText(text) || isLikelyControlPanelText(text)) continue;
+    if (node instanceof HTMLElement && node.children.length > 10 && text.length > 180) continue;
+
+    entries.push({ top: rect.top, left: rect.left, text });
+  }
+
+  const merged = mergePreviewEntries(entries);
+  const compact = sanitizePreviewText(merged);
+  if (compact.length >= 20) return compact.slice(0, 420);
+  if (sourceNode instanceof HTMLElement) {
+    const sourceRect = sourceNode.getBoundingClientRect();
+    if (sourceRect.width >= 2 && sourceRect.height >= 2 && bboxIntersectsRect(bbox, sourceRect)) {
+      const sourceText = sanitizePreviewText(extractReadableNodeText(sourceNode));
+      if (sourceText.length >= 20 && !isLikelyControlPanelText(sourceText) && !isLikelyActionText(sourceText)) {
+        return sourceText.slice(0, 420);
+      }
+    }
+  }
+  return sanitizePreviewText(buildPreviewText(el, fallbackText)).slice(0, 420);
+}
+
+function bboxIntersectsRect(bbox: BoundingBox, rect: DOMRect): boolean {
+  return !(
+    rect.right <= bbox.x ||
+    rect.left >= bbox.x + bbox.width ||
+    rect.bottom <= bbox.y ||
+    rect.top >= bbox.y + bbox.height
+  );
+}
+
+function mergePreviewEntries(entries: Array<{ top: number; left: number; text: string }>): string {
+  if (!entries.length) return "";
+  entries.sort((a, b) => (a.top - b.top) || (a.left - b.left));
+
+  const deduped: Array<{ top: number; left: number; text: string }> = [];
+  for (const entry of entries) {
+    const prev = deduped[deduped.length - 1];
+    if (prev && prev.text === entry.text && Math.abs(prev.top - entry.top) < 6 && Math.abs(prev.left - entry.left) < 6) continue;
+    deduped.push(entry);
+  }
+
+  return normalizeText(deduped.map((entry) => entry.text).join(" "));
+}
+
+function sanitizePreviewText(text: string): string {
+  let out = normalizeText(text);
+  if (!out) return "";
+
+  const headNoise = /^(?:返回|作业详情|提交作业|上一题|下一题|标记此题|课堂练习|总分|题目数|答题卡|截止时间)\s*/;
+  while (headNoise.test(out)) {
+    out = out.replace(headNoise, "").trim();
+  }
+
+  const questionStart = out.search(/(?:\d{1,3}\s*[\.、\)）]|第\s*\d{1,3}\s*题|[A-D][\.\):\uFF1A\u3001])/);
+  if (questionStart > 0) {
+    const prefix = out.slice(0, questionStart);
+    if (/返回|作业详情|提交作业|课堂练习|总分|题目数|答题卡|截止时间|单选题|多选题|判断题|填空题/.test(prefix)) {
+      out = out.slice(questionStart).trim();
+    }
+  }
+
+  out = sanitizeJudgePreviewText(out);
+
+  return out;
+}
+
+function sanitizePreviewTextByType(text: string, type: QuestionType): string {
+  const normalized = sanitizePreviewText(text);
+  if (!normalized) return "";
+  if (type === "single_choice" || type === "multi_choice") {
+    return sanitizeChoicePreviewText(normalized);
+  }
+  if (type === "judge") {
+    return sanitizeJudgePreviewText(normalized);
+  }
+  return normalized;
+}
+
+function sanitizeChoicePreviewText(text: string): string {
+  const normalized = sanitizePreviewText(text);
+  if (!normalized) return "";
+
+  const firstOptionIdx = normalized.search(/[A-D][\.\):\uFF1A\u3001]/);
+  if (firstOptionIdx < 0) return trimTrailingQuestionMarker(normalized);
+
+  const stem = trimTrailingQuestionMarker(normalizeText(normalized.slice(0, firstOptionIdx)));
+  const optionSegment = normalized.slice(firstOptionIdx);
+  const rawMatches = Array.from(optionSegment.matchAll(/([A-D])[\.\):\uFF1A\u3001]\s*([\s\S]*?)(?=(?:\s+[A-D][\.\):\uFF1A\u3001])|$)/g));
+  const dedup = new Map<string, string>();
+  for (const match of rawMatches) {
+    const key = match[1];
+    const value = sanitizeChoiceOptionValue(match[2] || "");
+    if (!value) continue;
+    if (!dedup.has(key)) dedup.set(key, value);
+  }
+
+  if (dedup.size < 2) return trimTrailingQuestionMarker(normalized);
+  const rebuiltOptions = [...dedup.entries()].map(([key, value]) => `${key}. ${value}`).join(" ");
+  return normalizeText(`${stem} ${rebuiltOptions}`);
+}
+
+function sanitizeChoiceOptionValue(raw: string): string {
+  let out = normalizeText(raw);
+  if (!out) return "";
+
+  const noisePattern = /(?:返回|作业详情|提交作业|上一题|下一题|标记此题|课堂练习|总分|题目数|答题卡|截止时间|在线客服|文件预览|submit|previous|next)/i;
+  const noiseMatch = noisePattern.exec(out);
+  if (noiseMatch && noiseMatch.index > 0) {
+    out = normalizeText(out.slice(0, noiseMatch.index));
+  }
+
+  return trimTrailingQuestionMarker(out);
+}
+
+function containsMathLikeContent(el: Element, text: string): boolean {
+  if (el.querySelector("math, mjx-container, .MathJax, .katex, embed")) return true;
+  const t = normalizeText(text).toLowerCase();
+  if (!t) return false;
+  return /(g\(s\)|h\(s\)|g\(j|h\(j|f\(x\)|lim|sin|cos|tan|e\^|s\^|jω|jw|σ|ω|∫|Σ|√|≤|≥|≠|传递函数|奈奎斯特|伯德图)/i.test(t);
+}
+
+function extractReadableNodeText(node: Element): string {
+  const tag = node.tagName.toLowerCase();
+  const attrText = [
+    node.getAttribute("aria-label"),
+    node.getAttribute("alt"),
+    node.getAttribute("title"),
+    node.getAttribute("data-alt"),
+  ].find((v) => normalizeText(v || ""));
+
+  if (tag === "img") {
+    if (node.closest(".option-item") && /icon-lou|aloha-icon|iconfont/i.test(node.getAttribute("class") || "")) {
+      return "";
+    }
+    if (findNearbySemanticFormulaTextForImage(node)) {
+      return "";
+    }
+    return normalizeText(attrText || "[图片]");
+  }
+
+  if (tag === "embed") {
+    const latex = decodeFormulaLikeText(
+      node.getAttribute("data-svg-latex")
+      || node.getAttribute("data-latex")
+      || node.getAttribute("alt")
+      || node.getAttribute("title")
+      || "",
+    );
+    return normalizeText(latex || attrText || "[公式]");
+  }
+
+  if (tag === "canvas") {
+    return normalizeText(attrText || "[图形]");
+  }
+
+  if (tag === "svg") {
+    if (hasNearbyLargeVisualImageForSemanticNode(node)) return "";
+    return normalizeText(extractSemanticSvgLikeText(node) || "[公式]");
+  }
+
+  if (tag === "math" || tag === "mjx-container") {
+    if (hasNearbyLargeVisualImageForSemanticNode(node)) return "";
+    return normalizeText(extractSemanticSvgLikeText(node) || "[公式]");
+  }
+
+  if (node.matches(".MathJax, .katex")) {
+    if (hasNearbyLargeVisualImageForSemanticNode(node)) return "";
+    return normalizeText(extractSemanticSvgLikeText(node) || "[公式]");
+  }
+
+  if (node instanceof HTMLElement) {
+    if (node.matches(".option-item")) {
+      const orderText = normalizeText((node.querySelector(".option-order") as HTMLElement | null)?.innerText || "");
+      const contentNode = node.querySelector(".option-content,.markdown-latex-container,.ml-p");
+      const contentText = normalizeText(
+        contentNode ? extractReadableNodeText(contentNode) : (node.innerText || node.textContent || ""),
+      );
+      return normalizeText(`${orderText} ${contentText}`);
+    }
+
+    if (node.matches(".question-item,.questionBox,.base-question-component")) {
+      return extractStructuredQuestionText(node);
+    }
+
+    if (node.matches(".questionContent,.qeustion-content")) {
+      return extractOrderedChildContentText(node, (child) => child.matches(".option-item,.option-content,.optionUl,ul,ol"));
+    }
+
+    if (
+      node.childElementCount > 0 &&
+      node.matches(".markdown-latex-container,.ml-p,.option-content")
+    ) {
+      return extractOrderedChildContentText(node);
+    }
+
+    if (
+      node.childElementCount > 0 &&
+      node.querySelector("svg,math,mjx-container,.MathJax,.katex,embed,img")
+    ) {
+      return extractOrderedChildContentText(node);
+    }
+
+    return normalizeText(node.innerText || node.textContent || attrText || "");
+  }
+
+  return normalizeText(node.textContent || attrText || "");
+}
+
+function extractOrderedChildContentText(
+  node: HTMLElement,
+  shouldSkipChild?: (child: Element) => boolean,
+): string {
+  const orderedPieces = Array.from(node.childNodes)
+    .map((child) => readInlineOrderedChildContent(child, shouldSkipChild))
+    .filter(Boolean);
+
+  return normalizeText(dedupeJoinedStructuredText(orderedPieces).join(""));
+}
+
+function readInlineOrderedChildContent(
+  node: Node,
+  shouldSkipChild?: (child: Element) => boolean,
+): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
+  if (!(node instanceof Element)) return "";
+  if (shouldSkipChild?.(node)) return "";
+
+  const tag = node.tagName.toLowerCase();
+  if (
+    tag === "img" ||
+    tag === "svg" ||
+    tag === "math" ||
+    tag === "mjx-container" ||
+    tag === "embed" ||
+    node.matches(".MathJax, .katex")
+  ) {
+    return ` ${extractReadableNodeText(node)} `;
+  }
+  if (tag === "sub") {
+    const text = normalizeText(node.textContent || "");
+    return text ? text.replace(/\s+/g, "") : "";
+  }
+  if (tag === "sup") {
+    const text = normalizeText(node.textContent || "");
+    return text ? `^${text.replace(/\s+/g, "")}` : "";
+  }
+  if (tag === "br") return " ";
+
+  const inlineChildren = Array.from(node.childNodes)
+    .map((child) => readInlineOrderedChildContent(child, shouldSkipChild))
+    .filter(Boolean);
+
+  if (inlineChildren.length > 0) {
+    const joined = inlineChildren.join("");
+    if (tag === "span" || tag === "strong" || tag === "em" || tag === "b" || tag === "i" || tag === "u") {
+      return joined;
+    }
+    return ` ${joined} `;
+  }
+
+  return ` ${extractReadableNodeText(node)} `;
+}
+
+function extractStructuredQuestionText(container: Element): string {
+  const pieces: string[] = [];
+  const push = (value: string) => {
+    const normalized = normalizeText(value);
+    if (!normalized) return;
+    const next = dedupeJoinedStructuredText([...pieces, normalized]);
+    pieces.splice(0, pieces.length, ...next);
+  };
+
+  const titleBox = container.querySelector(".title-box,.questionTit,.question-title");
+  if (titleBox instanceof HTMLElement) {
+    push(titleBox.innerText || titleBox.textContent || "");
+  }
+
+  const stemNode = container.querySelector(".qeustion-content,.questionContent,.question-content,.stem,.question-body,.content");
+  if (stemNode) {
+    push(extractReadableNodeText(stemNode));
+  }
+
+  const tableNodes = Array.from(container.querySelectorAll("table"));
+  for (const tableNode of tableNodes) {
+    push(extractReadableNodeText(tableNode));
+  }
+
+  const optionNodes = Array.from(container.querySelectorAll(".option-item, li, label"))
+    .filter((node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      if (!isElementVisible(node)) return false;
+      const text = normalizeText(node.innerText || node.textContent || "");
+      return /^[A-D][\.\):\uFF1A\u3001]/.test(text) || /^[\u2460\u2461\u2462\u2463]/.test(text);
+    });
+  for (const optionNode of optionNodes) {
+    push(extractReadableNodeText(optionNode));
+  }
+
+  if (pieces.length === 0) {
+    push(container instanceof HTMLElement ? (container.innerText || container.textContent || "") : (container.textContent || ""));
+  }
+
+  return normalizeText(dedupeJoinedStructuredText(pieces).join(" "));
+}
+
+function extractStructuredQuestionDisplaySegments(container: Element): QuestionDisplaySegment[] | undefined {
+  const stemNode = container.querySelector(".qeustion-content,.questionContent,.question-content,.stem,.question-body,.content");
+  if (!(stemNode instanceof HTMLElement)) return undefined;
+
+  const segments = buildOrderedDisplaySegments(stemNode, (child) =>
+    child.matches(".option-item,.option-content,.optionUl,ul,ol,.sign-box,.flex.items-center.gap-12px"),
+  );
+
+  return segments.length ? segments : undefined;
+}
+
+function buildOrderedDisplaySegments(
+  root: Element,
+  shouldSkipChild?: (child: Element) => boolean,
+): QuestionDisplaySegment[] {
+  const out: QuestionDisplaySegment[] = [];
+
+  const pushText = (text: string) => {
+    const normalized = normalizeText(text);
+    if (!normalized) return;
+    const prev = out[out.length - 1];
+    if (prev?.type === "text") {
+      prev.text = normalizeText(`${prev.text} ${normalized}`);
+      return;
+    }
+    out.push({ type: "text", text: normalized });
+  };
+
+  const pushInlineText = (text: string) => {
+    const normalized = normalizeText(text);
+    if (!normalized) return;
+    const prev = out[out.length - 1];
+    if (prev?.type === "text") {
+      prev.text = normalizeText(`${prev.text}${normalized}`);
+      return;
+    }
+    out.push({ type: "text", text: normalized });
+  };
+
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      pushText(node.textContent || "");
+      return;
+    }
+    if (!(node instanceof Element)) return;
+    if (shouldSkipChild?.(node)) return;
+    if (isExtensionUiElement(node)) return;
+
+    const tag = node.tagName.toLowerCase();
+    if (tag === "br") return;
+    if (tag === "sub" || tag === "sup" || tag === "span" || tag === "strong" || tag === "em" || tag === "b" || tag === "i" || tag === "u") {
+      pushInlineText(readInlineOrderedChildContent(node, shouldSkipChild));
+      return;
+    }
+    if (tag === "img") {
+      const formulaText = findNearbySemanticFormulaTextForImage(node);
+      if (formulaText) return;
+      const url = String((node as HTMLImageElement).currentSrc || node.getAttribute("src") || "").trim();
+      if (url) out.push({ type: "image", url });
+      return;
+    }
+    if (tag === "svg" || tag === "math" || tag === "mjx-container" || node.matches(".MathJax, .katex")) {
+      if (hasNearbyLargeVisualImageForSemanticNode(node)) return;
+      pushText(extractSemanticSvgLikeText(node));
+      return;
+    }
+    if (tag === "embed") {
+      pushText(extractReadableNodeText(node));
+      return;
+    }
+
+    for (const child of Array.from(node.childNodes)) {
+      walk(child);
+    }
+  };
+
+  for (const child of Array.from(root.childNodes)) {
+    walk(child);
+  }
+
+  return out
+    .map((segment) => segment.type === "text" ? { ...segment, text: trimTrailingQuestionMarker(segment.text) } : segment)
+    .filter((segment) => segment.type === "image" || segment.text);
+}
+
+function trimTrailingQuestionMarker(text: string): string {
+  let out = normalizeText(text);
+  if (!out) return "";
+
+  out = out
+    .replace(/\s+[一二三四五六七八九十]+、\s*$/u, "")
+    .replace(/\s+\d{1,3}\s*[\.、．]\s*[\[【]?(?:单选题|多选题|判断题|填空题)?[\]】]?\s*$/u, "")
+    .replace(/\s+\d{1,3}\s*[\.、．]\s*[\[【]\s*$/u, "")
+    .replace(/\s+第\s*[一二三四五六七八九十\d]+\s*[章节题]\s*$/u, "")
+    .trim();
+
+  return out;
+}
+
+function normalizeMathDisplayText(text: string): string {
+  let out = String(text || "");
+  if (!out) return "";
+
+  out = out
+    .replace(/&infin;|&#8734;|\\infty/gi, "∞")
+    .replace(/负无穷/g, "-∞")
+    .replace(/正无穷/g, "+∞")
+    .replace(/&omega;|&#969;|\\omega/gi, "ω")
+    .replace(/&sigma;|&#963;|\\sigma/gi, "σ")
+    .replace(/&minus;|&#8722;/gi, "-")
+    .replace(/[−﹣－]/g, "-")
+    .replace(/[＋﹢]/g, "+")
+    .replace(/\b([+-])\s*infty\b/gi, "$1∞")
+    .replace(/\binfty\b/gi, "∞")
+    .replace(/由\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/g, "由-∞到+∞")
+    .replace(/从\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/g, "从-∞到+∞");
+
+  out = out.replace(
+    /((?:ω|w|omega)[^。；;,.，]{0,24}?由)\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/gi,
+    (_m, prefix) => `${prefix}-∞到+∞`,
+  );
+
+  return out;
+}
+
+function stripSvgCssNoise(text: string): string {
+  let out = String(text || "");
+  if (!out) return "";
+
+  out = out
+    .replace(/\.[A-Za-z0-9_-]+\s+\.[A-Za-z0-9_-]+\s*\{[^{}]{0,240}\}/g, " ")
+    .replace(/\b(?:fill|stroke|stroke-width|stroke-linejoin|stroke-linecap|font-size|font-family|font-style|font-weight)\s*:\s*[^;}{]{1,120};?/gi, " ")
+    .replace(/\s{2,}/g, " ");
+
+  return out.trim();
+}
+
+function decodeFormulaLikeText(raw: string): string {
+  let out = String(raw || "");
+  if (!out) return "";
+  try {
+    out = decodeURIComponent(out);
+  } catch {
+    // keep raw text
+  }
+
+  out = out
+    .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "$1/$2")
+    .replace(/\\cdot/g, "·")
+    .replace(/\\times/g, "×")
+    .replace(/\\omega/g, "ω")
+    .replace(/\\sigma/g, "σ")
+    .replace(/\\infty/g, "∞")
+    .replace(/\\left/g, "")
+    .replace(/\\right/g, "")
+    .replace(/[{}]/g, "")
+    .replace(/\s*([=+\-*/])\s*/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return normalizeMathDisplayText(out);
+}
+
+function sanitizeJudgePreviewText(text: string): string {
+  const normalized = normalizeText(text);
+  if (!normalized) return "";
+  if (!/\[?判断题\]?|(?:对|错|正确|错误)/.test(normalized)) return normalized;
+
+  let out = normalized;
+  const headers = Array.from(out.matchAll(JUDGE_HEADER_RE));
+  const start = headers[0]?.index ?? out.search(JUDGE_HEADER_START_RE);
+  if (start > 0) out = out.slice(start).trim();
+  if (headers.length >= 2 && typeof headers[1].index === "number") {
+    const secondIndex = headers[1].index!;
+    if (secondIndex > 0) out = out.slice(0, secondIndex).trim();
+  }
+
+  const noise = /(?:上一题|下一题|提交作业|标记此题|返回|答题卡|课堂练习)/;
+  const noiseMatch = noise.exec(out);
+  if (noiseMatch && noiseMatch.index > 0) {
+    out = out.slice(0, noiseMatch.index).trim();
+  }
+
+  const stem = dedupeRepeatedJudgeStem(extractJudgeStemCore(out));
+  const hasDui = /(?:^|\s)对(?:\s|$)|正确|\btrue\b/i.test(out);
+  const hasCuo = /(?:^|\s)错(?:\s|$)|错误|\bfalse\b/i.test(out);
+
+  out = stem;
+  if (hasDui) out += " 对";
+  if (hasCuo) out += " 错";
+
+  return out;
+}
+
+function extractJudgeStemCore(text: string): string {
+  const normalized = normalizeText(text);
+  if (!normalized) return "";
+
+  const explicitSentence = normalized.match(/^(\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?\s*\(\d+分\)\s*.*?[。！？!?])/);
+  if (explicitSentence?.[1]) return normalizeText(explicitSentence[1]);
+
+  const cutAtOption = normalized.match(/^(\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?\s*\(\d+分\)\s*.*?)(?=\s+(?:对|错|正确|错误|true|false)\b)/i);
+  if (cutAtOption?.[1]) return normalizeText(cutAtOption[1]);
+
+  return normalized;
+}
+
+function dedupeRepeatedJudgeStem(text: string): string {
+  const normalized = normalizeText(text);
+  if (!normalized) return "";
+
+  const headerMatch = normalized.match(/^(\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?\s*\(\d+分\)\s*)(.+)$/);
+  if (!headerMatch) return normalized;
+
+  const header = headerMatch[1];
+  const body = headerMatch[2].trim();
+  if (!body) return normalized;
+
+  const firstOptionAt = body.search(/\b(?:对|错|正确|错误|true|false)\b/i);
+  const leadStem = normalizeText((firstOptionAt > 0 ? body.slice(0, firstOptionAt) : body).trim());
+  if (leadStem.length >= 8) {
+    const repeatedLeadAt = body.indexOf(leadStem, leadStem.length);
+    if (repeatedLeadAt > 0) {
+      return normalizeText(`${header}${body.slice(0, repeatedLeadAt).trim()}`);
+    }
+  }
+
+  const firstSentence = body.match(/^(.{6,}?[。！？!?])/);
+  if (firstSentence?.[1]) {
+    const sentence = normalizeText(firstSentence[1]);
+    const secondIndex = body.indexOf(sentence, sentence.length);
+    if (secondIndex > 0) {
+      return normalizeText(`${header}${body.slice(0, secondIndex).trim()}`);
+    }
+  }
+
+  const probe = normalizeText(body.slice(0, Math.min(24, Math.max(12, Math.floor(body.length / 2)))));
+  if (probe.length >= 12) {
+    const repeatedAt = body.indexOf(probe, probe.length);
+    if (repeatedAt > 0) {
+      return normalizeText(`${header}${body.slice(0, repeatedAt).trim()}`);
+    }
+  }
+
+  return normalizeText(`${header}${body}`);
+}
+
 function findQuestionContainer(el: Element): Element | null {
+  const isLeafQuestionPart = (node: Element): boolean => {
+    const cls = String((node as HTMLElement).className || "").toLowerCase();
+    const id = String((node as HTMLElement).id || "").toLowerCase();
+    const marker = `${cls} ${id}`;
+    return /(questiontit|questioncontent|optionul|option-li|option-item|stem|title|content|option)/.test(marker);
+  };
+
+  let best: Element | null = null;
+  let bestScore = -Infinity;
   let node: Element | null = el;
   for (let i = 0; i < 8 && node; i++) {
     const cls = String((node as HTMLElement).className || "").toLowerCase();
     const id = String((node as HTMLElement).id || "").toLowerCase();
-    if (cls.includes("q-detail") || cls.includes("question") || cls.includes("problem") || cls.includes("item") || cls.includes("card") || id.includes("question")) {
-      return node;
+    const marker = `${cls} ${id}`;
+    const positive = /(q-detail|questionbox|question-box|question-item|base-question-component|problem-item|exam-item|test-item|question|problem|exercise|item|card|subject)/.test(marker);
+    const negative = /(optionul|option-li|option-item|questioncontent|questiontit|toolbar|header|footer|sidebar|aside|nav)/.test(marker);
+    if (positive && !negative) {
+      let score = 0;
+      if (/questionbox|question-box|q-detail|question-item|base-question-component|problem-item|exam-item|test-item/.test(marker)) score += 60;
+      if (/card-body|card/.test(marker)) score += 35;
+      if (cls.includes("question") || id.includes("question")) score += 20;
+      if (cls.includes("item")) score += 12;
+      if (node === el) score -= 18;
+      if (isLeafQuestionPart(node)) score -= 40;
+      score -= i * 3;
+      if (score > bestScore) {
+        bestScore = score;
+        best = node;
+      }
     }
     node = node.parentElement;
   }
-  return el.parentElement;
+  return best ?? el.parentElement;
 }
 
 function isLikelyCompleteQuestionText(text: string, type: QuestionType): boolean {
@@ -479,7 +1249,8 @@ function isLikelyCompleteQuestionText(text: string, type: QuestionType): boolean
   if (type === "single_choice" || type === "multi_choice") {
     if (optionCount + circledCount < 4) return false;
     if (!hasABCD && circledCount < 4) return false;
-    if (!hasQuestion && text.length < 60) return false;
+    const hasMathLikePayload = /θ|μ|σ|λ|∞|∑|∫|π|T\d|x_\d|[A-Za-z]\([A-Za-z0-9,+\-*/=()]+\)|\d+\/\d+/.test(text);
+    if (!hasQuestion && !hasMathLikePayload && text.length < 60) return false;
   }
   if (type === "unknown") {
     if (optionCount + circledCount < 2 && !hasQuestion) return false;
@@ -523,7 +1294,7 @@ function isLikelyControlPanelText(text: string): boolean {
 }
 
 function filterFragmentBlocks(blocks: QuestionBlock[]): QuestionBlock[] {
-  const sorted = [...blocks].sort((a, b) => b.previewText.length - a.previewText.length);
+  const sorted = [...blocks].sort((a, b) => candidateQualityScore(b) - candidateQualityScore(a));
   const kept: QuestionBlock[] = [];
   for (const block of sorted) {
     const text = normalizeText(block.previewText);
@@ -564,6 +1335,10 @@ function shouldMergeBlocks(a: QuestionBlock, b: QuestionBlock): boolean {
   // Never merge two direct-card candidates, otherwise adjacent questions may collapse into one.
   if (a.id.startsWith("auto-direct-") && b.id.startsWith("auto-direct-")) return false;
 
+  const orderA = extractLeadingQuestionNumber(a.previewText);
+  const orderB = extractLeadingQuestionNumber(b.previewText);
+  if (orderA !== null && orderB !== null && orderA !== orderB) return false;
+
   const aBottom = a.bbox.y + a.bbox.height;
   const bTop = b.bbox.y;
   const verticalGap = Math.max(0, bTop - aBottom);
@@ -578,13 +1353,31 @@ function shouldMergeBlocks(a: QuestionBlock, b: QuestionBlock): boolean {
   const bText = normalizeText(b.previewText);
   const aHasOptions = countOptionMarkersInText(aText) >= 2;
   const bHasOptions = countOptionMarkersInText(bText) >= 2;
+  if (aHasOptions && bHasOptions) return false;
   const aLooksStem = QUESTION_RE.test(aText) || /下列|正确的是|错误的是|如图|图示/.test(aText);
   const bLooksStem = QUESTION_RE.test(bText) || /下列|正确的是|错误的是|如图|图示/.test(bText);
+  const aLooksComplete = isLikelyCompleteQuestionText(aText, a.questionTypeGuess);
+  const bLooksComplete = isLikelyCompleteQuestionText(bText, b.questionTypeGuess);
 
   const complementary = (aHasOptions && bLooksStem) || (bHasOptions && aLooksStem);
   const sameType = a.questionTypeGuess === b.questionTypeGuess || a.questionTypeGuess === "unknown" || b.questionTypeGuess === "unknown";
+  const fragmentJoin =
+    sameType &&
+    Math.abs(verticalGap) <= 64 &&
+    (
+      (!aLooksComplete && (bHasOptions || bLooksStem)) ||
+      (!bLooksComplete && (aHasOptions || aLooksStem))
+    );
 
-  return complementary || sameType;
+  return complementary || fragmentJoin;
+}
+
+function extractLeadingQuestionNumber(text: string): number | null {
+  const normalized = normalizeText(text);
+  const match = normalized.match(/^(\d{1,3})\s*[\.、\)）]/);
+  if (!match) return null;
+  const n = Number(match[1]);
+  return Number.isFinite(n) ? n : null;
 }
 
 function mergeTwoBlocks(a: QuestionBlock, b: QuestionBlock): QuestionBlock {
@@ -617,9 +1410,41 @@ function mergeTwoBlocks(a: QuestionBlock, b: QuestionBlock): QuestionBlock {
 function deduplicateBlocks(blocks: QuestionBlock[]): QuestionBlock[] {
   const out: QuestionBlock[] = [];
   for (const b of blocks) {
-    if (!out.some((k) => overlapRatio(k.bbox, b.bbox) > 0.5)) out.push(b);
+    const overlapIndex = out.findIndex((k) => {
+      if (overlapRatio(k.bbox, b.bbox) > 0.5) return true;
+      const sameColumn = Math.abs(k.bbox.x - b.bbox.x) < 120;
+      const closeTop = Math.abs(k.bbox.y - b.bbox.y) < 140;
+      const textA = normalizeText(k.previewText);
+      const textB = normalizeText(b.previewText);
+      return sameColumn && closeTop && !!textA && !!textB && (textA.includes(textB) || textB.includes(textA));
+    });
+    if (overlapIndex < 0) {
+      out.push(b);
+      continue;
+    }
+    if (candidateQualityScore(b) > candidateQualityScore(out[overlapIndex])) {
+      out[overlapIndex] = b;
+    }
   }
   return out;
+}
+
+function candidateQualityScore(block: QuestionBlock): number {
+  const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+  const area = Math.max(1, block.bbox.width * block.bbox.height);
+  const areaRatio = area / viewportArea;
+  const heightRatio = block.bbox.height / Math.max(1, window.innerHeight);
+  let score = completenessScore(block.previewText, block.questionTypeGuess, block.confidence);
+
+  if (areaRatio > 0.42) score -= (areaRatio - 0.42) * 220;
+  if (heightRatio > 0.68) score -= (heightRatio - 0.68) * 180;
+  if ((block.questionTypeGuess === "single_choice" || block.questionTypeGuess === "multi_choice") && areaRatio > 0.28) {
+    score -= 22;
+  }
+  if (/\b(?:返回|提交作业|上一题|下一题|答题卡)\b/.test(block.previewText)) {
+    score -= 26;
+  }
+  return score;
 }
 
 function overlapRatio(a: BoundingBox, b: BoundingBox): number {
@@ -645,6 +1470,38 @@ function clampRect(rect: DOMRect, vw: number, vh: number): BoundingBox {
   };
 }
 
+function clampRectToBbox(rect: DOMRect, vw: number, vh: number): BoundingBox {
+  return clampRect(rect, vw, vh);
+}
+
+function getVisibleVerticalRatio(rect: DOMRect, vh: number): number {
+  if (rect.height <= 1) return 0;
+  const visibleTop = Math.max(0, rect.top);
+  const visibleBottom = Math.min(vh, rect.bottom);
+  return Math.max(0, visibleBottom - visibleTop) / rect.height;
+}
+
+function dedupeJoinedStructuredText(parts: string[]): string[] {
+  const out: string[] = [];
+  for (const part of parts) {
+    const normalized = normalizeText(part);
+    if (!normalized) continue;
+    for (let i = out.length - 1; i >= 0; i--) {
+      const existing = out[i];
+      if (existing === normalized) {
+        out.splice(i, 1);
+        continue;
+      }
+      if (existing.length >= 8 && normalized.includes(existing)) {
+        out.splice(i, 1);
+      }
+    }
+    if (out.some((existing) => normalized.length >= 8 && existing.includes(normalized))) continue;
+    out.push(normalized);
+  }
+  return out;
+}
+
 function refineCandidateRect(el: Element, baseRect: DOMRect, vw: number, vh: number): BoundingBox {
   const base = clampRect(baseRect, vw, vh);
   const baseArea = Math.max(1, base.width * base.height);
@@ -655,7 +1512,9 @@ function refineCandidateRect(el: Element, baseRect: DOMRect, vw: number, vh: num
   if (!clustered) return base;
 
   const controls = collectChoiceControls(el, baseRect, vw, vh);
-  const withControls = attachNearbyControls(clustered, controls);
+  const blankControls = collectBlankControls(el, baseRect, vw, vh);
+  const withChoiceControls = attachNearbyControls(clustered, controls);
+  const withControls = attachNearbyBlankControls(withChoiceControls, blankControls);
   const mediaRects = collectMediaRects(el, baseRect, vw, vh);
   const withMedia = attachRelevantMedia(withControls, mediaRects, normalizeText(el.textContent ?? ""));
   const refinedRect = inflateRect(withMedia, 10, baseRect);
@@ -671,6 +1530,70 @@ function refineCandidateRect(el: Element, baseRect: DOMRect, vw: number, vh: num
   if (refinedArea < baseArea * 0.08) return base;
   if (refinedArea > baseArea * 0.98) return base;
   return refined;
+}
+
+function refineBboxForDetectedType(
+  el: Element,
+  bbox: BoundingBox,
+  type: QuestionType,
+  vw: number,
+  vh: number,
+): BoundingBox {
+  if (type === "judge") {
+    return refineJudgeCandidateRect(el, bbox, vw, vh);
+  }
+  return bbox;
+}
+
+function refineJudgeCandidateRect(el: Element, bbox: BoundingBox, vw: number, vh: number): BoundingBox {
+  const relevantRects: DOMRect[] = [];
+  const nodes = el.querySelectorAll("div,p,li,label,span,input");
+
+  for (const node of nodes) {
+    if (!(node instanceof HTMLElement)) continue;
+    if (isExtensionUiElement(node)) continue;
+    if (node === el) continue;
+
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) continue;
+    if (!inViewport(rect, vw, vh)) continue;
+    if (!bboxIntersectsRect(bbox, rect)) continue;
+    if (rect.width >= bbox.width * 0.92 && rect.height >= bbox.height * 0.65) continue;
+    if (!node.matches("label") && !node.matches("input") && node.childElementCount > 2) continue;
+    if (!node.matches("label") && !node.matches("input") && rect.height > 120) continue;
+
+    if (node.matches("input[type='radio'],input[type='checkbox']")) {
+      relevantRects.push(rect);
+      continue;
+    }
+
+    const text = normalizeText(node.innerText || node.textContent || "");
+    if (!text) continue;
+    if (isLikelyActionText(text) || isSectionHeadingText(text)) continue;
+    if (text.length > 180) continue;
+    if (
+      /^(?:\d{1,3}[\.、\)）]\s*)?\[?判断题\]?/u.test(text) ||
+      /(?:对|错|正确|错误|true|false|t\/f)/i.test(text) ||
+      (text.length >= 8 && text.length <= 120 && /[。！？.!?)]$/.test(text))
+    ) {
+      relevantRects.push(rect);
+    }
+  }
+
+  if (!relevantRects.length) return bbox;
+
+  const union = unionRects(relevantRects);
+  const expanded = {
+    x: Math.max(0, union.left - 14),
+    y: Math.max(0, union.top - 14),
+    width: Math.max(20, Math.min(vw, union.right + 14) - Math.max(0, union.left - 14)),
+    height: Math.max(20, Math.min(vh, union.bottom + 14) - Math.max(0, union.top - 14)),
+  };
+
+  const oldArea = Math.max(1, bbox.width * bbox.height);
+  const newArea = Math.max(1, expanded.width * expanded.height);
+  if (newArea >= oldArea * 0.92) return bbox;
+  return expanded;
 }
 
 type RectItem = { rect: DOMRect; text: string; score: number };
@@ -714,6 +1637,7 @@ function collectTextRectItems(el: Element, baseRect: DOMRect, vw: number, vh: nu
 function scoreTextSnippet(text: string): number {
   const t = normalizeText(text);
   if (!t) return 0;
+  if (isSectionHeadingText(t)) return -2;
   let score = 0;
   if (QUESTION_RE.test(t)) score += 3;
   if ((t.match(OPTION_RE) || []).length > 0) score += 4;
@@ -721,9 +1645,15 @@ function scoreTextSnippet(text: string): number {
   if (/^\d{1,3}[\.、\)）]/.test(t)) score += 3;
   if (/^[A-D][\.\):\uFF1A\u3001]/.test(t)) score += 3;
   if (/单选|多选|判断|填空|简答|题目|选项/.test(t)) score += 2;
+  if (/请输入答案|_{3,}|—{2,}|﹍{2,}/.test(t)) score += 3;
   if (/[\u4e00-\u9fa5]/.test(t) && t.length >= 6) score += 1;
   if (/^\d+$/.test(t)) score -= 1;
   return score;
+}
+
+function isSectionHeadingText(text: string): boolean {
+  const t = normalizeText(text);
+  return /^(?:[一二三四五六七八九十]+、\s*)?(?:单选题|多选题|填空题|判断题|简答题)(?:\s*[（(]\d+分[)）])?$/u.test(t);
 }
 
 function pickBestQuestionCluster(items: RectItem[]): DOMRect | null {
@@ -797,6 +1727,20 @@ function collectChoiceControls(el: Element, baseRect: DOMRect, vw: number, vh: n
   return out;
 }
 
+function collectBlankControls(el: Element, baseRect: DOMRect, vw: number, vh: number): DOMRect[] {
+  const out: DOMRect[] = [];
+  const controls = el.querySelectorAll("input:not([type='radio']):not([type='checkbox']):not([type='hidden']):not([type='button']):not([type='submit']),textarea,[contenteditable='true']");
+  for (const c of controls) {
+    if (!(c instanceof HTMLElement)) continue;
+    const r = c.getBoundingClientRect();
+    if (r.width < 20 || r.height < 12) continue;
+    if (!inViewport(r, vw, vh)) continue;
+    if (!intersectsRect(r, baseRect)) continue;
+    out.push(r);
+  }
+  return out;
+}
+
 function attachNearbyControls(mainRect: DOMRect, controls: DOMRect[]): DOMRect {
   if (!controls.length) return mainRect;
   const near = controls.filter((c) => {
@@ -808,9 +1752,20 @@ function attachNearbyControls(mainRect: DOMRect, controls: DOMRect[]): DOMRect {
   return unionRects([mainRect, ...near]);
 }
 
+function attachNearbyBlankControls(mainRect: DOMRect, controls: DOMRect[]): DOMRect {
+  if (!controls.length) return mainRect;
+  const near = controls.filter((c) => {
+    const yNear = c.bottom >= mainRect.top - 80 && c.top <= mainRect.bottom + 240;
+    const xNear = c.right >= mainRect.left - 220 && c.left <= mainRect.right + 220;
+    return yNear && xNear;
+  });
+  if (!near.length) return mainRect;
+  return unionRects([mainRect, ...near]);
+}
+
 function collectMediaRects(el: Element, baseRect: DOMRect, vw: number, vh: number): DOMRect[] {
   const out: DOMRect[] = [];
-  const mediaNodes = el.querySelectorAll("img,canvas,svg,math,figure");
+  const mediaNodes = el.querySelectorAll("img,canvas,svg,math,figure,mjx-container,.MathJax,.katex,embed,table");
   for (const node of mediaNodes) {
     if (!(node instanceof Element)) continue;
     const r = (node as HTMLElement).getBoundingClientRect();

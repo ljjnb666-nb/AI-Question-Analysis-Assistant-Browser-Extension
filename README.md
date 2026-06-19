@@ -17,7 +17,7 @@
 | 🔍 自动识题 | DOM 扫描当前屏题目，高亮候选块 |
 | 📋 批量解析 | 侧边栏勾选多题，一键批量解析 |
 | 💬 悬浮弹窗 | 可拖动、可缩放、可最小化，Shadow DOM 隔离样式 |
-| 🤖 多 AI 提供商 | 支持 Anthropic、OpenAI、DeepSeek、Gemini、通义千问、Kimi、智谱、Ollama |
+| 🤖 多 AI 提供商 | 支持 Anthropic、OpenAI、DeepSeek、Gemini、通义千问、Kimi、智谱、MiniMax、Ollama |
 | 📜 历史记录 | 自动保存最近 50 条解析记录 |
 | ⚙️ 完整设置 | API Key、模型选择、路由策略、语言、连接测试 |
 
@@ -113,9 +113,10 @@ npm run dev
 | 🟡 **通义千问** | ✅ | qwen-vl-max | [dashscope.aliyun.com](https://dashscope.aliyun.com) |
 | 🌙 **Kimi** | ❌ 纯文字 | moonshot-v1-8k | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | 🔮 **智谱 GLM** | ✅ | glm-4v-flash | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| 🧠 **MiniMax** | ✅ | MiniMax-M3 | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | 🦙 **Ollama 本地** | ✅ | llava | [ollama.com](https://ollama.com) |
 
-**自定义 Base URL**：OpenAI 和 Ollama 支持填入代理/自托管地址。
+**自定义 Base URL**：OpenAI、MiniMax 和 Ollama 支持填入代理/自托管地址。
 
 ---
 
@@ -156,7 +157,7 @@ src/
         ├── cropImage.ts             # Canvas 截图裁剪
         ├── messaging.ts             # 类型安全消息总线
         ├── ocr.ts                   # 图像分析 + 视觉关键词检测
-        ├── parseRouter.ts           # 8家AI提供商路由 + Mock 兜底
+        ├── parseRouter.ts           # 9家AI提供商路由 + Mock 兜底
         └── storage.ts               # chrome.storage 封装（状态/设置/历史）
 ```
 
@@ -228,7 +229,7 @@ if (provider.id === "myprovider") {
 | M2 手动截图闭环 | ✅ |
 | M3 弹窗完善（Shadow DOM/拖动/缩放/最小化/边界吸附） | ✅ |
 | M4 自动识题+高亮+侧边栏+批量解析 | ✅ |
-| M5 OCR路由+8家AI+图题增强 | ✅ |
+| M5 OCR路由+9家AI+图题增强 | ✅ |
 | M6 埋点+错误处理+反馈面板 | ✅ |
 | V2 整页滚动采集 | ⏳ 规划中 |
 | V2 登录/会员/配额 | ⏳ 规划中 |

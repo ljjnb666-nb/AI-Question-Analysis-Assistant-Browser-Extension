@@ -31,6 +31,10 @@ export type AnalyticsEvent =
   | "manual_second_vision_review_started"
   | "manual_second_vision_review_applied"
   | "manual_second_vision_review_skipped"
+  | "parse_stream_timeout_fallback"
+  | "manual_parse_attempt_started"
+  | "manual_parse_attempt_succeeded"
+  | "manual_parse_attempt_failed"
   | "route_used_text"
   | "route_used_vision"
   | "route_used_hybrid"
@@ -51,6 +55,11 @@ interface EventEntry {
 
 const SESSION_LOG: EventEntry[] = [];
 const MAX_STORED = 300;
+
+function isExtensionContextInvalidatedError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err || "");
+  return /Extension context invalidated/i.test(message);
+}
 
 // Fire session_start once per content script load
 let sessionStarted = false;
@@ -82,6 +91,7 @@ async function persistEvent(entry: EventEntry): Promise<void> {
     const updated = [...log, entry].slice(-MAX_STORED);
     await chrome.storage.local.set({ analyticsLog: updated });
   } catch (err) {
+    if (isExtensionContextInvalidatedError(err)) return;
     logError("Failed to persist analytics event", err, "persistEvent", { event: entry.event });
   }
 }
@@ -95,6 +105,7 @@ export async function getStoredLog(): Promise<EventEntry[]> {
     const r = await chrome.storage.local.get("analyticsLog");
     return (r["analyticsLog"] as EventEntry[]) ?? [];
   } catch (err) {
+    if (isExtensionContextInvalidatedError(err)) return [];
     logError("Failed to load stored analytics log", err, "getStoredLog");
     return [];
   }

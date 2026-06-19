@@ -20,11 +20,12 @@ describe("parseRouter", () => {
     });
 
     it("contains expected providers", () => {
-      expect(PROVIDERS.length).toBeGreaterThanOrEqual(9);
+      expect(PROVIDERS.length).toBeGreaterThanOrEqual(10);
       const ids = PROVIDERS.map((p) => p.id);
       expect(ids).toContain("custom");
       expect(ids).toContain("openai");
       expect(ids).toContain("anthropic");
+      expect(ids).toContain("minimax");
     });
   });
 
@@ -84,6 +85,25 @@ describe("parseRouter", () => {
       expect(result.answer.length).toBeGreaterThan(1);
     });
 
+    it("normalizes numbered fill-blank answers at parse stage", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "7.【填空题】 奈氏图终点相角由______决定，n-m=1时终点相角为______。",
+        questionTypeGuess: "fill_blank",
+      };
+      const rawText = JSON.stringify({
+        questionType: "fill_blank",
+        answer: "1: n-m（开环传递函数极点数与零点数之差）；2. -90°（或-π/2）",
+        confidence: 0.93,
+        briefExplanation: "按小问作答",
+        detailedExplanation: "1. 第一空：n-m（开环传递函数极点数与零点数之差）\n2. 第二空：-90°（或-π/2）",
+        recognizedText: block.previewText,
+      });
+
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("n-m（开环传递函数极点数与零点数之差）；-90°（或-π/2）");
+    });
+
     it("keeps structured multi-part lines in detailed explanation", () => {
       const block: QuestionBlock = {
         ...mockBlock,
@@ -119,7 +139,7 @@ describe("parseRouter", () => {
       });
       const result = buildResult(block, "vision", rawText);
       expect(result.answer).not.toBe("A,B,C,D");
-      expect(result.answer).toBe("见分点答案");
+      expect(result.answer).toBe("需人工确认");
     });
 
     it("forces fallback when model marks multi_choice but stem is clearly multi-part fill-blank", () => {
@@ -138,7 +158,7 @@ describe("parseRouter", () => {
       });
       const result = buildResult(block, "vision", rawText);
       expect(result.questionType).toBe("fill_blank");
-      expect(result.answer).toBe("见分点答案");
+      expect(result.answer).toBe("需人工确认");
     });
 
     it("does not treat extracted answer-like line containing only A,B,C,D as valid non-choice answer", () => {
@@ -156,7 +176,7 @@ describe("parseRouter", () => {
         recognizedText: block.previewText,
       });
       const result = buildResult(block, "vision", rawText);
-      expect(result.answer).toBe("见分点答案");
+      expect(result.answer).toBe("需人工确认");
     });
 
     it("falls back from uncertain long non-choice narrative to structured placeholder", () => {
@@ -174,7 +194,25 @@ describe("parseRouter", () => {
         recognizedText: block.previewText,
       });
       const result = buildResult(block, "vision", rawText);
-      expect(result.answer).toBe("见分点答案");
+      expect(result.answer).toBe("需人工确认");
+    });
+
+    it("normalizes placeholder-style non-choice answers to manual confirmation", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "填空题：第一空____ 第二空____",
+        questionTypeGuess: "fill_blank",
+      };
+      const rawText = JSON.stringify({
+        questionType: "fill_blank",
+        answer: "按分点作答，详见解析",
+        confidence: 0.95,
+        briefExplanation: "模型未给出逐空答案",
+        detailedExplanation: "第一空对应概念，第二空对应结论。",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("需人工确认");
     });
 
     it("applies biology heuristic corrections for common fill-blank mistakes", () => {
@@ -218,6 +256,87 @@ describe("parseRouter", () => {
       const result = buildResult(block, "vision", rawText);
       expect(result.detailedExplanation).toContain("物质A是葡萄糖，物质E是淀粉");
       expect(result.detailedExplanation).not.toContain("物质A是淀粉");
+    });
+
+    it("removes next-question tail from recognized single-choice option D", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "5. [单选题] 某系统的校正装置的数学模型为（ ）。A. 超前校正 B. 滞后校正 C. 微分校正 D. PID校正",
+        questionTypeGuess: "single_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "single_choice",
+        answer: "D",
+        confidence: 0.92,
+        briefExplanation: "根据模型项判断",
+        detailedExplanation: "略",
+        recognizedText: "5. [单选题] 某系统的校正装置的数学模型为（ ）。A. 超前校正 B. 滞后校正 C. 微分校正 D. PID校正 5. [",
+      });
+
+      const result = buildResult(block, "vision", rawText);
+      expect(result.recognizedText).toContain("D. PID校正");
+      expect(result.recognizedText).not.toContain("PID校正 5. [");
+    });
+
+    it("deduplicates repeated judge recognized text while keeping structured options", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "8. [判断题] 前馈补偿可以在不影响稳定性前提下消除误差。 对 错",
+        questionTypeGuess: "judge",
+      };
+      const rawText = JSON.stringify({
+        questionType: "judge",
+        answer: "对",
+        confidence: 0.9,
+        briefExplanation: "前馈补偿可改善误差",
+        detailedExplanation: "略",
+        recognizedText:
+          "8. [判断题] 前馈补偿可以在不影响稳定性前提下消除误差。 对 错 8. [判断题] 前馈补偿可以在不影响稳定性前提下消除误差。 对 错",
+      });
+
+      const result = buildResult(block, "vision", rawText);
+      const stem = "前馈补偿可以在不影响稳定性前提下消除误差。";
+      expect((result.recognizedText.match(new RegExp(stem, "g")) || []).length).toBe(1);
+      expect(result.recognizedText).toContain("对");
+      expect(result.recognizedText).toContain("错");
+    });
+
+    it("repairs missing infinity symbols in frequency-domain recognized text", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "若开环传递函数G(s)H(s)在[s]右半平面有P个极点，当ω由-∞到+∞时，若G(jw)H(jw)曲线逆时针包围(-1,j0)点P圈，则闭环系统( )。",
+        questionTypeGuess: "single_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "single_choice",
+        answer: "D",
+        confidence: 0.91,
+        briefExplanation: "根据奈奎斯特判据",
+        detailedExplanation: "略",
+        recognizedText: "若开环传递函数G(s)H(s)在[s]右半平面有P个极点，当ω由 - 到 + 时，若G(jw)H(jw)曲线逆时针包围(-1,j0)点P圈，则闭环系统( )。",
+      });
+
+      const result = buildResult(block, "vision", rawText);
+      expect(result.recognizedText).toContain("ω由-∞到+∞");
+    });
+
+    it("repairs infinity symbols even when omega is missing from the broken span", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "当由-∞到+∞时，若G(jw)H(jw)曲线逆时针包围(-1,j0)点P圈，则闭环系统( )。",
+        questionTypeGuess: "single_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "single_choice",
+        answer: "D",
+        confidence: 0.9,
+        briefExplanation: "略",
+        detailedExplanation: "略",
+        recognizedText: "当由-到+时，若G(jw)H(jw)曲线逆时针包围(-1,j0)点P圈，则闭环系统( )。",
+      });
+
+      const result = buildResult(block, "vision", rawText);
+      expect(result.recognizedText).toContain("由-∞到+∞");
     });
   });
 
@@ -340,6 +459,94 @@ describe("parseRouter", () => {
       const keywords = ["葡萄糖", "淀粉", "F", "C、H、O、N", "a+b", "砖红色沉淀", "紫色"];
       const hitCount = keywords.filter((k) => joined.includes(k)).length;
       expect(hitCount).toBeGreaterThanOrEqual(5);
+    });
+  });
+
+  describe("MiniMax provider", () => {
+    it("uses OpenAI-compatible chat endpoint with reasoning split enabled", async () => {
+      const block: QuestionBlock = {
+        id: "minimax-test",
+        bbox: { x: 0, y: 0, width: 100, height: 50 },
+        previewText: "1+1等于多少？A.1 B.2 C.3 D.4",
+        hasImage: true,
+        imageDataUrl: "data:image/png;base64,abc",
+        questionTypeGuess: "single_choice",
+        confidence: 1,
+        source: "manual_capture",
+      };
+
+      const settings: AppSettings = {
+        providerId: "minimax",
+        apiKey: "test-key",
+        apiModel: "MiniMax-M3",
+        preferredRoute: "vision",
+        language: "zh",
+        enableAnalytics: true,
+      };
+
+      const fetchMock = vi.fn(async () =>
+        new Response(JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "{\"questionType\":\"single_choice\",\"answer\":\"B\",\"confidence\":0.98,\"briefExplanation\":\"1+1=2\",\"detailedExplanation\":\"1+1 的结果是 2。\",\"recognizedText\":\"1+1等于多少？A.1 B.2 C.3 D.4\"}",
+              },
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await parseQuestion(block, settings);
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+
+      expect(url).toBe("https://api.minimaxi.com/v1/chat/completions");
+      expect(body.model).toBe("MiniMax-M3");
+      expect(body.thinking).toEqual({ type: "adaptive" });
+      expect(body.reasoning_split).toBe(true);
+      expect(body.max_completion_tokens).toBe(1024);
+      expect(body.max_tokens).toBeUndefined();
+      expect(result.answer).toBe("B");
+    });
+
+    it("normalizes custom base url when user includes /v1", async () => {
+      const block: QuestionBlock = {
+        id: "minimax-custom-url-test",
+        bbox: { x: 0, y: 0, width: 100, height: 50 },
+        previewText: "1+1等于多少？A.1 B.2 C.3 D.4",
+        hasImage: false,
+        questionTypeGuess: "single_choice",
+        confidence: 1,
+        source: "manual_capture",
+      };
+
+      const settings: AppSettings = {
+        providerId: "minimax",
+        apiKey: "test-key",
+        apiModel: "MiniMax-M3",
+        preferredRoute: "text",
+        language: "zh",
+        enableAnalytics: true,
+        customBaseUrl: "https://api.minimaxi.com/v1",
+      };
+
+      const fetchMock = vi.fn(async () =>
+        new Response(JSON.stringify({
+          choices: [{ message: { content: "{\"questionType\":\"single_choice\",\"answer\":\"B\",\"confidence\":0.98,\"briefExplanation\":\"1+1=2\",\"detailedExplanation\":\"1+1 的结果是 2。\",\"recognizedText\":\"1+1等于多少？A.1 B.2 C.3 D.4\"}" } }],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await parseQuestion(block, settings);
+      const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe("https://api.minimaxi.com/v1/chat/completions");
     });
   });
 });

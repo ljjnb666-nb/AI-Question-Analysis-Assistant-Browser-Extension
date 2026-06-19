@@ -1,17 +1,14 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
-import type { DetectedCandidate, ParseResult, QuestionBlock, QuestionType } from "@/shared/types";
+import type { CandidateSnapshot, DetectedCandidate, HistoryEntry, ParseResult, QuestionBlock, QuestionDisplaySegment, QuestionType } from "@/shared/types";
 import { addHistoryEntry, clearHistory, exportHistory, loadSettings, saveSettings } from "@/shared/utils/storage";
 import { getProvider, parseQuestion, PROVIDERS } from "@/shared/utils/parseRouter";
 import type { ProviderId } from "@/shared/utils/parseRouter";
 
-type HistoryItem = {
-  id: string;
-  timestamp: number;
-  result: Partial<ParseResult> & { answer?: string; confidence?: number };
-  block: { previewText?: string; questionTypeGuess?: QuestionType; imageDataUrl?: string; questionImageUrl?: string };
-};
+type HistoryItem = HistoryEntry;
 
 type UILang = "zh" | "en";
+type CandidateViewFilter = "all" | "risky" | "done";
+const JUDGE_HEADER_RE = /\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?\s*\(\d+分\)/g;
 
 export const SidePanelApp: React.FC = () => {
   const [uiLang, setUiLang] = useState<UILang>("zh");
@@ -21,7 +18,20 @@ export const SidePanelApp: React.FC = () => {
   const [isFullPageScan, setIsFullPageScan] = useState(false);
   const [scanProgress, setScanProgress] = useState<{ progress: number; found: number; step: number; total: number } | null>(null);
   const [isBatchParsing, setIsBatchParsing] = useState(false);
+  const [isBatchFilling, setIsBatchFilling] = useState(false);
+  const [isRetryingRisky, setIsRetryingRisky] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
+  const [candidateViewFilter, setCandidateViewFilter] = useState<CandidateViewFilter>("all");
+  const [fillFeedback, setFillFeedback] = useState<string>("");
+  const [isAutoSolving, setIsAutoSolving] = useState(false);
+  const [autoSolveProgress, setAutoSolveProgress] = useState<{
+    solved: number;
+    filled: number;
+    total: number;
+    current: number;
+    statusText: string;
+    currentPreview?: string;
+  } | null>(null);
 
   useEffect(() => {
     loadSettings().then((s) => {
@@ -36,15 +46,15 @@ export const SidePanelApp: React.FC = () => {
 
     const handler = (msg: Record<string, unknown>) => {
       if (msg.type === "AUTO_DETECT_RESULT_READY") {
-        const blocks = (msg.candidates as QuestionBlock[]) ?? [];
+        const snapshots = (msg.candidates as CandidateSnapshot[]) ?? [];
         setCandidates((prev) => {
           const prevById = new Map(prev.map((c) => [c.block.id, c] as const));
-          return blocks.map((b) => {
-            const old = prevById.get(b.id);
+          return snapshots.map((snapshot) => {
+            const old = prevById.get(snapshot.block.id);
             return {
-              block: b,
-              selected: (b as any)._selected === true,
-              status: old?.status ?? "idle",
+              block: snapshot.block,
+              selected: snapshot.selected,
+              status: snapshot.status ?? old?.status ?? "idle",
               result: old?.result,
               error: old?.error,
               debugInfo: old?.debugInfo,
@@ -68,6 +78,23 @@ export const SidePanelApp: React.FC = () => {
         const blocks = (msg.candidates as QuestionBlock[]) ?? [];
         setCandidates(blocks.map((b) => ({ block: b, selected: false, status: "idle" as const })));
         setExpandedIds({});
+      }
+      if (msg.type === "AUTO_SOLVE_PROGRESS") {
+        setIsAutoSolving(Boolean(msg.running));
+        setAutoSolveProgress({
+          solved: Number(msg.solved ?? 0),
+          filled: Number(msg.filled ?? 0),
+          total: Number(msg.total ?? 0),
+          current: Number(msg.current ?? 0),
+          statusText: String(msg.statusText ?? ""),
+          currentPreview: typeof msg.currentPreview === "string" ? msg.currentPreview : "",
+        });
+      }
+      if (msg.type === "AUTO_SOLVE_DONE") {
+        setIsAutoSolving(false);
+        setAutoSolveProgress(null);
+        setFillFeedback(String(msg.message || (msg.ok ? "自动答题完成" : "自动答题失败")));
+        window.setTimeout(() => setFillFeedback(""), 3200);
       }
     };
     chrome.runtime.onMessage.addListener(handler);
@@ -222,7 +249,114 @@ export const SidePanelApp: React.FC = () => {
     }
   }, []);
 
+  const handleSelectRisky = useCallback(() => {
+    setCandidates((prev) => {
+      const next = prev.map((cand) => ({ ...cand, selected: isRiskyCandidate(cand) }));
+      const riskyIds = new Set(next.filter((cand) => cand.selected).map((cand) => cand.block.id));
+      for (const cand of next) {
+        void syncSelection({ blockId: cand.block.id, selected: riskyIds.has(cand.block.id) });
+      }
+      return next;
+    });
+  }, []);
+
+  const handleRetryRisky = useCallback(async () => {
+    const settings = await loadSettings();
+    const provider = getProvider(settings.providerId ?? "anthropic");
+    if (!provider.supportsVision) return;
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) return;
+
+    const riskyCandidates = candidates.filter(isRiskyCandidate);
+    if (!riskyCandidates.length) return;
+
+    setIsRetryingRisky(true);
+    for (const cand of riskyCandidates) {
+      setCandidates((prev) => prev.map((c) => (c.block.id === cand.block.id ? { ...c, status: "loading" as const } : c)));
+      try {
+        const imageDataUrl = await requestBlockImage(activeTab.id, cand.block.bbox);
+        if (!imageDataUrl) throw new Error(langSafe(settings.language, "截图失败", "Image capture failed"));
+        const visionBlock: QuestionBlock = { ...cand.block, hasImage: true, imageDataUrl };
+        const visionResult = await parseQuestion(visionBlock, { ...settings, preferredRoute: "vision" as const });
+        setCandidates((prev) =>
+          prev.map((c) =>
+            c.block.id === cand.block.id
+              ? { ...c, status: "success" as const, result: visionResult, error: undefined, debugInfo: { imageAttached: true, routeUsed: visionResult.routeUsed } }
+              : c,
+          ),
+        );
+        await addHistoryEntry({ id: cand.block.id, timestamp: Date.now(), block: visionBlock, result: visionResult, host: location.hostname });
+      } catch (err) {
+        setCandidates((prev) =>
+          prev.map((c) => (c.block.id === cand.block.id ? { ...c, status: "error" as const, error: String(err) } : c)),
+        );
+      }
+    }
+    setIsRetryingRisky(false);
+  }, [candidates]);
+
+  const handleFillCandidate = useCallback(async (cand: DetectedCandidate) => {
+    if (!cand.result) return;
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) return;
+
+    const resp = await sendFillMessage(activeTab.id, cand.block, cand.result);
+    setFillFeedback(resp?.message || (resp?.ok ? "填写完成" : "填写失败"));
+    window.setTimeout(() => setFillFeedback(""), 2200);
+  }, []);
+
+  const handleBatchFill = useCallback(async () => {
+    const targets = candidates.filter((cand) => cand.selected && cand.status === "success" && cand.result);
+    if (!targets.length) return;
+
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) return;
+
+    setIsBatchFilling(true);
+    let totalFilled = 0;
+    for (const cand of targets) {
+      const resp = await sendFillMessage(activeTab.id, cand.block, cand.result!);
+      totalFilled += resp?.filledCount ?? 0;
+    }
+    setIsBatchFilling(false);
+    setFillFeedback(
+      uiLang === "en"
+        ? `Filled ${totalFilled} fields across ${targets.length} question(s)`
+        : `已在 ${targets.length} 题中填写 ${totalFilled} 个控件`,
+    );
+    window.setTimeout(() => setFillFeedback(""), 2600);
+  }, [candidates, uiLang]);
+
+  const handleStartAutoSolve = useCallback(async () => {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) return;
+    setFillFeedback("");
+    setIsAutoSolving(true);
+    setAutoSolveProgress({
+      solved: 0,
+      filled: 0,
+      total: 0,
+      current: 0,
+      statusText: uiLang === "en" ? "Starting auto solve..." : "开始自动答题...",
+    });
+    chrome.tabs.sendMessage(activeTab.id, { type: "START_AUTO_SOLVE_ALL" });
+  }, [uiLang]);
+
+  const handleStopAutoSolve = useCallback(async () => {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) return;
+    chrome.tabs.sendMessage(activeTab.id, { type: "STOP_AUTO_SOLVE_ALL" });
+  }, []);
+
   const selectedCount = candidates.filter((c) => c.selected).length;
+  const selectedSolvedCount = candidates.filter((c) => c.selected && c.status === "success" && c.result).length;
+  const riskyCount = candidates.filter(isRiskyCandidate).length;
+  const doneCount = candidates.filter((cand) => cand.status === "success").length;
+  const filteredCandidates = candidates.filter((cand) => {
+    if (candidateViewFilter === "risky") return isRiskyCandidate(cand);
+    if (candidateViewFilter === "done") return cand.status === "success";
+    return true;
+  });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
@@ -263,6 +397,15 @@ export const SidePanelApp: React.FC = () => {
               <Btn primary={isFullPageScan} onClick={isFullPageScan ? handleCancelFullPage : handleFullPageDetect} disabled={isDetecting}>
                 {isFullPageScan ? (uiLang === "en" ? "Stop Scan" : "停止扫描") : (uiLang === "en" ? "Full Page Scan" : "整页扫描")}
               </Btn>
+              <Btn
+                primary={isAutoSolving}
+                onClick={isAutoSolving ? handleStopAutoSolve : handleStartAutoSolve}
+                disabled={isDetecting || isFullPageScan || isBatchParsing || isBatchFilling}
+              >
+                {isAutoSolving
+                  ? (uiLang === "en" ? "Stop Auto Solve" : "停止自动答题")
+                  : (uiLang === "en" ? "Auto Solve All" : "自动答题")}
+              </Btn>
               {candidates.length > 0 && !isFullPageScan && (
                 <>
                   <Btn
@@ -281,14 +424,54 @@ export const SidePanelApp: React.FC = () => {
                   >
                     {uiLang === "en" ? "Clear" : "清空"}
                   </Btn>
+                  <Btn onClick={handleSelectRisky} disabled={!riskyCount}>
+                    {uiLang === "en" ? `Select Risky ${riskyCount}` : `选中风险题 ${riskyCount}`}
+                  </Btn>
+                  <Btn onClick={handleRetryRisky} disabled={!riskyCount || isRetryingRisky || isBatchParsing}>
+                    {isRetryingRisky
+                      ? (uiLang === "en" ? "Reviewing..." : "复核中...")
+                      : (uiLang === "en" ? `Review Risky ${riskyCount}` : `复核风险题 ${riskyCount}`)}
+                  </Btn>
                   <Btn primary onClick={handleBatchParse} disabled={!selectedCount || isBatchParsing}>
                     {isBatchParsing
                       ? (uiLang === "en" ? "Parsing..." : "解析中...")
                       : (uiLang === "en" ? `Solve ${selectedCount}` : `解析 ${selectedCount} 题`)}
                   </Btn>
+                  <Btn primary onClick={handleBatchFill} disabled={!selectedSolvedCount || isBatchFilling || isBatchParsing}>
+                    {isBatchFilling
+                      ? (uiLang === "en" ? "Filling..." : "填写中...")
+                      : (uiLang === "en" ? `Fill ${selectedSolvedCount}` : `填写 ${selectedSolvedCount} 题`)}
+                  </Btn>
                 </>
               )}
             </div>
+
+            {fillFeedback && (
+              <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 8, backgroundColor: "#1c2a3a", border: "1px solid #4f9cf9", fontSize: 12, color: "#cfe7ff" }}>
+                {fillFeedback}
+              </div>
+            )}
+
+            {autoSolveProgress && (
+              <div style={{ marginBottom: 10, padding: "10px 12px", borderRadius: 8, backgroundColor: "#1f2d1f", border: "1px solid #5ab56b" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
+                  <span style={{ color: "#8fe39a", fontWeight: 700 }}>
+                    {uiLang === "en" ? "Auto Solving" : "自动答题中"}
+                  </span>
+                  <span style={{ color: "#9bc7a3" }}>
+                    {uiLang === "en"
+                      ? `Solved ${autoSolveProgress.solved}${autoSolveProgress.total ? ` / ${autoSolveProgress.total}` : ""}, filled ${autoSolveProgress.filled}`
+                      : `已解析 ${autoSolveProgress.solved}${autoSolveProgress.total ? ` / ${autoSolveProgress.total}` : ""}，已填写 ${autoSolveProgress.filled}`}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: "#d5f5da", lineHeight: 1.5 }}>
+                  {autoSolveProgress.statusText}
+                </div>
+                {autoSolveProgress.currentPreview && (
+                  <AutoSolvePreviewCard previewText={autoSolveProgress.currentPreview} lang={uiLang} />
+                )}
+              </div>
+            )}
 
             {scanProgress && (
               <div style={{ marginBottom: 10, padding: "10px 12px", borderRadius: 8, backgroundColor: "#1c2a3a", border: "1px solid #4f9cf9" }}>
@@ -315,6 +498,32 @@ export const SidePanelApp: React.FC = () => {
               </div>
             )}
 
+            {candidates.length > 0 && !isFullPageScan && (
+              <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+                {([
+                  ["all", uiLang === "en" ? `All ${candidates.length}` : `全部 ${candidates.length}`],
+                  ["risky", uiLang === "en" ? `Risky ${riskyCount}` : `风险 ${riskyCount}`],
+                  ["done", uiLang === "en" ? `Done ${doneCount}` : `完成 ${doneCount}`],
+                ] as const).map(([filterId, label]) => (
+                  <button
+                    key={filterId}
+                    onClick={() => setCandidateViewFilter(filterId)}
+                    style={{
+                      border: `1px solid ${candidateViewFilter === filterId ? "#4f9cf9" : "#313244"}`,
+                      backgroundColor: candidateViewFilter === filterId ? "#1c2a3a" : "transparent",
+                      color: candidateViewFilter === filterId ? "#89b4fa" : "#6c7086",
+                      borderRadius: 999,
+                      fontSize: 11,
+                      padding: "4px 10px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {candidates.length === 0 && !isDetecting && !isFullPageScan && !scanProgress && (
                 <div style={{ textAlign: "center", padding: "28px 0", color: "#6c7086", fontSize: 13 }}>
                 {uiLang === "en"
@@ -323,7 +532,7 @@ export const SidePanelApp: React.FC = () => {
               </div>
             )}
 
-            {candidates.map((cand, i) => (
+            {filteredCandidates.map((cand, i) => (
               <CandidateCard
                 key={cand.block.id}
                 index={i + 1}
@@ -332,6 +541,7 @@ export const SidePanelApp: React.FC = () => {
                 onToggle={() => toggleSelect(cand.block.id)}
                 onFlash={() => handleFlash(cand.block.id)}
                 onToggleDetails={() => toggleDetails(cand.block.id)}
+                onFill={() => handleFillCandidate(cand)}
                 onRetryVision={() => handleRetryVision(cand)}
                 lang={uiLang}
               />
@@ -390,114 +600,295 @@ const CandidateCard: React.FC<{
   onToggle: () => void;
   onFlash: () => void;
   onToggleDetails: () => void;
+  onFill: () => void;
   onRetryVision: () => void;
   lang: UILang;
-}> = ({ index, cand, isExpanded, onToggle, onFlash, onToggleDetails, onRetryVision, lang }) => (
-  <div
-    onClick={onToggle}
-    style={{
-      border: `1px solid ${cand.selected ? "#4f9cf9" : "#313244"}`,
-      borderRadius: 8,
-      padding: "10px 12px",
-      marginBottom: 8,
-      backgroundColor: cand.selected ? "#1c2a3a" : "#181825",
-      cursor: "pointer",
-    }}
-  >
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-      <div
-        style={{
-          width: 16,
-          height: 16,
-          borderRadius: 3,
-          flexShrink: 0,
-          marginTop: 2,
-          border: `2px solid ${cand.selected ? "#4f9cf9" : "#45475a"}`,
-          backgroundColor: cand.selected ? "#4f9cf9" : "transparent",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {cand.selected && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
-      </div>
+}> = ({ index, cand, isExpanded, onToggle, onFlash, onToggleDetails, onFill, onRetryVision, lang }) => {
+  const rawPreviewText = cand.block.previewText || "";
+  const normalizedPreviewText = cleanCandidatePreviewText(rawPreviewText);
+  const { stem, options } = splitStemAndOptions(normalizedPreviewText);
+  const blankView = splitStemAndBlanks(normalizedPreviewText);
+  const judgeView = splitJudgeStemAndOptions(normalizedPreviewText);
+  const displaySegments = buildDisplaySegmentsForCandidate(cand.block, stem || normalizedPreviewText, rawPreviewText, lang);
+  const displayStem = formatQuestionTextForDisplay(
+    buildCandidateStemForDisplay(cand.block, stem || normalizedPreviewText, rawPreviewText, lang),
+  );
+  const fillBlankStem = formatQuestionTextForDisplay(ensureBlankPlaceholders(blankView.stem || normalizedPreviewText, blankView.blanks.length));
+  const judgeStem = formatQuestionTextForDisplay(judgeView.stem || normalizedPreviewText);
+  const answerSummary = formatQuestionTextForDisplay(cand.result?.briefExplanation || "");
+  const displayImageUrl = displaySegments.some((segment) => segment.type === "image") ? "" : getDisplayQuestionImageFromBlock(cand.block);
 
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
-          <span style={{ color: "#6c7086", fontSize: 11 }}>#{index}</span>
-          <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, backgroundColor: "#313244", color: "#89b4fa" }}>
-            {(lang === "en" ? TYPE_LABELS_EN : TYPE_LABELS)[cand.block.questionTypeGuess] ?? "?"}
-          </span>
-          <span style={{ marginLeft: "auto", fontSize: 10, color: STATUS_COLORS[cand.status] ?? "#45475a" }}>
-            {(lang === "en" ? STATUS_LABELS_EN : STATUS_LABELS)[cand.status] ?? cand.status}
-          </span>
-        </div>
-
+  return (
+    <div
+      onClick={onToggle}
+      style={{
+        border: `1px solid ${cand.selected ? "#4f9cf9" : "#313244"}`,
+        borderRadius: 8,
+        padding: "10px 12px",
+        marginBottom: 8,
+        backgroundColor: cand.selected ? "#1c2a3a" : "#181825",
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
         <div
           style={{
-            fontSize: 12,
-            color: "#a6adc8",
-            lineHeight: 1.5,
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
+            width: 16,
+            height: 16,
+            borderRadius: 3,
+            flexShrink: 0,
+            marginTop: 2,
+            border: `2px solid ${cand.selected ? "#4f9cf9" : "#45475a"}`,
+            backgroundColor: cand.selected ? "#4f9cf9" : "transparent",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
-          {cand.block.previewText || (lang === "en" ? "(No preview text)" : "(无预览文本)")}
+          {cand.selected && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
         </div>
 
-        {(cand.debugInfo?.routeUsed || cand.debugInfo?.imageAttached !== undefined) && (
-          <div style={{ marginTop: 4, fontSize: 10, color: "#6c7086" }}>
-            {lang === "en" ? "Route" : "路由"}: {cand.debugInfo?.routeUsed ?? "-"} |{" "}
-            {lang === "en" ? "Image attached" : "已附图"}: {cand.debugInfo?.imageAttached ? (lang === "en" ? "Yes" : "是") : (lang === "en" ? "No" : "否")}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+            <span style={{ color: "#6c7086", fontSize: 11 }}>#{index}</span>
+            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, backgroundColor: "#313244", color: "#89b4fa" }}>
+              {(lang === "en" ? TYPE_LABELS_EN : TYPE_LABELS)[cand.block.questionTypeGuess] ?? "?"}
+            </span>
+            {isRiskyCandidate(cand) && (
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, backgroundColor: "#36241c", color: "#f9c58f" }}>
+                {lang === "en" ? "Needs review" : "建议复核"}
+              </span>
+            )}
+            <span style={{ marginLeft: "auto", fontSize: 10, color: STATUS_COLORS[cand.status] ?? "#45475a" }}>
+              {(lang === "en" ? STATUS_LABELS_EN : STATUS_LABELS)[cand.status] ?? cand.status}
+            </span>
           </div>
-        )}
 
-        {cand.status === "success" && cand.result && (
-          <div style={{ marginTop: 6, padding: "4px 8px", borderRadius: 4, backgroundColor: "#1e3a2e", border: "1px solid #2d5a3d", fontSize: 12, color: "#a6e3a1" }}>
-            {lang === "en" ? "Answer" : "答案"}: <strong>{cand.result.answer}</strong>{" "}
-            <span style={{ color: "#6c7086", fontSize: 11 }}>{cand.result.briefExplanation.slice(0, 40)}...</span>
+          <div
+            style={{
+              fontSize: 12,
+              color: "#dce0ff",
+              lineHeight: 1.7,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {(cand.block.questionTypeGuess === "fill_blank"
+              ? fillBlankStem
+              : cand.block.questionTypeGuess === "judge"
+                ? judgeStem
+                : displaySegments.length > 0
+                  ? <DisplaySegmentsView segments={displaySegments} lang={lang} />
+                  : displayStem) || (lang === "en" ? "(No preview text)" : "(无预览文本)")}
           </div>
-        )}
 
-        {cand.status === "success" && cand.result && (
-          <div style={{ marginTop: 6 }}>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleDetails();
-              }}
-              style={{
-                border: "1px solid #45475a",
-                background: "transparent",
-                color: "#89b4fa",
-                borderRadius: 6,
-                fontSize: 11,
-                padding: "2px 8px",
-                cursor: "pointer",
-              }}
-            >
-              {isExpanded ? (lang === "en" ? "Hide details" : "收起详情") : (lang === "en" ? "View details" : "查看详情")}
-            </button>
-            {isExpanded && (
-              <div
+          {displayImageUrl && (
+            <div style={{ marginTop: 8 }}>
+              <img
+                src={displayImageUrl}
+                alt={lang === "en" ? "Question figure" : "题目配图"}
                 style={{
-                  marginTop: 6,
-                  padding: "8px",
-                  borderRadius: 6,
+                  width: "100%",
+                  maxHeight: 220,
+                  objectFit: "contain",
+                  borderRadius: 8,
                   border: "1px solid #313244",
                   backgroundColor: "#11111b",
-                  color: "#cdd6f4",
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                  whiteSpace: "pre-wrap",
+                }}
+              />
+            </div>
+          )}
+
+          {cand.block.questionTypeGuess === "judge" && judgeView.options.length > 0 && (
+            <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+              {judgeView.options.map((option) => (
+                <div
+                  key={option.key}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 6,
+                    fontSize: 12,
+                    lineHeight: 1.55,
+                    color: "#bac2de",
+                    padding: "4px 8px",
+                    borderRadius: 6,
+                    backgroundColor: "#11111b",
+                    border: "1px solid #313244",
+                  }}
+                >
+                  <span style={{ color: "#f9c58f", fontWeight: 700, width: 18, flexShrink: 0 }}>{option.key}</span>
+                  {option.value ? (
+                    <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{option.value}</span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {cand.block.questionTypeGuess === "fill_blank" && blankView.blanks.length > 0 && (
+            <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+              {blankView.blanks.map((blank, idx) => (
+                <div
+                  key={`${blank.label}-${idx}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 6,
+                    fontSize: 12,
+                    lineHeight: 1.55,
+                    color: "#bac2de",
+                    padding: "4px 8px",
+                    borderRadius: 6,
+                    backgroundColor: "#11111b",
+                    border: "1px solid #313244",
+                  }}
+                >
+                  <span style={{ color: "#cba6f7", fontWeight: 700, minWidth: 32, flexShrink: 0 }}>{blank.label}</span>
+                  <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{blank.hint || (lang === "en" ? "Blank" : "填空")}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {options.length > 0 && (
+            <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+              {options.map((option) => (
+                <div
+                  key={option.key}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 6,
+                    fontSize: 12,
+                    lineHeight: 1.55,
+                    color: "#bac2de",
+                    padding: "4px 8px",
+                    borderRadius: 6,
+                    backgroundColor: "#11111b",
+                    border: "1px solid #313244",
+                  }}
+                >
+                  <span style={{ color: "#89b4fa", fontWeight: 700, width: 18, flexShrink: 0 }}>{option.key}</span>
+                  <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{formatQuestionTextForDisplay(option.value)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {(cand.debugInfo?.routeUsed || cand.debugInfo?.imageAttached !== undefined) && (
+            <div style={{ marginTop: 6, fontSize: 10, color: "#6c7086" }}>
+              {lang === "en" ? "Route" : "路由"}: {cand.debugInfo?.routeUsed ?? "-"} |{" "}
+              {lang === "en" ? "Image attached" : "已附图"}: {cand.debugInfo?.imageAttached ? (lang === "en" ? "Yes" : "是") : (lang === "en" ? "No" : "否")}
+            </div>
+          )}
+
+          {cand.status === "success" && cand.result && (
+            <div
+              style={{
+                marginTop: 8,
+                padding: "8px 10px",
+                borderRadius: 6,
+                backgroundColor: "#1e3a2e",
+                border: "1px solid #2d5a3d",
+                fontSize: 12,
+                color: "#a6e3a1",
+                lineHeight: 1.6,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              <strong>{lang === "en" ? "Answer" : "答案"}: {cand.result.answer}</strong>
+              <div style={{ marginTop: 4, color: "#cfecc8" }}>
+                {lang === "en" ? "Confidence" : "置信度"} {Math.round((cand.result.confidence ?? 0) * 100)}%
+                {answerSummary ? ` · ${answerSummary}` : ""}
+              </div>
+              <div style={{ marginTop: 6 }}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onFill();
+                  }}
+                  style={{
+                    border: "1px solid #5bc28c",
+                    background: "#173524",
+                    color: "#b8f0cc",
+                    borderRadius: 6,
+                    fontSize: 11,
+                    padding: "3px 8px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {lang === "en" ? "Fill answer" : "填写答案"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {cand.status === "success" && cand.result && (
+            <div style={{ marginTop: 6 }}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleDetails();
+                }}
+                style={{
+                  border: "1px solid #45475a",
+                  background: "transparent",
+                  color: "#89b4fa",
+                  borderRadius: 6,
+                  fontSize: 11,
+                  padding: "2px 8px",
+                  cursor: "pointer",
                 }}
               >
-                {cand.result.detailedExplanation || cand.result.briefExplanation}
-              </div>
-            )}
-            {cand.status === "success" && shouldRetryWithVision(cand.result as ParseResult) && (
+                {isExpanded ? (lang === "en" ? "Hide details" : "收起详情") : (lang === "en" ? "View details" : "查看详情")}
+              </button>
+              {isExpanded && (
+                <div
+                  style={{
+                    marginTop: 6,
+                    padding: "8px",
+                    borderRadius: 6,
+                    border: "1px solid #313244",
+                    backgroundColor: "#11111b",
+                    color: "#cdd6f4",
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {cand.result.detailedExplanation || cand.result.briefExplanation}
+                </div>
+              )}
+              {shouldRetryWithVision(cand.result as ParseResult) && (
+                <div style={{ marginTop: 6 }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRetryVision();
+                    }}
+                    style={{
+                      border: "1px solid #7c5cff",
+                      background: "#2b1f52",
+                      color: "#d9ccff",
+                      borderRadius: 6,
+                      fontSize: 11,
+                      padding: "2px 8px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {lang === "en" ? "Retry with Vision" : "视觉重试"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {cand.status === "error" && (
+            <div style={{ marginTop: 6 }}>
+              <div style={{ fontSize: 11, color: "#f38ba8", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{cand.error?.slice(0, 160)}</div>
               <div style={{ marginTop: 6 }}>
                 <button
                   onClick={(e) => {
@@ -517,49 +908,161 @@ const CandidateCard: React.FC<{
                   {lang === "en" ? "Retry with Vision" : "视觉重试"}
                 </button>
               </div>
-            )}
-          </div>
-        )}
-
-        {cand.status === "error" && (
-          <div style={{ marginTop: 4 }}>
-            <div style={{ fontSize: 11, color: "#f38ba8" }}>{cand.error?.slice(0, 80)}</div>
-            <div style={{ marginTop: 6 }}>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRetryVision();
-                }}
-                style={{
-                  border: "1px solid #7c5cff",
-                  background: "#2b1f52",
-                  color: "#d9ccff",
-                  borderRadius: 6,
-                  fontSize: 11,
-                  padding: "2px 8px",
-                  cursor: "pointer",
-                }}
-              >
-                {lang === "en" ? "Retry with Vision" : "视觉重试"}
-              </button>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
 
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onFlash();
-        }}
-        style={{ background: "none", border: "none", color: "#6c7086", cursor: "pointer", fontSize: 12, padding: "2px", flexShrink: 0 }}
-        title={lang === "en" ? "Locate on page" : "在页面中定位"}
-      >
-        {lang === "en" ? "Locate" : "定位"}
-      </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onFlash();
+          }}
+          style={{ background: "none", border: "none", color: "#6c7086", cursor: "pointer", fontSize: 12, padding: "2px", flexShrink: 0 }}
+          title={lang === "en" ? "Locate on page" : "在页面中定位"}
+        >
+          {lang === "en" ? "Locate" : "定位"}
+        </button>
+      </div>
     </div>
+  );
+};
+
+const DisplaySegmentsView: React.FC<{ segments: QuestionDisplaySegment[]; lang: UILang }> = ({ segments, lang }) => (
+  <div style={{ display: "grid", gap: 8 }}>
+    {segments.map((segment, idx) => (
+      segment.type === "image" ? (
+        <img
+          key={`${segment.type}-${idx}`}
+          src={segment.url}
+          alt={lang === "en" ? "Question figure" : "题目配图"}
+          style={{
+            width: "100%",
+            maxHeight: 220,
+            objectFit: "contain",
+            borderRadius: 8,
+            border: "1px solid #313244",
+            backgroundColor: "#11111b",
+          }}
+        />
+      ) : (
+        <div key={`${segment.type}-${idx}`}>{formatQuestionTextForDisplay(segment.text)}</div>
+      )
+    ))}
   </div>
 );
+
+const AutoSolvePreviewCard: React.FC<{ previewText: string; lang: UILang }> = ({ previewText, lang }) => {
+  const normalizedPreviewText = cleanCandidatePreviewText(previewText);
+  const { stem, options } = splitStemAndOptions(normalizedPreviewText);
+  const blankView = splitStemAndBlanks(normalizedPreviewText);
+  const judgeView = splitJudgeStemAndOptions(normalizedPreviewText);
+  const inferredType = inferPreviewQuestionType(normalizedPreviewText, options.length, blankView.blanks.length, judgeView.options.length);
+
+  const displayStem = formatQuestionTextForDisplay(stem || normalizedPreviewText);
+  const fillBlankStem = formatQuestionTextForDisplay(ensureBlankPlaceholders(blankView.stem || normalizedPreviewText, blankView.blanks.length));
+  const judgeStem = formatQuestionTextForDisplay(judgeView.stem || normalizedPreviewText);
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        padding: "8px 9px",
+        borderRadius: 6,
+        backgroundColor: "#162116",
+        border: "1px solid #355c39",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, backgroundColor: "#223622", color: "#8fe39a" }}>
+          {(lang === "en" ? TYPE_LABELS_EN : TYPE_LABELS)[inferredType] ?? (lang === "en" ? "Question" : "题目")}
+        </span>
+      </div>
+
+      <div style={{ fontSize: 11, color: "#d5f5da", lineHeight: 1.55, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+        {(inferredType === "fill_blank"
+          ? fillBlankStem
+          : inferredType === "judge"
+            ? judgeStem
+            : displayStem) || (lang === "en" ? "(No preview text)" : "(无预览文本)")}
+      </div>
+
+      {inferredType === "judge" && judgeView.options.length > 0 && (
+        <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+          {judgeView.options.map((option) => (
+            <div
+              key={option.key}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 6,
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: "#cbe9ce",
+                padding: "4px 8px",
+                borderRadius: 6,
+                backgroundColor: "#111a11",
+                border: "1px solid #2a442e",
+              }}
+            >
+              <span style={{ color: "#f9c58f", fontWeight: 700, width: 18, flexShrink: 0 }}>{option.key}</span>
+              {option.value ? <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{option.value}</span> : null}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {inferredType === "fill_blank" && blankView.blanks.length > 0 && (
+        <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+          {blankView.blanks.map((blank, idx) => (
+            <div
+              key={`${blank.label}-${idx}`}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 6,
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: "#cbe9ce",
+                padding: "4px 8px",
+                borderRadius: 6,
+                backgroundColor: "#111a11",
+                border: "1px solid #2a442e",
+              }}
+            >
+              <span style={{ color: "#cba6f7", fontWeight: 700, minWidth: 32, flexShrink: 0 }}>{blank.label}</span>
+              <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{blank.hint || (lang === "en" ? "Blank" : "填空")}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {options.length > 0 && (
+        <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+          {options.map((option) => (
+            <div
+              key={option.key}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 6,
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: "#cbe9ce",
+                padding: "4px 8px",
+                borderRadius: 6,
+                backgroundColor: "#111a11",
+                border: "1px solid #2a442e",
+              }}
+            >
+              <span style={{ color: "#89b4fa", fontWeight: 700, width: 18, flexShrink: 0 }}>{option.key}</span>
+              <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{formatQuestionTextForDisplay(option.value)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const HistoryTab: React.FC<{ lang: UILang }> = ({ lang }) => {
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -616,6 +1119,9 @@ const HistoryTab: React.FC<{ lang: UILang }> = ({ lang }) => {
         const sourceText = normalizeText(rawSourceText);
         const prettySourceText = formatQuestionTextForDisplay(rawSourceText);
         const { stem, options } = splitStemAndOptions(sourceText);
+        const blankView = splitStemAndBlanks(sourceText);
+        const judgeView = splitJudgeStemAndOptions(sourceText);
+        const fillBlankStem = formatQuestionTextForDisplay(ensureBlankPlaceholders(blankView.stem || sourceText, blankView.blanks.length));
         const prettyImageUrl = getDisplayQuestionImage(entry);
         const showDetails = !!expandedIds[entry.id];
 
@@ -673,11 +1179,39 @@ const HistoryTab: React.FC<{ lang: UILang }> = ({ lang }) => {
             )}
 
             {dtype === "judge" && (
-              <div style={historyStemStyle}>{formatQuestionTextForDisplay(stem || sourceText) || (lang === "en" ? "(No stem)" : "(无题干)")}</div>
+              <>
+                <div style={historyStemStyle}>{formatQuestionTextForDisplay(judgeView.stem || sourceText) || (lang === "en" ? "(No stem)" : "(无题干)")}</div>
+                {judgeView.options.length > 0 && (
+                  <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                    {judgeView.options.map((op) => (
+                      <div key={op.key} style={historyOptionStyle}>
+                        <span style={{ color: "#f9c58f", fontWeight: 700, width: 18 }}>{op.key}</span>
+                        {op.value ? <span style={{ color: "#cdd6f4" }}>{op.value}</span> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
 
             {(dtype === "fill_blank" || dtype === "short_answer" || dtype === "unknown") && (
-              <div style={historyStemStyle}>{prettySourceText || (lang === "en" ? "(No stem)" : "(无题干)")}</div>
+              <>
+                <div style={historyStemStyle}>
+                  {dtype === "fill_blank"
+                    ? fillBlankStem || (lang === "en" ? "(No stem)" : "(无题干)")
+                    : prettySourceText || (lang === "en" ? "(No stem)" : "(无题干)")}
+                </div>
+                {dtype === "fill_blank" && blankView.blanks.length > 0 && (
+                  <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                    {blankView.blanks.map((blank, idx) => (
+                      <div key={`${blank.label}-${idx}`} style={historyOptionStyle}>
+                        <span style={{ color: "#cba6f7", fontWeight: 700, width: 32 }}>{blank.label}</span>
+                        <span style={{ color: "#cdd6f4" }}>{blank.hint || (lang === "en" ? "Blank" : "填空")}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
 
             <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
@@ -842,6 +1376,7 @@ const SettingsTab: React.FC<{ lang: UILang; onLanguageChange: (lang: UILang) => 
     qwen: ["https://dashscope.aliyun.com", "阿里云百炼"],
     moonshot: ["https://platform.moonshot.cn", "Moonshot Platform"],
     zhipu: ["https://open.bigmodel.cn", "智谱开放平台"],
+    minimax: ["https://platform.minimaxi.com", "MiniMax Platform"],
     custom: ["https://platform.openai.com/docs/api-reference/chat", "OpenAI Compatible API Docs"],
   };
   const isEn = lang === "en";
@@ -930,7 +1465,7 @@ const SettingsTab: React.FC<{ lang: UILang; onLanguageChange: (lang: UILang) => 
         </FieldGroup>
       )}
 
-      {(providerId === "ollama" || providerId === "openai" || providerId === "custom" || providerId === "anthropic") && (
+      {(providerId === "ollama" || providerId === "openai" || providerId === "custom" || providerId === "anthropic" || providerId === "minimax") && (
         <FieldGroup label={isEn ? "Custom Base URL (Optional)" : "自定义 Base URL（可选）"}>
           <input type="text" value={customUrl} onChange={(e) => setCustomUrl(e.target.value)} placeholder={provider.baseUrl} style={inputStyle} />
           <div style={{ fontSize: 10, color: "#6c7086", marginTop: 4 }}>
@@ -1050,6 +1585,37 @@ async function requestBlockImage(tabId: number, bbox: QuestionBlock["bbox"]): Pr
   });
 }
 
+async function sendFillMessage(tabId: number, block: QuestionBlock, result: ParseResult): Promise<{ ok?: boolean; filledCount?: number; message?: string } | null> {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(
+      tabId,
+      { type: "FILL_PARSED_ANSWER", block, result },
+      (resp?: { ok?: boolean; filledCount?: number; message?: string }) => {
+        if (chrome.runtime.lastError) {
+          resolve({
+            ok: false,
+            filledCount: 0,
+            message: chrome.runtime.lastError.message || "填写消息发送失败",
+          });
+          return;
+        }
+        resolve(resp ?? {
+          ok: false,
+          filledCount: 0,
+          message: "页面未返回填写结果",
+        });
+      },
+    );
+  });
+}
+
+function isRiskyCandidate(cand: DetectedCandidate): boolean {
+  if (cand.status === "error") return true;
+  if (cand.status !== "success" || !cand.result) return false;
+  if ((cand.result.confidence ?? 0) < 0.72) return true;
+  return shouldRetryWithVision(cand.result);
+}
+
 function shouldRetryWithVision(result: ParseResult): boolean {
   if ((result.confidence ?? 0) < 0.5) return true;
   const s = `${result.warning ?? ""} ${result.briefExplanation ?? ""}`.toLowerCase();
@@ -1069,7 +1635,7 @@ function preferVisionResult(textResult: ParseResult, visionResult: ParseResult):
 function looksMathHeavy(text: string): boolean {
   const t = String(text || "");
   if (!t) return false;
-  return /(g\(s\)|h\(s\)|f\(x\)|\bkv\b|s\^|\/|=\s*0|传递函数|积分环节|稳态误差)/i.test(t);
+  return /(g\(s\)|h\(s\)|g\(j|h\(j|f\(x\)|\bkv\b|s\^|\/|=\s*0|jω|jw|ω|σ|∫|Σ|√|传递函数|积分环节|稳态误差|奈奎斯特|伯德图|如图|图中|下图|上图)/i.test(t);
 }
 
 function langSafe(lang: "zh" | "en" | undefined, zh: string, en: string): string {
@@ -1093,7 +1659,69 @@ const historyOptionStyle: React.CSSProperties = {
 };
 
 function normalizeText(s: string): string {
-  return String(s || "").replace(/\s+/g, " ").trim();
+  return normalizeMathDisplayText(String(s || "").replace(/\s+/g, " ").trim());
+}
+
+function normalizeMathDisplayText(text: string): string {
+  let out = String(text || "");
+  if (!out) return "";
+
+  out = out
+    .replace(/&infin;|&#8734;|\\infty/gi, "∞")
+    .replace(/负无穷/g, "-∞")
+    .replace(/正无穷/g, "+∞")
+    .replace(/&omega;|&#969;|\\omega/gi, "ω")
+    .replace(/&sigma;|&#963;|\\sigma/gi, "σ")
+    .replace(/&minus;|&#8722;/gi, "-")
+    .replace(/[−﹣－]/g, "-")
+    .replace(/[＋﹢]/g, "+")
+    .replace(/\b([+-])\s*infty\b/gi, "$1∞")
+    .replace(/\binfty\b/gi, "∞")
+    .replace(/由\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/g, "由-∞到+∞")
+    .replace(/从\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/g, "从-∞到+∞");
+
+  out = out.replace(
+    /((?:ω|w|omega)[^。；;,.，\n]{0,24}?由)\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/gi,
+    (_m, prefix) => `${prefix}-∞到+∞`,
+  );
+
+  return out;
+}
+
+function cleanCandidatePreviewText(s: string): string {
+  const normalized = normalizeText(s);
+  if (!normalized) return "";
+
+  const noiseMarkers = [
+    "返回",
+    "作业详情",
+    "提交作业",
+    "上一题",
+    "下一题",
+    "标记此题",
+    "课堂练习",
+    "总分",
+    "题库卡",
+    "答题卡",
+    "提示我知道了",
+    "提示提交",
+    "重做",
+    "取消",
+    "退出",
+    "文件预览",
+    "在线客服",
+  ];
+
+  let cutIndex = -1;
+  for (const marker of noiseMarkers) {
+    const index = normalized.indexOf(marker);
+    if (index > 0 && (cutIndex < 0 || index < cutIndex)) {
+      cutIndex = index;
+    }
+  }
+
+  const cleaned = cutIndex > 0 ? normalized.slice(0, cutIndex) : normalized;
+  return normalizeText(cleaned);
 }
 
 function formatQuestionTextForDisplay(s: string): string {
@@ -1109,12 +1737,171 @@ function formatQuestionTextForDisplay(s: string): string {
     .trim();
 }
 
+function buildCandidateStemForDisplay(
+  block: QuestionBlock,
+  stemText: string,
+  rawPreviewText: string,
+  lang: UILang,
+): string {
+  const normalizedStem = cleanCandidatePreviewText(stemText);
+  const imageLike = Boolean(block.questionImageUrl) || /\[图片\]|图片/.test(rawPreviewText);
+  if (!imageLike) {
+    return normalizedStem;
+  }
+
+  const compact = compactImageHeavyStem(rawPreviewText, normalizedStem);
+  if (compact) {
+    return `${compact} ${lang === "en" ? "(Image question)" : "（配图题）"}`.trim();
+  }
+
+  return `${normalizedStem.replace(/\[图片\]/g, "").trim()} ${lang === "en" ? "(Image question)" : "（配图题）"}`.trim();
+}
+
+function buildDisplaySegmentsForCandidate(
+  block: QuestionBlock,
+  stemText: string,
+  rawPreviewText: string,
+  lang: UILang,
+): QuestionDisplaySegment[] {
+  if (block.questionTypeGuess === "judge" || block.questionTypeGuess === "fill_blank") return [];
+
+  if (block.displaySegments?.length) {
+    return block.displaySegments
+      .map((segment) => {
+        if (segment.type === "image") return segment;
+        return { ...segment, text: segment.text.replace(/\[图片\]/g, "").trim() };
+      })
+      .filter((segment) => segment.type === "image" || segment.text);
+  }
+
+  const imageUrl = getDisplayQuestionImageFromBlock(block);
+  if (!imageUrl) return [];
+
+  const displayStem = buildCandidateStemForDisplay(block, stemText, rawPreviewText, lang)
+    .replace(/\s*[（(]配图题[)）]\s*$/g, "")
+    .trim();
+  const [lead, ...tailParts] = displayStem.split(/\[图片\]/g);
+  const tail = tailParts.join(" ").trim();
+  const segments: QuestionDisplaySegment[] = [];
+  if (lead.trim()) segments.push({ type: "text", text: lead.trim() });
+  segments.push({ type: "image", url: imageUrl });
+  if (tail) segments.push({ type: "text", text: tail });
+  return segments;
+}
+
+function compactImageHeavyStem(rawPreviewText: string, fallbackStem: string): string {
+  const raw = cleanCandidatePreviewText(rawPreviewText || "");
+  const headerMatch = raw.match(/^\d{1,3}\s*[\.、]\s*(?:单选题|多选题|判断题|填空题)?\s*(?:（\d+分）|\(\d+分\))?/);
+  const header = normalizeText(headerMatch?.[0] || "");
+  const withoutHeader = raw.replace(headerMatch?.[0] || "", "").trim();
+
+  const imageParts = withoutHeader.split("[图片]");
+  const beforeImage = normalizeText((imageParts[0] || "").trim());
+  const afterImage = normalizeText(imageParts.slice(1).join(" ").trim());
+
+  let lead = stripFormulaNoiseForImageStem(beforeImage);
+  let tail = sanitizeImageStemTail(afterImage);
+
+  if (!/[\u4e00-\u9fa5]{4,}/.test(lead)) {
+    lead = stripFormulaNoiseForImageStem(
+      normalizeText(fallbackStem)
+        .replace(/\[图片\]/g, " ")
+        .trim(),
+    );
+  }
+
+  if (lead.length > 80) {
+    lead = lead.slice(0, 80).replace(/\s+\S*$/, "").trim();
+  }
+
+  if ((!tail || tail.length < 6) && /[\u4e00-\u9fa5]{6,}/.test(fallbackStem)) {
+    const fallbackTail = sanitizeImageStemTail(
+      normalizeText(fallbackStem)
+        .replace(beforeImage, "")
+        .replace(/\[图片\]/g, " ")
+        .trim(),
+    );
+    if (fallbackTail.length > tail.length) tail = fallbackTail;
+  }
+
+  const fallbackLead = stripFormulaNoiseForImageStem(
+    beforeImage
+      .replace(/\[图片\]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+    { keepMathPlaceholders: true },
+  );
+  const mergedBody = [lead || fallbackLead, tail]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  const merged = normalizeText(`${header} ${mergedBody}`.trim());
+  return trimDisplayStemTailNoise(merged);
+}
+
+function sanitizeImageStemTail(text: string): string {
+  const normalized = normalizeText(text || "");
+  if (!normalized) return "";
+
+  return trimDisplayStemTailNoise(
+    normalized
+      .replace(/\.w\d+[a-z0-9]*\s+\.brush\d+\s*\{[^}]*\}/gi, " ")
+      .replace(/\.w\d+[a-z0-9]*\s+\.pen\d+\s*\{[^}]*\}/gi, " ")
+      .replace(/\b(?:q|TXXXX|\^+|=+\++|\(\d+\d+\d+\)|[xX]\s+[xX]\s+[xX])\b/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim(),
+  );
+}
+
+function stripFormulaNoiseForImageStem(
+  text: string,
+  options?: { keepMathPlaceholders?: boolean },
+): string {
+  const normalized = normalizeText(text || "");
+  if (!normalized) return "";
+
+  let out = normalized
+    .replace(/\.w\d+[a-z0-9]*\s+\.brush\d+\s*\{[^}]*\}/gi, " ")
+    .replace(/\.w\d+[a-z0-9]*\s+\.pen\d+\s*\{[^}]*\}/gi, " ")
+    .replace(/[A-Za-z]{2,}\s*[:=]?\s*[0-9.()\-+*/]*/g, " ")
+    .replace(/[0-9]+\s*(?:[,，]\s*[0-9]+){2,}/g, " ")
+    .replace(/[θωσμλφψπτxyzXYZTLHGS]{1,}/g, " ");
+
+  if (options?.keepMathPlaceholders) {
+    out = out.replace(/\(\s*\)/g, "（ ）");
+  } else {
+    out = out.replace(/[=+\-*/()[\]{}<>]/g, " ");
+  }
+
+  return trimDisplayStemTailNoise(
+    out
+      .replace(/\s{2,}/g, " ")
+      .replace(/\s*[:：]\s*/g, "：")
+      .trim(),
+  );
+}
+
+function trimDisplayStemTailNoise(text: string): string {
+  const normalized = normalizeText(text || "");
+  if (!normalized) return "";
+  return normalized
+    .replace(/\s*(?:\[图片\]|图片)\s*$/g, "")
+    .replace(/\s*[=+\-*/(){}\[\]<>.,，;；:：]+\s*$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function getDisplayQuestionImage(entry: HistoryItem): string {
-  const q = String(entry.block.questionImageUrl || "").trim();
+  return getDisplayQuestionImageFromBlock(entry.block);
+}
+
+function getDisplayQuestionImageFromBlock(block: QuestionBlock): string {
+  const q = String(block.questionImageUrl || "").trim();
   if (!/^https?:\/\//i.test(q)) return "";
   // Only keep likely original question figure URLs, never screenshot/data URLs.
   if (!/\.(png|jpg|jpeg|webp)(?:[?#]|$)/i.test(q)) return "";
-  if (!/(tikuimgs\.oss-|aliyuncs\.com|tiku\.cn)/i.test(q)) return "";
+  if (!/(tikuimgs\.oss-|aliyuncs\.com|tiku\.cn|polymas\.com)/i.test(q)) return "";
   return q;
 }
 
@@ -1127,13 +1914,16 @@ function normalizeAnswer(ans?: string): string {
 
 function normalizeHistoryAnswer(entry: HistoryItem, dtype: QuestionType): string {
   const raw = String(entry.result.answer || "");
+  if (/(见分点答案|见分点作答|按分点作答|分点作答|仅供参考|参考答案见解析|详见解析|示例答案|需人工确认)/.test(raw)) {
+    return "需人工确认";
+  }
   const normalized = normalizeAnswer(raw);
   const looksChoiceLetters = /^[A-D](?:\s*[,，、/|]\s*[A-D])*$/.test(normalized);
   const text = normalizeText(`${entry.result.recognizedText || ""} ${entry.block.previewText || ""}`);
   const looksMultiPart = /\(\s*1\s*\)|（\s*1\s*）|请据图回答|填空|____|________/.test(text);
 
   if ((dtype === "fill_blank" || dtype === "short_answer" || dtype === "unknown") && looksChoiceLetters && looksMultiPart) {
-    return "见分点答案";
+    return "需人工确认";
   }
   return normalized;
 }
@@ -1157,7 +1947,7 @@ function getDisplayType(entry: HistoryItem): QuestionType {
 }
 
 function splitStemAndOptions(text: string): { stem: string; options: Array<{ key: string; value: string }> } {
-  const normalized = normalizeText(text);
+  const normalized = cleanCandidatePreviewText(text);
   const firstOptionIdx = normalized.search(/[A-D][\.\):：、]/);
   if (firstOptionIdx < 0) return { stem: normalized, options: [] };
 
@@ -1167,12 +1957,250 @@ function splitStemAndOptions(text: string): { stem: string; options: Array<{ key
   const dedup = new Map<string, string>();
   for (const m of rawMatches) {
     const key = m[1];
-    const value = normalizeText(m[2] || "");
+    const value = sanitizeOptionValue(m[2] || "");
     if (!value) continue;
     if (!dedup.has(key)) dedup.set(key, value);
   }
   const options = [...dedup.entries()].map(([key, value]) => ({ key, value }));
+  if (!looksLikeCleanOptions(stem, options)) {
+    return { stem: normalized, options: [] };
+  }
   return { stem, options };
+}
+
+function splitStemAndBlanks(text: string): { stem: string; blanks: Array<{ label: string; hint: string }> } {
+  const normalized = cleanCandidatePreviewText(text).replace(/请输入答案/g, " ").replace(/\s+/g, " ").trim();
+  if (!normalized) return { stem: "", blanks: [] };
+
+  const labelRegex = /(?:^|\s)(\d+\.\d+|[（(]\d+[)）])(?=\s|$)/g;
+  const matches = Array.from(normalized.matchAll(labelRegex));
+  const labels = matches.map((m) => m[1]);
+  const uniqueLabels = Array.from(new Set(labels));
+  const firstLabelIdx = matches[0]?.index ?? -1;
+  const stemCandidate = firstLabelIdx > 0 ? normalized.slice(0, firstLabelIdx).trim() : normalized;
+
+  if (uniqueLabels.length > 0) {
+    return {
+      stem: stemCandidate,
+      blanks: uniqueLabels.map((label, idx) => ({
+        label: normalizeBlankLabel(label, idx),
+        hint: "",
+      })),
+    };
+  }
+
+  const underscoreCount = (normalized.match(/_{3,}|—{2,}|﹍{2,}/g) || []).length;
+  if (underscoreCount > 0) {
+    return {
+      stem: normalized,
+      blanks: Array.from({ length: underscoreCount }, (_, idx) => ({
+        label: `空${idx + 1}`,
+        hint: "",
+      })),
+    };
+  }
+
+  return { stem: normalized, blanks: [] };
+}
+
+function splitJudgeStemAndOptions(text: string): { stem: string; options: Array<{ key: string; value: string }> } {
+  const normalized = cleanCandidatePreviewText(text);
+  if (!normalized) return { stem: "", options: [] };
+
+  let stem = extractJudgeDisplayStem(normalized);
+  const options: Array<{ key: string; value: string }> = [];
+  const hasStandaloneJudgeWords = /(?:^|\s)(?:对|错|正确|错误)(?=\s|$)/.test(normalized);
+
+  if (/\btrue\b|\bfalse\b/i.test(normalized)) {
+    options.push({ key: "T", value: "True" });
+    options.push({ key: "F", value: "False" });
+    return { stem, options };
+  }
+
+  if (/(?:^|\s)(?:正确|错误)(?=\s|$)/.test(normalized)) {
+    options.push({ key: "对", value: "" });
+    options.push({ key: "错", value: "" });
+    return { stem, options };
+  }
+
+  if (hasStandaloneJudgeWords) {
+    options.push({ key: "对", value: "" });
+    options.push({ key: "错", value: "" });
+  }
+
+  return { stem, options };
+}
+
+function extractJudgeDisplayStem(text: string): string {
+  const normalized = cleanCandidatePreviewText(text);
+  if (!normalized) return "";
+
+  const headers = Array.from(normalized.matchAll(JUDGE_HEADER_RE));
+  let out = normalized;
+  const firstIndex = headers[0]?.index ?? -1;
+  if (firstIndex > 0) out = out.slice(firstIndex).trim();
+  if (headers.length >= 2 && typeof headers[1].index === "number") {
+    out = out.slice(0, headers[1].index!).trim();
+  }
+
+  const explicitSentence = out.match(/^(\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?\s*\(\d+分\)\s*.*?[。！？!?])/);
+  if (explicitSentence?.[1]) return dedupeRepeatedJudgeStemForDisplay(explicitSentence[1]);
+
+  const cutAtOption = out.match(/^(\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?\s*\(\d+分\)\s*.*?)(?=\s+(?:对|错|正确|错误|true|false)\b)/i);
+  if (cutAtOption?.[1]) return dedupeRepeatedJudgeStemForDisplay(cutAtOption[1]);
+
+  return dedupeRepeatedJudgeStemForDisplay(out);
+}
+
+function dedupeRepeatedJudgeStemForDisplay(text: string): string {
+  const normalized = cleanCandidatePreviewText(text);
+  if (!normalized) return "";
+
+  const headerMatch = normalized.match(/^(\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?\s*\(\d+分\)\s*)(.+)$/);
+  if (!headerMatch) return normalizeText(normalized);
+
+  const header = headerMatch[1];
+  const body = headerMatch[2].trim();
+  if (!body) return normalizeText(normalized);
+
+  const firstOptionAt = body.search(/\b(?:对|错|正确|错误|true|false)\b/i);
+  const leadStem = normalizeText((firstOptionAt > 0 ? body.slice(0, firstOptionAt) : body).trim());
+  if (leadStem.length >= 8) {
+    const repeatedLeadAt = body.indexOf(leadStem, leadStem.length);
+    if (repeatedLeadAt > 0) {
+      return normalizeText(`${header}${body.slice(0, repeatedLeadAt).trim()}`);
+    }
+  }
+
+  const firstSentence = body.match(/^(.{6,}?[。！？!?])/);
+  if (firstSentence?.[1]) {
+    const sentence = normalizeText(firstSentence[1]);
+    const secondIndex = body.indexOf(sentence, sentence.length);
+    if (secondIndex > 0) {
+      return normalizeText(`${header}${body.slice(0, secondIndex).trim()}`);
+    }
+  }
+
+  const probe = normalizeText(body.slice(0, Math.min(24, Math.max(12, Math.floor(body.length / 2)))));
+  if (probe.length >= 12) {
+    const repeatedAt = body.indexOf(probe, probe.length);
+    if (repeatedAt > 0) {
+      return normalizeText(`${header}${body.slice(0, repeatedAt).trim()}`);
+    }
+  }
+
+  return normalizeText(`${header}${body}`);
+}
+
+function ensureBlankPlaceholders(text: string, blankCount: number): string {
+  const normalized = String(text || "").replace(/\r\n?/g, "\n").trim();
+  if (!normalized || blankCount <= 0) return normalized;
+
+  const existingBlankCount = (normalized.match(/_{3,}|—{2,}|﹍{2,}/g) || []).length;
+  if (existingBlankCount >= blankCount) return normalized;
+
+  let remaining = blankCount - existingBlankCount;
+  let rebuilt = normalized.replace(
+    /([\u4e00-\u9fa5A-Za-z0-9])\s+(?=[\u4e00-\u9fa5A-Za-z0-9])/g,
+    (full, prev) => {
+      if (remaining <= 0) return full;
+      remaining -= 1;
+      return `${prev} ____ `;
+    },
+  );
+
+  if (remaining > 0) {
+    const suffix = Array.from({ length: remaining }, () => " ____ ").join("");
+    rebuilt = `${rebuilt}${suffix}`;
+  }
+
+  return rebuilt.replace(/\s{2,}/g, " ").trim();
+}
+
+function normalizeBlankLabel(label: string, idx: number): string {
+  const trimmed = normalizeText(label).replace(/[()（）]/g, "");
+  if (/^\d+\.\d+$/.test(trimmed)) return trimmed;
+  if (/^\d+$/.test(trimmed)) return `空${trimmed}`;
+  return trimmed || `空${idx + 1}`;
+}
+
+function inferPreviewQuestionType(
+  previewText: string,
+  choiceOptionCount: number,
+  blankCount: number,
+  judgeOptionCount: number,
+): QuestionType {
+  const text = cleanCandidatePreviewText(previewText);
+  if (!text) return "unknown";
+  if (/判断题|是非题/.test(text) || judgeOptionCount >= 2) return "judge";
+  if (/填空题|____|________/.test(text) || blankCount > 0) return "fill_blank";
+  if (/多选/.test(text)) return "multi_choice";
+  if (/单选/.test(text)) return "single_choice";
+  if (choiceOptionCount >= 4) return "single_choice";
+  return "unknown";
+}
+
+function sanitizeOptionValue(raw: string): string {
+  const normalized = cleanCandidatePreviewText(raw);
+  if (!normalized) return "";
+
+  const repeatedHeaderMatch = normalized.match(/\s+\d{1,3}\s*[\.、．]\s*[\[【]?(?:单选题|多选题|判断题|填空题)[\]】]?\s*\(\d+分\)/u);
+  const preTrimmed = repeatedHeaderMatch?.index && repeatedHeaderMatch.index > 0
+    ? normalizeText(normalized.slice(0, repeatedHeaderMatch.index))
+    : normalized;
+
+  const noisePattern = /(?:返回|作业详情|提交作业|上一题|下一题|标记此题|课堂练习|总分|题库卡|答题卡|单选题|多选题|判断题|填空题|提示我知道了|提示提交|重做|取消|退出|文件预览|在线客服|submit|previous|next)/i;
+  const match = noisePattern.exec(preTrimmed);
+  let trimmed = (!match || match.index <= 0)
+    ? preTrimmed
+    : normalizeText(preTrimmed.slice(0, match.index));
+
+  trimmed = trimTrailingNextQuestionMarker(trimmed);
+  return stripTrailingSectionNoise(trimmed);
+}
+
+function trimTrailingNextQuestionMarker(text: string): string {
+  let out = normalizeText(text);
+  if (!out) return "";
+
+  out = out
+    .replace(/\s+[一二三四五六七八九十]+、\s*$/u, "")
+    .replace(/\s+\d{1,3}\s*[\.、．]\s*[\[【](?:单选题|多选题|判断题|填空题)?[\]】]?\s*$/u, "")
+    .replace(/\s+\d{1,3}\s*[\.、．]\s*[\[【]\s*$/u, "")
+    .replace(/\s+\d{1,3}\s*[\.、．]\s*$/u, "")
+    .trim();
+
+  return out;
+}
+
+function stripTrailingSectionNoise(text: string): string {
+  let out = normalizeText(text);
+  if (!out) return "";
+
+  out = out
+    .replace(/\s+[一二三四五六七八九十]+、\s*$/u, "")
+    .replace(/\s+第\s*[一二三四五六七八九十\d]+\s*[章节题]\s*$/u, "")
+    .replace(/\s+\d+\s*[、.．]\s*$/u, "")
+    .trim();
+
+  return out;
+}
+
+function looksLikeCleanOptions(stem: string, options: Array<{ key: string; value: string }>): boolean {
+  if (options.length < 2) return false;
+
+  const keys = options.map((option) => option.key).join("");
+  if (!/^A(B(C(D)?)?)?$/.test(keys)) return false;
+
+  const values = options.map((option) => option.value);
+  if (values.some((value) => !value || value.length > 120)) return false;
+  if (values.some((value) => /返回|提交作业|上一题|下一题|课堂练习|文件预览|在线客服/i.test(value))) return false;
+
+  const stemLength = normalizeText(stem).length;
+  const totalOptionLength = values.reduce((sum, value) => sum + value.length, 0);
+  if (stemLength > 0 && totalOptionLength > stemLength * 3.2) return false;
+
+  return true;
 }
 
 

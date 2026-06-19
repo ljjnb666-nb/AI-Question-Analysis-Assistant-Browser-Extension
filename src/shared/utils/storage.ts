@@ -1,4 +1,4 @@
-import type { FloatingWindowState, AppSettings, HistoryEntry } from "../types";
+import type { FloatingWindowState, AppSettings, HistoryEntry, ParseResult, QuestionBlock } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { logError } from "./errorLogger";
 import { encryptValue, decryptValue, isEncrypted } from "./encryption";
@@ -11,6 +11,15 @@ const KEYS = {
 } as const;
 
 const MAX_HISTORY = 50;
+const MAX_PREVIEW_TEXT_CHARS = 800;
+const MAX_RECOGNIZED_TEXT_CHARS = 4_000;
+const MAX_BRIEF_EXPLANATION_CHARS = 500;
+const MAX_DETAILED_EXPLANATION_CHARS = 8_000;
+
+function isExtensionContextInvalidatedError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err || "");
+  return /Extension context invalidated/i.test(message);
+}
 
 // ─── Floating Window State ────────────────────────────────────────────────────
 
@@ -43,6 +52,58 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<void
   await chrome.storage.local.set({ [KEYS.settings]: merged });
 }
 
+function truncateText(value: string | undefined, maxChars: number): string {
+  const text = String(value || "");
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}…`;
+}
+
+function sanitizeQuestionImageUrl(value?: string): string | undefined {
+  const url = String(value || "").trim();
+  if (!url) return undefined;
+  return /^https?:\/\//i.test(url) ? url : undefined;
+}
+
+export function sanitizeBlockForHistory(block: QuestionBlock): QuestionBlock {
+  return {
+    ...block,
+    previewText: truncateText(block.previewText, MAX_PREVIEW_TEXT_CHARS),
+    displaySegments: block.displaySegments?.slice(0, 12).map((segment) =>
+      segment.type === "text"
+        ? { ...segment, text: truncateText(segment.text, 300) }
+        : segment,
+    ),
+    questionImageUrl: sanitizeQuestionImageUrl(block.questionImageUrl),
+    imageDataUrl: undefined,
+  };
+}
+
+export function sanitizeResultForHistory(result: ParseResult): ParseResult {
+  const rawAnswer = String(result.answer || "").trim();
+  const normalizedAnswer =
+    result.questionType === "single_choice" || result.questionType === "multi_choice" || result.questionType === "judge"
+      ? rawAnswer
+      : /(见分点答案|见分点作答|按分点作答|分点作答|仅供参考|参考答案见解析|详见解析|示例答案)/.test(rawAnswer)
+        ? "需人工确认"
+        : rawAnswer;
+  return {
+    ...result,
+    answer: truncateText(normalizedAnswer, 500),
+    briefExplanation: truncateText(result.briefExplanation, MAX_BRIEF_EXPLANATION_CHARS),
+    detailedExplanation: truncateText(result.detailedExplanation, MAX_DETAILED_EXPLANATION_CHARS),
+    recognizedText: truncateText(result.recognizedText, MAX_RECOGNIZED_TEXT_CHARS),
+    warning: result.warning ? truncateText(result.warning, 500) : undefined,
+  };
+}
+
+export function sanitizeHistoryEntry(entry: HistoryEntry): HistoryEntry {
+  return {
+    ...entry,
+    block: sanitizeBlockForHistory(entry.block),
+    result: sanitizeResultForHistory(entry.result),
+  };
+}
+
 export async function loadSettings(): Promise<AppSettings> {
   const r = await chrome.storage.local.get(KEYS.settings);
   const stored = { ...DEFAULT_SETTINGS, ...(r[KEYS.settings] as Partial<AppSettings> ?? {}) };
@@ -64,14 +125,28 @@ export async function loadSettings(): Promise<AppSettings> {
 // ─── Parse History ────────────────────────────────────────────────────────────
 
 export async function addHistoryEntry(entry: HistoryEntry): Promise<void> {
+  await pruneIfNeeded();
   const history = await loadHistory();
-  const updated = [entry, ...history].slice(0, MAX_HISTORY);
-  await chrome.storage.local.set({ [KEYS.history]: updated });
+  const updated = [sanitizeHistoryEntry(entry), ...history.map(sanitizeHistoryEntry)].slice(0, MAX_HISTORY);
+  try {
+    await chrome.storage.local.set({ [KEYS.history]: updated });
+  } catch (err) {
+    if (isExtensionContextInvalidatedError(err)) return;
+    logError("Failed to save parse history", err, "addHistoryEntry", { count: updated.length });
+    const compact = updated.slice(0, Math.max(10, Math.floor(updated.length / 2)));
+    try {
+      await chrome.storage.local.set({ [KEYS.history]: compact });
+    } catch (compactErr) {
+      if (isExtensionContextInvalidatedError(compactErr)) return;
+      throw compactErr;
+    }
+  }
 }
 
 export async function loadHistory(): Promise<HistoryEntry[]> {
   const r = await chrome.storage.local.get(KEYS.history);
-  return (r[KEYS.history] as HistoryEntry[]) ?? [];
+  const history = (r[KEYS.history] as HistoryEntry[]) ?? [];
+  return history.map(sanitizeHistoryEntry);
 }
 
 export async function clearHistory(): Promise<void> {
@@ -106,6 +181,9 @@ export async function checkStorageQuota(): Promise<{
       nearLimit: used > QUOTA_WARNING_BYTES,
     };
   } catch (err) {
+    if (isExtensionContextInvalidatedError(err)) {
+      return { usedBytes: 0, quotaBytes: 5_242_880, nearLimit: false };
+    }
     logError("Failed to check storage quota", err, "checkStorageQuota");
     return { usedBytes: 0, quotaBytes: 5_242_880, nearLimit: false };
   }

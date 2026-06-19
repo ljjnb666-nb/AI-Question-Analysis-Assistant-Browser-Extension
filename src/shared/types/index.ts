@@ -21,10 +21,15 @@ export type QuestionType =
 
 export type QuestionSource = "manual_capture" | "auto_dom" | "auto_visual";
 
+export type QuestionDisplaySegment =
+  | { type: "text"; text: string }
+  | { type: "image"; url: string };
+
 export interface QuestionBlock {
   id: string;
   bbox: BoundingBox;
   previewText: string;
+  displaySegments?: QuestionDisplaySegment[];
   hasImage: boolean;
   questionImageUrl?: string;
   questionTypeGuess: QuestionType;
@@ -73,6 +78,12 @@ export interface DetectedCandidate {
     imageAttached?: boolean;
     routeUsed?: RouteUsed;
   };
+}
+
+export interface CandidateSnapshot {
+  block: QuestionBlock;
+  selected: boolean;
+  status: ParseStatus;
 }
 
 // ─── Floating Window ─────────────────────────────────────────────────────────
@@ -167,7 +178,12 @@ export type MessageType =
   | "FULL_PAGE_DETECT_PROGRESS"
   | "FULL_PAGE_DETECT_DONE"
   | "FULL_PAGE_DETECT_CANCELLED"
-  | "CAPTURE_BLOCK_IMAGE";
+  | "CAPTURE_BLOCK_IMAGE"
+  | "FILL_PARSED_ANSWER"
+  | "START_AUTO_SOLVE_ALL"
+  | "STOP_AUTO_SOLVE_ALL"
+  | "AUTO_SOLVE_PROGRESS"
+  | "AUTO_SOLVE_DONE";
 
 export interface BaseMessage { type: MessageType; }
 
@@ -215,7 +231,7 @@ export interface SaveWindowStateMsg extends BaseMessage {
 export interface StartAutoDetectMsg extends BaseMessage { type: "START_AUTO_DETECT"; }
 export interface AutoDetectResultReadyMsg extends BaseMessage {
   type: "AUTO_DETECT_RESULT_READY";
-  candidates: QuestionBlock[];
+  candidates: CandidateSnapshot[];
 }
 export interface HighlightCandidateMsg extends BaseMessage {
   type: "HIGHLIGHT_CANDIDATE";
@@ -262,6 +278,33 @@ export interface CaptureBlockImageMsg extends BaseMessage {
   type: "CAPTURE_BLOCK_IMAGE";
   bbox: BoundingBox;
 }
+export interface FillParsedAnswerMsg extends BaseMessage {
+  type: "FILL_PARSED_ANSWER";
+  block: QuestionBlock;
+  result: ParseResult;
+}
+export interface StartAutoSolveAllMsg extends BaseMessage { type: "START_AUTO_SOLVE_ALL"; }
+export interface StopAutoSolveAllMsg extends BaseMessage { type: "STOP_AUTO_SOLVE_ALL"; }
+export interface AutoSolveProgressMsg extends BaseMessage {
+  type: "AUTO_SOLVE_PROGRESS";
+  running: boolean;
+  solved: number;
+  filled: number;
+  total: number;
+  current: number;
+  statusText: string;
+  currentQuestionId?: string;
+  currentPreview?: string;
+}
+export interface AutoSolveDoneMsg extends BaseMessage {
+  type: "AUTO_SOLVE_DONE";
+  ok: boolean;
+  stopped?: boolean;
+  solved: number;
+  filled: number;
+  total: number;
+  message: string;
+}
 
 export type ExtMessage =
   | StartManualCaptureMsg | CancelManualCaptureMsg | SubmitManualCaptureMsg
@@ -273,4 +316,5 @@ export type ExtMessage =
   | HighlightCandidateMsg | UpdateCandidateSelectionMsg | ClearHighlightsMsg | SubmitBatchParseMsg
   | GetSettingsMsg | SaveSettingsMsg | LogEventMsg
   | StartFullPageDetectMsg | FullPageDetectProgressMsg
-  | FullPageDetectDoneMsg | FullPageDetectCancelledMsg | CaptureBlockImageMsg;
+  | FullPageDetectDoneMsg | FullPageDetectCancelledMsg | CaptureBlockImageMsg | FillParsedAnswerMsg
+  | StartAutoSolveAllMsg | StopAutoSolveAllMsg | AutoSolveProgressMsg | AutoSolveDoneMsg;

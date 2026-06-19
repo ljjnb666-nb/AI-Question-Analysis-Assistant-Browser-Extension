@@ -18,6 +18,11 @@ export interface ErrorLogEntry {
 const ERROR_LOG: ErrorLogEntry[] = [];
 const MAX_LOG_SIZE = 100;
 
+function isExtensionContextInvalidatedError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err || "");
+  return /Extension context invalidated/i.test(message);
+}
+
 /**
  * Log an error with context
  */
@@ -115,7 +120,8 @@ export function getErrorLogs(): ErrorLogEntry[] {
  */
 export function clearErrorLogs(): void {
   ERROR_LOG.length = 0;
-  chrome.storage.local.remove("errorLog").catch(() => {
+  chrome.storage.local.remove("errorLog").catch((err) => {
+    if (isExtensionContextInvalidatedError(err)) return;
     // Ignore storage errors
   });
 }
@@ -130,6 +136,7 @@ async function persistErrorLog(entry: ErrorLogEntry): Promise<void> {
     const updated = [...log, entry].slice(-MAX_LOG_SIZE);
     await chrome.storage.local.set({ errorLog: updated });
   } catch (err) {
+    if (isExtensionContextInvalidatedError(err)) return;
     // Can't log storage errors to storage, just console
     console.error("[ErrorLogger] Failed to persist error log:", err);
   }
@@ -142,7 +149,8 @@ export async function loadErrorLogs(): Promise<ErrorLogEntry[]> {
   try {
     const result = await chrome.storage.local.get("errorLog");
     return (result["errorLog"] as ErrorLogEntry[]) ?? [];
-  } catch {
+  } catch (err) {
+    if (isExtensionContextInvalidatedError(err)) return [];
     return [];
   }
 }
