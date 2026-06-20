@@ -18,6 +18,8 @@ const CIRCLED_RE = /[\u2460\u2461\u2462\u2463]/g;
 const QUESTION_RE = /[?\uFF1F]|下列|哪项|正确的是|错误的是|属于|不属于/;
 const JUDGE_HEADER_RE = /\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?\s*\(\d+分\)/g;
 const JUDGE_HEADER_START_RE = /\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?/;
+const FORMULA_FALLBACK_ATTR = "data-qs-formula-fallback";
+const FORMULA_HIDDEN_ATTR = "data-qs-formula-hidden";
 
 let mutationObserver: MutationObserver | null = null;
 let pendingRescan = false;
@@ -79,28 +81,35 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
   const preferDirectCardMode = directCardBodies.length >= 1;
   for (const [directIndex, el] of directCardBodies.entries()) {
     if (isExtensionUiElement(el)) continue;
-    const rawRect = (el as HTMLElement).getBoundingClientRect();
+    const structuredHost = el.querySelector(".question-item, .questionBox, .base-question-component");
+    const rectSource = (structuredHost instanceof HTMLElement ? structuredHost : el) as HTMLElement;
+    const rawRect = rectSource.getBoundingClientRect();
     const rect = applyRightCutToRect(rawRect, hostRightCutX);
     if (!rect) continue;
     if (!inViewport(rect, vw, vh)) continue;
     if (rect.width < 80 || rect.height < 16) continue;
 
-    const text = getElementReadableText(el);
+    const text = structuredHost
+      ? extractStructuredQuestionText(structuredHost)
+      : getElementReadableText(el);
     if (!text || text.length < 10) continue;
     if (isLikelyControlPanelText(text)) continue;
 
-    let candidateBbox = applyRightCutToBbox(refineCandidateRect(el, rect, vw, vh), hostRightCutX);
+    let candidateBbox = applyRightCutToBbox(refineCandidateRect(rectSource, rect, vw, vh), hostRightCutX);
     let previewText = buildPreviewTextForBbox(el, candidateBbox, text);
     const guessed = inferQuestionType(previewText || text);
-    candidateBbox = refineBboxForDetectedType(el, candidateBbox, guessed, vw, vh);
-    previewText = sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), guessed);
+    candidateBbox = refineBboxForDetectedType(rectSource, candidateBbox, guessed, vw, vh);
+    previewText = structuredHost
+      ? sanitizePreviewTextByType(text, guessed)
+      : sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), guessed);
     if (!isLikelyCompleteQuestionText(previewText, guessed)) continue;
     const candidate: QuestionBlock = {
       id: `auto-direct-${Date.now()}-${directIndex}-${Math.random().toString(36).slice(2, 8)}`,
       bbox: candidateBbox,
       previewText: previewText.slice(0, 420),
-      hasImage: !!el.querySelector("img, canvas, svg, math, figure, mjx-container, .MathJax, .katex, embed"),
-      questionImageUrl: pickQuestionImageFromElement(el) ?? undefined,
+      displaySegments: structuredHost ? extractStructuredQuestionDisplaySegments(structuredHost) : undefined,
+      hasImage: !!rectSource.querySelector("img, canvas, svg, math, figure, mjx-container, .MathJax, .katex, embed"),
+      questionImageUrl: pickQuestionImageFromElement(rectSource) ?? undefined,
       questionTypeGuess: guessed,
       confidence: 0.9,
       source: "auto_dom",
@@ -732,7 +741,7 @@ function sanitizePreviewText(text: string): string {
   return out;
 }
 
-function sanitizePreviewTextByType(text: string, type: QuestionType): string {
+export function sanitizePreviewTextByType(text: string, type: QuestionType): string {
   const normalized = sanitizePreviewText(text);
   if (!normalized) return "";
   if (type === "single_choice" || type === "multi_choice") {
@@ -744,7 +753,7 @@ function sanitizePreviewTextByType(text: string, type: QuestionType): string {
   return normalized;
 }
 
-function sanitizeChoicePreviewText(text: string): string {
+export function sanitizeChoicePreviewText(text: string): string {
   const normalized = sanitizePreviewText(text);
   if (!normalized) return "";
 
@@ -787,8 +796,14 @@ function containsMathLikeContent(el: Element, text: string): boolean {
   return /(g\(s\)|h\(s\)|g\(j|h\(j|f\(x\)|lim|sin|cos|tan|e\^|s\^|jω|jw|σ|ω|∫|Σ|√|≤|≥|≠|传递函数|奈奎斯特|伯德图)/i.test(t);
 }
 
-function extractReadableNodeText(node: Element): string {
+export function extractReadableNodeText(node: Element): string {
   const tag = node.tagName.toLowerCase();
+  if (node.hasAttribute(FORMULA_FALLBACK_ATTR)) {
+    return normalizeText(node.textContent || "");
+  }
+  if (node.hasAttribute(FORMULA_HIDDEN_ATTR)) {
+    return "";
+  }
   const attrText = [
     node.getAttribute("aria-label"),
     node.getAttribute("alt"),
@@ -892,6 +907,7 @@ function readInlineOrderedChildContent(
   if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
   if (!(node instanceof Element)) return "";
   if (shouldSkipChild?.(node)) return "";
+  if (node.hasAttribute(FORMULA_HIDDEN_ATTR)) return "";
 
   const tag = node.tagName.toLowerCase();
   if (
@@ -906,11 +922,11 @@ function readInlineOrderedChildContent(
   }
   if (tag === "sub") {
     const text = normalizeText(node.textContent || "");
-    return text ? text.replace(/\s+/g, "") : "";
+    return text ? `_{${text.replace(/\s+/g, "")}}` : "";
   }
   if (tag === "sup") {
     const text = normalizeText(node.textContent || "");
-    return text ? `^${text.replace(/\s+/g, "")}` : "";
+    return text ? `^{${text.replace(/\s+/g, "")}}` : "";
   }
   if (tag === "br") return " ";
 
@@ -929,7 +945,7 @@ function readInlineOrderedChildContent(
   return ` ${extractReadableNodeText(node)} `;
 }
 
-function extractStructuredQuestionText(container: Element): string {
+export function extractStructuredQuestionText(container: Element): string {
   const pieces: string[] = [];
   const push = (value: string) => {
     const normalized = normalizeText(value);

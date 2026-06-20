@@ -403,7 +403,7 @@ function remapFullPageBlocksFromDom(blocks: QuestionBlock[], scrollRoot: ScanScr
         width: Math.max(1, rect.width),
         height: Math.max(1, rect.height),
       };
-      const previewText = normalizeQuestionText(el.innerText || el.textContent || "");
+      const previewText = extractRichQuestionPreviewFromElement(el);
       return {
         el,
         previewText,
@@ -1366,7 +1366,7 @@ function detectZhihuishuCurrentQuestionBlock(): QuestionBlock | null {
     .filter((el): el is HTMLElement => el instanceof HTMLElement)
     .map((el) => {
       const rect = el.getBoundingClientRect();
-      const text = normalizeQuestionText(el.innerText || el.textContent || "");
+      const text = extractRichQuestionPreviewFromElement(el);
       return { el, rect, text, isQuestionBox: el.classList.contains("questionBox") };
     })
     .filter(({ rect, text }) => rect.width > 260 && rect.height > 80 && /^\d{1,3}\s*[\.、]/.test(text))
@@ -1761,7 +1761,7 @@ function extractTextFromBBox(bbox: BoundingBox): string {
         node = node.parentElement;
         continue;
       }
-      const text = normalizeQuestionText((node as HTMLElement).innerText || node.textContent || "");
+      const text = extractRichQuestionPreviewFromElement(node);
       const score = scoreQuestionLikeText(text, node, depth);
       if (score > bestScore) {
         bestScore = score;
@@ -1844,7 +1844,7 @@ function findBestQuestionContainer(anchor: Element, bbox: BoundingBox): Element 
     const nodeArea = Math.max(1, rect.width * rect.height);
     const areaRatio = nodeArea / bboxArea;
     const overlapRatio = interArea / Math.min(nodeArea, bboxArea);
-    const text = normalizeQuestionText((node as HTMLElement).innerText || node.textContent || "");
+    const text = extractRichQuestionPreviewFromElement(node);
     const optionLikeCount = (
       text.match(/(?:^|\n)\s*(?:[A-D][\.\):\uFF1A\u3001]?|[\u2460\u2461\u2462\u2463])\s*/g) || []
     ).length;
@@ -1968,7 +1968,7 @@ function findLikelyQuestionBBoxNear(bbox: BoundingBox): BoundingBox | null {
     .filter((el) => {
       if (!(el instanceof HTMLElement)) return false;
       if (!isElementVisible(el) || isExtensionUiElement(el)) return false;
-      const txt = normalizeQuestionText(el.innerText || el.textContent || "");
+      const txt = extractRichQuestionPreviewFromElement(el);
       if (txt.length < 40 || txt.length > 5000) return false;
       return /(A[、.．]|B[、.．]|C[、.．]|D[、.．]|\(\s*1\s*\)|（\s*1\s*）|请据图回答|下列)/.test(txt);
     }) as HTMLElement[];
@@ -2047,12 +2047,13 @@ function findBestDetectedCandidateForBBox(bbox: BoundingBox): QuestionBlock | nu
 }
 
 function collectTextFromContainer(container: Element, bbox: BoundingBox): string {
-  const selector = "h1,h2,h3,h4,p,li,td,label,span,div,img,svg,math,figure,mjx-container,.MathJax,.katex,embed";
+  const selector = "h1,h2,h3,h4,p,li,td,label,img,svg,math,figure,mjx-container,.MathJax,.katex,embed,.option-content,.qeustion-content,.questionContent,.markdown-latex-container";
   const nodes = Array.from(container.querySelectorAll(selector));
   const entries: Array<{ top: number; left: number; text: string }> = [];
 
   for (const node of nodes) {
     if (isExtensionUiElement(node)) continue;
+    if (shouldSkipNestedSemanticNode(node, container)) continue;
     if (node instanceof HTMLElement && !isElementVisible(node)) continue;
     const rect = (node as Element).getBoundingClientRect();
     const interArea = intersectionArea(rect, bbox);
@@ -2143,14 +2144,86 @@ function normalizeInlineText(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();
 }
 
+const FORMULA_FALLBACK_ATTR = "data-qs-formula-fallback";
+const FORMULA_HIDDEN_ATTR = "data-qs-formula-hidden";
+const SEMANTIC_MATH_SELECTOR = "svg,math,mjx-container,.MathJax,.katex,embed,[data-svg-latex],[data-latex]";
+const MIXED_CONTENT_HOST_SELECTOR = "p,li,td,label,.option-content,.qeustion-content,.questionContent,.markdown-latex-container";
+
 function isSemanticFormulaTextNodeParent(parent: HTMLElement): boolean {
   return Boolean(
-    parent.closest("svg,math,mjx-container,.MathJax,.katex,embed,[data-svg-latex],[data-latex]"),
+    parent.closest(SEMANTIC_MATH_SELECTOR),
+  );
+}
+
+function isSemanticMathElement(node: Element): boolean {
+  if (!node) return false;
+  if (node.matches(SEMANTIC_MATH_SELECTOR)) return true;
+  const tag = node.tagName.toLowerCase();
+  return tag === "svg" || tag === "math" || tag === "mjx-container" || tag === "embed";
+}
+
+function shouldSkipNestedSemanticNode(node: Element, container: Element): boolean {
+  if (!isSemanticMathElement(node)) return false;
+  const host = node.parentElement?.closest(MIXED_CONTENT_HOST_SELECTOR);
+  if (!host || host === node || host === container) return false;
+  return container.contains(host);
+}
+
+function extractMixedReadableQuestionText(node: Element, depth = 0): string {
+  if (!node || depth >= 8) {
+    return normalizeQuestionText((node as HTMLElement).innerText || node.textContent || "");
+  }
+
+  const parts: string[] = [];
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      const text = normalizeInlineText(child.textContent || "");
+      if (text) parts.push(text);
+      continue;
+    }
+
+    if (!(child instanceof Element) || isExtensionUiElement(child)) continue;
+    if (child.hasAttribute(FORMULA_HIDDEN_ATTR)) continue;
+
+    const tag = child.tagName.toLowerCase();
+    if (tag === "br") {
+      parts.push("\n");
+      continue;
+    }
+
+    let text = "";
+    if (isSemanticMathElement(child)) {
+      text = extractReadableQuestionNodeText(child);
+    } else if (tag === "img" || tag === "canvas") {
+      text = extractReadableQuestionNodeText(child);
+    } else {
+      text = extractMixedReadableQuestionText(child, depth + 1);
+    }
+
+    if (text) parts.push(text);
+  }
+
+  if (!parts.length) {
+    return normalizeQuestionText((node as HTMLElement).innerText || node.textContent || "");
+  }
+
+  return normalizeQuestionText(
+    parts
+      .join(" ")
+      .replace(/[ \t]*\n[ \t]*/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
   );
 }
 
 function extractReadableQuestionNodeText(node: Element): string {
   const tag = node.tagName.toLowerCase();
+  if (node.hasAttribute(FORMULA_FALLBACK_ATTR)) {
+    return normalizeQuestionText(node.textContent || "");
+  }
+  if (node.hasAttribute(FORMULA_HIDDEN_ATTR)) {
+    return "";
+  }
   const attrText = [
     node.getAttribute("aria-label"),
     node.getAttribute("alt"),
@@ -2184,7 +2257,30 @@ function extractReadableQuestionNodeText(node: Element): string {
     if (hasNearbyLargeVisualImageForSemanticNode(node)) return "";
     return normalizeQuestionText(extractSemanticSvgLikeText(node) || "[公式]");
   }
-  return normalizeQuestionText((node as HTMLElement).innerText || node.textContent || attrText || "");
+  return extractMixedReadableQuestionText(node) || normalizeQuestionText((node as HTMLElement).innerText || node.textContent || attrText || "");
+}
+
+function extractRichQuestionPreviewFromElement(node: Element): string {
+  if (!node || isExtensionUiElement(node)) return "";
+  const rect = node.getBoundingClientRect();
+  const bbox: BoundingBox = {
+    x: Math.max(0, rect.left),
+    y: Math.max(0, rect.top),
+    width: Math.max(1, rect.width),
+    height: Math.max(1, rect.height),
+  };
+
+  let text = "";
+  if (rect.width >= 2 && rect.height >= 2) {
+    text = collectTextFromContainer(node, bbox);
+  }
+  if (!text) {
+    text = extractReadableQuestionNodeText(node);
+  }
+  if (!text) {
+    text = normalizeQuestionText((node as HTMLElement).innerText || node.textContent || "");
+  }
+  return normalizeQuestionText(text);
 }
 
 function mergeTextEntries(entries: Array<{ top: number; left: number; text: string }>): string {

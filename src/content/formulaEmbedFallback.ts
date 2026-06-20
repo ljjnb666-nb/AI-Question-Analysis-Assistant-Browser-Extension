@@ -5,39 +5,54 @@ const FORMULA_PROCESSED_ATTR = "data-qs-formula-processed";
 const FORMULA_HIDDEN_ATTR = "data-qs-formula-hidden";
 
 const SVG_TEXT_SELECTOR = "text,tspan,annotation,annotation-xml,title,desc";
+const MATH_IDENTIFIER_RE = /[\p{Script=Latin}\p{Script=Greek}\u03b8\u03c9\u03c3\u03bc\u03bb\u03c6\u03c8\u03c0\u03c4\u03c7XYZxyz]/u;
+
+function normalizeFormulaPlaceholderGlyphs(text: string): string {
+  return String(text || "")
+    .replace(/\u80c3/g, "\u03b8")
+    .replace(/\u8805/g, "\u03c9")
+    .replace(/\u87fd/g, "\u03c3")
+    .replace(/\u8802/g, "\u03c7")
+    .replace(/\u6e2d/g, "\u03bc")
+    .replace(/\u4f4d/g, "\u03bb")
+    .replace(/\u8801/g, "\u03c6")
+    .replace(/\u8804/g, "\u03c8")
+    .replace(/\u87fa/g, "\u03c0")
+    .replace(/\u87ff/g, "\u03c4");
+}
 
 export function shouldInstallFormulaEmbedFallback(hostname: string = window.location.hostname): boolean {
   return /(^|\.)zhihuishu\.com$/i.test(hostname);
 }
 
 export function normalizeMathDisplayText(text: string): string {
-  let out = String(text || "");
+  let out = normalizeFormulaPlaceholderGlyphs(String(text || ""));
   if (!out) return "";
 
   out = out
-    .replace(/&infin;|&#8734;|\\infty/gi, "∞")
-    .replace(/负无穷/g, "-∞")
-    .replace(/正无穷/g, "+∞")
-    .replace(/&omega;|&#969;|\\omega/gi, "ω")
-    .replace(/&sigma;|&#963;|\\sigma/gi, "σ")
+    .replace(/&infin;|&#8734;|\\infty/gi, "\u221e")
+    .replace(/\u8d1f\u65e0\u7a77/g, "-\u221e")
+    .replace(/\u6b63\u65e0\u7a77/g, "+\u221e")
+    .replace(/&omega;|&#969;|\\omega/gi, "\u03c9")
+    .replace(/&sigma;|&#963;|\\sigma/gi, "\u03c3")
     .replace(/&minus;|&#8722;/gi, "-")
-    .replace(/[−﹣－]/g, "-")
-    .replace(/[＋﹢]/g, "+")
-    .replace(/\b([+-])\s*infty\b/gi, "$1∞")
-    .replace(/\binfty\b/gi, "∞")
-    .replace(/由\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/g, "由-∞到+∞")
-    .replace(/从\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/g, "从-∞到+∞");
+    .replace(/[\u2212\ufe63\uff0d]/g, "-")
+    .replace(/[\uff0b\ufe62]/g, "+")
+    .replace(/\b([+-])\s*infty\b/gi, "$1\u221e")
+    .replace(/\binfty\b/gi, "\u221e")
+    .replace(/\u7531\s*-\s*(?:\u221e)?\s*\u5230\s*\+\s*(?:\u221e)?/g, "\u7531-\u221e\u5230+\u221e")
+    .replace(/\u4ece\s*-\s*(?:\u221e)?\s*\u5230\s*\+\s*(?:\u221e)?/g, "\u4ece-\u221e\u5230+\u221e");
 
   out = out.replace(
-    /((?:ω|w|omega)[^。；;,.，\n]{0,24}?由)\s*-\s*(?:∞)?\s*到\s*\+\s*(?:∞)?/gi,
-    (_m, prefix) => `${prefix}-∞到+∞`,
+    /((?:\u03c9|w|omega)[^\u3002\uff1b;,.，\n]{0,24}?\u7531)\s*-\s*(?:\u221e)?\s*\u5230\s*\+\s*(?:\u221e)?/gi,
+    (_m, prefix) => `${prefix}-\u221e\u5230+\u221e`,
   );
 
   return out;
 }
 
 export function decodeFormulaLikeText(raw: string): string {
-  let out = String(raw || "");
+  let out = normalizeFormulaPlaceholderGlyphs(String(raw || ""));
   if (!out) return "";
   try {
     out = decodeURIComponent(out);
@@ -46,18 +61,32 @@ export function decodeFormulaLikeText(raw: string): string {
   }
 
   out = out
-    .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "$1/$2")
-    .replace(/\\cdot/g, "·")
-    .replace(/\\times/g, "×")
-    .replace(/\\omega/g, "ω")
-    .replace(/\\sigma/g, "σ")
-    .replace(/\\infty/g, "∞")
+    .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "($1)/($2)")
+    .replace(/\\sqrt\s*\{([^{}]+)\}/g, "\u221a($1)")
+    .replace(/\\sqrt\s*\(([^()]+)\)/g, "\u221a($1)")
+    .replace(/\\cdot/g, "\u00b7")
+    .replace(/\\times/g, "\u00d7")
+    .replace(/\\theta/g, "\u03b8")
+    .replace(/\\omega/g, "\u03c9")
+    .replace(/\\sigma/g, "\u03c3")
+    .replace(/\\chi/g, "\u03c7")
+    .replace(/\\mu/g, "\u03bc")
+    .replace(/\\lambda/g, "\u03bb")
+    .replace(/\\phi/g, "\u03c6")
+    .replace(/\\psi/g, "\u03c8")
+    .replace(/\\pi/g, "\u03c0")
+    .replace(/\\tau/g, "\u03c4")
+    .replace(/\\infty/g, "\u221e")
     .replace(/\\left/g, "")
     .replace(/\\right/g, "")
     .replace(/[{}]/g, "")
     .replace(/\s*([=+\-*/])\s*/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
+
+  out = normalizeFormulaPlaceholderGlyphs(out)
+    .replace(/([\p{Script=Latin}\p{Script=Greek}\u03b8\u03c9\u03c3\u03bc\u03bb\u03c6\u03c8\u03c0\u03c4\u03c7XYZxyz])_\{([^{}]+)\}\^\{([^{}]+)\}/gu, "$1_{$2}^{$3}")
+    .replace(/([\p{Script=Latin}\p{Script=Greek}\u03b8\u03c9\u03c3\u03bc\u03bb\u03c6\u03c8\u03c0\u03c4\u03c7XYZxyz])\^\{([^{}]+)\}_\{([^{}]+)\}/gu, "$1_{$3}^{$2}");
 
   return normalizeMathDisplayText(out);
 }
@@ -79,7 +108,6 @@ export function extractSemanticSvgLikeText(node: Element): string {
     || node.getAttribute("title")
     || "",
   ).trim();
-  if (explicit) return explicit;
 
   const pieces: Array<{ text: string; x: number; y: number }> = [];
   const seen = new Set<string>();
@@ -111,6 +139,8 @@ export function extractSemanticSvgLikeText(node: Element): string {
       extractRadicalDescriptors(node),
     );
   }
+
+  if (explicit) return explicit;
 
   const textContent = normalizeMathDisplayText((node.textContent || "").replace(/\s+/g, " ").trim());
   return looksLikeSvgStyleNoise(textContent) ? "" : textContent;
@@ -398,17 +428,20 @@ function joinSvgPiecesInReadingOrder(
     .sort((a, b) => a.x - b.x);
 
   const merged = baseline.map((piece) => ({ ...piece, prefix: "", suffix: "" }));
+  const attachedPieceIds = new Set<number>();
 
   for (const piece of upper) {
     const host = findNearestAttachTargetSmart(merged, piece.x);
     if (!host) continue;
-    host.suffix += `^${piece.text}`;
+    host.suffix += `^{${piece.text}}`;
+    attachedPieceIds.add(piece.id);
   }
 
   for (const piece of lower) {
     const host = findNearestAttachTargetSmart(merged, piece.x);
-    if (!host) continue;
-    host.suffix += piece.text;
+    if (!host || !shouldAttachAsSubscriptPiece(piece.text)) continue;
+    host.suffix += `_{${piece.text}}`;
+    attachedPieceIds.add(piece.id);
   }
 
   const mergedText = merged
@@ -418,7 +451,7 @@ function joinSvgPiecesInReadingOrder(
 
   const leftover = remainingPieces
     .filter((piece) => Math.abs(piece.y - baselineY) > 18)
-    .filter((piece) => !findNearestAttachTargetSmart(merged, piece.x))
+    .filter((piece) => !attachedPieceIds.has(piece.id))
     .sort((a, b) => a.y - b.y || a.x - b.x)
     .map((piece) => piece.text)
     .join(" ");
@@ -460,7 +493,7 @@ function consumeFractionTokens(
     if (!numeratorText || !denominatorText) continue;
     syntheticPieces.push({
       id: 10_000 + syntheticPieces.length,
-      text: `${numeratorText}/${denominatorText}`,
+      text: `(${numeratorText})/(${denominatorText})`,
       x: bar.x1,
       y: bar.y,
     });
@@ -498,7 +531,7 @@ function consumeRadicalTokens(
     if (!inner) continue;
     syntheticPieces.push({
       id: 20_000 + syntheticPieces.length,
-      text: `${radicalPrefix}${inner}`,
+      text: `${radicalPrefix}(${inner})`,
       x: radical.x1,
       y: radical.maxY,
     });
@@ -526,26 +559,37 @@ function composeMathSideText(
   const lower = pieces
     .filter((piece) => piece.y > baselineY + 18)
     .sort((a, b) => a.x - b.x);
+  const attachedPieces = new Set<string>();
+
+  const pieceKey = (piece: { text: string; x: number; y: number }) =>
+    `${piece.x}:${piece.y}:${piece.text}`;
 
   for (const piece of upper) {
     const host = findNearestAttachTargetSmart(baseline, piece.x);
-    if (host) host.superscript += piece.text;
+    if (host) {
+      host.superscript += piece.text;
+      attachedPieces.add(pieceKey(piece));
+    }
   }
   for (const piece of lower) {
     const host = findNearestAttachTargetSmart(baseline, piece.x);
-    if (host) host.subscript += piece.text;
+    if (host && shouldAttachAsSubscriptPiece(piece.text)) {
+      host.subscript += piece.text;
+      attachedPieces.add(pieceKey(piece));
+    }
   }
 
   let text = baseline
     .map((piece) => {
-      const superscript = piece.superscript ? `^${piece.superscript}` : "";
-      return `${piece.prefix}${piece.text}${piece.subscript}${superscript}${piece.suffix}`.trim();
+      const subscript = piece.subscript ? `_{${piece.subscript}}` : "";
+      const superscript = piece.superscript ? `^{${piece.superscript}}` : "";
+      return `${piece.prefix}${piece.text}${subscript}${superscript}${piece.suffix}`.trim();
     })
     .filter(Boolean)
     .join(" ");
 
   let leftoverPieces = [...upper, ...lower]
-    .filter((piece) => !findNearestAttachTargetSmart(baseline, piece.x))
+    .filter((piece) => !attachedPieces.has(pieceKey(piece)))
     .sort((a, b) => a.x - b.x);
 
   if (side === "numerator" && baseline.length > 0) {
@@ -627,13 +671,30 @@ function extractRadicalDescriptors(node: Element): Array<{ x1: number; x2: numbe
 }
 
 function tightenMathTokenSpacing(text: string): string {
-  return String(text || "")
-    .replace(/(\d\/\d+)\s+([A-Za-zθωσμλφψπτχXYZxyz])/gu, "$1$2")
-    .replace(/([A-Za-zθωσμλφψπτχXYZxyz])\s+\^/gu, "$1^")
+  return normalizeFormulaPlaceholderGlyphs(String(text || ""))
+    .replace(/[?]+/g, "-")
+    .replace(/-\s*\?/g, "-")
+    .replace(/\?\s*-/g, "-")
+    .replace(/\s*-\s*/g, " - ")
+    .replace(/(\d\/\d+)\s+([\p{Script=Latin}\p{Script=Greek}\u03b8\u03c9\u03c3\u03bc\u03bb\u03c6\u03c8\u03c0\u03c4\u03c7XYZxyz])/gu, "$1$2")
+    .replace(/([\p{Script=Latin}\p{Script=Greek}\u03b8\u03c9\u03c3\u03bc\u03bb\u03c6\u03c8\u03c0\u03c4\u03c7XYZxyz])\s+\^/gu, "$1^")
+    .replace(/\)\s*\/\s*\(/g, ")/(")
+    .replace(/\)\s+\(/g, ")*(")
+    .replace(/([0-9}])\s+\(/g, "$1*(")
+    .replace(/([0-9}])\s+([\p{Script=Latin}\p{Script=Greek}\u03b8\u03c9\u03c3\u03bc\u03bb\u03c6\u03c8\u03c0\u03c4\u03c7XYZxyz])/gu, "$1*$2")
+    .replace(/\)\s+([\p{Script=Latin}\p{Script=Greek}\u03b8\u03c9\u03c3\u03bc\u03bb\u03c6\u03c8\u03c0\u03c4\u03c7XYZxyz])/gu, ")*$1")
+    .replace(/([0-9}])\s+([\p{L}])/gu, "$1*$2")
+    .replace(/\)\s+([\p{L}])/gu, ")*$1")
     .replace(/\(\s+/g, "(")
     .replace(/\s+\)/g, ")")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+function shouldAttachAsSubscriptPiece(text: string): boolean {
+  const compact = String(text || "").replace(/\s+/g, "");
+  if (!compact) return false;
+  return /^[0-9]+$/.test(compact);
 }
 
 function pickBaselineY(pieces: Array<{ x: number; y: number; text: string }>): number {
@@ -661,15 +722,50 @@ function baselineWeightForPiece(text: string): number {
 }
 
 function findNearestAttachTargetSmart<T extends { x: number; text: string; suffix?: string }>(pieces: T[], x: number): T | null {
-  let best: T | null = null;
-  let bestDx = Number.POSITIVE_INFINITY;
-  for (const piece of pieces) {
+  const hosts = pieces.filter((piece) => {
     const compact = String(piece.text || "").replace(/\s+/g, "");
-    if (!compact || !isLikelyMathAttachHost(compact)) continue;
+    return compact && isLikelyMathAttachHost(compact);
+  });
+  if (!hosts.length) return null;
+
+  const sortedXs = hosts.map((piece) => piece.x).sort((a, b) => a - b);
+  const gaps: number[] = [];
+  for (let i = 1; i < sortedXs.length; i += 1) {
+    const gap = sortedXs[i] - sortedXs[i - 1];
+    if (gap > 0) gaps.push(gap);
+  }
+  const medianGap = gaps.length
+    ? gaps.sort((a, b) => a - b)[Math.floor(gaps.length / 2)]
+    : 180;
+  const maxAttachDx = Math.max(140, Math.min(900, medianGap * 0.8));
+
+  const leftHosts = hosts.filter((piece) => {
     const dx = x - piece.x;
-    if (dx < -24) continue;
-    if (dx < bestDx) {
-      bestDx = dx;
+    return dx >= -8 && dx <= maxAttachDx;
+  });
+  if (leftHosts.length) {
+    let bestLeft: T | null = null;
+    let bestLeftScore = Number.POSITIVE_INFINITY;
+    for (const piece of leftHosts) {
+      const dx = Math.max(0, x - piece.x);
+      const compact = String(piece.text || "").replace(/\s+/g, "");
+      const preferenceBias = /[\p{L}]/u.test(compact) ? 0 : 90;
+      const score = dx + preferenceBias;
+      if (score < bestLeftScore) {
+        bestLeftScore = score;
+        bestLeft = piece;
+      }
+    }
+    if (bestLeft) return bestLeft;
+  }
+
+  let best: T | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const piece of hosts) {
+    const dx = Math.abs(x - piece.x);
+    if (dx > maxAttachDx) continue;
+    if (dx < bestScore) {
+      bestScore = dx;
       best = piece;
     }
   }
@@ -678,17 +774,17 @@ function findNearestAttachTargetSmart<T extends { x: number; text: string; suffi
 
 function isLikelyMathAttachHost(text: string): boolean {
   if (!text) return false;
-  if (/^[=+\-*/,:;，。．、]+$/u.test(text)) return false;
-  if (/[)\]}]$/u.test(text)) return true;
-  if (/[\p{L}]/u.test(text)) return true;
-  return /[A-Za-z0-9θωσμλφψπτXYZxyz]/u.test(text);
+  if (/^[=+\-*/,:;\uFF0C\u3002\uFF0E\u3001]+$/u.test(text)) return false;
+  if (/[)\]}]$/u.test(text)) return false;
+  if (MATH_IDENTIFIER_RE.test(text)) return true;
+  return /[0-9]/.test(text);
 }
 
 function findNearestAttachTarget<T extends { x: number; text: string; suffix?: string }>(pieces: T[], x: number): T | null {
   let best: T | null = null;
   let bestDx = Number.POSITIVE_INFINITY;
   for (const piece of pieces) {
-    if (!/[A-Za-zα-ωΑ-ΩθωσμλxXyYzZTSLHGF]/.test(piece.text)) continue;
+    if (!MATH_IDENTIFIER_RE.test(piece.text)) continue;
     const dx = x - piece.x;
     if (dx < -24) continue;
     if (dx < bestDx) {

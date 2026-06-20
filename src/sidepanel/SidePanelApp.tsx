@@ -1,5 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
-import type { CandidateSnapshot, DetectedCandidate, HistoryEntry, ParseResult, QuestionBlock, QuestionDisplaySegment, QuestionType } from "@/shared/types";
+import type { CandidateSnapshot, DetectedCandidate, ExtMessage, HistoryEntry, ParseResult, QuestionBlock, QuestionDisplaySegment, QuestionType } from "@/shared/types";
 import { addHistoryEntry, clearHistory, exportHistory, loadSettings, saveSettings } from "@/shared/utils/storage";
 import { getProvider, parseQuestion, PROVIDERS } from "@/shared/utils/parseRouter";
 import type { ProviderId } from "@/shared/utils/parseRouter";
@@ -112,7 +112,7 @@ export const SidePanelApp: React.FC = () => {
     setCandidates([]);
     setExpandedIds({});
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab?.id) chrome.tabs.sendMessage(activeTab.id, { type: "START_AUTO_DETECT" });
+    if (activeTab?.id) await sendTabMessageWithBootstrap(activeTab.id, { type: "START_AUTO_DETECT" });
   };
 
   const handleFullPageDetect = async () => {
@@ -121,19 +121,19 @@ export const SidePanelApp: React.FC = () => {
     setExpandedIds({});
     setScanProgress({ progress: 0, found: 0, step: 0, total: 1 });
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab?.id) chrome.tabs.sendMessage(activeTab.id, { type: "START_FULL_PAGE_DETECT" });
+    if (activeTab?.id) await sendTabMessageWithBootstrap(activeTab.id, { type: "START_FULL_PAGE_DETECT" });
   };
 
   const handleCancelFullPage = async () => {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab?.id) chrome.tabs.sendMessage(activeTab.id, { type: "FULL_PAGE_DETECT_CANCELLED" });
+    if (activeTab?.id) await sendTabMessageWithBootstrap(activeTab.id, { type: "FULL_PAGE_DETECT_CANCELLED" });
     setIsFullPageScan(false);
     setScanProgress(null);
   };
 
   const syncSelection = async (payload: { blockId?: string; selected?: boolean; selectAll?: boolean }) => {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab?.id) chrome.tabs.sendMessage(activeTab.id, { type: "UPDATE_CANDIDATE_SELECTION", ...payload });
+    if (activeTab?.id) await sendTabMessageWithBootstrap(activeTab.id, { type: "UPDATE_CANDIDATE_SELECTION", ...payload });
   };
 
   const toggleSelect = (id: string) =>
@@ -146,7 +146,7 @@ export const SidePanelApp: React.FC = () => {
 
   const handleFlash = async (blockId: string) => {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab?.id) chrome.tabs.sendMessage(activeTab.id, { type: "HIGHLIGHT_CANDIDATE", blockId });
+    if (activeTab?.id) await sendTabMessageWithBootstrap(activeTab.id, { type: "HIGHLIGHT_CANDIDATE", blockId });
   };
 
   const toggleDetails = (id: string) => {
@@ -339,13 +339,13 @@ export const SidePanelApp: React.FC = () => {
       current: 0,
       statusText: uiLang === "en" ? "Starting auto solve..." : "开始自动答题...",
     });
-    chrome.tabs.sendMessage(activeTab.id, { type: "START_AUTO_SOLVE_ALL" });
+    await sendTabMessageWithBootstrap(activeTab.id, { type: "START_AUTO_SOLVE_ALL" });
   }, [uiLang]);
 
   const handleStopAutoSolve = useCallback(async () => {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!activeTab?.id) return;
-    chrome.tabs.sendMessage(activeTab.id, { type: "STOP_AUTO_SOLVE_ALL" });
+    await sendTabMessageWithBootstrap(activeTab.id, { type: "STOP_AUTO_SOLVE_ALL" });
   }, []);
 
   const selectedCount = candidates.filter((c) => c.selected).length;
@@ -673,13 +673,15 @@ const CandidateCard: React.FC<{
               wordBreak: "break-word",
             }}
           >
-            {(cand.block.questionTypeGuess === "fill_blank"
-              ? fillBlankStem
-              : cand.block.questionTypeGuess === "judge"
-                ? judgeStem
-                : displaySegments.length > 0
-                  ? <DisplaySegmentsView segments={displaySegments} lang={lang} />
-                  : displayStem) || (lang === "en" ? "(No preview text)" : "(无预览文本)")}
+            {displaySegments.length > 0
+              ? <DisplaySegmentsView segments={displaySegments} lang={lang} />
+              : renderMathText(
+                (cand.block.questionTypeGuess === "fill_blank"
+                  ? fillBlankStem
+                  : cand.block.questionTypeGuess === "judge"
+                    ? judgeStem
+                    : displayStem) || (lang === "en" ? "(No preview text)" : "(无预览文本)"),
+              )}
           </div>
 
           {displayImageUrl && (
@@ -719,7 +721,7 @@ const CandidateCard: React.FC<{
                 >
                   <span style={{ color: "#f9c58f", fontWeight: 700, width: 18, flexShrink: 0 }}>{option.key}</span>
                   {option.value ? (
-                    <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{option.value}</span>
+                    <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{renderMathText(option.value)}</span>
                   ) : null}
                 </div>
               ))}
@@ -745,7 +747,7 @@ const CandidateCard: React.FC<{
                   }}
                 >
                   <span style={{ color: "#cba6f7", fontWeight: 700, minWidth: 32, flexShrink: 0 }}>{blank.label}</span>
-                  <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{blank.hint || (lang === "en" ? "Blank" : "填空")}</span>
+                  <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{renderMathText(blank.hint || (lang === "en" ? "Blank" : "填空"))}</span>
                 </div>
               ))}
             </div>
@@ -770,7 +772,7 @@ const CandidateCard: React.FC<{
                   }}
                 >
                   <span style={{ color: "#89b4fa", fontWeight: 700, width: 18, flexShrink: 0 }}>{option.key}</span>
-                  <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{formatQuestionTextForDisplay(option.value)}</span>
+                  <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{renderMathText(formatQuestionTextForDisplay(option.value))}</span>
                 </div>
               ))}
             </div>
@@ -798,10 +800,10 @@ const CandidateCard: React.FC<{
                 wordBreak: "break-word",
               }}
             >
-              <strong>{lang === "en" ? "Answer" : "答案"}: {cand.result.answer}</strong>
+              <strong>{lang === "en" ? "Answer" : "答案"}: {renderMathText(cand.result.answer)}</strong>
               <div style={{ marginTop: 4, color: "#cfecc8" }}>
                 {lang === "en" ? "Confidence" : "置信度"} {Math.round((cand.result.confidence ?? 0) * 100)}%
-                {answerSummary ? ` · ${answerSummary}` : ""}
+                {answerSummary ? <> · {renderMathText(answerSummary)}</> : ""}
               </div>
               <div style={{ marginTop: 6 }}>
                 <button
@@ -859,7 +861,7 @@ const CandidateCard: React.FC<{
                     wordBreak: "break-word",
                   }}
                 >
-                  {cand.result.detailedExplanation || cand.result.briefExplanation}
+                  {renderMathText(cand.result.detailedExplanation || cand.result.briefExplanation)}
                 </div>
               )}
               {shouldRetryWithVision(cand.result as ParseResult) && (
@@ -888,7 +890,7 @@ const CandidateCard: React.FC<{
 
           {cand.status === "error" && (
             <div style={{ marginTop: 6 }}>
-              <div style={{ fontSize: 11, color: "#f38ba8", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{cand.error?.slice(0, 160)}</div>
+              <div style={{ fontSize: 11, color: "#f38ba8", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{renderMathText(cand.error?.slice(0, 160) || "")}</div>
               <div style={{ marginTop: 6 }}>
                 <button
                   onClick={(e) => {
@@ -945,7 +947,7 @@ const DisplaySegmentsView: React.FC<{ segments: QuestionDisplaySegment[]; lang: 
           }}
         />
       ) : (
-        <div key={`${segment.type}-${idx}`}>{formatQuestionTextForDisplay(segment.text)}</div>
+        <div key={`${segment.type}-${idx}`}>{renderMathText(formatQuestionTextForDisplay(segment.text))}</div>
       )
     ))}
   </div>
@@ -979,11 +981,13 @@ const AutoSolvePreviewCard: React.FC<{ previewText: string; lang: UILang }> = ({
       </div>
 
       <div style={{ fontSize: 11, color: "#d5f5da", lineHeight: 1.55, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-        {(inferredType === "fill_blank"
-          ? fillBlankStem
-          : inferredType === "judge"
-            ? judgeStem
-            : displayStem) || (lang === "en" ? "(No preview text)" : "(无预览文本)")}
+        {renderMathText(
+          (inferredType === "fill_blank"
+            ? fillBlankStem
+            : inferredType === "judge"
+              ? judgeStem
+              : displayStem) || (lang === "en" ? "(No preview text)" : "(无预览文本)"),
+        )}
       </div>
 
       {inferredType === "judge" && judgeView.options.length > 0 && (
@@ -1005,7 +1009,7 @@ const AutoSolvePreviewCard: React.FC<{ previewText: string; lang: UILang }> = ({
               }}
             >
               <span style={{ color: "#f9c58f", fontWeight: 700, width: 18, flexShrink: 0 }}>{option.key}</span>
-              {option.value ? <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{option.value}</span> : null}
+              {option.value ? <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{renderMathText(option.value)}</span> : null}
             </div>
           ))}
         </div>
@@ -1030,7 +1034,7 @@ const AutoSolvePreviewCard: React.FC<{ previewText: string; lang: UILang }> = ({
               }}
             >
               <span style={{ color: "#cba6f7", fontWeight: 700, minWidth: 32, flexShrink: 0 }}>{blank.label}</span>
-              <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{blank.hint || (lang === "en" ? "Blank" : "填空")}</span>
+              <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{renderMathText(blank.hint || (lang === "en" ? "Blank" : "填空"))}</span>
             </div>
           ))}
         </div>
@@ -1055,7 +1059,7 @@ const AutoSolvePreviewCard: React.FC<{ previewText: string; lang: UILang }> = ({
               }}
             >
               <span style={{ color: "#89b4fa", fontWeight: 700, width: 18, flexShrink: 0 }}>{option.key}</span>
-              <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{formatQuestionTextForDisplay(option.value)}</span>
+              <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{renderMathText(formatQuestionTextForDisplay(option.value))}</span>
             </div>
           ))}
         </div>
@@ -1164,13 +1168,13 @@ const HistoryTab: React.FC<{ lang: UILang }> = ({ lang }) => {
 
             {(dtype === "single_choice" || dtype === "multi_choice") && (
               <>
-                <div style={historyStemStyle}>{formatQuestionTextForDisplay(stem || sourceText) || (lang === "en" ? "(No stem)" : "(无题干)")}</div>
+                <div style={historyStemStyle}>{renderMathText(formatQuestionTextForDisplay(stem || sourceText) || (lang === "en" ? "(No stem)" : "(无题干)"))}</div>
                 <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
                   {options.length > 0
                     ? options.map((op) => (
                         <div key={op.key} style={historyOptionStyle}>
                           <span style={{ color: "#89b4fa", fontWeight: 700, width: 18 }}>{op.key}</span>
-                          <span style={{ color: "#cdd6f4" }}>{op.value}</span>
+                          <span style={{ color: "#cdd6f4" }}>{renderMathText(op.value)}</span>
                         </div>
                       ))
                     : <div style={{ color: "#a6adc8", fontSize: 12 }}>{lang === "en" ? "No standard option structure extracted" : "未提取到标准选项结构"}</div>}
@@ -1180,13 +1184,13 @@ const HistoryTab: React.FC<{ lang: UILang }> = ({ lang }) => {
 
             {dtype === "judge" && (
               <>
-                <div style={historyStemStyle}>{formatQuestionTextForDisplay(judgeView.stem || sourceText) || (lang === "en" ? "(No stem)" : "(无题干)")}</div>
+                <div style={historyStemStyle}>{renderMathText(formatQuestionTextForDisplay(judgeView.stem || sourceText) || (lang === "en" ? "(No stem)" : "(无题干)"))}</div>
                 {judgeView.options.length > 0 && (
                   <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
                     {judgeView.options.map((op) => (
                       <div key={op.key} style={historyOptionStyle}>
                         <span style={{ color: "#f9c58f", fontWeight: 700, width: 18 }}>{op.key}</span>
-                        {op.value ? <span style={{ color: "#cdd6f4" }}>{op.value}</span> : null}
+                        {op.value ? <span style={{ color: "#cdd6f4" }}>{renderMathText(op.value)}</span> : null}
                       </div>
                     ))}
                   </div>
@@ -1197,16 +1201,18 @@ const HistoryTab: React.FC<{ lang: UILang }> = ({ lang }) => {
             {(dtype === "fill_blank" || dtype === "short_answer" || dtype === "unknown") && (
               <>
                 <div style={historyStemStyle}>
-                  {dtype === "fill_blank"
-                    ? fillBlankStem || (lang === "en" ? "(No stem)" : "(无题干)")
-                    : prettySourceText || (lang === "en" ? "(No stem)" : "(无题干)")}
+                  {renderMathText(
+                    dtype === "fill_blank"
+                      ? fillBlankStem || (lang === "en" ? "(No stem)" : "(无题干)")
+                      : prettySourceText || (lang === "en" ? "(No stem)" : "(无题干)"),
+                  )}
                 </div>
                 {dtype === "fill_blank" && blankView.blanks.length > 0 && (
                   <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
                     {blankView.blanks.map((blank, idx) => (
                       <div key={`${blank.label}-${idx}`} style={historyOptionStyle}>
                         <span style={{ color: "#cba6f7", fontWeight: 700, width: 32 }}>{blank.label}</span>
-                        <span style={{ color: "#cdd6f4" }}>{blank.hint || (lang === "en" ? "Blank" : "填空")}</span>
+                        <span style={{ color: "#cdd6f4" }}>{renderMathText(blank.hint || (lang === "en" ? "Blank" : "填空"))}</span>
                       </div>
                     ))}
                   </div>
@@ -1575,38 +1581,75 @@ const inputStyle: React.CSSProperties = {
   fontFamily: "system-ui, sans-serif",
 };
 
-async function requestBlockImage(tabId: number, bbox: QuestionBlock["bbox"]): Promise<string | null> {
+function shouldBootstrapContentScript(error: unknown): boolean {
+  const text = String(error || "");
+  return /Receiving end does not exist|Could not establish connection/i.test(text);
+}
+
+async function injectContentScriptIntoTab(tabId: number): Promise<boolean> {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content/content-main.js"],
+    });
+    await new Promise((resolve) => window.setTimeout(resolve, 180));
+    return true;
+  } catch (err) {
+    console.warn("[SidePanel] content bootstrap failed:", err);
+    return false;
+  }
+}
+
+async function sendRawTabMessage<T = unknown>(tabId: number, message: ExtMessage): Promise<{ ok: boolean; response?: T; error?: string }> {
   return new Promise((resolve) => {
-    chrome.tabs.sendMessage(
-      tabId,
-      { type: "CAPTURE_BLOCK_IMAGE", bbox },
-      (resp?: { ok?: boolean; dataUrl?: string }) => resolve(resp?.ok && resp.dataUrl ? resp.dataUrl : null),
-    );
+    chrome.tabs.sendMessage(tabId, message, (resp?: T) => {
+      if (chrome.runtime.lastError) {
+        resolve({
+          ok: false,
+          error: chrome.runtime.lastError.message || "unknown tabs.sendMessage error",
+        });
+        return;
+      }
+      resolve({ ok: true, response: resp });
+    });
   });
 }
 
+async function sendTabMessageWithBootstrap<T = unknown>(tabId: number, message: ExtMessage): Promise<{ ok: boolean; response?: T; error?: string }> {
+  const first = await sendRawTabMessage<T>(tabId, message);
+  if (first.ok || !shouldBootstrapContentScript(first.error)) return first;
+
+  const injected = await injectContentScriptIntoTab(tabId);
+  if (!injected) return first;
+
+  return sendRawTabMessage<T>(tabId, message);
+}
+
+async function requestBlockImage(tabId: number, bbox: QuestionBlock["bbox"]): Promise<string | null> {
+  const resp = await sendTabMessageWithBootstrap<{ ok?: boolean; dataUrl?: string }>(
+    tabId,
+    { type: "CAPTURE_BLOCK_IMAGE", bbox },
+  );
+  return resp.response?.ok && resp.response.dataUrl ? resp.response.dataUrl : null;
+}
+
 async function sendFillMessage(tabId: number, block: QuestionBlock, result: ParseResult): Promise<{ ok?: boolean; filledCount?: number; message?: string } | null> {
-  return new Promise((resolve) => {
-    chrome.tabs.sendMessage(
-      tabId,
-      { type: "FILL_PARSED_ANSWER", block, result },
-      (resp?: { ok?: boolean; filledCount?: number; message?: string }) => {
-        if (chrome.runtime.lastError) {
-          resolve({
-            ok: false,
-            filledCount: 0,
-            message: chrome.runtime.lastError.message || "填写消息发送失败",
-          });
-          return;
-        }
-        resolve(resp ?? {
-          ok: false,
-          filledCount: 0,
-          message: "页面未返回填写结果",
-        });
-      },
-    );
-  });
+  const resp = await sendTabMessageWithBootstrap<{ ok?: boolean; filledCount?: number; message?: string }>(
+    tabId,
+    { type: "FILL_PARSED_ANSWER", block, result },
+  );
+  if (!resp.ok) {
+    return {
+      ok: false,
+      filledCount: 0,
+      message: resp.error || "填写消息发送失败",
+    };
+  }
+  return resp.response ?? {
+    ok: false,
+    filledCount: 0,
+    message: "页面未返回填写结果",
+  };
 }
 
 function isRiskyCandidate(cand: DetectedCandidate): boolean {
@@ -1724,17 +1767,228 @@ function cleanCandidatePreviewText(s: string): string {
   return normalizeText(cleaned);
 }
 
-function formatQuestionTextForDisplay(s: string): string {
+export function formatQuestionTextForDisplay(s: string): string {
   const base = String(s || "").replace(/\r\n?/g, "\n").trim();
   if (!base) return "";
   return base
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
-    .replace(/\s*(\(\d+\)|（\d+）)/g, "\n$1")
+    .replace(/(^|[\n。；;!?！？]\s*|\s{2,})(\(\d+\)|（\d+）)(?!\s*\/)/g, (_m, prefix, marker) => `${prefix}\n${marker}`)
     .replace(/\s*([①②③④⑤⑥⑦⑧⑨⑩])/g, "\n$1")
     .replace(/\s*(?=[A-D][\.\):：、]\s)/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+export function renderMathText(text: string): React.ReactNode {
+  const lines = String(text || "")
+    .split("\n")
+    .map((line) => normalizeRenderableMathText(line));
+  return (
+    <>
+      {lines.map((line, lineIndex) => (
+        <React.Fragment key={`line-${lineIndex}`}>
+          {lineIndex > 0 ? <br /> : null}
+          {renderMathTextLine(line, `line-${lineIndex}`)}
+        </React.Fragment>
+      ))}
+    </>
+  );
+}
+
+export function renderMathTextLine(text: string, keyPrefix: string): React.ReactNode[] {
+  return renderStructuredMathTextLine(text, keyPrefix, 0);
+}
+
+export function renderStructuredMathTextLine(text: string, keyPrefix: string, depth: number): React.ReactNode[] {
+  if (!text) return [];
+  if (depth >= 4) return renderMathAtoms(text, keyPrefix);
+
+  const fraction = findNextFractionExpression(text);
+  if (!fraction) return renderMathAtoms(text, keyPrefix);
+
+  const out: React.ReactNode[] = [];
+  out.push(...renderStructuredMathTextLine(text.slice(0, fraction.start), `${keyPrefix}-pre`, depth + 1));
+  out.push(
+    <span
+      key={`${keyPrefix}-frac-${depth}-${fraction.start}`}
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        verticalAlign: "middle",
+        margin: "0 0.14em",
+        lineHeight: 1.05,
+      }}
+    >
+      <span style={{ padding: "0 0.18em", borderBottom: "1px solid currentColor" }}>
+        {renderStructuredMathTextLine(fraction.numerator, `${keyPrefix}-num`, depth + 1)}
+      </span>
+      <span style={{ padding: "0 0.18em" }}>
+        {renderStructuredMathTextLine(fraction.denominator, `${keyPrefix}-den`, depth + 1)}
+      </span>
+    </span>,
+  );
+  out.push(...renderStructuredMathTextLine(text.slice(fraction.end), `${keyPrefix}-post`, depth + 1));
+  return out;
+}
+
+export function renderMathAtoms(text: string, keyPrefix: string): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  const pattern = /([\p{Script=Latin}\p{Script=Greek}\u0300-\u036f]{1,8})_\{([^{}]+)\}\^\{([^{}]+)\}|([\p{Script=Latin}\p{Script=Greek}\u0300-\u036f]{1,8})_\{([^{}]+)\}|([\p{Script=Latin}\p{Script=Greek}\u0300-\u036f]{1,8})\^\{([^{}]+)\}|(\d+)\^\{([^{}]+)\}|([\p{Script=Latin}\p{Script=Greek}\u0300-\u036f]{1,6})(\d{1,3})(?![\p{Script=Latin}\p{Script=Greek}\p{N}])|\^(\([^)]+\)|[\p{L}\p{N}+\-*/=.θωσμλφψπτχ]{1,24})/gu;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  let tokenIndex = 0;
+
+  while ((match = pattern.exec(text)) !== null) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      out.push(text.slice(cursor, index));
+    }
+
+    if (match[1] && match[2] && match[3]) {
+      if (looksLikeMathIdentifier(match[1])) {
+        out.push(
+          <React.Fragment key={`${keyPrefix}-subsup-${tokenIndex++}`}>
+            {match[1]}
+            <sub>{match[2]}</sub>
+            <sup>{match[3]}</sup>
+          </React.Fragment>,
+        );
+      } else {
+        out.push(match[0]);
+      }
+    } else if (match[4] && match[5]) {
+      if (looksLikeMathIdentifier(match[4])) {
+        out.push(
+          <React.Fragment key={`${keyPrefix}-sub-${tokenIndex++}`}>
+            {match[4]}
+            <sub>{match[5]}</sub>
+          </React.Fragment>,
+        );
+      } else {
+        out.push(match[0]);
+      }
+    } else if (match[6] && match[7]) {
+      if (looksLikeMathIdentifier(match[6])) {
+        out.push(
+          <React.Fragment key={`${keyPrefix}-sup-${tokenIndex++}`}>
+            {match[6]}
+            <sup>{match[7]}</sup>
+          </React.Fragment>,
+        );
+      } else {
+        out.push(match[0]);
+      }
+    } else if (match[8] && match[9]) {
+      out.push(
+        <React.Fragment key={`${keyPrefix}-numsup-${tokenIndex++}`}>
+          {match[8]}
+          <sup>{match[9]}</sup>
+        </React.Fragment>,
+      );
+    } else if (match[10] && match[11]) {
+      if (looksLikeMathIdentifier(match[10])) {
+        out.push(
+          <React.Fragment key={`${keyPrefix}-sub-${tokenIndex++}`}>
+            {match[10]}
+            <sub>{match[11]}</sub>
+          </React.Fragment>,
+        );
+      } else {
+        out.push(match[0]);
+      }
+    } else if (match[12]) {
+      if (looksLikeMathIdentifier(match[12])) {
+        out.push(
+          <React.Fragment key={`${keyPrefix}-sub-${tokenIndex++}`}>
+            {match[12]}
+            <sub>{match[13]}</sub>
+          </React.Fragment>,
+        );
+      } else {
+        out.push(match[0]);
+      }
+    } else if (match[14]) {
+      const superscript = match[14].replace(/^\((.*)\)$/u, "$1");
+      out.push(<sup key={`${keyPrefix}-sup-${tokenIndex++}`}>{superscript}</sup>);
+    }
+
+    cursor = index + match[0].length;
+  }
+
+  if (cursor < text.length) {
+    out.push(text.slice(cursor));
+  }
+
+  return out;
+}
+
+export function normalizeRenderableMathText(text: string): string {
+  const raw = String(text || "");
+  if (!raw) return "";
+
+  // Normalize common OCR/SVG flattening patterns before rendering.
+  return raw
+    .replace(/\b([A-Za-z])\s+(\d+)\s+(\d+)(?=\s*(?:[),+\-*/=]|$))/g, "$1_{$2}^{$3}")
+    .replace(/([\p{Script=Greek}])\s+(\d+)(?=\s*(?:[),+\-*/=]|$))/gu, "$1^{$2}")
+    .replace(/\b([A-Za-z])\s+(\d+)(?=\s*(?:[),+\-*/=]|$))/g, "$1_{$2}")
+    .replace(/([\p{Script=Latin}\p{Script=Greek}])_\{(\d+)\}\s+(\d+)(?=\s*(?:[),+\-*/=]|$))/gu, "$1_{$2}^{$3}")
+    .replace(/([\p{Script=Latin}\p{Script=Greek}])_\{(\d+)\}\s+\^\{(\d+)\}/gu, "$1_{$2}^{$3}")
+    .replace(/([\p{Script=Latin}\p{Script=Greek}])(\d+)(?=[\p{Script=Han}])/gu, "$1_{$2}")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
+    .trim();
+}
+
+export function findNextFractionExpression(text: string): { start: number; end: number; numerator: string; denominator: string } | null {
+  const input = String(text || "");
+  for (let i = 0; i < input.length; i += 1) {
+    if (input[i] !== "(") continue;
+    const numeratorEnd = findMatchingParen(input, i);
+    if (numeratorEnd < 0) continue;
+
+    let cursor = numeratorEnd + 1;
+    while (cursor < input.length && /\s/.test(input[cursor])) cursor += 1;
+    if (input[cursor] !== "/") continue;
+    cursor += 1;
+    while (cursor < input.length && /\s/.test(input[cursor])) cursor += 1;
+    if (input[cursor] !== "(") continue;
+
+    const denominatorStart = cursor;
+    const denominatorEnd = findMatchingParen(input, denominatorStart);
+    if (denominatorEnd < 0) continue;
+
+    return {
+      start: i,
+      end: denominatorEnd + 1,
+      numerator: input.slice(i + 1, numeratorEnd).trim(),
+      denominator: input.slice(denominatorStart + 1, denominatorEnd).trim(),
+    };
+  }
+  return null;
+}
+
+export function findMatchingParen(text: string, start: number): number {
+  let depth = 0;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+export function looksLikeMathIdentifier(token: string): boolean {
+  const value = String(token || "").trim();
+  if (!value) return false;
+  if (/^[\p{Script=Han}]+$/u.test(value)) return false;
+  return /[\p{L}θωσμλφψπτχ]/u.test(value);
 }
 
 function buildCandidateStemForDisplay(

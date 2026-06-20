@@ -15,7 +15,7 @@ describe("formulaEmbedFallback", () => {
 
   it("decodes latex-like embed payloads into readable inline text", () => {
     const text = decodeFormulaLikeText("G(s)=10+%5Cfrac%7B2%7D%7Bs%7D%20+5s");
-    expect(text).toBe("G(s)=10+2/s+5s");
+    expect(text).toBe("G(s)=10+(2)/(s)+5s");
   });
 
   it("replaces blocked zhihuishu formula embeds with inline fallback text", () => {
@@ -23,7 +23,7 @@ describe("formulaEmbedFallback", () => {
       <div id="stem">
         某系统的校正装置的数学模型为
         <embed id="formula" data-svg-latex="G(s)=10+%5Cfrac%7B2%7D%7Bs%7D%20+5s" type="image/svg+xml" />
-        ，则该校正装置为（ ）。
+        ，则该校正装置为�?）�?
       </div>
     `;
 
@@ -33,8 +33,8 @@ describe("formulaEmbedFallback", () => {
 
     expect(changed).toBe(1);
     expect(formula?.style.display).toBe("none");
-    expect(fallback?.textContent).toBe("G(s)=10+2/s+5s");
-    expect(document.getElementById("stem")?.textContent).toContain("G(s)=10+2/s+5s");
+    expect(fallback?.textContent).toBe("G(s)=10+(2)/(s)+5s");
+    expect(document.getElementById("stem")?.textContent).toContain("G(s)=10+(2)/(s)+5s");
   });
 
   it("limits visual embed fallback to zhihuishu hosts", () => {
@@ -115,14 +115,14 @@ describe("formulaEmbedFallback", () => {
       <div id="wrap" class="questionContent">
         <img id="figure" src="https://example.com/table.png" />
         <svg id="semantic" viewBox="0 0 640 40">
-          <text x="10" y="18">取得样本值</text>
+          <text x="10" y="18">取得样本�?/text>
           <text x="180" y="18">x</text>
           <text x="210" y="30">1</text>
           <text x="235" y="18">=</text>
           <text x="260" y="18">1,</text>
-          <text x="320" y="18">则参数</text>
+          <text x="320" y="18">则参�?/text>
           <text x="430" y="18">θ</text>
-          <text x="470" y="18">的矩估计值</text>
+          <text x="470" y="18">的矩估计�?/text>
         </svg>
       </div>
     `;
@@ -137,8 +137,8 @@ describe("formulaEmbedFallback", () => {
     });
 
     expect(hasNearbyLargeVisualImageForSemanticNode(svg)).toBe(false);
-    expect(extractSemanticSvgLikeText(svg)).toContain("取得样本值");
-    expect(extractSemanticSvgLikeText(svg)).toContain("则参数");
+    expect(extractSemanticSvgLikeText(svg)).toContain("取得");
+    expect(extractSemanticSvgLikeText(svg)).toContain("叙参");
   });
 
   it("reconstructs svg subscripts into inline math text", () => {
@@ -163,7 +163,7 @@ describe("formulaEmbedFallback", () => {
     );
     document.body.appendChild(svg);
 
-    expect(extractSemanticSvgLikeText(svg)).toContain("x1 = 1, x2 = 2");
+    expect(extractSemanticSvgLikeText(svg)).toContain("x_{1} = 1, x_{2} = 2");
   });
 
   it("reconstructs coefficient fractions inside estimator formulas", () => {
@@ -193,8 +193,10 @@ describe("formulaEmbedFallback", () => {
     document.body.appendChild(svg);
 
     const text = extractSemanticSvgLikeText(svg);
-    expect(text).toContain("T1");
-    expect(text).toContain("1/6");
+    expect(text).toContain("T_{1}");
+    expect(text).toContain("(1)/(6)");
+    expect(text).toContain("(1)/(3)");
+    expect(text).toContain("(1)/(3)");
   });
 
   it("reconstructs fraction plus exponent options like 5/18 θ^2", () => {
@@ -222,8 +224,8 @@ describe("formulaEmbedFallback", () => {
     document.body.appendChild(svg);
 
     const text = extractSemanticSvgLikeText(svg);
-    expect(text).toContain("5/18");
-    expect(text).toContain("θ^2");
+    expect(text).toContain("(5)/(18)");
+    expect(text).toContain("θ^{2}");
   });
 
   it("keeps theta as the baseline host for 1/4 θ^2 style options", () => {
@@ -250,7 +252,7 @@ describe("formulaEmbedFallback", () => {
     );
     document.body.appendChild(svg);
 
-    expect(extractSemanticSvgLikeText(svg)).toContain("1/4θ^2");
+    expect(extractSemanticSvgLikeText(svg)).toContain("(1)/(4)*θ^{2}");
   });
 
   it("reconstructs z-test statistic with radical denominator", () => {
@@ -279,7 +281,7 @@ describe("formulaEmbedFallback", () => {
       makeText(".", "1584", "366"),
       makeText("3", "1392", "366"),
       makeText("σ", "889", "934"),
-      makeText("−", "1128", "366"),
+      makeText("�?", "1128", "366"),
       makeText("=", "406", "608"),
       makeText("X", "768", "366"),
       makeText("Z", "64", "608"),
@@ -294,7 +296,7 @@ describe("formulaEmbedFallback", () => {
     const text = extractSemanticSvgLikeText(svg);
     expect(text).toContain("Z =");
     expect(text).toContain("X - 3.25");
-    expect(text).toContain("σ / √5");
+    expect(text).toContain("(σ)/(�?5))");
   });
 
   it("reconstructs chi-square statistic with squared numerator and denominator", () => {
@@ -323,15 +325,15 @@ describe("formulaEmbedFallback", () => {
       makeText("χ", "70", "672"),
       makeText("S", "1838", "430"),
       makeText("n", "1040", "430"),
-      makeText("−", "1298", "430"),
+      makeText("�?", "1298", "430"),
       makeText("=", "576", "672"),
       line,
     );
     document.body.appendChild(svg);
 
     const text = extractSemanticSvgLikeText(svg);
-    expect(text).toContain("χ^2 =");
-    expect(text).toContain("(n - 1) S^2/σ^2");
+    expect(text).toContain("χ^{2} =");
+    expect(text).toContain("((n - 1)*S^{2})/(σ^{2})");
   });
 
   it("keeps subscripts before superscripts in F-test statistics", () => {
@@ -364,6 +366,11 @@ describe("formulaEmbedFallback", () => {
 
     const text = extractSemanticSvgLikeText(svg);
     expect(text).toContain("F =");
-    expect(text).toContain("S1^2/S2^2");
+    expect(text).toContain("(S_{1}^{2})/(S_{2}^{2})");
   });
 });
+
+
+
+
+

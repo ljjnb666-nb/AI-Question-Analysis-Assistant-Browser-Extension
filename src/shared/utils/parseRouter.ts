@@ -379,6 +379,7 @@ function buildUserQuestionPrompt(block: QuestionBlock, route: RouteUsed, setting
     ? [
       "Formula/image hint:",
       "1) Preserve mathematical symbols exactly when possible, such as G(s), H(s), G(jw), omega, sigma, fractions, superscripts, subscripts, and minus signs.",
+      "1.1) Treat serialized math literally: x_{1} is subscript, θ^{2} is superscript, (a)/(b) is a full fraction, and * means multiplication.",
       "2) If the text snippet loses symbols, recover them from the image.",
       "3) If the question contains a chart, diagram, waveform, geometry figure, or equation image, read that visual content before answering.",
     ].join("\n")
