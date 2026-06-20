@@ -119,6 +119,19 @@ export async function detectCandidatesFullPage(
 
 /** Convert a viewport-relative block to page-absolute coordinates */
 function toAbsoluteCoords(block: QuestionBlock, scrollRoot: ScanScrollRoot): QuestionBlock {
+  if (!isWindowScrollRoot(scrollRoot)) {
+    const rect = scrollRoot.getBoundingClientRect();
+    return {
+      ...block,
+      bbox: {
+        x: block.bbox.x - rect.left + getScrollLeft(scrollRoot),
+        y: block.bbox.y - rect.top + getScrollTop(scrollRoot),
+        width: block.bbox.width,
+        height: block.bbox.height,
+      },
+    };
+  }
+
   return {
     ...block,
     bbox: {

@@ -1,10 +1,11 @@
 ﻿/**
  * HighlightLayer (M4)
  * Renders colored highlight boxes over detected question candidates.
- * Stores document-space boxes and reprojects to viewport on scroll/resize.
+ * Supports viewport-space and scroll-root-space boxes.
  */
 
 import type { QuestionBlock } from "@/shared/types";
+import type { ScanScrollRoot } from "../detector/fullPageDetector";
 
 const LAYER_ID = "qs-highlight-layer";
 
@@ -27,18 +28,29 @@ const BORDER_COLORS: Record<string, string> = {
 export class HighlightLayer {
   private layer: HTMLDivElement;
   private highlights = new Map<string, HTMLDivElement>();
-  private docBBoxes = new Map<string, { x: number; y: number; width: number; height: number }>();
+  private storedBBoxes = new Map<string, { x: number; y: number; width: number; height: number }>();
   private states = new Map<string, { status: string; selected: boolean; questionType: string }>();
   private onSelect?: (blockId: string, selected: boolean) => void;
+  private coordinateSpace: "viewport" | "scroll-root";
+  private scrollRoot: ScanScrollRoot | null;
   private onViewportChange = () => this.scheduleRelayout();
   private relayoutRaf: number | null = null;
 
-  constructor(opts?: { onSelect?: (blockId: string, selected: boolean) => void }) {
+  constructor(opts?: {
+    onSelect?: (blockId: string, selected: boolean) => void;
+    coordinateSpace?: "viewport" | "scroll-root";
+    scrollRoot?: ScanScrollRoot | null;
+  }) {
     this.onSelect = opts?.onSelect;
+    this.coordinateSpace = opts?.coordinateSpace ?? "viewport";
+    this.scrollRoot = opts?.scrollRoot ?? null;
     this.layer = this.createLayer();
     document.body.appendChild(this.layer);
     window.addEventListener("scroll", this.onViewportChange, { passive: true });
     window.addEventListener("resize", this.onViewportChange, { passive: true });
+    if (this.scrollRoot && this.scrollRoot !== window) {
+      this.scrollRoot.addEventListener("scroll", this.onViewportChange, { passive: true });
+    }
   }
 
   private createLayer(): HTMLDivElement {
@@ -58,16 +70,16 @@ export class HighlightLayer {
       if (!blocks.find((b) => b.id === id)) {
         el.remove();
         this.highlights.delete(id);
-        this.docBBoxes.delete(id);
+        this.storedBBoxes.delete(id);
         this.states.delete(id);
       }
     }
 
     for (const block of blocks) {
       const state = statusMap.get(block.id) ?? { status: "pending", selected: false };
-      this.docBBoxes.set(block.id, {
-        x: block.bbox.x + window.scrollX,
-        y: block.bbox.y + window.scrollY,
+      this.storedBBoxes.set(block.id, {
+        x: block.bbox.x,
+        y: block.bbox.y,
         width: block.bbox.width,
         height: block.bbox.height,
       });
@@ -131,21 +143,48 @@ export class HighlightLayer {
   }
 
   private relayout() {
-    const sx = window.scrollX;
-    const sy = window.scrollY;
     for (const [id, el] of this.highlights) {
-      const b = this.docBBoxes.get(id);
+      const b = this.storedBBoxes.get(id);
       if (!b) continue;
-      const vx = b.x - sx;
-      const vy = b.y - sy;
+      const projected = this.projectToViewport(b);
       Object.assign(el.style, {
-        left: `${vx}px`,
-        top: `${vy}px`,
-        width: `${b.width}px`,
-        height: `${b.height}px`,
-        display: vx + b.width < 0 || vy + b.height < 0 || vx > window.innerWidth || vy > window.innerHeight ? "none" : "block",
+        left: `${projected.x}px`,
+        top: `${projected.y}px`,
+        width: `${projected.width}px`,
+        height: `${projected.height}px`,
+        display:
+          projected.x + projected.width < 0 ||
+          projected.y + projected.height < 0 ||
+          projected.x > window.innerWidth ||
+          projected.y > window.innerHeight
+            ? "none"
+            : "block",
       });
     }
+  }
+
+  private projectToViewport(bbox: { x: number; y: number; width: number; height: number }) {
+    if (this.coordinateSpace !== "scroll-root" || !this.scrollRoot) {
+      return bbox;
+    }
+
+    if (this.scrollRoot === window) {
+      return {
+        x: bbox.x - window.scrollX,
+        y: bbox.y - window.scrollY,
+        width: bbox.width,
+        height: bbox.height,
+      };
+    }
+
+    const elementRoot = this.scrollRoot as HTMLElement;
+    const rect = elementRoot.getBoundingClientRect();
+    return {
+      x: rect.left + bbox.x - elementRoot.scrollLeft,
+      y: rect.top + bbox.y - elementRoot.scrollTop,
+      width: bbox.width,
+      height: bbox.height,
+    };
   }
 
   flashBlock(blockId: string) {
@@ -162,13 +201,16 @@ export class HighlightLayer {
   destroy() {
     window.removeEventListener("scroll", this.onViewportChange);
     window.removeEventListener("resize", this.onViewportChange);
+    if (this.scrollRoot && this.scrollRoot !== window) {
+      this.scrollRoot.removeEventListener("scroll", this.onViewportChange);
+    }
     if (this.relayoutRaf !== null) {
       window.cancelAnimationFrame(this.relayoutRaf);
       this.relayoutRaf = null;
     }
     this.layer.remove();
     this.highlights.clear();
-    this.docBBoxes.clear();
+    this.storedBBoxes.clear();
     this.states.clear();
   }
 }

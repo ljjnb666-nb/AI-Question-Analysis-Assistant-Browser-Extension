@@ -14,6 +14,7 @@ import {
   cancelFullPageScan,
   isFullPageScanRunning,
   resolveFullPageScrollRoot,
+  type ScanScrollRoot,
   getScrollLeft,
   getScrollTop,
   setScrollPosition,
@@ -48,6 +49,9 @@ let activeCandidates: QuestionBlock[] = [];
 let activeHighlightBlocks: QuestionBlock[] = [];
 let activeDetectMode: "viewport" | "fullpage" | null = null;
 let relayoutRescanTimer: number | null = null;
+let lastFullPageLayoutKey = "";
+let layoutResizeObserver: ResizeObserver | null = null;
+let observedLayoutElements = new Set<Element>();
 let autoSolveRunning = false;
 let autoSolveStopRequested = false;
 
@@ -125,6 +129,9 @@ window.visualViewport?.addEventListener("scroll", () => {
   scheduleHighlightRelayoutRescan();
 }, { passive: true });
 
+ensureLayoutResizeObserver();
+refreshLayoutResizeObservation();
+
 // 鈹€鈹€鈹€ Messages 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 chrome.runtime.onMessage.addListener((message: ExtMessage, _sender, sendResponse) => {
   switch (message.type) {
@@ -168,6 +175,8 @@ chrome.runtime.onMessage.addListener((message: ExtMessage, _sender, sendResponse
       activeCandidates = [];
       activeHighlightBlocks = [];
       activeDetectMode = null;
+      lastFullPageLayoutKey = "";
+      refreshLayoutResizeObservation();
       sendResponse({ ok: true });
       return false;
 
@@ -261,9 +270,52 @@ function scheduleHighlightRelayoutRescan() {
       return;
     }
     if (activeDetectMode === "fullpage") {
-      refreshFullPageHighlightsAfterLayoutChange();
+      const scrollRoot = resolveFullPageScrollRoot();
+      const layoutKey = getFullPageLayoutKey(scrollRoot);
+      if (layoutKey !== lastFullPageLayoutKey) {
+        lastFullPageLayoutKey = layoutKey;
+        refreshFullPageHighlightsAfterLayoutChange();
+      }
     }
   }, 180);
+}
+
+function ensureLayoutResizeObserver() {
+  if (layoutResizeObserver || typeof ResizeObserver === "undefined") return;
+  layoutResizeObserver = new ResizeObserver(() => {
+    if (activeDetectMode !== "fullpage") return;
+    scheduleHighlightRelayoutRescan();
+  });
+}
+
+function refreshLayoutResizeObservation() {
+  if (!layoutResizeObserver) return;
+
+  const nextObserved = new Set<Element>();
+  nextObserved.add(document.documentElement);
+  if (document.body) nextObserved.add(document.body);
+
+  if (activeDetectMode === "fullpage") {
+    const scrollRoot = resolveFullPageScrollRoot();
+    if (scrollRoot instanceof HTMLElement) {
+      nextObserved.add(scrollRoot);
+      if (scrollRoot.parentElement) nextObserved.add(scrollRoot.parentElement);
+    }
+  }
+
+  for (const el of observedLayoutElements) {
+    if (!nextObserved.has(el)) {
+      layoutResizeObserver.unobserve(el);
+    }
+  }
+
+  for (const el of nextObserved) {
+    if (!observedLayoutElements.has(el)) {
+      layoutResizeObserver.observe(el);
+    }
+  }
+
+  observedLayoutElements = nextObserved;
 }
 
 function refreshViewportCandidatesAfterLayoutChange() {
@@ -299,35 +351,114 @@ function refreshViewportCandidatesAfterLayoutChange() {
 function refreshFullPageHighlightsAfterLayoutChange() {
   if (activeDetectMode !== "fullpage") return;
   if (!highlightLayer) return;
-
-  const visibleCandidates = detectCandidatesInViewport();
-  if (visibleCandidates.length === 0) {
-    activeHighlightBlocks = [];
-    highlightLayer.setBlocks(activeHighlightBlocks, candidateStatusMap);
-    return;
+  const scrollRoot = resolveFullPageScrollRoot();
+  lastFullPageLayoutKey = getFullPageLayoutKey(scrollRoot);
+  refreshLayoutResizeObservation();
+  const remappedBlocks = remapFullPageBlocksFromDom(activeCandidates, scrollRoot);
+  if (remappedBlocks.length === activeCandidates.length) {
+    activeCandidates = remappedBlocks;
+    activeHighlightBlocks = remappedBlocks;
   }
-
-  const usedIds = new Set<string>();
-  const nextVisibleBlocks: QuestionBlock[] = [];
-  for (const visible of visibleCandidates) {
-    const matched = findMatchingFullPageCandidate(activeCandidates, visible, usedIds);
-    if (!matched) continue;
-    usedIds.add(matched.id);
-    nextVisibleBlocks.push({
-      ...visible,
-      id: matched.id,
-      previewText: matched.previewText,
-      displaySegments: matched.displaySegments,
-      hasImage: matched.hasImage,
-      questionImageUrl: matched.questionImageUrl,
-      questionTypeGuess: matched.questionTypeGuess,
-      confidence: matched.confidence,
-      source: matched.source,
-    });
-  }
-
-  activeHighlightBlocks = nextVisibleBlocks;
   highlightLayer.setBlocks(activeHighlightBlocks, candidateStatusMap);
+}
+
+function getFullPageLayoutKey(scrollRoot: ScanScrollRoot): string {
+  if (!(scrollRoot instanceof HTMLElement)) {
+    return `window:${window.innerWidth}x${window.innerHeight}`;
+  }
+
+  const rect = scrollRoot.getBoundingClientRect();
+  return [
+    "root",
+    Math.round(window.innerWidth),
+    Math.round(window.innerHeight),
+    Math.round(rect.left),
+    Math.round(rect.top),
+    Math.round(rect.width),
+    Math.round(rect.height),
+  ].join(":");
+}
+
+function remapFullPageBlocksFromDom(blocks: QuestionBlock[], scrollRoot: ScanScrollRoot): QuestionBlock[] {
+  const containerNodes = Array.from(
+    document.querySelectorAll<HTMLElement>(".question-item, .questionBox, .base-question-component"),
+  ).filter((el) => {
+    if (!el.isConnected || isExtensionUiElement(el)) return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width >= 240 && rect.height >= 120;
+  });
+
+  const seenContainers = new Set<HTMLElement>();
+  const containerRecords = containerNodes
+    .filter((el) => {
+      if (seenContainers.has(el)) return false;
+      seenContainers.add(el);
+      return true;
+    })
+    .map((el) => {
+      const rect = el.getBoundingClientRect();
+      const viewportBox: BoundingBox = {
+        x: Math.max(0, rect.left),
+        y: Math.max(0, rect.top),
+        width: Math.max(1, rect.width),
+        height: Math.max(1, rect.height),
+      };
+      const previewText = normalizeQuestionText(el.innerText || el.textContent || "");
+      return {
+        el,
+        previewText,
+        order: extractAutoSolveQuestionOrder(previewText),
+        fingerprint: getAutoSolveTextFingerprint(previewText),
+        type: inferAutoSolveQuestionType(previewText),
+        bbox: projectViewportBboxToAbsolute(viewportBox, scrollRoot),
+      };
+    });
+
+  const used = new Set<number>();
+  const remapped: QuestionBlock[] = [];
+
+  for (const block of [...blocks].sort((a, b) => a.bbox.y - b.bbox.y || a.bbox.x - b.bbox.x)) {
+    const blockOrder = extractAutoSolveQuestionOrder(block.previewText || "");
+    const blockFingerprint = getAutoSolveTextFingerprint(block.previewText || "");
+    let bestIndex = -1;
+    let bestScore = -Infinity;
+
+    for (let i = 0; i < containerRecords.length; i += 1) {
+      if (used.has(i)) continue;
+      const record = containerRecords[i];
+      let score = 0;
+      if (blockOrder !== null && record.order !== null && blockOrder === record.order) score += 120;
+      if (blockFingerprint && record.fingerprint) {
+        if (blockFingerprint === record.fingerprint) score += 120;
+        else if (
+          blockFingerprint.length >= 16 &&
+          record.fingerprint.length >= 16 &&
+          (blockFingerprint.includes(record.fingerprint) || record.fingerprint.includes(blockFingerprint))
+        ) {
+          score += 80;
+        }
+      }
+      if (record.type === block.questionTypeGuess) score += 20;
+      score -= Math.abs(record.bbox.y - block.bbox.y) / 12;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex >= 0 && bestScore >= 80) {
+      used.add(bestIndex);
+      remapped.push({
+        ...block,
+        bbox: containerRecords[bestIndex].bbox,
+      });
+      continue;
+    }
+
+    remapped.push(block);
+  }
+
+  return remapped;
 }
 
 function startManualCapture(forceVisionMode: boolean) {
@@ -335,6 +466,8 @@ function startManualCapture(forceVisionMode: boolean) {
   highlightLayer?.destroy();
   highlightLayer = null;
   activeDetectMode = null;
+  lastFullPageLayoutKey = "";
+  refreshLayoutResizeObservation();
   logEvent("manual_capture_started");
 
   activeOverlay = new CaptureOverlay({
@@ -1213,10 +1346,24 @@ function pickAutoSolveBlock(blocks: QuestionBlock[]): QuestionBlock | null {
 function detectZhihuishuCurrentQuestionBlock(): QuestionBlock | null {
   if (!/zhihuishu\.com$/i.test(location.hostname)) return null;
 
-  const boxes = Array.from(document.querySelectorAll(".questionBox, .Classificationquestionall-div"))
+  const questionBoxes = Array.from(document.querySelectorAll(".questionBox"))
     .filter((el): el is HTMLElement => el instanceof HTMLElement)
     .filter((el) => !isExtensionUiElement(el))
-    .filter((el) => isElementVisible(el))
+    .filter((el) => isElementVisible(el));
+
+  const fallbackBoxes = questionBoxes.length > 0
+    ? questionBoxes
+    : Array.from(document.querySelectorAll(".Classificationquestionall-div"))
+      .filter((el): el is HTMLElement => el instanceof HTMLElement)
+      .filter((el) => !isExtensionUiElement(el))
+      .filter((el) => isElementVisible(el))
+      .map((el) => {
+        const innerQuestionBox = el.querySelector(".questionBox");
+        return innerQuestionBox instanceof HTMLElement ? innerQuestionBox : el;
+      });
+
+  const boxes = fallbackBoxes
+    .filter((el): el is HTMLElement => el instanceof HTMLElement)
     .map((el) => {
       const rect = el.getBoundingClientRect();
       const text = normalizeQuestionText(el.innerText || el.textContent || "");
@@ -1934,7 +2081,8 @@ function collectTextFromRegion(bbox: BoundingBox): string {
       parent &&
       !isExtensionUiElement(parent) &&
       rawText.trim().length > 0 &&
-      isElementVisible(parent)
+      isElementVisible(parent) &&
+      !isSemanticFormulaTextNodeParent(parent)
     ) {
       const range = document.createRange();
       range.selectNodeContents(textNode);
@@ -1993,6 +2141,12 @@ function collectTextFromRegion(bbox: BoundingBox): string {
 
 function normalizeInlineText(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();
+}
+
+function isSemanticFormulaTextNodeParent(parent: HTMLElement): boolean {
+  return Boolean(
+    parent.closest("svg,math,mjx-container,.MathJax,.katex,embed,[data-svg-latex],[data-latex]"),
+  );
 }
 
 function extractReadableQuestionNodeText(node: Element): string {
@@ -2191,6 +2345,7 @@ async function handleFullPageDetect() {
   activeCandidates = [];
   activeHighlightBlocks = [];
   activeDetectMode = "fullpage";
+  refreshLayoutResizeObservation();
 
   // Notify sidepanel scan started with 0%
   safeRuntimeSendMessage({
@@ -2212,15 +2367,19 @@ async function handleFullPageDetect() {
       });
     });
     const candidates = await refineFullPageCandidatesViaManualPipeline(roughCandidates);
+    const scrollRoot = resolveFullPageScrollRoot();
+    lastFullPageLayoutKey = getFullPageLayoutKey(scrollRoot);
 
     logEvent("auto_detect_candidates_found", { count: candidates.length, mode: "full_page" });
 
     activeCandidates = candidates;
-    activeHighlightBlocks = [];
+    activeHighlightBlocks = candidates;
 
     candidates.forEach(b => candidateStatusMap.set(b.id, { status: "pending", selected: false }));
 
     highlightLayer = new HighlightLayer({
+      coordinateSpace: "scroll-root",
+      scrollRoot,
       onSelect: (blockId, selected) => {
         const s = candidateStatusMap.get(blockId);
         if (s) {
@@ -2243,6 +2402,8 @@ async function handleFullPageDetect() {
     console.error("[QS] Full page detect error:", err);
     activeCandidates = [];
     activeHighlightBlocks = [];
+    lastFullPageLayoutKey = "";
+    refreshLayoutResizeObservation();
     safeRuntimeSendMessage({
       type: "FULL_PAGE_DETECT_DONE",
       candidates: [],
@@ -2268,12 +2429,7 @@ async function refineFullPageCandidatesViaManualPipeline(candidates: QuestionBlo
       setScrollPosition(scrollRoot, targetTop, originalLeft);
       await pauseFullPage(220);
 
-      const viewportBBox: BoundingBox = {
-        x: candidate.bbox.x - getScrollLeft(scrollRoot),
-        y: candidate.bbox.y - getScrollTop(scrollRoot),
-        width: candidate.bbox.width,
-        height: candidate.bbox.height,
-      };
+      const viewportBBox = projectAbsoluteBboxToViewport(candidate.bbox, scrollRoot);
 
       const visibleCandidates = detectCandidatesInViewport();
       const viewportTarget: QuestionBlock = {
@@ -2298,12 +2454,7 @@ async function refineFullPageCandidatesViaManualPipeline(candidates: QuestionBlo
         ?? candidate.questionImageUrl;
       const hasImage = Boolean(imageUrl) || Boolean(matchedCandidate?.hasImage) || candidate.hasImage;
       const finalViewportBBox = matchedVisibleCandidate?.bbox ?? resolved.finalBBox;
-      const absoluteBBox: BoundingBox = {
-        x: finalViewportBBox.x + getScrollLeft(scrollRoot),
-        y: finalViewportBBox.y + getScrollTop(scrollRoot),
-        width: finalViewportBBox.width,
-        height: finalViewportBBox.height,
-      };
+      const absoluteBBox = projectViewportBboxToAbsolute(finalViewportBBox, scrollRoot);
 
       const order = extractAutoSolveQuestionOrder(previewText) ?? extractAutoSolveQuestionOrder(candidate.previewText);
       const fingerprint = `${order ?? "x"}:${getAutoSolveTextFingerprint(previewText)}`;
@@ -2326,6 +2477,46 @@ async function refineFullPageCandidatesViaManualPipeline(candidates: QuestionBlo
   }
 
   return refined.length ? refined : candidates;
+}
+
+function projectAbsoluteBboxToViewport(bbox: BoundingBox, scrollRoot: ScanScrollRoot): BoundingBox {
+  if (scrollRoot === window) {
+    return {
+      x: bbox.x - getScrollLeft(scrollRoot),
+      y: bbox.y - getScrollTop(scrollRoot),
+      width: bbox.width,
+      height: bbox.height,
+    };
+  }
+
+  const elementRoot = scrollRoot as HTMLElement;
+  const rect = elementRoot.getBoundingClientRect();
+  return {
+    x: rect.left + bbox.x - elementRoot.scrollLeft,
+    y: rect.top + bbox.y - elementRoot.scrollTop,
+    width: bbox.width,
+    height: bbox.height,
+  };
+}
+
+function projectViewportBboxToAbsolute(bbox: BoundingBox, scrollRoot: ScanScrollRoot): BoundingBox {
+  if (scrollRoot === window) {
+    return {
+      x: bbox.x + getScrollLeft(scrollRoot),
+      y: bbox.y + getScrollTop(scrollRoot),
+      width: bbox.width,
+      height: bbox.height,
+    };
+  }
+
+  const elementRoot = scrollRoot as HTMLElement;
+  const rect = elementRoot.getBoundingClientRect();
+  return {
+    x: bbox.x - rect.left + elementRoot.scrollLeft,
+    y: bbox.y - rect.top + elementRoot.scrollTop,
+    width: bbox.width,
+    height: bbox.height,
+  };
 }
 
 function findBestVisibleCandidateByOrder(

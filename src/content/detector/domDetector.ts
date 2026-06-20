@@ -218,6 +218,7 @@ function buildStableStructuredContainerCandidates(
     if (!inViewport(rect, vw, vh)) continue;
     if (rect.width < 240 || rect.height < 120) continue;
     if (getVisibleVerticalRatio(rawRect, vh) < 0.55) continue;
+    if (isTopClippedQuestionTail(hostContainer, rawRect, vh)) continue;
 
     const readableText = extractStructuredQuestionText(hostContainer);
     const displaySegments = extractStructuredQuestionDisplaySegments(hostContainer);
@@ -239,6 +240,34 @@ function buildStableStructuredContainerCandidates(
   }
 
   return out;
+}
+
+function isTopClippedQuestionTail(container: HTMLElement, rect: DOMRect, vh: number): boolean {
+  if (rect.top >= -24) return false;
+
+  const titleNode = container.querySelector(".title-box,.questionTit,.question-title");
+  if (titleNode instanceof HTMLElement) {
+    const titleRect = titleNode.getBoundingClientRect();
+    if (titleRect.height >= 8 && titleRect.width >= 20) {
+      // Current-screen detection should not keep the previous question
+      // once the question title itself has scrolled out of the viewport.
+      if (titleRect.bottom <= 20) return true;
+      if (titleRect.bottom > 20 && titleRect.top < vh - 16) return false;
+    }
+  }
+
+  const stemNode = container.querySelector(
+    ".qeustion-content,.questionContent,.question-content,.stem,.question-body,.content",
+  );
+  if (stemNode instanceof HTMLElement) {
+    const stemRect = stemNode.getBoundingClientRect();
+    if (stemRect.height >= 8 && stemRect.width >= 20) {
+      if (stemRect.bottom <= 24) return true;
+      if (stemRect.top >= 20 && stemRect.top < vh - 16) return false;
+    }
+  }
+
+  return rect.top < -48;
 }
 
 function getStableQuestionCardContainers(): Element[] {
