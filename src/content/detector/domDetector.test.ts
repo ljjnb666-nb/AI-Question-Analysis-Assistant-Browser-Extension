@@ -557,7 +557,42 @@ describe("domDetector", () => {
       .map((segment) => segment.text)
       .join(" ");
 
-    expect(displayText).toContain("X1,X2,X3,X4");
-    expect(displayText).toContain("θ^2");
+    expect(displayText).toContain("X_{1},X_{2},X_{3},X_{4}");
+    expect(displayText).toContain("θ^{2}");
+  });
+  it("ignores decorative option icons when deciding whether a question has an image", () => {
+    document.body.innerHTML = `
+      <div id="question-box" class="questionBox">
+        <div id="question-content" class="questionContent">
+          9. 单选题 矿砂镍含量样本中的镍含量(以%计)：3.25 3.27 3.24 3.26 3.24，总体服从正态分布，检验H0：μ=3.25，α=0.01所用统计量为（ ）。
+        </div>
+        <div id="opt-a" class="option-item"><img id="icon-a" class="icon-lou" src="https://example.com/689dc301e4b07b838da42b38.png" />A. Z=(X̄-3.25)/(σ/√5)</div>
+        <div id="opt-b" class="option-item"><img id="icon-b" class="icon-lou" src="https://example.com/689dc301e4b07b838da42b38.png" />B. t=(X̄-3.25)/(S/√5)</div>
+        <div id="opt-c" class="option-item"><img id="icon-c" class="icon-lou" src="https://example.com/689dc301e4b07b838da42b38.png" />C. χ²=(n-1)S²/σ²</div>
+        <div id="opt-d" class="option-item"><img id="icon-d" class="icon-lou" src="https://example.com/689dc301e4b07b838da42b38.png" />D. F=S₁²/S₂²</div>
+      </div>
+    `;
+
+    const ids = [
+      ["question-box", 220, 120, 760, 280],
+      ["question-content", 240, 150, 700, 44],
+      ["opt-a", 240, 220, 420, 28],
+      ["opt-b", 240, 256, 420, 28],
+      ["opt-c", 240, 292, 420, 28],
+      ["opt-d", 240, 328, 420, 28],
+      ["icon-a", 250, 224, 16, 16],
+      ["icon-b", 250, 260, 16, 16],
+      ["icon-c", 250, 296, 16, 16],
+      ["icon-d", 250, 332, 16, 16],
+    ] as const;
+
+    ids.forEach(([id, left, top, width, height]) => {
+      setRect(document.getElementById(id)!, { left, top, width, height });
+    });
+
+    const blocks = detectCandidatesInViewport();
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks[0].hasImage).toBe(false);
+    expect(blocks[0].questionImageUrl).toBeUndefined();
   });
 });

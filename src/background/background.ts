@@ -26,6 +26,10 @@ chrome.runtime.onMessage.addListener((
       relayToActiveTab(message);
       return false;
 
+    case "REAL_CLICK":
+      clickRealPoint(sender, message, sendResponse);
+      return true;
+
     case "LOG_EVENT":
       // No-op in background; events are stored in content script context
       return false;
@@ -58,6 +62,65 @@ async function captureTab(
   } catch (err) {
     console.error("[BG] captureVisibleTab failed:", err);
     sendResponse({ error: String(err) });
+  }
+}
+
+async function clickRealPoint(
+  sender: chrome.runtime.MessageSender,
+  message: Extract<ExtMessage, { type: "REAL_CLICK" }>,
+  sendResponse: (r?: unknown) => void,
+) {
+  const tabId = sender.tab?.id;
+  if (!tabId) {
+    sendResponse({ ok: false, error: "missing sender tab id" });
+    return;
+  }
+
+  const target = { tabId };
+  try {
+    await chrome.debugger.attach(target, "1.3");
+  } catch (err) {
+    const text = String(err);
+    if (!/Another debugger is already attached/i.test(text)) {
+      sendResponse({ ok: false, error: text });
+      return;
+    }
+  }
+
+  try {
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: Math.round(message.x),
+      y: Math.round(message.y),
+      button: "none",
+      buttons: 0,
+      clickCount: 0,
+    });
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x: Math.round(message.x),
+      y: Math.round(message.y),
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    });
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x: Math.round(message.x),
+      y: Math.round(message.y),
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    });
+    sendResponse({ ok: true });
+  } catch (err) {
+    sendResponse({ ok: false, error: String(err) });
+  } finally {
+    try {
+      await chrome.debugger.detach(target);
+    } catch {
+      // Ignore detach races when another call already released it.
+    }
   }
 }
 

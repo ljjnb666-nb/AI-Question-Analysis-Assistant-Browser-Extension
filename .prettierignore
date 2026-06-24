@@ -1,0 +1,7 @@
+dist/
+output/
+coverage/
+node_modules/
+.playwright-mcp/
+artifacts/
+package-lock.json

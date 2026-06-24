@@ -42,6 +42,7 @@ export interface QuestionBlock {
 
 export type RouteUsed = "text" | "vision" | "hybrid";
 export type ParseStatus = "idle" | "loading" | "success" | "error";
+export type ChoiceSelectionMap = Partial<Record<"A" | "B" | "C" | "D" | "E" | "F", boolean | null>>;
 
 export interface ParseResult {
   blockId: string;
@@ -52,6 +53,7 @@ export interface ParseResult {
   detailedExplanation: string;
   recognizedText: string;
   routeUsed: RouteUsed;
+  optionSelections?: ChoiceSelectionMap;
   ocrQualityScore?: number;
   warning?: string;
 }
@@ -180,6 +182,8 @@ export type MessageType =
   | "FULL_PAGE_DETECT_CANCELLED"
   | "CAPTURE_BLOCK_IMAGE"
   | "FILL_PARSED_ANSWER"
+  | "VERIFY_PARSED_ANSWER"
+  | "REAL_CLICK"
   | "START_AUTO_SOLVE_ALL"
   | "STOP_AUTO_SOLVE_ALL"
   | "AUTO_SOLVE_PROGRESS"
@@ -283,6 +287,16 @@ export interface FillParsedAnswerMsg extends BaseMessage {
   block: QuestionBlock;
   result: ParseResult;
 }
+export interface VerifyParsedAnswerMsg extends BaseMessage {
+  type: "VERIFY_PARSED_ANSWER";
+  block: QuestionBlock;
+  result: ParseResult;
+}
+export interface RealClickMsg extends BaseMessage {
+  type: "REAL_CLICK";
+  x: number;
+  y: number;
+}
 export interface StartAutoSolveAllMsg extends BaseMessage { type: "START_AUTO_SOLVE_ALL"; }
 export interface StopAutoSolveAllMsg extends BaseMessage { type: "STOP_AUTO_SOLVE_ALL"; }
 export interface AutoSolveProgressMsg extends BaseMessage {
@@ -295,6 +309,7 @@ export interface AutoSolveProgressMsg extends BaseMessage {
   statusText: string;
   currentQuestionId?: string;
   currentPreview?: string;
+  currentBlock?: QuestionBlock;
 }
 export interface AutoSolveDoneMsg extends BaseMessage {
   type: "AUTO_SOLVE_DONE";
@@ -316,5 +331,5 @@ export type ExtMessage =
   | HighlightCandidateMsg | UpdateCandidateSelectionMsg | ClearHighlightsMsg | SubmitBatchParseMsg
   | GetSettingsMsg | SaveSettingsMsg | LogEventMsg
   | StartFullPageDetectMsg | FullPageDetectProgressMsg
-  | FullPageDetectDoneMsg | FullPageDetectCancelledMsg | CaptureBlockImageMsg | FillParsedAnswerMsg
+  | FullPageDetectDoneMsg | FullPageDetectCancelledMsg | CaptureBlockImageMsg | FillParsedAnswerMsg | VerifyParsedAnswerMsg | RealClickMsg
   | StartAutoSolveAllMsg | StopAutoSolveAllMsg | AutoSolveProgressMsg | AutoSolveDoneMsg;

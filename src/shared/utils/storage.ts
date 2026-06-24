@@ -21,6 +21,12 @@ function isExtensionContextInvalidatedError(err: unknown): boolean {
   return /Extension context invalidated/i.test(message);
 }
 
+function createErrorWithCause(message: string, cause: unknown): Error {
+  const error = new Error(message) as Error & { cause?: unknown };
+  error.cause = cause;
+  return error;
+}
+
 // ─── Floating Window State ────────────────────────────────────────────────────
 
 export async function saveFloatingState(state: Partial<FloatingWindowState>): Promise<void> {
@@ -45,7 +51,7 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<void
       merged.apiKey = await encryptValue(merged.apiKey);
     } catch (err) {
       logError("Failed to encrypt API key", err, "saveSettings");
-      throw new Error("Failed to save settings securely");
+      throw createErrorWithCause("Failed to save settings securely", err);
     }
   }
 
@@ -86,12 +92,19 @@ export function sanitizeResultForHistory(result: ParseResult): ParseResult {
       : /(见分点答案|见分点作答|按分点作答|分点作答|仅供参考|参考答案见解析|详见解析|示例答案)/.test(rawAnswer)
         ? "需人工确认"
         : rawAnswer;
+  const optionSelections = result.optionSelections
+    ? Object.fromEntries(
+        Object.entries(result.optionSelections)
+          .filter(([key, value]) => /^[A-F]$/.test(key) && (value === true || value === false || value === null)),
+      )
+    : undefined;
   return {
     ...result,
     answer: truncateText(normalizedAnswer, 500),
     briefExplanation: truncateText(result.briefExplanation, MAX_BRIEF_EXPLANATION_CHARS),
     detailedExplanation: truncateText(result.detailedExplanation, MAX_DETAILED_EXPLANATION_CHARS),
     recognizedText: truncateText(result.recognizedText, MAX_RECOGNIZED_TEXT_CHARS),
+    optionSelections,
     warning: result.warning ? truncateText(result.warning, 500) : undefined,
   };
 }

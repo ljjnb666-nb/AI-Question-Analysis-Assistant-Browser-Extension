@@ -2,6 +2,8 @@ node_modules/
 dist/
 .playwright-mcp/
 artifacts/
+coverage/
 *.png
 tmp_req.json
 tmp_resp.json
+output/

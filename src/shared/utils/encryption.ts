@@ -8,6 +8,12 @@ import { logError } from "./errorLogger";
 // Derive a key from extension ID (stable across sessions)
 const SALT = new TextEncoder().encode("quiz-solver-ext-v1");
 
+function createErrorWithCause(message: string, cause: unknown): Error {
+  const error = new Error(message) as Error & { cause?: unknown };
+  error.cause = cause;
+  return error;
+}
+
 /**
  * Get or generate encryption key
  */
@@ -37,7 +43,7 @@ async function getEncryptionKey(): Promise<CryptoKey> {
     );
   } catch (err) {
     logError("Failed to derive encryption key", err, "getEncryptionKey");
-    throw new Error("Encryption key derivation failed");
+    throw createErrorWithCause("Encryption key derivation failed", err);
   }
 }
 
@@ -66,7 +72,7 @@ export async function encryptValue(plaintext: string): Promise<string> {
     return btoa(String.fromCharCode(...combined));
   } catch (err) {
     logError("Encryption failed", err, "encryptValue");
-    throw new Error("Failed to encrypt value");
+    throw createErrorWithCause("Failed to encrypt value", err);
   }
 }
 
@@ -95,7 +101,7 @@ export async function decryptValue(encrypted: string): Promise<string> {
     return new TextDecoder().decode(decrypted);
   } catch (err) {
     logError("Decryption failed", err, "decryptValue");
-    throw new Error("Failed to decrypt value");
+    throw createErrorWithCause("Failed to decrypt value", err);
   }
 }
 

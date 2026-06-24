@@ -123,6 +123,172 @@ describe("parseRouter", () => {
       expect(result.detailedExplanation).toContain("2.");
     });
 
+    it("does not override a correct choice answer from explanations that enumerate all options", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "9、单选题 A. Z=(X-3.25)/(σ/√5) B. t=(X-3.25)/(S/√5) C. χ²=(n-1)S²/σ² D. F=S1²/S2²",
+        questionTypeGuess: "single_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "single_choice",
+        answer: "B",
+        confidence: 0.97,
+        briefExplanation: "由于总体方差未知，应使用t检验，故选B。",
+        detailedExplanation: "选项A是Z检验，要求总体方差已知。选项B是t检验，适用于总体方差未知。选项C用于方差检验。选项D用于比较两个方差。所以选B。",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("B");
+    });
+
+    it("corrects single-choice answer from option judgements under negative stem", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "4、单选题 阅读课本“实现共产主义是历史发展的必然”回答问题，下面关于其实现的表述错误的是（）。A. 现实的社会主义事业每前进一步，也就是向着共产主义迈进一步 B. 实现共产主义是广大人民群众的共同愿望 C. 无产阶级的解放与全人类的解放是完全一致的 D. 社会发展的规律是独立于人的社会活动的",
+        questionTypeGuess: "single_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "single_choice",
+        answer: "B",
+        confidence: 0.95,
+        briefExplanation: "分析各选项：A项正确，B项正确，C项正确，D项错误。",
+        detailedExplanation: "A项正确，现实社会主义事业每前进一步就是向共产主义迈进；B项正确；C项正确；D项错误，社会发展规律具有客观性，但并不是独立于人的社会活动之外。",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("D");
+    });
+
+    it("corrects single-choice answer when verdict appears after a long option description", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "1、单选题 阅读课本“共产主义社会的基本特征”内容，回答问题。下面关于共产主义社会说法错误的是（ ） A. 实现人的自由而全面的发展，是共产主义社会的根本特征 B. 在资本主义条件下，人虽然摆脱了对人的依赖关系，但是陷入到了物的依赖性之中 C. 自由时间的大大延长为人的自由而全面的发展提供了广阔前景 D. 共产主义社会将取消分工",
+        questionTypeGuess: "single_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "single_choice",
+        answer: "A",
+        confidence: 0.92,
+        briefExplanation: "逐项分析。",
+        detailedExplanation: "逐项分析：A项实现人的自由而全面的发展是共产主义社会的根本特征是正确的；B项在资本主义条件下陷入物的依赖性符合马克思关于社会形态的论述；C项自由时间的大大延长为人的自由而全面的发展提供了广阔前景也是正确的；D项共产主义社会将取消分工表述错误，共产主义社会消除的是旧式分工。",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("D");
+    });
+
+    it("refuses to trust bare raw choice letters when no structured evidence exists", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "3、单选题 关于共产主义社会的表述正确的是（ ） A. ... B. ... C. ... D. ...",
+        questionTypeGuess: "single_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "single_choice",
+        answer: "A",
+        confidence: 0.91,
+        briefExplanation: "暂无法确认。",
+        detailedExplanation: "题干不完整，无法稳定判断。",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("需人工确认");
+      expect(result.warning).toContain("结构化选项结论");
+    });
+
+    it("corrects multi-choice answer from summarized final option set in explanation", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "11、多选题 阅读课本有关共产主义社会的基本特征内容，在共产主义社会中（ ） A. 将实现社会关系的高度和谐 B. 人类文明与自然之间的高度和谐 C. 人的自由而全面的发展 D. 三大差别将会消亡",
+        questionTypeGuess: "multi_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "multi_choice",
+        answer: "B,C",
+        confidence: 0.98,
+        briefExplanation: "根据课本内容判断。",
+        detailedExplanation: "根据课本关于共产主义社会基本特征的内容：（1）社会生产力高度发展，产品极大丰富；（2）社会关系高度和谐；（3）人类文明与自然之间的高度和谐；（4）人的自由而全面的发展；（5）三大差别将会消亡。因此A、B、C、D四项均为共产主义社会的基本特征，均应选入。",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("A,B,C,D");
+    });
+
+    it("corrects multi-choice answer from long per-option verdicts using A dot syntax", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "13、多选题 阅读课本“实现共产主义是历史发展的必然”思考问题。以下理解正确的是（ ）。 A. 共产主义是可以实现的理想 B. 实现共产主义社会离不开工人阶级及其政党能动性的发挥 C. 实现共产主义理想与人民对美好生活和理想社会的向往是一致的 D. 无产阶级和工人阶级是同一个阶级的两种不同的称呼",
+        questionTypeGuess: "multi_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "multi_choice",
+        answer: "A,B,C",
+        confidence: 0.9,
+        briefExplanation: "逐项分析。",
+        detailedExplanation: "逐项分析：A. 共产主义是可以实现的理想——正确；B. 实现共产主义社会离不开工人阶级及其政党能动性的发挥——正确；C. 实现共产主义理想与人民对美好生活和理想社会的向往是一致的——正确；D. 无产阶级和工人阶级是同一个阶级的两种不同的称呼——正确。",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("A,B,C,D");
+    });
+
+    it("corrects mixed multi-choice verdicts using A dot syntax", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "15、多选题 阅读课本“实现共产主义是长期的历史过程”内容问题。下面说法正确的是（ ）。 A. 实现共产主义必须经历许多历史阶段 B. 社会主义社会在各方面完全消除了旧社会的痕迹 C. 不具备主观客观条件下的革命，不可能成功并建立起共产主义新社会 D. 特别是2008年以来，资本主义世界又出现严重的金融危机和社会危机",
+        questionTypeGuess: "multi_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "multi_choice",
+        answer: "A,B,C",
+        confidence: 0.9,
+        briefExplanation: "逐项分析。",
+        detailedExplanation: "逐项分析：A. 实现共产主义必须经历许多历史阶段——正确；B. 社会主义社会在各方面完全消除了旧社会的痕迹——错误；C. 不具备主观客观条件下的革命，不可能成功并建立起共产主义新社会——正确；D. 特别是2008年以来，资本主义世界又出现严重的金融危机和社会危机——正确。",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("A,C,D");
+    });
+
+    it("prefers structured optionSelections over free-form multi-choice answer text", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "11、多选题 阅读课本有关共产主义社会的基本特征内容，在共产主义社会中（ ） A. 将实现社会关系的高度和谐 B. 人类文明与自然之间的高度和谐 C. 人的自由而全面的发展 D. 三大差别将会消亡",
+        questionTypeGuess: "multi_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "multi_choice",
+        answer: "B,C",
+        optionSelections: { A: true, B: true, C: true, D: true },
+        confidence: 0.98,
+        briefExplanation: "根据课本内容判断。",
+        detailedExplanation: "略",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("A,B,C,D");
+      expect(result.optionSelections).toEqual({ A: true, B: true, C: true, D: true });
+    });
+
+    it("does not misclassify formula-heavy multiple-choice questions as non-choice", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "6、单选题 设X1,X2,X3,X4来自均值为θ的指数分布，其中θ未知，估计量T1=(1/6)*(X1+X2)+(1/3)*(X3+X4)，T2=(1/5)*(X1+2*X2+3*X3+4*X4)，T3=(1/4)*(X1+X2+X3+X4)，在无偏估计中更有效的是（ ）。 A. T1 B. T2 C. T3 D. 无法比较",
+        questionTypeGuess: "single_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "short_answer",
+        answer: "T3",
+        confidence: 0.95,
+        briefExplanation: "T2不是无偏估计，比较T1和T3的方差，T3更有效。",
+        detailedExplanation: "T2的期望为2θ，不是θ的无偏估计；比较T1和T3的方差，Var(T3)=θ²/4 小于 Var(T1)=5θ²/18，故T3更有效，对应选项C。",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.questionType).toBe("single_choice");
+      expect(result.answer).toBe("C");
+    });
+
     it("forces non-choice fallback when unknown type returns A,B,C,D but preview is multi-part", () => {
       const block: QuestionBlock = {
         ...mockBlock,
@@ -337,6 +503,25 @@ describe("parseRouter", () => {
 
       const result = buildResult(block, "vision", rawText);
       expect(result.recognizedText).toContain("由-∞到+∞");
+    });
+
+    it("overrides conflicting single-choice answer when explanation clearly points to another option", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "5、单选题（2分）设X1,X2,X3,X4来自均值为θ的指数分布,其中θ未知,估计量T=(1/6)(X1+X2)+(1/3)(X3+X4),则D(T)=（ ）. A. (5/18)θ2 B. (1/4)θ2 C. (1/2)θ2 D. (3/8)θ2",
+        questionTypeGuess: "single_choice",
+      };
+      const rawText = JSON.stringify({
+        questionType: "single_choice",
+        answer: "D",
+        confidence: 0.99,
+        briefExplanation: "根据方差计算，正确答案应为A。",
+        detailedExplanation: "设Xi独立且均值为θ的指数分布，则D(Xi)=θ2。D(T)=(1/36)2θ2+(1/9)2θ2=(5/18)θ2。因此选A。",
+        recognizedText: block.previewText,
+      });
+
+      const result = buildResult(block, "text", rawText);
+      expect(result.answer).toBe("A");
     });
   });
 

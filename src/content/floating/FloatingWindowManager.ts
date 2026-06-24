@@ -6,7 +6,8 @@
  * - Exposes upgradeToVision() for low-confidence switch suggestion
  */
 
-import { createRoot, Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
+import type { Root } from "react-dom/client";
 import React from "react";
 import { FloatingWindow } from "./FloatingWindow";
 import type { FloatingWindowState, ParseResult, QuestionBlock } from "@/shared/types";
