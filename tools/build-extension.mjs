@@ -40,7 +40,11 @@ function buildFallbackManifest() {
   };
 
   mkdirSync(distDir, { recursive: true });
-  writeFileSync(path.join(distDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  const manifestOutPath = path.join(distDir, "manifest.json");
+  writeFileSync(manifestOutPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  if (!existsSync(manifestOutPath)) {
+    throw new Error("Failed to write dist/manifest.json");
+  }
 }
 
 function hasBuiltArtifacts() {
@@ -60,15 +64,21 @@ const result = spawnSync(process.execPath, [viteBin, "build"], {
   shell: false,
 });
 
-if (hasBuiltArtifacts()) {
+if (result.status === 0) {
   buildFallbackManifest();
-  if (result.status !== 0) {
-    console.warn(
-      `[build-extension] vite exited with status ${result.status ?? "unknown"}${result.signal ? ` (signal: ${result.signal})` : ""}, ` +
-      "but core dist artifacts exist. Wrote fallback dist/manifest.json and treating build as successful.",
-    );
-    process.exit(0);
+  if (!existsSync(path.join(distDir, "manifest.json"))) {
+    console.error("[build-extension] dist/manifest.json is missing after build.");
+    process.exit(1);
   }
+  console.log("[build-extension] Wrote dist/manifest.json");
+  process.exit(0);
+}
+
+if (hasBuiltArtifacts()) {
+  console.error(
+    `[build-extension] vite exited with status ${result.status ?? "unknown"}${result.signal ? ` (signal: ${result.signal})` : ""}. ` +
+      "Partial dist artifacts were generated, but the build is treated as failed.",
+  );
 }
 
 process.exit(result.status ?? 1);

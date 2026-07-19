@@ -1,44 +1,123 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import type { DetectedCandidate, QuestionBlock } from "@/shared/types";
+import React, { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import gsap from "gsap";
+import { useGSAP } from "@gsap/react";
 import { loadSettings } from "@/shared/utils/storage";
 import { findNextFractionExpression, normalizeRenderableMathText, type UILang } from "./displayUtils";
-import {
-  isRiskyCandidate,
-} from "./batchParseHeuristics";
+import { isRiskyCandidate } from "./batchParseHeuristics";
 import { HistoryTab } from "./HistoryTab";
 import { SettingsTab } from "./settingsPanel";
 import { registerSidePanelRuntimeListeners } from "./sidepanelMessageBridge";
 import { computeCandidateMetrics, type CandidateViewFilter } from "./sidepanelCandidateMetrics";
 import { CandidatesTab } from "./CandidatesTab";
+import {
+  APP_SHELL_STYLE,
+  PANEL_BODY_STYLE,
+  SidePanelHeader,
+  SidePanelLockedState,
+} from "./sidePanelShell";
+import type { AutoSolveProgressState, ScanProgressState, SidePanelAppState } from "./sidepanelAppState";
+import { initialSidePanelAppState, sidePanelAppReducer } from "./sidepanelAppState";
 import { useSidePanelActions } from "./useSidePanelActions";
 
 export { findNextFractionExpression, normalizeRenderableMathText, renderMathText } from "./displayUtils";
+
+gsap.registerPlugin(useGSAP);
+
 export const SidePanelApp: React.FC = () => {
-  const [uiLang, setUiLang] = useState<UILang>("zh");
-  const [tab, setTab] = useState<"candidates" | "history" | "settings">("candidates");
-  const [candidates, setCandidates] = useState<DetectedCandidate[]>([]);
-  const [isDetecting, setIsDetecting] = useState(false);
-  const [isFullPageScan, setIsFullPageScan] = useState(false);
-  const [scanProgress, setScanProgress] = useState<{ progress: number; found: number; step: number; total: number } | null>(null);
-  const [isBatchParsing, setIsBatchParsing] = useState(false);
-  const [isBatchFilling, setIsBatchFilling] = useState(false);
-  const [isRetryingRisky, setIsRetryingRisky] = useState(false);
-  const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
-  const [candidateViewFilter, setCandidateViewFilter] = useState<CandidateViewFilter>("all");
-  const [fillFeedback, setFillFeedback] = useState<string>("");
-  const [isAutoSolving, setIsAutoSolving] = useState(false);
-  const [autoSolveProgress, setAutoSolveProgress] = useState<{
-    solved: number;
-    filled: number;
-    total: number;
-    current: number;
-    statusText: string;
-    currentPreview?: string;
-    currentBlock?: QuestionBlock;
-  } | null>(null);
+  const scopeRef = useRef<HTMLDivElement | null>(null);
+  const [state, dispatch] = useReducer(sidePanelAppReducer, initialSidePanelAppState);
+
+  const setUiLang = useCallback((updater: React.SetStateAction<UILang>) => dispatch({ type: "uiLang", updater }), []);
+  const setIsAuthenticated = useCallback(
+    (updater: React.SetStateAction<boolean>) => dispatch({ type: "isAuthenticated", updater }),
+    [],
+  );
+  const setUserEmail = useCallback(
+    (updater: React.SetStateAction<string>) => dispatch({ type: "userEmail", updater }),
+    [],
+  );
+  const setTab = useCallback((updater: React.SetStateAction<SidePanelAppState["tab"]>) => dispatch({ type: "tab", updater }), []);
+  const setCandidates = useCallback(
+    (updater: React.SetStateAction<SidePanelAppState["candidates"]>) => dispatch({ type: "candidates", updater }),
+    [],
+  );
+  const setIsDetecting = useCallback(
+    (updater: React.SetStateAction<boolean>) => dispatch({ type: "isDetecting", updater }),
+    [],
+  );
+  const setIsFullPageScan = useCallback(
+    (updater: React.SetStateAction<boolean>) => dispatch({ type: "isFullPageScan", updater }),
+    [],
+  );
+  const setScanProgress = useCallback(
+    (updater: React.SetStateAction<ScanProgressState>) => dispatch({ type: "scanProgress", updater }),
+    [],
+  );
+  const setIsBatchParsing = useCallback(
+    (updater: React.SetStateAction<boolean>) => dispatch({ type: "isBatchParsing", updater }),
+    [],
+  );
+  const setIsBatchFilling = useCallback(
+    (updater: React.SetStateAction<boolean>) => dispatch({ type: "isBatchFilling", updater }),
+    [],
+  );
+  const setIsRetryingRisky = useCallback(
+    (updater: React.SetStateAction<boolean>) => dispatch({ type: "isRetryingRisky", updater }),
+    [],
+  );
+  const setExpandedIds = useCallback(
+    (updater: React.SetStateAction<SidePanelAppState["expandedIds"]>) => dispatch({ type: "expandedIds", updater }),
+    [],
+  );
+  const setCandidateViewFilter = useCallback(
+    (updater: React.SetStateAction<CandidateViewFilter>) => dispatch({ type: "candidateViewFilter", updater }),
+    [],
+  );
+  const setFillFeedback = useCallback(
+    (updater: React.SetStateAction<string>) => dispatch({ type: "fillFeedback", updater }),
+    [],
+  );
+  const setIsAutoSolving = useCallback(
+    (updater: React.SetStateAction<boolean>) => dispatch({ type: "isAutoSolving", updater }),
+    [],
+  );
+  const setAutoSolveProgress = useCallback(
+    (updater: React.SetStateAction<AutoSolveProgressState>) => dispatch({ type: "autoSolveProgress", updater }),
+    [],
+  );
 
   useEffect(() => {
-    return registerSidePanelRuntimeListeners({
+    loadSettings().then((settings) => {
+      setUiLang((settings.language ?? "zh") as UILang);
+      setIsAuthenticated(!!(settings.userId && settings.authToken));
+      setUserEmail(settings.userEmail ?? "");
+      if (!(settings.userId && settings.authToken)) setTab("settings");
+    });
+
+    const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
+      if (areaName !== "local" || !changes.appSettings?.newValue) return;
+
+      const nextSettings = changes.appSettings.newValue as {
+        language?: UILang;
+        userId?: string;
+        userEmail?: string;
+        authToken?: string;
+      };
+
+      if (nextSettings.language === "zh" || nextSettings.language === "en") {
+        setUiLang(nextSettings.language);
+      }
+
+      const nextAuthenticated = !!(nextSettings.userId && nextSettings.authToken);
+      setIsAuthenticated(nextAuthenticated);
+      setUserEmail(nextSettings.userEmail ?? "");
+
+      if (!nextAuthenticated) setTab("settings");
+    };
+
+    chrome.storage.onChanged.addListener(handleStorageChange);
+
+    const unregisterRuntime = registerSidePanelRuntimeListeners({
       loadLanguage: async () => ((await loadSettings()).language ?? "zh") as UILang,
       setUiLang,
       setCandidates,
@@ -50,7 +129,25 @@ export const SidePanelApp: React.FC = () => {
       setAutoSolveProgress,
       setFillFeedback,
     });
-  }, []);
+
+    return () => {
+      chrome.storage.onChanged.removeListener(handleStorageChange);
+      unregisterRuntime();
+    };
+  }, [
+    setAutoSolveProgress,
+    setCandidates,
+    setExpandedIds,
+    setFillFeedback,
+    setIsAuthenticated,
+    setIsAutoSolving,
+    setIsDetecting,
+    setIsFullPageScan,
+    setScanProgress,
+    setTab,
+    setUiLang,
+    setUserEmail,
+  ]);
 
   const {
     handleBatchFill,
@@ -70,8 +167,8 @@ export const SidePanelApp: React.FC = () => {
     toggleDetails,
     toggleSelect,
   } = useSidePanelActions({
-    candidates,
-    isBatchParsing,
+    candidates: state.candidates,
+    isBatchParsing: state.isBatchParsing,
     setCandidates,
     setExpandedIds,
     setFillFeedback,
@@ -83,62 +180,78 @@ export const SidePanelApp: React.FC = () => {
     setIsRetryingRisky,
     setAutoSolveProgress,
     setScanProgress,
-    uiLang,
+    uiLang: state.uiLang,
   });
 
   const { selectedCount, selectedSolvedCount, riskyCount, doneCount, filteredCandidates } = useMemo(
-    () => computeCandidateMetrics(candidates, candidateViewFilter, isRiskyCandidate),
-    [candidateViewFilter, candidates],
+    () => computeCandidateMetrics(state.candidates, state.candidateViewFilter, isRiskyCandidate),
+    [state.candidateViewFilter, state.candidates],
   );
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
-      <div style={{ display: "flex", flexShrink: 0, backgroundColor: "#181825", borderBottom: "1px solid #313244" }}>
-        {[
-          { id: "candidates" as const, label: uiLang === "en" ? "Candidates" : "\u5019\u9009\u9898" },
-          { id: "history" as const, label: uiLang === "en" ? "History" : "\u5386\u53f2" },
-          { id: "settings" as const, label: uiLang === "en" ? "Settings" : "\u8bbe\u7f6e" },
-        ].map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              flex: 1,
-              padding: "11px 4px",
-              border: "none",
-              cursor: "pointer",
-              backgroundColor: tab === t.id ? "#1e1e2e" : "transparent",
-              color: tab === t.id ? "#cba6f7" : "#6c7086",
-              fontSize: 12,
-              fontWeight: tab === t.id ? 700 : 400,
-              borderBottom: `2px solid ${tab === t.id ? "#cba6f7" : "transparent"}`,
-              fontFamily: "system-ui, sans-serif",
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+  useGSAP(() => {
+    gsap.from(".sp-header-copy", {
+      y: 12,
+      autoAlpha: 0,
+      duration: 0.6,
+      ease: "power2.out",
+    });
+    gsap.from(".sp-tab", {
+      y: 8,
+      autoAlpha: 0,
+      duration: 0.42,
+      stagger: 0.06,
+      ease: "power2.out",
+      delay: 0.08,
+    });
+    gsap.to(".sp-glow-a", {
+      x: 18,
+      y: -8,
+      duration: 8,
+      repeat: -1,
+      yoyo: true,
+      ease: "sine.inOut",
+    });
+    gsap.to(".sp-glow-b", {
+      x: -8,
+      y: 8,
+      duration: 9,
+      repeat: -1,
+      yoyo: true,
+      ease: "sine.inOut",
+    });
+  }, { scope: scopeRef });
 
-      <div style={{ flex: 1, overflowY: "auto" }}>
-        {tab === "candidates" && (
+  return (
+    <div ref={scopeRef} style={APP_SHELL_STYLE}>
+      <SidePanelHeader
+        isAuthenticated={state.isAuthenticated}
+        lang={state.uiLang}
+        onTabChange={setTab}
+        tab={state.tab}
+        userEmail={state.userEmail}
+      />
+
+      <div style={PANEL_BODY_STYLE}>
+        {!state.isAuthenticated && state.tab !== "settings" ? (
+          <SidePanelLockedState lang={state.uiLang} onOpenSettings={() => setTab("settings")} />
+        ) : state.tab === "candidates" ? (
           <CandidatesTab
-            autoSolveProgress={autoSolveProgress}
-            candidateViewFilter={candidateViewFilter}
-            candidates={candidates}
+            autoSolveProgress={state.autoSolveProgress}
+            candidateViewFilter={state.candidateViewFilter}
+            candidates={state.candidates}
             doneCount={doneCount}
-            expandedIds={expandedIds}
-            fillFeedback={fillFeedback}
+            expandedIds={state.expandedIds}
+            fillFeedback={state.fillFeedback}
             filteredCandidates={filteredCandidates}
-            isAutoSolving={isAutoSolving}
-            isBatchFilling={isBatchFilling}
-            isBatchParsing={isBatchParsing}
-            isDetecting={isDetecting}
-            isFullPageScan={isFullPageScan}
-            isRetryingRisky={isRetryingRisky}
-            lang={uiLang}
+            isAutoSolving={state.isAutoSolving}
+            isBatchFilling={state.isBatchFilling}
+            isBatchParsing={state.isBatchParsing}
+            isDetecting={state.isDetecting}
+            isFullPageScan={state.isFullPageScan}
+            isRetryingRisky={state.isRetryingRisky}
+            lang={state.uiLang}
             riskyCount={riskyCount}
-            scanProgress={scanProgress}
+            scanProgress={state.scanProgress}
             selectedCount={selectedCount}
             selectedSolvedCount={selectedSolvedCount}
             onBatchFill={handleBatchFill}
@@ -159,10 +272,12 @@ export const SidePanelApp: React.FC = () => {
             onToggleCandidate={toggleSelect}
             onToggleDetails={toggleDetails}
           />
-        )}
+        ) : null}
 
-        {tab === "history" && <HistoryTab lang={uiLang} />}
-        {tab === "settings" && <SettingsTab lang={uiLang} onLanguageChange={setUiLang} />}
+        {state.tab === "history" ? <HistoryTab lang={state.uiLang} /> : null}
+        {state.tab === "settings" ? (
+          <SettingsTab lang={state.uiLang} onLanguageChange={setUiLang} authOnly={!state.isAuthenticated} />
+        ) : null}
       </div>
     </div>
   );

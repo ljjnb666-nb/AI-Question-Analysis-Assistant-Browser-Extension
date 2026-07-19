@@ -65,6 +65,7 @@ import {
 import { refineViewportCandidate } from "./viewportCandidateRefinement";
 import type { FloatingWindowManager } from "./floating/FloatingWindowManager";
 import type { HighlightLayer as HighlightLayerInstance } from "./highlight/HighlightLayer";
+import type { CandidateStatusMap, ContentMainBridgeState } from "./contentRuntimeState";
 
 const MANUAL_PARSE_TIER_TIMEOUTS_MS = [10_000, 20_000, 30_000] as const;
 const MANUAL_PARSE_PIPELINE_TIMEOUT_MS = 45_000;
@@ -73,24 +74,8 @@ const AUTO_SOLVE_REVIEW_TIMEOUT_MS = 60_000;
 const AUTO_SOLVE_QUICK_REVIEW_TIMEOUT_MS = 15_000;
 const AUTO_SOLVE_REVIEW_CONFIDENCE_THRESHOLD = 0.9;
 
-type ContentMainBridgeState = {
-  getActiveCandidates: () => QuestionBlock[];
-  setActiveCandidates: (candidates: QuestionBlock[]) => void;
-  getActiveHighlightBlocks: () => QuestionBlock[];
-  setActiveHighlightBlocks: (blocks: QuestionBlock[]) => void;
-  getActiveDetectMode: () => "viewport" | "fullpage" | null;
-  setActiveDetectMode: (mode: "viewport" | "fullpage" | null) => void;
-  getHighlightLayer: () => HighlightLayerInstance | null;
-  setHighlightLayer: (layer: HighlightLayerInstance | null) => void;
-  getLastFullPageLayoutKey: () => string;
-  setLastFullPageLayoutKey: (layoutKey: string) => void;
-  getAutoSolveStopRequested: () => boolean;
-  setUnwatchSPA: (unwatch: (() => void) | null) => void;
-  stopSpaWatch: () => void;
-};
-
 type CreateContentMainBridgesOptions = {
-  candidateStatusMap: Map<string, { status: string; selected: boolean }>;
+  candidateStatusMap: CandidateStatusMap;
   floatingMgr: FloatingWindowManager;
   refreshLayoutResizeObservation: () => void;
   scheduleHighlightRelayoutRescan: () => void;

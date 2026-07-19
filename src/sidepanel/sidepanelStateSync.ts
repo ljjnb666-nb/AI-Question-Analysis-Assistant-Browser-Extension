@@ -17,7 +17,7 @@ export function mergeCandidateSnapshots(
   prev: DetectedCandidate[],
   snapshots: CandidateSnapshot[],
 ): DetectedCandidate[] {
-  const prevById = new Map(prev.map((c) => [c.block.id, c] as const));
+  const prevById = new Map(prev.map((candidate) => [candidate.block.id, candidate] as const));
   return snapshots.map((snapshot) => {
     const old = prevById.get(snapshot.block.id);
     return {
@@ -32,7 +32,7 @@ export function mergeCandidateSnapshots(
 }
 
 export function mapFullPageDoneCandidates(blocks: QuestionBlock[]): DetectedCandidate[] {
-  return blocks.map((b) => ({ block: b, selected: false, status: "idle" as const }));
+  return blocks.map((block) => ({ block, selected: false, status: "idle" as const }));
 }
 
 export function mapFullPageProgressMessage(msg: Record<string, unknown>) {

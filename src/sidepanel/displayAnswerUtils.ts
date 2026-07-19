@@ -26,6 +26,12 @@ export function resolveResultAnswerForDisplay(result: ParseResult, dtype: Questi
   return normalizeAnswer(raw || "-");
 }
 
+export function isStructuredAnswerExtractionFailed(result: ParseResult): boolean {
+  const raw = String(result.answer || "").trim();
+  const brief = String(result.briefExplanation || "").trim();
+  return looksLikePlaceholderDisplayAnswer(raw) || looksLikeNarrativeCodeDisplayAnswer(raw) || /解析提取失败/.test(brief);
+}
+
 export function normalizeHistoryAnswer(entry: HistoryItem, dtype: QuestionType): string {
   const normalized = resolveResultAnswerForDisplay(entry.result, dtype, entry.result.recognizedText || entry.block.previewText || "");
   const looksChoiceLetters = /^[A-D](?:\s*[,，、/|]\s*[A-D])*$/.test(normalized);
@@ -41,6 +47,16 @@ export function normalizeHistoryAnswer(entry: HistoryItem, dtype: QuestionType):
 
 function looksLikePlaceholderDisplayAnswer(answer: string): boolean {
   return /(见分点答案|见分点作答|按分点作答|分点作答|仅供参考|参考答案见解析|详见解析|示例答案|需人工确认|未提取到稳定答案|解析提取失败)/.test(String(answer || "").trim());
+}
+
+function looksLikeNarrativeCodeDisplayAnswer(answer: string): boolean {
+  const text = String(answer || "").trim();
+  if (!text) return false;
+  if (/[;{}#]/.test(text)) return false;
+  if (/(?:^|\n)\s*(?:1[.)、:]|2[.)、:]|3[.)、:]|一[、.]|二[、.]|三[、.])\s*(?:函数|实现|思路|要点|步骤|说明|参考实现|完整参考实现)/.test(text)) {
+    return true;
+  }
+  return /(函数功能|实现要点|参考实现|完整参考实现如\s*answer\s*所示|已按小问分点整理答案)/.test(text);
 }
 
 function extractAnswerFromExplanation(result: ParseResult, dtype: QuestionType, sourceQuestionText = ""): string {

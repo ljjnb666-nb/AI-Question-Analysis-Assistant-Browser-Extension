@@ -318,7 +318,39 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
         currentBlock: toProgressBlock(currentBlock),
       });
 
-      if (!questionCompleted) continue;
+      if (!questionCompleted) {
+        if (repeatedCount >= 2) {
+          solved += 1;
+          deps.sendAutoSolveProgress({
+            running: true,
+            solved,
+            filled,
+            total,
+            current: solved,
+            statusText: `第 ${solved} 题多次重试仍未完成，已跳过并继续下一题`,
+            currentQuestionId: currentBlock.id,
+            currentPreview: currentBlock.previewText,
+            currentBlock: toProgressBlock(currentBlock),
+          });
+
+          const advanceResult = await advanceAfterSolvedQuestion(
+            {
+              currentBlock,
+              currentOrder,
+              driveFromOrderedPlan,
+              filled,
+              fixedTotal,
+              lastFingerprint,
+              solved,
+              total,
+            },
+            advanceAfterSolvedQuestionDeps,
+          );
+          if (driveFromOrderedPlan) incrementOrderedPlanCursor(orderedPlanState);
+          if (advanceResult === "done") return;
+        }
+        continue;
+      }
 
       const advanceResult = await advanceAfterSolvedQuestion(
         {

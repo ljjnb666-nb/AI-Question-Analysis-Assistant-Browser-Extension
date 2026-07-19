@@ -10,26 +10,27 @@ import {
   resolveStableChoiceResolution,
 } from "./parseResultChoice";
 import { normalizeRecognizedQuestionText, sanitizeModelText } from "./parseResultNormalization";
+import { buildPreferredQuestionText } from "./questionPromptText";
 // ---- Result Builder ----
 
 export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: string): ParseResult {
-  const clean = rawText.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  const clean = sanitizeRawModelResponse(rawText);
   let parsed: Record<string, unknown> = {};
   let parsedByFallback = false;
   try {
     parsed = JSON.parse(clean);
   } catch (firstErr) {
     logWarn("Failed to parse JSON response, attempting extraction", "buildResult", { rawText: clean.slice(0, 100) });
-    const match = clean.match(/\{[\s\S]*\}/);
-    if (match) {
+    const extractedJson = extractLikelyJsonPayload(clean);
+    if (extractedJson) {
       try {
-        parsed = JSON.parse(match[0]);
+        parsed = JSON.parse(extractedJson);
       } catch (secondErr) {
         logError("Failed to extract JSON from response", secondErr, "buildResult", { rawText: clean.slice(0, 200) });
       }
     }
     if (Object.keys(parsed).length === 0) {
-      parsed = extractFieldsFromLooseJsonLikeText(clean);
+      parsed = extractFieldsFromLooseJsonLikeText(extractedJson || clean);
       parsedByFallback = Object.keys(parsed).length > 0;
     }
   }
@@ -48,7 +49,8 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
 
   const parsedRecognizedRaw = typeof parsed.recognizedText === "string" ? parsed.recognizedText : "";
   const parsedRecognized = sanitizeModelText(parsedRecognizedRaw);
-  const previewSanitized = sanitizeModelText(block.previewText ?? "");
+  const sourceQuestionText = buildPreferredQuestionText(block);
+  const previewSanitized = sanitizeModelText(sourceQuestionText);
   const recognizedTextRaw = shouldFallbackToPreview(parsedRecognized, previewSanitized)
     ? previewSanitized
     : parsedRecognized;
@@ -57,7 +59,9 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     questionType,
     block.questionTypeGuess,
   );
-  const strongChoiceType = inferChoiceTypeFromQuestionText(`${recognizedText}\n${block.previewText || ""}`);
+  const codeProblemLikely = isCodeProblemLikely(`${recognizedText}\n${sourceQuestionText}`);
+  const judgeQuestionLikely = isJudgeQuestionLikely(`${recognizedText}\n${sourceQuestionText}`, block.questionTypeGuess);
+  const strongChoiceType = inferChoiceTypeFromQuestionText(`${recognizedText}\n${sourceQuestionText}`);
   if ((questionType === "fill_blank" || questionType === "short_answer" || questionType === "unknown") && strongChoiceType) {
     questionType = strongChoiceType;
   }
@@ -79,10 +83,18 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     questionType,
   );
   const corrected = applyBiologyHeuristicCorrections(structured.detailed, recognizedText);
-  const nonChoiceLike = shouldTreatAsNonChoice(questionType, recognizedText, structured.detailed, block.previewText || "");
+  if (judgeQuestionLikely) {
+    questionType = "judge";
+    answer = normalizeJudgeAnswer(
+      answer,
+      `${structured.brief}\n${corrected}\n${recognizedText}\n${sourceQuestionText}`,
+    ) || answer;
+    optionSelections = undefined;
+  }
+  const nonChoiceLike = shouldTreatAsNonChoice(questionType, recognizedText, structured.detailed, sourceQuestionText);
   if (nonChoiceLike) {
     if (questionType === "single_choice" || questionType === "multi_choice" || questionType === "unknown") {
-      questionType = inferNonChoiceType(recognizedText, block.previewText || "");
+      questionType = inferNonChoiceType(recognizedText, sourceQuestionText);
     }
     if (isOptionLetterSet(answer)) {
       const extracted = extractNonChoiceAnswerFromText(`${corrected}\n${structured.brief}`);
@@ -93,13 +105,28 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     }
   }
 
+  if (codeProblemLikely) {
+    questionType = "short_answer";
+    const extractedCodeAnswer = extractCodeAnswerFromSources([
+      rawAnswer,
+      typeof parsed.briefExplanation === "string" ? parsed.briefExplanation : "",
+      typeof parsed.detailedExplanation === "string" ? parsed.detailedExplanation : "",
+      clean,
+    ]);
+    if (extractedCodeAnswer) {
+      answer = extractedCodeAnswer;
+    } else {
+      answer = "需人工确认";
+    }
+  }
+
   answer = normalizePlaceholderAnswer(answer, questionType);
 
   if (questionType === "single_choice") {
     const correctedByRule = applyProbabilitySingleChoiceCorrection(
       answer,
       recognizedText,
-      block.previewText || "",
+      sourceQuestionText,
     );
     if (correctedByRule && correctedByRule !== answer) {
       answer = correctedByRule;
@@ -111,7 +138,7 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     correctedByExplanation = inferChoiceAnswerFromExplanation(
       questionType,
       recognizedText,
-      block.previewText || "",
+      sourceQuestionText,
       structured.brief,
       corrected,
     );
@@ -138,9 +165,12 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
       answer = "需人工确认";
     }
   }
-  const finalWarning = answer === "需人工确认"
+  const finalWarning = (questionType === "single_choice" || questionType === "multi_choice") && answer === "需人工确认"
     ? [warning, "选择题未提取到稳定的结构化选项结论，需人工确认后再填写。"].filter(Boolean).join(" ")
     : warning;
+  const mergedWarning = codeProblemLikely && answer === "需人工确认"
+    ? [finalWarning, "代码题未提取到可直接填写的代码答案，请查看详情或视觉重试。"].filter(Boolean).join(" ")
+    : finalWarning;
 
   return {
     blockId: block.id,
@@ -153,8 +183,96 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     routeUsed: route,
     optionSelections,
     ocrQualityScore: 0.85,
-    warning: finalWarning || undefined,
+    warning: mergedWarning || undefined,
   };
+}
+
+function sanitizeRawModelResponse(rawText: string): string {
+  const clean = String(rawText || "").replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  const thinkEnd = clean.lastIndexOf("</think>");
+  if (thinkEnd >= 0) {
+    const afterThink = clean.slice(thinkEnd + "</think>".length).trim();
+    if (afterThink) return afterThink;
+  }
+  return clean;
+}
+
+function extractLikelyJsonPayload(text: string): string {
+  const source = sanitizeRawModelResponse(text);
+  const schemaStart = source.search(/\{\s*"questionType"\s*:/);
+  if (schemaStart >= 0) {
+    const tail = source.slice(schemaStart);
+    const tailEnd = tail.lastIndexOf("}");
+    if (tailEnd >= 0) return tail.slice(0, tailEnd + 1);
+  }
+
+  const firstBrace = source.indexOf("{");
+  const lastBrace = source.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return source.slice(firstBrace, lastBrace + 1);
+  }
+  return "";
+}
+
+function isCodeProblemLikely(text: string): boolean {
+  const normalized = String(text || "");
+  return /(函数接口定义|裁判测试程序样例|输入格式|输出格式|输入样例|输出样例|样例输入|样例输出|代码长度限制)/.test(normalized);
+}
+
+function extractCodeAnswerFromSources(sources: string[]): string {
+  for (const source of sources) {
+    const normalized = normalizeCodeSnippet(source);
+    if (looksLikeUsefulCodeSnippet(normalized)) return normalized;
+  }
+  return "";
+}
+
+function normalizeCodeSnippet(source: string): string {
+  let text = String(source || "").trim();
+  if (!text) return "";
+
+  const fence = text.match(/```(?:c|cpp|c\+\+)?\s*([\s\S]*?)```/i);
+  if (fence?.[1]) text = fence[1].trim();
+
+  const codeStart = text.search(/(?:#include\s*<|(?:char|int|long|double|float|void)\s+\*?\s*[A-Za-z_]\w*\s*\([^)]*\)\s*\{|return\s+|if\s*\(|for\s*\(|while\s*\()/);
+  if (codeStart > 0) {
+    text = text.slice(codeStart).trim();
+  }
+
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\s*注[:：].*$/gm, "")
+    .replace(/^\s*(?:答案|参考代码|代码如下)[:：]\s*/gm, "")
+    .replace(/\\n/g, "\n")
+    .replace(/\\"/g, "\"")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function looksLikeUsefulCodeSnippet(text: string): boolean {
+  if (!text) return false;
+  if (/^(注[:：]|由于|本题要求|根据输入|若.*返回|模型|具体形参)/.test(text)) return false;
+  if (looksLikeNarrativeCodeAnswer(text)) return false;
+  if (/["']\s*}\s*$/.test(text)) return false;
+
+  const hasFunctionWithBody = /(?:char|int|long|double|float|void)\s+\*?\s*[A-Za-z_]\w*\s*\([^)]*\)\s*\{[\s\S]*\}/.test(text);
+  const hasControlFlowBody = /\b(?:if|for|while|switch)\s*\([^)]*\)\s*\{[\s\S]*\}/.test(text);
+  const statementCount = (text.match(/;/g) || []).length;
+  const hasMultipleStatements = statementCount >= 2 && /[\n{}]/.test(text);
+
+  return hasFunctionWithBody || hasControlFlowBody || hasMultipleStatements;
+}
+
+function looksLikeNarrativeCodeAnswer(text: string): boolean {
+  const normalized = String(text || "").trim();
+  if (!normalized) return false;
+  if (/(?:^|\n)\s*(?:1[.)、:]|2[.)、:]|3[.)、:]|一[、.]|二[、.]|三[、.])\s*(?:函数|实现|思路|要点|步骤|说明|参考实现|完整参考实现)/.test(normalized)) {
+    return true;
+  }
+  if (/(函数功能|实现要点|参考实现|完整参考实现如\s*answer\s*所示|已按小问分点整理答案)/.test(normalized)) {
+    return true;
+  }
+  return false;
 }
 
 function applyProbabilitySingleChoiceCorrection(
@@ -318,9 +436,29 @@ function normalizeAnswerByType(raw: string, questionType: ParseResult["questionT
   const t = questionType;
   if (t === "single_choice" || t === "multi_choice") return normalizeAnswer(raw);
   if (t === "fill_blank") return normalizeFillBlankAnswer(raw);
+  if (t === "judge") return normalizeJudgeAnswer(raw, raw) || String(raw || "").trim() || "—";
   const s = String(raw || "").trim();
   if (!s) return "—";
   return s;
+}
+
+function isJudgeQuestionLikely(text: string, hint: QuestionBlock["questionTypeGuess"]): boolean {
+  if (hint === "judge") return true;
+  const normalized = String(text || "");
+  return /(判断题|是非题|判断对错|判断正误|对\s*错|正确\s*错误|\btrue\b|\bfalse\b)/i.test(normalized);
+}
+
+function normalizeJudgeAnswer(answer: string, sourceText: string): "对" | "错" | null {
+  const direct = String(answer || "").trim().toLowerCase();
+  if (/^(对|正确|true|t|yes|y)[。.!！?？]?$/i.test(direct)) return "对";
+  if (/^(错|错误|false|f|no|n)[。.!！?？]?$/i.test(direct)) return "错";
+
+  const source = `${answer || ""}\n${sourceText || ""}`;
+  if (/(答案|判断为|该说法|因此|所以|结论).{0,8}(错误|错|false)/i.test(source)) return "错";
+  if (/(答案|判断为|该说法|因此|所以|结论).{0,8}(正确|对|true)/i.test(source)) return "对";
+  if (/(说法错误|表述错误|命题错误|此题错误)/.test(source)) return "错";
+  if (/(说法正确|表述正确|命题正确|此题正确)/.test(source)) return "对";
+  return null;
 }
 
 function normalizePlaceholderAnswer(answer: string, questionType: ParseResult["questionType"]): string {
@@ -412,22 +550,14 @@ function formatMultiPartExplanation(
 }
 
 function extractFieldsFromLooseJsonLikeText(text: string): Record<string, unknown> {
-  const pick = (field: string): string | undefined => {
-    const m = text.match(new RegExp(`"${field}"\\s*:\\s*"([\\s\\S]*?)"\\s*(?:,|\\n\\s*"|\\n\\s*\\}|\\})`, "i"));
-    return m?.[1];
-  };
-  const pickNum = (field: string): number | undefined => {
-    const m = text.match(new RegExp(`"${field}"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)`, "i"));
-    return m ? Number(m[1]) : undefined;
-  };
   const out: Record<string, unknown> = {};
-  const questionType = pick("questionType");
-  const answer = pick("answer");
-  const brief = pick("briefExplanation");
-  const detailed = pick("detailedExplanation");
-  const recognized = pick("recognizedText");
-  const warning = pick("warning");
-  const confidence = pickNum("confidence");
+  const questionType = pickLooseJsonStringField(text, "questionType");
+  const answer = pickLooseJsonStringField(text, "answer");
+  const brief = pickLooseJsonStringField(text, "briefExplanation");
+  const detailed = pickLooseJsonStringField(text, "detailedExplanation");
+  const recognized = pickLooseJsonStringField(text, "recognizedText");
+  const warning = pickLooseJsonStringField(text, "warning");
+  const confidence = pickLooseJsonNumberField(text, "confidence");
 
   if (questionType) out.questionType = unescapeLooseJsonString(questionType);
   if (answer) out.answer = unescapeLooseJsonString(answer);
@@ -437,6 +567,78 @@ function extractFieldsFromLooseJsonLikeText(text: string): Record<string, unknow
   if (warning && warning.toLowerCase() !== "null") out.warning = unescapeLooseJsonString(warning);
   if (typeof confidence === "number" && Number.isFinite(confidence)) out.confidence = confidence;
   return out;
+}
+
+function pickLooseJsonStringField(text: string, field: string): string | undefined {
+  const fieldPattern = new RegExp(`"${escapeRegExp(field)}"\\s*:\\s*`, "ig");
+  for (let match = fieldPattern.exec(text); match; match = fieldPattern.exec(text)) {
+    let cursor = match.index + match[0].length;
+    cursor = skipWhitespace(text, cursor);
+    if (text[cursor] !== "\"") continue;
+    const parsed = readLooseQuotedJsonString(text, cursor + 1);
+    if (parsed) return parsed.value;
+  }
+  return undefined;
+}
+
+function pickLooseJsonNumberField(text: string, field: string): number | undefined {
+  const m = text.match(new RegExp(`"${escapeRegExp(field)}"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)`, "i"));
+  return m ? Number(m[1]) : undefined;
+}
+
+function readLooseQuotedJsonString(
+  text: string,
+  start: number,
+): { value: string; end: number } | null {
+  let value = "";
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === "\\") {
+      if (i + 1 < text.length) {
+        value += ch + text[i + 1];
+        i += 1;
+        continue;
+      }
+      value += ch;
+      continue;
+    }
+    if (ch === "\"") {
+      if (classifyLooseStringQuoteEnd(text, i + 1) === "end") {
+        return { value, end: i };
+      }
+      value += ch;
+      continue;
+    }
+    value += ch;
+  }
+  return value ? { value, end: text.length - 1 } : null;
+}
+
+function classifyLooseStringQuoteEnd(text: string, afterQuote: number): "end" | "content" {
+  let cursor = skipWhitespace(text, afterQuote);
+  const next = text[cursor];
+  if (next === "}") return "end";
+  if (next !== ",") return "content";
+
+  cursor = skipWhitespace(text, cursor + 1);
+  if (text[cursor] !== "\"") return "content";
+
+  let nameEnd = cursor + 1;
+  while (nameEnd < text.length && /[A-Za-z]/.test(text[nameEnd])) nameEnd += 1;
+  if (nameEnd === cursor + 1 || text[nameEnd] !== "\"") return "content";
+
+  const colonPos = skipWhitespace(text, nameEnd + 1);
+  return text[colonPos] === ":" ? "end" : "content";
+}
+
+function skipWhitespace(text: string, index: number): number {
+  let cursor = index;
+  while (cursor < text.length && /\s/.test(text[cursor])) cursor += 1;
+  return cursor;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function unescapeLooseJsonString(s: string): string {

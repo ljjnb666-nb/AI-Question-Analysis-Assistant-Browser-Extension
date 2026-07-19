@@ -29,6 +29,9 @@ type VisionRetryDeps = {
   addHistoryEntry: (entry: HistoryEntry) => Promise<void>;
   setCandidates: UpdateCandidates;
   langSafe: (lang: "zh" | "en" | undefined, zh: string, en: string) => string;
+  pickBatchReviewModel: (providerId: string, currentModel: string) => string;
+  shouldRetryBatchParseForIncompleteResult: (result: ParseResult, block: QuestionBlock) => boolean;
+  preferBatchRetryResult: (firstResult: ParseResult, retryResult: ParseResult, block: QuestionBlock) => boolean;
 };
 
 type FillDeps = {
@@ -157,17 +160,51 @@ export async function runRetryVision(
     const imageDataUrl = await deps.requestBlockImage(activeTab.id, cand.block.bbox);
     if (!imageDataUrl) throw new Error(deps.langSafe(settings.language, "截图失败", "Image capture failed"));
     const visionBlock: QuestionBlock = { ...cand.block, hasImage: true, imageDataUrl };
-    const visionResult = await deps.parseQuestion(visionBlock, { ...settings, preferredRoute: "vision" as const });
+    const visionSettings = { ...settings, preferredRoute: "vision" as const };
+    const reviewSettings = {
+      ...visionSettings,
+      apiModel: deps.pickBatchReviewModel(settings.providerId ?? "anthropic", settings.apiModel),
+    };
+
+    let finalResult = await deps.parseQuestion(visionBlock, visionSettings);
+    if (deps.shouldRetryBatchParseForIncompleteResult(finalResult, cand.block)) {
+      const reviewedResult = await deps.parseQuestion(visionBlock, reviewSettings);
+      if (deps.preferBatchRetryResult(finalResult, reviewedResult, cand.block)) {
+        finalResult = reviewedResult;
+      }
+    }
+
+    const resultToKeep =
+      cand.status === "success" && cand.result && !deps.preferBatchRetryResult(cand.result, finalResult, cand.block)
+        ? cand.result
+        : finalResult;
+
     deps.setCandidates((prev) =>
       prev.map((c) =>
         c.block.id === cand.block.id
-          ? { ...c, status: "success" as const, result: visionResult, debugInfo: { imageAttached: true, routeUsed: visionResult.routeUsed } }
+          ? { ...c, status: "success" as const, result: resultToKeep, error: undefined, debugInfo: { imageAttached: true, routeUsed: resultToKeep.routeUsed } }
           : c,
       ),
     );
-    await deps.addHistoryEntry({ id: cand.block.id, timestamp: Date.now(), block: visionBlock, result: visionResult, host: location.hostname });
+    await deps.addHistoryEntry({ id: cand.block.id, timestamp: Date.now(), block: visionBlock, result: resultToKeep, host: location.hostname });
   } catch (err) {
-    deps.setCandidates((prev) => prev.map((c) => (c.block.id === cand.block.id ? { ...c, status: "error" as const, error: String(err) } : c)));
+    deps.setCandidates((prev) =>
+      prev.map((c) =>
+        c.block.id === cand.block.id
+          ? (
+            cand.status === "success" && cand.result
+              ? {
+                ...c,
+                status: "success" as const,
+                result: cand.result,
+                error: undefined,
+                debugInfo: { ...(c.debugInfo || {}), retryError: String(err) } as typeof c.debugInfo,
+              }
+              : { ...c, status: "error" as const, error: String(err) }
+          )
+          : c,
+      ),
+    );
   }
 }
 
@@ -190,18 +227,50 @@ export async function runRetryRisky(
       const imageDataUrl = await deps.requestBlockImage(activeTab.id, cand.block.bbox);
       if (!imageDataUrl) throw new Error(deps.langSafe(settings.language, "截图失败", "Image capture failed"));
       const visionBlock: QuestionBlock = { ...cand.block, hasImage: true, imageDataUrl };
-      const visionResult = await deps.parseQuestion(visionBlock, { ...settings, preferredRoute: "vision" as const });
+      const visionSettings = { ...settings, preferredRoute: "vision" as const };
+      const reviewSettings = {
+        ...visionSettings,
+        apiModel: deps.pickBatchReviewModel(settings.providerId ?? "anthropic", settings.apiModel),
+      };
+
+      let finalResult = await deps.parseQuestion(visionBlock, visionSettings);
+      if (deps.shouldRetryBatchParseForIncompleteResult(finalResult, cand.block)) {
+        const reviewedResult = await deps.parseQuestion(visionBlock, reviewSettings);
+        if (deps.preferBatchRetryResult(finalResult, reviewedResult, cand.block)) {
+          finalResult = reviewedResult;
+        }
+      }
+
+      const resultToKeep =
+        cand.status === "success" && cand.result && !deps.preferBatchRetryResult(cand.result, finalResult, cand.block)
+          ? cand.result
+          : finalResult;
+
       deps.setCandidates((prev) =>
         prev.map((c) =>
           c.block.id === cand.block.id
-            ? { ...c, status: "success" as const, result: visionResult, error: undefined, debugInfo: { imageAttached: true, routeUsed: visionResult.routeUsed } }
+            ? { ...c, status: "success" as const, result: resultToKeep, error: undefined, debugInfo: { imageAttached: true, routeUsed: resultToKeep.routeUsed } }
             : c,
         ),
       );
-      await deps.addHistoryEntry({ id: cand.block.id, timestamp: Date.now(), block: visionBlock, result: visionResult, host: location.hostname });
+      await deps.addHistoryEntry({ id: cand.block.id, timestamp: Date.now(), block: visionBlock, result: resultToKeep, host: location.hostname });
     } catch (err) {
       deps.setCandidates((prev) =>
-        prev.map((c) => (c.block.id === cand.block.id ? { ...c, status: "error" as const, error: String(err) } : c)),
+        prev.map((c) =>
+          c.block.id === cand.block.id
+            ? (
+              cand.status === "success" && cand.result
+                ? {
+                  ...c,
+                  status: "success" as const,
+                  result: cand.result,
+                  error: undefined,
+                  debugInfo: { ...(c.debugInfo || {}), retryError: String(err) } as typeof c.debugInfo,
+                }
+                : { ...c, status: "error" as const, error: String(err) }
+            )
+            : c,
+        ),
       );
     }
   }

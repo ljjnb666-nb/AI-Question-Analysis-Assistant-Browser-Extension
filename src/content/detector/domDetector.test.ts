@@ -595,4 +595,41 @@ describe("domDetector", () => {
     expect(blocks[0].hasImage).toBe(false);
     expect(blocks[0].questionImageUrl).toBeUndefined();
   });
+
+  it("does not append judge markers to choice options when the stem mentions correct or wrong", () => {
+    document.body.innerHTML = `
+      <div id="question-box" class="questionBox">
+        <div id="question-content" class="questionContent">
+          2-3 分数2 作者李廷元 单位中国民用航空飞行学院 对数组元素不正确的引用是
+        </div>
+        <ul id="option-ul" class="optionUl">
+          <li id="opt-a">A. a[p-a]</li>
+          <li id="opt-b">B. *(&a[i])</li>
+          <li id="opt-c">C. p[i]</li>
+          <li id="opt-d">D. a[10]</li>
+        </ul>
+      </div>
+    `;
+
+    const questionBox = document.getElementById("question-box")!;
+    const questionContent = document.getElementById("question-content")!;
+    const optionUl = document.getElementById("option-ul")!;
+    const optA = document.getElementById("opt-a")!;
+    const optB = document.getElementById("opt-b")!;
+    const optC = document.getElementById("opt-c")!;
+    const optD = document.getElementById("opt-d")!;
+
+    setRect(questionBox, { left: 220, top: 120, width: 760, height: 240 });
+    setRect(questionContent, { left: 240, top: 152, width: 700, height: 44 });
+    setRect(optionUl, { left: 240, top: 232, width: 700, height: 100 });
+    setRect(optA, { left: 260, top: 240, width: 180, height: 20 });
+    setRect(optB, { left: 260, top: 264, width: 180, height: 20 });
+    setRect(optC, { left: 260, top: 288, width: 180, height: 20 });
+    setRect(optD, { left: 260, top: 312, width: 180, height: 20 });
+
+    const blocks = detectCandidatesInViewport();
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks[0].previewText).toContain("D. a[10]");
+    expect(blocks[0].previewText).not.toMatch(/D\. a\[10\]\s*[对對错錯]/);
+  });
 });

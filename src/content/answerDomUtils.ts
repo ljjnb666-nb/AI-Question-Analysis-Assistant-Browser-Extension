@@ -18,9 +18,12 @@ export function applyTextValue(control: HTMLElement, value: string): boolean {
   }
 
   if (control.isContentEditable) {
-    if ((control.textContent || "") === value) return false;
+    const existing = control.textContent || "";
+    if (existing === value) return false;
     control.focus();
-    control.textContent = value;
+    if (!replaceContentEditableText(control, value)) {
+      control.textContent = value;
+    }
     dispatchTextEvents(control);
     return true;
   }
@@ -142,4 +145,25 @@ function setNativeTextareaValue(input: HTMLTextAreaElement, value: string) {
   } else {
     input.value = value;
   }
+}
+
+function replaceContentEditableText(control: HTMLElement, value: string): boolean {
+  const selection = window.getSelection();
+  if (!selection) return false;
+
+  try {
+    selection.removeAllRanges();
+    const range = document.createRange();
+    range.selectNodeContents(control);
+    selection.addRange(range);
+
+    if (typeof document.execCommand === "function") {
+      const ok = document.execCommand("insertText", false, value);
+      if (ok) return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
 }

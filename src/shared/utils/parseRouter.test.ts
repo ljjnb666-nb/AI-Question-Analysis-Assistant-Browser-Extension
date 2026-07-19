@@ -1,6 +1,14 @@
 ﻿import { describe, it, expect, vi, afterEach } from "vitest";
-import { getProvider, buildResult, decideRoute, parseQuestion, PROVIDERS } from "./parseRouter";
-import type { QuestionBlock, AppSettings } from "../types";
+import {
+  getProvider,
+  buildResult,
+  decideRoute,
+  parseQuestion,
+  PROVIDERS,
+  isLikelyTextOnlyModel,
+  normalizeNetworkError,
+} from "./parseRouter";
+import { DEFAULT_SETTINGS, type QuestionBlock, type AppSettings } from "../types";
 
 describe("parseRouter", () => {
   afterEach(() => {
@@ -363,6 +371,104 @@ describe("parseRouter", () => {
       expect(result.answer).toBe("需人工确认");
     });
 
+    it("does not treat note-heavy vision prose as fillable answer for code problems", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "6-44 输出月份英文名 函数接口定义： char *getmonth( int n ); 裁判测试程序样例： #include <stdio.h>",
+        questionTypeGuess: "short_answer",
+      };
+      const rawText = JSON.stringify({
+        questionType: "short_answer",
+        answer: "注：由于题目图片中函数接口定义被部分截断，具体形参名以标准答案为准。",
+        confidence: 0.82,
+        briefExplanation: "本题要求实现 getmonth 函数，根据输入的整数 n 返回对应月份的英文名。",
+        detailedExplanation: "1) 函数 getmonth 接收一个 int 类型参数 n。 2) 若 n<1 或 n>12 返回 NULL。 3) 否则返回 name[n]。",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("需人工确认");
+      expect(result.warning).toContain("代码题未提取到可直接填写的代码答案");
+    });
+
+    it("extracts code blocks as answer for code problems", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "6-44 输出月份英文名 函数接口定义： char *getmonth( int n ); 裁判测试程序样例： #include <stdio.h>",
+        questionTypeGuess: "short_answer",
+      };
+      const rawText = JSON.stringify({
+        questionType: "short_answer",
+        answer: "```c\nchar *getmonth( int n ) {\n  static char *name[] = {\"\", \"January\", \"February\"};\n  if (n < 1 || n > 12) return NULL;\n  return name[n];\n}\n```",
+        confidence: 0.91,
+        briefExplanation: "直接按数组映射返回。",
+        detailedExplanation: "略",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toContain("char *getmonth");
+      expect(result.answer).toContain("return name[n];");
+    });
+
+    it("recovers loose JSON code answers with raw quotes and newlines", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "7-3 查找指定字符 函数接口定义： char *findchar( char *s, char c ); 裁判测试程序样例： #include <stdio.h>",
+        questionTypeGuess: "short_answer",
+      };
+      const rawText = `{
+        "questionType": "short_answer",
+        "answer": "char *findchar(char *s, char c) {
+  while (*s) {
+    if (*s == c) return s;
+    s++;
+  }
+  return NULL;
+}",
+        "confidence": 0.89,
+        "briefExplanation": "遍历字符串，找到目标字符就返回对应地址。",
+        "detailedExplanation": "若遍历结束仍未找到，则返回 NULL。",
+        "recognizedText": "7-3 查找指定字符"
+      }`;
+
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toContain("char *findchar");
+      expect(result.answer).toContain("if (*s == c) return s;");
+      expect(result.answer).toContain("return NULL;");
+    });
+
+    it("extracts final JSON after MiniMax think prelude for code questions", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "7-3 查找指定字符 输入格式：... 输出格式：...",
+        questionTypeGuess: "short_answer",
+      };
+      const rawText = `<think>先分析题意，再尝试写代码。\nint main() {\n  return 0;\n}\n</think>\n{\"questionType\":\"short_answer\",\"answer\":\"#include <stdio.h>\\nint main() {\\n  return 0;\\n}\",\"confidence\":0.9,\"briefExplanation\":\"略\",\"detailedExplanation\":\"略\",\"recognizedText\":\"7-3 查找指定字符\"}`;
+
+      const result = buildResult(block, "text", rawText);
+      expect(result.answer).toContain("#include <stdio.h>");
+      expect(result.answer).toContain("return 0;");
+      expect(result.confidence).toBe(0.9);
+    });
+
+    it("does not treat numbered implementation prose as fillable answer for code problems", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "6-44 输出月份英文名 函数接口定义： char *getmonth( int n ); 裁判测试程序样例： #include <stdio.h>",
+        questionTypeGuess: "short_answer",
+      };
+      const rawText = JSON.stringify({
+        questionType: "short_answer",
+        answer: "1. 函数功能：getmonth(int n) 根据传入的月份数字 n 返回对应英文月份名称的字符串首地址；2. 实现要点：使用 static 字符指针数组存储 12 个月份名称；3. 完整参考实现如 answer 所示。",
+        confidence: 0.85,
+        briefExplanation: "本题考查 C 语言中返回字符串指针的函数实现。",
+        detailedExplanation: "1. 函数功能：根据 n 返回月份名称。 2. 实现要点：越界返回 NULL。 3. 完整参考实现如 answer 所示。",
+        recognizedText: block.previewText,
+      });
+      const result = buildResult(block, "vision", rawText);
+      expect(result.answer).toBe("需人工确认");
+      expect(result.warning).toContain("代码题未提取到可直接填写的代码答案");
+    });
+
     it("normalizes placeholder-style non-choice answers to manual confirmation", () => {
       const block: QuestionBlock = {
         ...mockBlock,
@@ -467,6 +573,27 @@ describe("parseRouter", () => {
       expect(result.recognizedText).toContain("错");
     });
 
+    it("coerces misclassified judge results back to judge with 对错 answers", () => {
+      const block: QuestionBlock = {
+        ...mockBlock,
+        previewText: "17. [判断题] 系统的截止频率越高，响应速度越快。 对 错",
+        questionTypeGuess: "judge",
+      };
+      const rawText = JSON.stringify({
+        questionType: "single_choice",
+        answer: "该说法错误",
+        confidence: 0.88,
+        briefExplanation: "截止频率与响应速度相关，但表述过于绝对。",
+        detailedExplanation: "该说法错误。",
+        recognizedText: block.previewText,
+      });
+
+      const result = buildResult(block, "text", rawText);
+      expect(result.questionType).toBe("judge");
+      expect(result.answer).toBe("错");
+      expect(result.warning).toBeUndefined();
+    });
+
     it("repairs missing infinity symbols in frequency-domain recognized text", () => {
       const block: QuestionBlock = {
         ...mockBlock,
@@ -537,9 +664,10 @@ describe("parseRouter", () => {
     };
 
     const mockSettings: AppSettings = {
+      ...DEFAULT_SETTINGS,
       providerId: "anthropic",
       apiKey: "test-key",
-      apiModel: "claude-opus-4-5",
+      apiModel: "claude-opus-4.8",
       preferredRoute: "auto",
       language: "zh",
       enableAnalytics: true,
@@ -555,7 +683,7 @@ describe("parseRouter", () => {
       expect(route).toBe("text");
     });
 
-    it("returns hybrid when image flag exists but preview text is still short", async () => {
+    it("returns hybrid when image flag exists but preview text is still incomplete", async () => {
       const route = await decideRoute({
         ...mockBlock,
         hasImage: true,
@@ -565,19 +693,51 @@ describe("parseRouter", () => {
       expect(route).toBe("hybrid");
     });
 
-    it("returns text when image flag exists and preview text is sufficiently complete", async () => {
+    it("keeps hybrid when image flag exists and the stem explicitly depends on the figure", async () => {
       const route = await decideRoute({
         ...mockBlock,
         hasImage: true,
         previewText:
           "下图甲是生物体内四种有机物的组成与功能关系图，请据图回答：(1)小麦种子细胞中，物质A是 ，物质E是_______________________。(2)相同质量的E和F彻底氧化分解，耗氧量较多的是 。(3)组成物质C的共同化学元素是 。若a个C物质组成b条链，组成某种物质G，该物质G至少含有氧原子的个数是_______。(4)图乙表示小麦开花数天后测定的种子中主要物质的变化图。请据图回答问题：①小麦成熟种子中主要的有机营养物质是 。检测还原糖时，可溶性还原糖的多少可通过 来判断。",
       }, mockSettings);
+      expect(route).toBe("hybrid");
+    });
+
+    it("returns text when captured image payload exists but text already fully covers a judge question", async () => {
+      const route = await decideRoute(
+        {
+          ...mockBlock,
+          questionTypeGuess: "judge",
+          hasImage: true,
+          imageDataUrl: "data:image/png;base64,abc",
+          previewText: "17. [判断题] 系统的截止频率越高，响应速度越快。 对 错",
+        },
+        mockSettings,
+      );
       expect(route).toBe("text");
     });
 
-    it("returns vision when captured image payload exists", async () => {
+    it("returns vision when captured image payload exists and the question strongly depends on the figure", async () => {
       const route = await decideRoute(
-        { ...mockBlock, hasImage: true, imageDataUrl: "data:image/png;base64,abc" },
+        {
+          ...mockBlock,
+          hasImage: true,
+          imageDataUrl: "data:image/png;base64,abc",
+          previewText: "根据下图波形判断系统稳定性，下列说法正确的是（ ）。",
+        },
+        mockSettings,
+      );
+      expect(route).toBe("vision");
+    });
+
+    it("returns vision for formula-heavy image questions when text is only partially captured", async () => {
+      const route = await decideRoute(
+        {
+          ...mockBlock,
+          hasImage: true,
+          imageDataUrl: "data:image/png;base64,abc",
+          previewText: "设开环传递函数G(s)H(s)，根据图中根轨迹判断（ ）。A. 稳定 B. 临界稳定",
+        },
         mockSettings,
       );
       expect(route).toBe("vision");
@@ -599,9 +759,10 @@ describe("parseRouter", () => {
       };
 
       const settings: AppSettings = {
+        ...DEFAULT_SETTINGS,
         providerId: "custom",
         apiKey: "test-key",
-        apiModel: "claude-haiku-4-5-20251001",
+        apiModel: "claude-haiku-4.5",
         preferredRoute: "vision",
         language: "zh",
         enableAnalytics: true,
@@ -648,7 +809,7 @@ describe("parseRouter", () => {
   });
 
   describe("MiniMax provider", () => {
-    it("uses OpenAI-compatible chat endpoint with reasoning split enabled", async () => {
+    it("uses OpenAI-compatible chat endpoint with reasoning split enabled for regular questions", async () => {
       const block: QuestionBlock = {
         id: "minimax-test",
         bbox: { x: 0, y: 0, width: 100, height: 50 },
@@ -661,6 +822,7 @@ describe("parseRouter", () => {
       };
 
       const settings: AppSettings = {
+        ...DEFAULT_SETTINGS,
         providerId: "minimax",
         apiKey: "test-key",
         apiModel: "MiniMax-M3",
@@ -698,6 +860,58 @@ describe("parseRouter", () => {
       expect(result.answer).toBe("B");
     });
 
+    it("disables reasoning split and raises completion budget for code questions", async () => {
+      const block: QuestionBlock = {
+        id: "minimax-code-test",
+        bbox: { x: 0, y: 0, width: 100, height: 50 },
+        previewText: "7-3 查找指定字符 题目描述：本题要求编写程序。输入格式：... 输出格式：... ",
+        hasImage: false,
+        questionTypeGuess: "short_answer",
+        confidence: 1,
+        source: "manual_capture",
+        displaySegments: [
+          { type: "text", role: "title", text: "7-3 查找指定字符" },
+          { type: "text", role: "section", label: "题目描述", text: "本题要求编写程序，从给定字符串中查找某指定的字符。" },
+          { type: "text", role: "section", label: "输入格式", text: "略" },
+          { type: "text", role: "section", label: "输出格式", text: "略" },
+        ],
+      };
+
+      const settings: AppSettings = {
+        ...DEFAULT_SETTINGS,
+        providerId: "minimax",
+        apiKey: "test-key",
+        apiModel: "MiniMax-M3",
+        preferredRoute: "text",
+        language: "zh",
+        enableAnalytics: true,
+      };
+
+      const fetchMock = vi.fn(async () =>
+        new Response(JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "{\"questionType\":\"short_answer\",\"answer\":\"int main(){return 0;}\",\"confidence\":0.98,\"briefExplanation\":\"略\",\"detailedExplanation\":\"略\",\"recognizedText\":\"7-3 查找指定字符\"}",
+              },
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await parseQuestion(block, settings);
+      const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+
+      expect(body.max_completion_tokens).toBe(2048);
+      expect(body.thinking).toBeUndefined();
+      expect(body.reasoning_split).toBeUndefined();
+    });
+
     it("normalizes custom base url when user includes /v1", async () => {
       const block: QuestionBlock = {
         id: "minimax-custom-url-test",
@@ -710,6 +924,7 @@ describe("parseRouter", () => {
       };
 
       const settings: AppSettings = {
+        ...DEFAULT_SETTINGS,
         providerId: "minimax",
         apiKey: "test-key",
         apiModel: "MiniMax-M3",
@@ -732,6 +947,51 @@ describe("parseRouter", () => {
       await parseQuestion(block, settings);
       const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
       expect(url).toBe("https://api.minimaxi.com/v1/chat/completions");
+    });
+  });
+
+  describe("error helpers", () => {
+    it("normalizes localhost failed-fetch errors in Chinese", () => {
+      const error = normalizeNetworkError(
+        new Error("Failed to fetch"),
+        getProvider("ollama"),
+        {
+          ...DEFAULT_SETTINGS,
+          language: "zh",
+          customBaseUrl: "http://127.0.0.1:11434",
+        },
+      );
+
+      expect(error.message).toContain("本地 API 服务已启动");
+      expect(error.message).toContain("127.0.0.1:11434");
+    });
+
+    it("normalizes insecure http failed-fetch errors in English", () => {
+      const error = normalizeNetworkError(
+        new Error("Failed to fetch"),
+        getProvider("custom"),
+        {
+          ...DEFAULT_SETTINGS,
+          language: "en",
+          customBaseUrl: "http://example.com/v1",
+        },
+      );
+
+      expect(error.message).toContain("Insecure HTTP endpoint may be blocked");
+      expect(error.message).toContain("example.com");
+    });
+
+    it("keeps non-network errors unchanged", () => {
+      const original = new Error("401 Unauthorized");
+      const error = normalizeNetworkError(original, getProvider("openai"), DEFAULT_SETTINGS);
+      expect(error).toBe(original);
+    });
+
+    it("identifies likely text-only models without flagging multimodal models", () => {
+      expect(isLikelyTextOnlyModel("qwen-plus")).toBe(true);
+      expect(isLikelyTextOnlyModel("glm-5.2")).toBe(true);
+      expect(isLikelyTextOnlyModel("qwen3-vl-plus")).toBe(false);
+      expect(isLikelyTextOnlyModel("llama3.2-vision")).toBe(false);
     });
   });
 });

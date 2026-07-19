@@ -10,6 +10,10 @@ afterEach(() => {
 // Mock chrome API
 global.chrome = {
   storage: {
+    onChanged: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
     local: {
       get: vi.fn().mockResolvedValue({}),
       set: vi.fn().mockResolvedValue(undefined),
@@ -21,7 +25,12 @@ global.chrome = {
   },
   runtime: {
     sendMessage: vi.fn(),
+    getManifest: vi.fn(() => ({ version: "0.2.0" })),
     onMessage: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
+    onInstalled: {
       addListener: vi.fn(),
       removeListener: vi.fn(),
     },

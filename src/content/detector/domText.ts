@@ -189,8 +189,6 @@ export function sanitizePreviewText(text: string): string {
     }
   }
 
-  out = sanitizeJudgePreviewText(out);
-
   return out;
 }
 

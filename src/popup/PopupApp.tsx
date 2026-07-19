@@ -1,75 +1,222 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import gsap from "gsap";
+import { useGSAP } from "@gsap/react";
 import { sendToActiveTab } from "@/shared/utils/messaging";
 import { getProviderShortName } from "@/shared/ai/providers";
+import { logEvent } from "@/shared/utils/analytics";
+import { loadSettings } from "@/shared/utils/storage";
+import { getAuthText } from "@/shared/auth/authText";
+import { useAuthController } from "@/shared/auth/useAuthController";
+import {
+  SHARED_FONT_FAMILY,
+  primaryButtonStyle,
+  secondaryButtonStyle,
+  uiInputStyle,
+} from "@/shared/ui/extensionUi";
+import { POPUP_COPY, type PopupLang } from "./popupCopy";
+import {
+  PopupActionsCard,
+  PopupAuthCard,
+  PopupHeroCard,
+  PopupStatusCard,
+  PopupWorkspaceCard,
+} from "./popupSections";
+
+type ActiveFeature = "manual" | "auto" | "fullpage" | "solve" | null;
+
+gsap.registerPlugin(useGSAP);
+
+const shellStyle: React.CSSProperties = {
+  padding: "10px",
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  width: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
+  background:
+    "radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.14), transparent 30%), radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.1), transparent 30%), linear-gradient(180deg, #070913 0%, #0f111a 60%, #070913 100%)",
+  color: "#f8fafc",
+  fontFamily: SHARED_FONT_FAMILY,
+};
 
 export const PopupApp: React.FC = () => {
+  const scopeRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [providerId, setProviderId] = useState("anthropic");
   const [providerName, setProviderName] = useState("Claude");
+  const [lang, setLang] = useState<PopupLang>("zh");
   const [loaded, setLoaded] = useState(false);
-  const [activeFeature, setActiveFeature] = useState<"manual" | "auto" | "fullpage" | null>(null);
+  const [activeFeature, setActiveFeature] = useState<ActiveFeature>(null);
+  const copy = POPUP_COPY[lang];
+  const authText = getAuthText(lang, "popup");
+  const auth = useAuthController({ lang, variant: "popup" });
+  const { isAuthenticated } = auth;
+  const authRef = useRef(auth);
 
   useEffect(() => {
-    chrome.storage.local.get("appSettings").then((r) => {
-      const settings = (r.appSettings as {
-        apiKey?: string;
-        providerId?: string;
-      } | undefined) ?? {};
+    authRef.current = auth;
+  }, [auth]);
+
+  useEffect(() => {
+    let disposed = false;
+    void loadSettings().then((settings) => {
+      if (disposed) return;
       const key = settings.apiKey ?? "";
-      const pid = settings.providerId ?? "anthropic";
+      const nextProviderId = settings.providerId ?? "anthropic";
+      const nextLang = settings.language ?? "zh";
       setApiKey(key);
-      setProviderId(pid);
-      setProviderName(getProviderShortName(pid));
+      setProviderId(nextProviderId);
+      setProviderName(getProviderShortName(nextProviderId));
+      setLang(nextLang);
+      authRef.current.setIdentity({
+        userId: settings.userId ?? "",
+        userEmail: settings.userEmail ?? "",
+      });
       setLoaded(true);
     });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    logEvent("popup_opened");
   }, []);
 
   const hasApiKey = apiKey.length > 0 || providerId === "ollama";
+  const isRuntimeConfigured = isAuthenticated && hasApiKey;
+
+  useGSAP(
+    () => {
+      gsap.fromTo(
+        ".popup-hero",
+        { y: 14, autoAlpha: 0 },
+        {
+          y: 0,
+          autoAlpha: 1,
+          duration: 0.6,
+          ease: "power2.out",
+          clearProps: "transform,opacity,visibility",
+        },
+      );
+      gsap.fromTo(
+        ".popup-section",
+        { y: 14, autoAlpha: 0 },
+        {
+          y: 0,
+          autoAlpha: 1,
+          duration: 0.45,
+          stagger: 0.08,
+          ease: "power2.out",
+          delay: 0.08,
+          clearProps: "transform,opacity,visibility",
+        },
+      );
+      gsap.fromTo(
+        ".popup-metric",
+        { y: 10, autoAlpha: 0 },
+        {
+          y: 0,
+          autoAlpha: 1,
+          duration: 0.38,
+          stagger: 0.05,
+          ease: "power2.out",
+          delay: 0.12,
+          clearProps: "transform,opacity,visibility",
+        },
+      );
+      gsap.fromTo(
+        ".popup-action",
+        { x: -10, autoAlpha: 0 },
+        {
+          x: 0,
+          autoAlpha: 1,
+          duration: 0.48,
+          stagger: 0.06,
+          ease: "power2.out",
+          delay: 0.16,
+          clearProps: "transform,opacity,visibility",
+        },
+      );
+
+      const hoverTargets = gsap.utils.toArray<HTMLElement>(
+        ".popup-hero, .popup-section, .popup-action, .popup-metric, .popup-open-panel",
+      );
+      const cleanups = hoverTargets.map((element) => {
+        const isAction = element.classList.contains("popup-action");
+        const isMetric = element.classList.contains("popup-metric");
+        const isHero = element.classList.contains("popup-hero");
+        const onEnter = () => {
+          gsap.to(element, {
+            y: isMetric ? 0 : isAction ? -2 : -3,
+            scale: isMetric ? 1.015 : 1,
+            boxShadow: isHero
+              ? "0 16px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12)"
+              : isAction
+                ? "0 12px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.08)"
+                : "0 16px 32px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255,255,255,0.1)",
+            duration: 0.2,
+            ease: "power2.out",
+          });
+        };
+        const onLeave = () => {
+          gsap.to(element, {
+            y: 0,
+            scale: 1,
+            boxShadow: isMetric
+              ? "none"
+              : isAction
+                ? "none"
+                : "0 4px 20px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06)",
+            duration: 0.2,
+            ease: "power2.out",
+          });
+        };
+        element.addEventListener("mouseenter", onEnter);
+        element.addEventListener("mouseleave", onLeave);
+        return () => {
+          element.removeEventListener("mouseenter", onEnter);
+          element.removeEventListener("mouseleave", onLeave);
+        };
+      });
+
+      return () => {
+        cleanups.forEach((cleanup) => cleanup());
+      };
+    },
+    { scope: scopeRef },
+  );
 
   const openSidePanelDirect = async () => {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab?.windowId) await chrome.sidePanel.open({ windowId: tab.windowId });
-    } catch (err) {
-      console.error("[Popup] sidePanel.open failed:", err);
+    } catch (error) {
+      console.error("[Popup] sidePanel.open failed:", error);
     }
   };
 
-  const handleManualCapture = async () => {
+  const runAction = async (
+    feature: Exclude<ActiveFeature, null>,
+    startText: string,
+    errorText: string,
+    messageType:
+      | "START_MANUAL_CAPTURE"
+      | "START_AUTO_DETECT"
+      | "START_FULL_PAGE_DETECT"
+      | "START_AUTO_SOLVE_ALL",
+    openPanel = false,
+  ) => {
     try {
-      setActiveFeature("manual");
-      setStatus("启动截图中...");
-      await sendToActiveTab({ type: "START_MANUAL_CAPTURE" });
+      setActiveFeature(feature);
+      setStatus(startText);
+      if (openPanel) await openSidePanelDirect();
+      await sendToActiveTab({ type: messageType });
       window.close();
     } catch {
-      setStatus("无法注入页面，请刷新页面后重试");
-      setActiveFeature(null);
-    }
-  };
-
-  const handleAutoDetect = async () => {
-    try {
-      setActiveFeature("auto");
-      setStatus("识别中...");
-      await openSidePanelDirect();
-      await sendToActiveTab({ type: "START_AUTO_DETECT" });
-      window.close();
-    } catch {
-      setStatus("无法识别，请刷新页面后重试");
-      setActiveFeature(null);
-    }
-  };
-
-  const handleFullPageDetect = async () => {
-    try {
-      setActiveFeature("fullpage");
-      setStatus("整页扫描中...");
-      await openSidePanelDirect();
-      await sendToActiveTab({ type: "START_FULL_PAGE_DETECT" });
-      window.close();
-    } catch {
-      setStatus("无法启动整页扫描，请刷新页面后重试");
+      setStatus(errorText);
       setActiveFeature(null);
     }
   };
@@ -80,103 +227,63 @@ export const PopupApp: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: "16px 14px", display: "flex", flexDirection: "column", gap: 10, minWidth: 240, fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-        <span style={{ fontSize: 22 }}>📘</span>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 14, color: "#cba6f7" }}>题目解析助手</div>
-          <div style={{ fontSize: 11, color: "#585b70" }}>截图识题 · 即时解析</div>
-        </div>
-        {loaded && !hasApiKey && (
-          <div
-            style={{
-              marginLeft: "auto",
-              fontSize: 10,
-              padding: "2px 8px",
-              borderRadius: 8,
-              backgroundColor: "#2c1f00",
-              color: "#f9e2af",
-              border: "1px solid #7c5c00",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Demo 模式
-          </div>
-        )}
-      </div>
+    <div ref={scopeRef} style={shellStyle}>
+      <PopupHeroCard
+        copy={copy}
+        hasApiKey={hasApiKey}
+        isAuthenticated={isAuthenticated}
+        isRuntimeConfigured={isRuntimeConfigured}
+        loaded={loaded}
+        providerName={providerName}
+        view={auth.view}
+      />
 
-      <hr style={{ border: "none", borderTop: "1px solid #313244" }} />
-
-      <SecondaryBtn onClick={handleManualCapture} active={activeFeature === "manual"}>📸 手动截图（框选题目）</SecondaryBtn>
-      <SecondaryBtn onClick={handleAutoDetect} active={activeFeature === "auto"}>🔍 自动识别当前屏题目</SecondaryBtn>
-      <SecondaryBtn onClick={handleFullPageDetect} active={activeFeature === "fullpage"}>🧾 自动识别整页题目</SecondaryBtn>
-
-      <hr style={{ border: "none", borderTop: "1px solid #313244" }} />
-
-      <SmallBtn onClick={handleOpenSidePanel}>📋 候选列表 / 设置</SmallBtn>
-
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#585b70" }}>
-        <span>v0.2.0</span>
-        <span style={{ color: hasApiKey ? "#a6e3a1" : "#585b70" }}>
-          {loaded
-            ? hasApiKey
-              ? `已连接 ${providerName}`
-              : "未设置 API Key"
-            : "加载中..."}
-        </span>
-      </div>
-
-      <div style={{ fontSize: 10, color: "#45475a", borderTop: "1px solid #313244", paddingTop: 7 }}>
-        快捷键：
-        <code style={{ backgroundColor: "#313244", padding: "1px 4px", borderRadius: 3, fontSize: 10, color: "#89b4fa" }}>Alt+Q</code>
-        {" 截图 · "}
-        <code style={{ backgroundColor: "#313244", padding: "1px 4px", borderRadius: 3, fontSize: 10, color: "#89b4fa" }}>Alt+W</code>
-        {" 自动识题"}
-      </div>
-
-      {status && (
-        <div style={{ fontSize: 11, color: "#f9e2af", textAlign: "center" }}>{status}</div>
+      {!isAuthenticated ? (
+        <PopupAuthCard
+          auth={auth}
+          authText={authText}
+          copy={copy}
+          gateInputStyle={gateInputStyle}
+          primaryGateButtonStyle={primaryGateButtonStyle}
+          secondaryGateButtonStyle={secondaryGateButtonStyle}
+        />
+      ) : (
+        <PopupActionsCard activeFeature={activeFeature} copy={copy} onRunAction={(...args) => void runAction(...args)} />
       )}
+
+      <PopupWorkspaceCard
+        copy={copy}
+        feedback={auth.feedback}
+        isAuthenticated={isAuthenticated}
+        onOpenSidePanel={() => void handleOpenSidePanel()}
+        secondaryActionStyle={secondaryActionStyle}
+        userEmail={auth.userEmail}
+      />
+
+      <PopupStatusCard status={status} />
     </div>
   );
 };
 
-const SecondaryBtn: React.FC<{ children: React.ReactNode; onClick: () => void; active?: boolean }> = ({ children, onClick, active }) => (
-  <button
-    onClick={onClick}
-    style={{
-      width: "100%",
-      padding: "9px 12px",
-      borderRadius: 8,
-      border: "1px solid #4f9cf9",
-      backgroundColor: active ? "#4f9cf9" : "transparent",
-      color: active ? "#fff" : "#4f9cf9",
-      cursor: "pointer",
-      fontSize: 13,
-      textAlign: "left",
-      fontFamily: "inherit",
-      transition: "background-color 0.2s, color 0.2s",
-    }}
-  >
-    {children}
-  </button>
-);
+const secondaryActionStyle: React.CSSProperties = {
+  ...primaryButtonStyle,
+  padding: "9px 12px",
+  fontSize: 11,
+};
 
-const SmallBtn: React.FC<{ children: React.ReactNode; onClick: () => void }> = ({ children, onClick }) => (
-  <button
-    onClick={onClick}
-    style={{
-      width: "100%",
-      padding: "7px 10px",
-      borderRadius: 7,
-      border: "1px solid #313244",
-      backgroundColor: "transparent",
-      color: "#a6adc8",
-      cursor: "pointer",
-      fontSize: 12,
-      fontFamily: "inherit",
-    }}
-  >
-    {children}
-  </button>
-);
+const primaryGateButtonStyle: React.CSSProperties = {
+  ...primaryButtonStyle,
+  width: "100%",
+  textAlign: "center",
+};
+
+const secondaryGateButtonStyle: React.CSSProperties = {
+  ...secondaryButtonStyle,
+  width: "100%",
+  textAlign: "center",
+};
+
+const gateInputStyle: React.CSSProperties = {
+  ...uiInputStyle,
+  fontSize: 12,
+};

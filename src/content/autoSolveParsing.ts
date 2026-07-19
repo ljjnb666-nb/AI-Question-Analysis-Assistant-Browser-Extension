@@ -43,6 +43,16 @@ async function attachVisionImageIfAvailable(
   return { ...block, hasImage: true, imageDataUrl };
 }
 
+async function maybeAttachVisionImage(
+  block: QuestionBlock,
+  shouldAttach: boolean,
+  supportsVision: boolean,
+  tryCaptureBlockImageForAutoSolve: AutoSolveParsingDeps["tryCaptureBlockImageForAutoSolve"],
+): Promise<QuestionBlock> {
+  if (!shouldAttach) return block;
+  return attachVisionImageIfAvailable(block, supportsVision, tryCaptureBlockImageForAutoSolve);
+}
+
 export async function parseBlockForAutoSolve(
   block: QuestionBlock,
   timeouts: AutoSolveTimeouts,
@@ -51,7 +61,12 @@ export async function parseBlockForAutoSolve(
   const settings = await deps.loadSettings();
   const provider = deps.getProvider(settings.providerId ?? "anthropic");
   const wantsVision = provider.supportsVision && shouldUseVisionForAutoSolve(block, settings.preferredRoute);
-  let parseBlock = await attachVisionImageIfAvailable(block, provider.supportsVision, deps.tryCaptureBlockImageForAutoSolve);
+  let parseBlock = await maybeAttachVisionImage(
+    block,
+    wantsVision,
+    provider.supportsVision,
+    deps.tryCaptureBlockImageForAutoSolve,
+  );
 
   const firstPassSettings = wantsVision && parseBlock.imageDataUrl
     ? { ...settings, preferredRoute: "vision" as const }
@@ -92,7 +107,14 @@ export async function parseBlockForAutoSolveReview(
   const settings = await deps.loadSettings();
   const provider = deps.getProvider(settings.providerId ?? "anthropic");
   const reviewSettings = buildAutoSolveReviewSettings(settings);
-  const parseBlock = await attachVisionImageIfAvailable(block, provider.supportsVision, deps.tryCaptureBlockImageForAutoSolve);
+  const shouldAttachForReview =
+    provider.supportsVision && shouldUseVisionForAutoSolve(block, reviewSettings.preferredRoute);
+  const parseBlock = await maybeAttachVisionImage(
+    block,
+    shouldAttachForReview,
+    provider.supportsVision,
+    deps.tryCaptureBlockImageForAutoSolve,
+  );
 
   let result = await deps.withTimeout(
     deps.parseWithTieredRetries(parseBlock, reviewSettings, provider.supportsVision, () => {}),
@@ -133,7 +155,14 @@ export async function parseBlockForAutoSolveQuickReview(
     apiModel: pickAutoSolveReviewModel(settings.providerId, settings.apiModel),
     preferredRoute: "auto" as const,
   };
-  const parseBlock = await attachVisionImageIfAvailable(block, provider.supportsVision, deps.tryCaptureBlockImageForAutoSolve);
+  const shouldAttachForQuickReview =
+    provider.supportsVision && shouldUseVisionForAutoSolve(block, quickReviewSettings.preferredRoute);
+  const parseBlock = await maybeAttachVisionImage(
+    block,
+    shouldAttachForQuickReview,
+    provider.supportsVision,
+    deps.tryCaptureBlockImageForAutoSolve,
+  );
 
   return deps.withTimeout(
     deps.parseQuestion(parseBlock, quickReviewSettings),

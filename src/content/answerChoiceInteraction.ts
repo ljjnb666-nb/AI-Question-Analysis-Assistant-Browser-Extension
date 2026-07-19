@@ -29,7 +29,7 @@ export function verifyChoiceAnswerInScope(
   const candidateMap = buildChoiceCandidateMap(scope, bbox, questionType, deps);
   const expectedKeys = resolveDesiredChoiceKeys(result, questionType, candidateMap);
   if (!expectedKeys.length) {
-    return { ok: false, expectedKeys: [], actualKeys: [], message: "鏃犳硶鏄犲皠鏈熸湜閫夐」" };
+    return { ok: false, expectedKeys: [], actualKeys: [], message: "无法映射期望选项" };
   }
 
   const actualKeys = getSelectedChoiceKeys(candidateMap).sort();
@@ -43,8 +43,8 @@ export function verifyChoiceAnswerInScope(
     expectedKeys: expectedSorted,
     actualKeys,
     message: ok
-      ? `宸叉牎楠岄€夐」 ${expectedSorted.join(",")}`
-      : `鏈熸湜 ${expectedSorted.join(",")}锛屽疄闄?${actualKeys.join(",") || "鏈€変腑"}`,
+      ? `已校验选项 ${expectedSorted.join(",")}`
+      : `期望 ${expectedSorted.join(",")}，实际 ${actualKeys.join(",") || "未选中"}`,
   };
 }
 
@@ -58,7 +58,7 @@ export async function fillChoiceLikeAnswer(
   const candidateMap = buildChoiceCandidateMap(scope, bbox, questionType, deps);
   const desiredKeys = resolveDesiredChoiceKeys(result, questionType, candidateMap);
   if (!desiredKeys.length) {
-    return { ok: false, filledCount: 0, message: "绛旀鏍煎紡鏃犳硶鏄犲皠鍒伴€夐」" };
+    return { ok: false, filledCount: 0, message: "答案格式无法映射到选项" };
   }
 
   const initiallySelected = new Set(getSelectedChoiceKeys(candidateMap));
@@ -83,14 +83,14 @@ export async function fillChoiceLikeAnswer(
 
   if (allDesiredSelected) {
     if (filledCount > 0) {
-      return { ok: true, filledCount, message: `宸插～鍐?${filledCount} 涓€夐」` };
+      return { ok: true, filledCount, message: `已填写 ${filledCount} 个选项` };
     }
     return { ok: true, filledCount: 0, message: "已校验当前答案" };
   }
 
   return filledCount > 0
-    ? { ok: true, filledCount, message: `宸插～鍐?${filledCount} 涓€夐」` }
-    : { ok: false, filledCount: 0, message: "鏈壘鍒板彲濉啓鐨勯€夐」鎺т欢" };
+    ? { ok: true, filledCount, message: `已填写 ${filledCount} 个选项` }
+    : { ok: false, filledCount: 0, message: "未找到可填写的选项控件" };
 }
 
 function buildChoiceCandidateMap(
@@ -330,7 +330,7 @@ function getSelectedChoiceKeys(candidateMap: Map<string, ChoiceCandidate>): stri
 
 function scoreRow(rect: DOMRect, bbox: BoundingBox, text: string, row: Element, deps: ChoiceHelperDeps): number {
   const inter = deps.intersectionArea(rect, bbox);
-  const optionPrefix = /^[A-F][\.\):锛氥€乗s]|^(?:瀵箌閿檤姝ｇ‘|閿欒|true|false)/i.test(text) ? 20 : 0;
+  const optionPrefix = /^[A-F][\.\):：、\s]|^(?:对|错|正确|错误|true|false)/i.test(text) ? 20 : 0;
   const hasInput = row.querySelector(CHOICE_INPUT_SELECTOR) ? 15 : 0;
   return inter + optionPrefix + hasInput - Math.abs(rect.top - bbox.y) * 0.2;
 }

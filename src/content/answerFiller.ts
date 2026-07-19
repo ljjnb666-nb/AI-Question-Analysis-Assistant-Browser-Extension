@@ -46,6 +46,7 @@ const TEXT_INPUT_SELECTOR = [
 
 const CHOICE_INPUT_SELECTOR = "input[type='radio'],input[type='checkbox']";
 const OPTION_ROW_SELECTOR = "li,label,div,p,span";
+const CODE_EDITOR_SELECTOR = ".cm-content[contenteditable='true'], .monaco-editor [contenteditable='true']";
 
 const choiceHelperDeps = {
   clickElement,
@@ -193,17 +194,19 @@ function fillTextLikeAnswer(
 ): FillAnswerResult {
   const controls = collectTextControls(scope, bbox, TEXT_INPUT_SELECTOR);
   if (!controls.length) {
-    return { ok: false, filledCount: 0, message: "鏈壘鍒版枃鏈緭鍏ユ" };
+    const fallback = tryFillCodeEditor(result, questionType);
+    if (fallback) return fallback;
+    return { ok: false, filledCount: 0, message: "未找到文本输入框" };
   }
 
   const answerSource = resolveTextAnswerSourceCore(result, controls.length, questionType);
   if (!answerSource) {
-    return { ok: false, filledCount: 0, message: "绛旀闇€浜哄伐纭锛屾湭鑷姩濉啓" };
+    return { ok: false, filledCount: 0, message: "答案需人工确认，未自动填写" };
   }
 
   const parts = splitAnswerPartsCore(answerSource, controls.length);
   const values = controls.length === 1
-    ? [formatSingleTextAnswerCore(answerSource, questionType)]
+    ? [normalizeTextLikeAnswerForControl(formatSingleTextAnswerCore(answerSource, questionType), questionType)]
     : buildControlValuesCore(parts, controls.length, answerSource);
 
   let filledCount = 0;
@@ -214,14 +217,107 @@ function fillTextLikeAnswer(
   });
 
   return filledCount > 0
-    ? { ok: true, filledCount, message: `宸插～鍐?${filledCount} 涓緭鍏ユ` }
-    : { ok: false, filledCount: 0, message: "鏈啓鍏ヤ换浣曡緭鍏ユ" };
+    ? { ok: true, filledCount, message: `已填入 ${filledCount} 个输入框` }
+    : { ok: false, filledCount: 0, message: "未写入任何输入框" };
+}
+
+function tryFillCodeEditor(
+  result: ParseResult,
+  questionType: ParseResult["questionType"],
+): FillAnswerResult | null {
+  if (!looksLikeCodeAnswer(result.answer, questionType)) return null;
+
+  const editor = findBestCodeEditor();
+  if (!editor) return null;
+
+  const nextValue = normalizeCodeForEditor(formatSingleTextAnswerCore(result.answer, "short_answer"));
+  if (!nextValue) {
+    return { ok: false, filledCount: 0, message: "答案为空，无法填写代码" };
+  }
+
+  const changed = applyTextValue(editor, nextValue);
+  return changed
+    ? { ok: true, filledCount: 1, message: "已填入 1 个代码编辑器" }
+    : { ok: false, filledCount: 0, message: "代码编辑器内容未发生变化" };
+}
+
+function findBestCodeEditor(): HTMLElement | null {
+  const editors = Array.from(document.querySelectorAll(CODE_EDITOR_SELECTOR))
+    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .filter((node) => isVisible(node) && node.isContentEditable);
+  if (!editors.length) return null;
+
+  return editors
+    .map((node) => ({ node, rect: node.getBoundingClientRect() }))
+    .filter((entry) => entry.rect.width > 10 && entry.rect.height > 10)
+    .sort((a, b) => {
+      const ax = a.rect.left + a.rect.width / 2;
+      const bx = b.rect.left + b.rect.width / 2;
+      return bx - ax || b.rect.height - a.rect.height;
+    })[0]?.node ?? null;
+}
+
+function looksLikeCodeAnswer(answer: string, questionType: ParseResult["questionType"]): boolean {
+  if (questionType !== "short_answer") return false;
+  const text = String(answer || "").trim();
+  if (!text || /需人工确认/.test(text)) return false;
+  return /#include|int\s+\*?\s*[A-Za-z_]\w*\s*\(|char\s+\*?\s*[A-Za-z_]\w*\s*\(|void\s+[A-Za-z_]\w*\s*\(|return\s+|for\s*\(|while\s*\(|if\s*\(|\{[\s\S]*\}/.test(text);
+}
+
+function normalizeCodeForEditor(code: string): string {
+  const source = String(code || "").replace(/\r\n?/g, "\n");
+  if (!source) return "";
+
+  let out = "";
+  let inSingle = false;
+  let inDouble = false;
+  let escaped = false;
+
+  for (const ch of source) {
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      out += ch;
+      continue;
+    }
+
+    if (ch === "\"" && !inSingle) {
+      inDouble = !inDouble;
+      out += ch;
+      continue;
+    }
+
+    if (ch === "\n" && (inSingle || inDouble)) {
+      out += "\\n";
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
+function normalizeTextLikeAnswerForControl(answer: string, questionType: ParseResult["questionType"]): string {
+  if (!looksLikeCodeAnswer(answer, questionType)) return answer;
+  return normalizeCodeForEditor(answer);
 }
 
 function shouldRetryFillWithTextRelocation(result: FillAnswerResult): boolean {
-  return /鏈壘鍒板彲濉啓鐨勯€夐」鎺т欢|鏈壘鍒版枃鏈緭鍏ユ|鏈啓鍏ヤ换浣曡緭鍏ユ/.test(String(result.message || ""));
+  return /未找到可填写的选项控件|未找到文本输入框|未写入任何输入框/.test(String(result.message || ""));
 }
 
 function shouldRetryVerifyWithTextRelocation(result: VerifyAnswerResult): boolean {
-  return /鏃犳硶鏄犲皠鏈熸湜閫夐」|鏈€変腑/.test(String(result.message || ""));
+  return /无法映射期望选项|未选中/.test(String(result.message || ""));
 }

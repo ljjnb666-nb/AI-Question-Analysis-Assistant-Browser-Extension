@@ -4,14 +4,43 @@ export function sendToBackground<R = unknown>(message: ExtMessage): Promise<R> {
   return chrome.runtime.sendMessage(message) as Promise<R>;
 }
 
+export function shouldBootstrapContentScript(error: unknown): boolean {
+  const text = String(error || "");
+  return /Receiving end does not exist|Could not establish connection/i.test(text);
+}
+
+export function isInjectablePageUrl(url: string | undefined): boolean {
+  return /^https?:/i.test(String(url || ""));
+}
+
+export async function injectContentScriptIntoTab(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["content/content-main.js"],
+  });
+}
+
+export async function sendToTabWithBootstrap<R = unknown>(tabId: number, message: ExtMessage): Promise<R> {
+  try {
+    return await (chrome.tabs.sendMessage(tabId, message) as Promise<R>);
+  } catch (error) {
+    if (!shouldBootstrapContentScript(error)) throw error;
+    await injectContentScriptIntoTab(tabId);
+    return chrome.tabs.sendMessage(tabId, message) as Promise<R>;
+  }
+}
+
 export async function sendToActiveTab<R = unknown>(message: ExtMessage): Promise<R> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error("No active tab found");
-  return chrome.tabs.sendMessage(tab.id, message) as Promise<R>;
+  if (!isInjectablePageUrl(tab.url)) {
+    throw new Error("Active tab does not allow extension injection");
+  }
+  return sendToTabWithBootstrap(tab.id, message);
 }
 
 export function sendToTab<R = unknown>(tabId: number, message: ExtMessage): Promise<R> {
-  return chrome.tabs.sendMessage(tabId, message) as Promise<R>;
+  return sendToTabWithBootstrap(tabId, message);
 }
 
 type MessageHandler<T extends ExtMessage = ExtMessage> = (

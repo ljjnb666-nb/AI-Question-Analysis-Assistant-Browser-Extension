@@ -3,6 +3,7 @@ import { buildUserQuestionPrompt, getSystemPrompt } from "./prompts";
 import { getProvider } from "./providers";
 import type { ProviderConfig } from "./providers";
 import { buildResult } from "./parseResult";
+import { buildPreferredQuestionText } from "./questionPromptText";
 import { logError, logWarn } from "../utils/errorLogger";
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -181,9 +182,13 @@ export async function callOpenAICompat(
   };
 
   if (provider.id === "minimax") {
-    requestBody.max_completion_tokens = 1024;
-    requestBody.thinking = { type: "adaptive" };
-    requestBody.reasoning_split = true;
+    if (isMiniMaxCodeProblem(block)) {
+      requestBody.max_completion_tokens = 2048;
+    } else {
+      requestBody.max_completion_tokens = 1024;
+      requestBody.thinking = { type: "adaptive" };
+      requestBody.reasoning_split = true;
+    }
   } else {
     requestBody.max_tokens = 1024;
   }
@@ -203,6 +208,12 @@ export async function callOpenAICompat(
 
   const data = await res.json() as { choices: Array<{ message: { content: string } }> };
   return buildResult(block, route, data.choices?.[0]?.message?.content ?? "{}");
+}
+
+function isMiniMaxCodeProblem(block: QuestionBlock): boolean {
+  if (block.questionTypeGuess !== "short_answer") return false;
+  const text = buildPreferredQuestionText(block);
+  return /(函数接口定义|裁判测试程序样例|输入格式|输出格式|输入样例|输出样例|样例输入|样例输出|代码长度限制|编写程序|完成函数)/.test(text);
 }
 
 async function consumeOpenAIStream(

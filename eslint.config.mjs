@@ -27,10 +27,20 @@ export default tseslint.config(
   },
   ...tseslint.configs.recommended.map((config) => ({
     ...config,
-    files: ["**/*.{ts,tsx,mts,cts}"],
+    files: [
+      "src/**/*.{ts,tsx,mts,cts}",
+      "analytics-server/**/*.{ts,tsx,mts,cts}",
+      "e2e/**/*.{ts,tsx,mts,cts}",
+      "playwright.config.ts",
+    ],
   })),
   {
-    files: ["**/*.{ts,tsx,mts,cts}"],
+    files: [
+      "src/**/*.{ts,tsx,mts,cts}",
+      "analytics-server/**/*.{ts,tsx,mts,cts}",
+      "e2e/**/*.{ts,tsx,mts,cts}",
+      "playwright.config.ts",
+    ],
     languageOptions: {
       globals: {
         ...globals.browser,

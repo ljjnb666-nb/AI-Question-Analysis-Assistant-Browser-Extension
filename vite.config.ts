@@ -18,10 +18,15 @@ export default defineConfig({
         const mf  = readJsonFile("src/manifest.json");
         return { ...mf, version: pkg.version };
       },
+      // The plugin validates against a remote schema by default, which makes production
+      // builds flaky when SchemaStore rate-limits or is unreachable.
+      skipManifestValidation: true,
       // sidepanel.html is already picked up via manifest's side_panel.default_path
-      // Only add content-main here (not in manifest)
+      // Build content bootstrap and the heavy runtime as separate entries so the runtime
+      // is only loaded on demand after a user action.
       additionalInputs: [
         "content/content-main.ts",
+        "content/contentRuntimeBootstrap.ts",
       ],
     }),
   ],

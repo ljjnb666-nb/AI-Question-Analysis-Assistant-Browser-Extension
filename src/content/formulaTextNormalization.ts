@@ -65,7 +65,7 @@ export function normalizeMathDisplayText(text: string): string {
     .replace(/\u4ece\s*-\s*(?:\u221e)?\s*\u5230\s*\+\s*(?:\u221e)?/g, "\u4ece-\u221e\u5230+\u221e");
 
   out = out.replace(
-    /((?:\u03c9|w|omega)[^\u3002\uff1b;,.锛孿n]{0,24}?\u7531)\s*-\s*(?:\u221e)?\s*\u5230\s*\+\s*(?:\u221e)?/gi,
+    /((?:\u03c9|w|omega)[^\u3002\uff1b;,.：:\n]{0,24}?\u7531)\s*-\s*(?:\u221e)?\s*\u5230\s*\+\s*(?:\u221e)?/gi,
     (_m, prefix) => `${prefix}-\u221e\u5230+\u221e`,
   );
 

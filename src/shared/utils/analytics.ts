@@ -4,8 +4,11 @@
  */
 
 import { logError } from "./errorLogger";
+import { buildAnalyticsUploadPayload, isAnalyticsUploadEvent } from "./analyticsBackend";
+import { getOrCreateDeviceId, loadSettings } from "./storage";
 
 export type AnalyticsEvent =
+  | "extension_installed"
   | "session_start"
   | "popup_opened"
   | "manual_capture_started"
@@ -40,6 +43,9 @@ export type AnalyticsEvent =
   | "route_used_hybrid"
   | "settings_saved"
   | "api_key_set"
+  | "auth_registered"
+  | "auth_logged_in"
+  | "auth_logged_out"
   | "vision_upgrade_triggered"
   | "keyboard_shortcut_used"
   | "history_exported"
@@ -55,6 +61,7 @@ interface EventEntry {
 
 const SESSION_LOG: EventEntry[] = [];
 const MAX_STORED = 300;
+let persistQueue: Promise<void> = Promise.resolve();
 
 function isExtensionContextInvalidatedError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err || "");
@@ -81,18 +88,61 @@ export function logEvent(
     duration: data?.duration as number | undefined,
   };
   SESSION_LOG.push(entry);
-  persistEvent(entry);
+  void persistEvent(entry);
+  void uploadEvent(entry);
 }
 
 async function persistEvent(entry: EventEntry): Promise<void> {
+  const writeTask = persistQueue
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        const r = await chrome.storage.local.get("analyticsLog");
+        const log: EventEntry[] = (r["analyticsLog"] as EventEntry[]) ?? [];
+        const updated = [...log, entry].slice(-MAX_STORED);
+        await chrome.storage.local.set({ analyticsLog: updated });
+      } catch (err) {
+        if (isExtensionContextInvalidatedError(err)) return;
+        logError("Failed to persist analytics event", err, "persistEvent", { event: entry.event });
+      }
+    });
+  persistQueue = writeTask;
+  await writeTask;
+}
+
+async function uploadEvent(entry: EventEntry): Promise<void> {
+  if (!isAnalyticsUploadEvent(entry.event)) return;
   try {
-    const r = await chrome.storage.local.get("analyticsLog");
-    const log: EventEntry[] = (r["analyticsLog"] as EventEntry[]) ?? [];
-    const updated = [...log, entry].slice(-MAX_STORED);
-    await chrome.storage.local.set({ analyticsLog: updated });
+    const settings = await loadSettings();
+    if (!settings.enableAnalytics) return;
+
+    const deviceId = settings.deviceId || await getOrCreateDeviceId();
+    const baseUrl = String(settings.analyticsBaseUrl || "").trim().replace(/\/+$/, "");
+    if (!baseUrl) return;
+
+    const payload = buildAnalyticsUploadPayload(
+      { ...settings, deviceId },
+      entry.event,
+      entry.ts,
+      chrome.runtime.getManifest?.().version,
+      entry.host,
+      entry.duration,
+      entry.data,
+    );
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (settings.authToken) headers.Authorization = `Bearer ${settings.authToken}`;
+
+    await fetch(`${baseUrl}/analytics/events`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
   } catch (err) {
     if (isExtensionContextInvalidatedError(err)) return;
-    logError("Failed to persist analytics event", err, "persistEvent", { event: entry.event });
+    console.warn("[Analytics] upload failed:", err);
   }
 }
 

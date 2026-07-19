@@ -40,6 +40,9 @@ type ResolveQuestionResult = {
   questionCompleted: boolean;
 };
 
+const MAX_AUTO_SOLVE_PARSE_RETRIES = 1;
+const MAX_AUTO_SOLVE_PARSE_ATTEMPTS = MAX_AUTO_SOLVE_PARSE_RETRIES + 1;
+
 export async function resolveAutoSolveQuestion(
   options: ResolveQuestionOptions,
   deps: ResolveQuestionDeps,
@@ -59,14 +62,14 @@ export async function resolveAutoSolveQuestion(
 
     let parsed = await parseOnce();
     let parseRetryCount = 0;
-    while (parseRetryCount < 2 && deps.shouldRetryUnstableChoiceParse(parsed)) {
+    while (parseRetryCount < MAX_AUTO_SOLVE_PARSE_RETRIES && deps.shouldRetryUnstableChoiceParse(parsed)) {
       parseRetryCount += 1;
       deps.sendProgress({
         solved: options.solved,
         filled: options.filled,
         total: options.total,
         currentBlock: deps.toProgressBlock(options.currentBlock),
-        statusText: `第 ${options.solved + 1} 题解析结果不稳定，正在重试解析（${parseRetryCount + 1}/3）...`,
+        statusText: `Auto-solve parse looks unstable. Retrying (${parseRetryCount + 1}/${MAX_AUTO_SOLVE_PARSE_ATTEMPTS})...`,
       });
       parsed = await parseOnce();
     }
@@ -82,18 +85,18 @@ export async function resolveAutoSolveQuestion(
       total: options.total,
       currentBlock: deps.toProgressBlock(options.currentBlock),
       statusText: !stableParsed
-        ? `第 ${options.solved + 1} 题重试 ${parseRetryCount + 1} 次后仍未得到稳定答案`
+        ? `Auto-solve parse stayed unstable after ${parseRetryCount + 1} attempt(s).`
         : options.needsHistoryReview
-          ? `复核完成，正在更新第 ${options.solved + 1} 题答案：${parsed.answer || "-"}`
+          ? `Review complete. Updating question ${options.solved + 1}: ${parsed.answer || "-"}`
           : options.needsQuickAnsweredChoiceReview
-            ? `快速复核完成，正在校验第 ${options.solved + 1} 题答案：${parsed.answer || "-"}`
-            : `正在填写第 ${options.solved + 1} 题，答案：${parsed.answer || "-"}`,
+            ? `Quick review complete. Verifying question ${options.solved + 1}: ${parsed.answer || "-"}`
+            : `Filling question ${options.solved + 1}: ${parsed.answer || "-"}`,
     });
 
     if (!stableParsed) {
       progressMessage = options.needsQuickAnsweredChoiceReview || options.answerStateComplete
-        ? "重解析 3 次后仍未得到稳定答案，保留当前作答并继续"
-        : "重解析 3 次后仍未得到稳定答案，已跳过本题";
+        ? `Auto-solve parse remained unstable after ${MAX_AUTO_SOLVE_PARSE_ATTEMPTS} attempts. Keeping the current answer and continuing.`
+        : `Auto-solve parse remained unstable after ${MAX_AUTO_SOLVE_PARSE_ATTEMPTS} attempts. Skipping this question.`;
       questionCompleted = true;
       return { filledDelta, progressMessage, questionCompleted };
     }
@@ -114,24 +117,24 @@ export async function resolveAutoSolveQuestion(
 
     if (options.needsQuickAnsweredChoiceReview) {
       progressMessage = fillResult.ok
-        ? `快速复核后校验失败：${verifyResult.message}，保留当前作答并继续`
-        : `快速复核未能覆盖：${fillResult.message}，保留当前作答并继续`;
+        ? `Quick review verification failed: ${verifyResult.message}. Keeping the current answer and continuing.`
+        : `Quick review could not overwrite the answer: ${fillResult.message}. Keeping the current answer and continuing.`;
       questionCompleted = true;
       return { filledDelta, progressMessage, questionCompleted };
     }
 
     progressMessage = fillResult.ok
-      ? `填写后校验失败：${verifyResult.message}`
-      : `填写失败：${fillResult.message}`;
+      ? `Verification failed after fill: ${verifyResult.message}`
+      : `Fill failed: ${fillResult.message}`;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     if (options.needsQuickAnsweredChoiceReview) {
-      progressMessage = `快速复核失败，保留现有答案并继续：${errMsg}`;
+      progressMessage = `Quick review failed. Keeping the current answer and continuing: ${errMsg}`;
       questionCompleted = true;
     } else {
       progressMessage = options.answerStateComplete
-        ? `复核失败，保留现有答案：${errMsg}`
-        : `解析失败，已跳过：${errMsg}`;
+        ? `Review failed. Keeping the current answer: ${errMsg}`
+        : `Parse failed. Skipping this question: ${errMsg}`;
     }
   }
 

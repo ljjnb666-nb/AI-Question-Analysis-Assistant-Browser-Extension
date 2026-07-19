@@ -122,12 +122,14 @@ export function extractStructuredQuestionText(container: Element): string {
     pieces.splice(0, pieces.length, ...next);
   };
 
-  const titleBox = container.querySelector(".title-box,.questionTit,.question-title");
+  const titleBox = container.querySelector(".title-box,.questionTit,.question-title,[id='title'],[id$='-title'],[id*='question-title']");
   if (titleBox instanceof HTMLElement) {
     push(titleBox.innerText || titleBox.textContent || "");
   }
 
-  const stemNode = container.querySelector(".qeustion-content,.questionContent,.question-content,.stem,.question-body,.content");
+  const stemNode = container.querySelector(
+    ".qeustion-content,.questionContent,.question-content,.stem,.question-body,.content,[id$='-content'],[id='question-content'],[id='content']",
+  );
   if (stemNode) {
     push(extractReadableNodeText(stemNode));
   }
@@ -156,7 +158,9 @@ export function extractStructuredQuestionText(container: Element): string {
 }
 
 export function extractStructuredQuestionDisplaySegments(container: Element): QuestionDisplaySegment[] | undefined {
-  const stemNode = container.querySelector(".qeustion-content,.questionContent,.question-content,.stem,.question-body,.content");
+  const stemNode = container.querySelector(
+    ".qeustion-content,.questionContent,.question-content,.stem,.question-body,.content,[id$='-content'],[id='question-content'],[id='content']",
+  );
   if (!(stemNode instanceof HTMLElement)) return undefined;
 
   const segments = buildOrderedDisplaySegments(stemNode, (child) =>
@@ -174,7 +178,7 @@ function extractOrderedChildContentText(
     .map((child) => readInlineOrderedChildContent(child, shouldSkipChild))
     .filter(Boolean);
 
-  return normalizeText(dedupeJoinedStructuredText(orderedPieces).join(""));
+  return collapseRepeatedStructuredRun(normalizeText(dedupeJoinedStructuredText(orderedPieces).join("")));
 }
 
 function readInlineOrderedChildContent(
@@ -306,6 +310,23 @@ function dedupeJoinedStructuredText(parts: string[]): string[] {
       deduped.push(text);
       continue;
     }
+
+    let collapsed = false;
+    for (let suffixSize = deduped.length; suffixSize >= 2; suffixSize -= 1) {
+      const suffix = deduped.slice(-suffixSize).join(" ");
+      if (text === suffix || text.includes(suffix)) {
+        deduped.splice(deduped.length - suffixSize, suffixSize, text);
+        collapsed = true;
+        break;
+      }
+      if (suffix.includes(text)) {
+        deduped.splice(deduped.length - suffixSize, suffixSize, suffix);
+        collapsed = true;
+        break;
+      }
+    }
+    if (collapsed) continue;
+
     if (text === last) continue;
     if (text.includes(last)) {
       deduped[deduped.length - 1] = text;
@@ -317,12 +338,32 @@ function dedupeJoinedStructuredText(parts: string[]): string[] {
   return deduped;
 }
 
+function collapseRepeatedStructuredRun(text: string): string {
+  const normalized = normalizeText(text);
+  if (!normalized) return "";
+
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  if (tokens.length < 6) return normalized;
+
+  for (let size = Math.floor(tokens.length / 2); size >= 3; size -= 1) {
+    const first = tokens.slice(0, size).join(" ");
+    const second = tokens.slice(size, size * 2).join(" ");
+    if (first !== second) continue;
+
+    const remainder = tokens.slice(size * 2).join(" ");
+    return normalizeText(remainder ? `${first} ${remainder}` : first);
+  }
+
+  return normalized;
+}
+
 function isElementVisible(el: HTMLElement): boolean {
-  if (el.offsetParent === null) return false;
   const style = getComputedStyle(el);
   if (style.visibility === "hidden" || style.display === "none") return false;
   if (style.opacity === "0") return false;
-  return true;
+  if (el.offsetParent !== null) return true;
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
 }
 
 function isExtensionUiElement(el: Element): boolean {

@@ -17,6 +17,7 @@ export interface ErrorLogEntry {
 
 const ERROR_LOG: ErrorLogEntry[] = [];
 const MAX_LOG_SIZE = 100;
+let persistQueue: Promise<void> = Promise.resolve();
 
 function isExtensionContextInvalidatedError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err || "");
@@ -130,16 +131,21 @@ export function clearErrorLogs(): void {
  * Persist error log to storage
  */
 async function persistErrorLog(entry: ErrorLogEntry): Promise<void> {
-  try {
-    const result = await chrome.storage.local.get("errorLog");
-    const log: ErrorLogEntry[] = (result["errorLog"] as ErrorLogEntry[]) ?? [];
-    const updated = [...log, entry].slice(-MAX_LOG_SIZE);
-    await chrome.storage.local.set({ errorLog: updated });
-  } catch (err) {
-    if (isExtensionContextInvalidatedError(err)) return;
-    // Can't log storage errors to storage, just console
-    console.error("[ErrorLogger] Failed to persist error log:", err);
-  }
+  const writeTask = persistQueue
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        const result = await chrome.storage.local.get("errorLog");
+        const log: ErrorLogEntry[] = (result["errorLog"] as ErrorLogEntry[]) ?? [];
+        const updated = [...log, entry].slice(-MAX_LOG_SIZE);
+        await chrome.storage.local.set({ errorLog: updated });
+      } catch (err) {
+        if (isExtensionContextInvalidatedError(err)) return;
+        console.error("[ErrorLogger] Failed to persist error log:", err);
+      }
+    });
+  persistQueue = writeTask;
+  await writeTask;
 }
 
 /**

@@ -11,6 +11,7 @@ export function isLikelyCompleteQuestionText(text: string, type: QuestionType): 
   const circledCount = (text.match(CIRCLED_RE) || []).length;
   const hasABCD = /A[\.\):\uFF1A\u3001][\s\S]*B[\.\):\uFF1A\u3001][\s\S]*C[\.\):\uFF1A\u3001][\s\S]*D[\.\):\uFF1A\u3001]/.test(text);
   const hasQuestion = QUESTION_RE.test(text);
+  const hasIndexedStem = /^(\d{1,3})[\.、。\)）]\s*/.test(text) || /^第\s*\d{1,3}\s*题/.test(text);
   const startsWithOption = /^[A-D][\.\):\uFF1A\u3001]/.test(text);
   const startsWithIndex = /^[\u2460\u2461\u2462\u2463]/.test(text);
 
@@ -27,7 +28,7 @@ export function isLikelyCompleteQuestionText(text: string, type: QuestionType): 
     if (optionCount + circledCount < 4) return false;
     if (!hasABCD && circledCount < 4) return false;
     const hasMathLikePayload = /θ|μ|σ|λ|∞|∑|∫|π|T\d|x_\d|[A-Za-z]\([A-Za-z0-9,+\-*/=()]+\)|\d+\/\d+/.test(text);
-    if (!hasQuestion && !hasMathLikePayload && text.length < 60) return false;
+    if (!hasQuestion && !hasMathLikePayload && !hasIndexedStem && text.length < 60) return false;
   }
   if (type === "unknown") {
     if (optionCount + circledCount < 2 && !hasQuestion) return false;

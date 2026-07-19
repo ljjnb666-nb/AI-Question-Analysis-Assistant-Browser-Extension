@@ -13,9 +13,23 @@ import {
   shouldRetryBatchParseForIncompleteResult,
   shouldRetryWithVision,
 } from "./batchParseHeuristics";
-import { runBatchFill, runBatchParse, runFillCandidate, runRetryRisky, runRetryVision, selectRiskyCandidates } from "./batchOperations";
+import {
+  runBatchFill,
+  runBatchParse,
+  runFillCandidate,
+  runRetryRisky,
+  runRetryVision,
+  selectRiskyCandidates,
+} from "./batchOperations";
+import { getBatchFillFeedback, getSingleFillFeedback } from "./sidepanelActionMessages";
 import { buildAutoSolveStartingState, resetDetectState, startFullPageDetectState, type AutoSolveProgressState, type ScanProgressState } from "./sidepanelStateSync";
-import { getBestActionTab, requestBlockImage, sendFillMessageWithVerify, sendTabMessageWithBootstrap } from "./tabActions";
+import { clearCandidateSelection, selectAllCandidates, toggleCandidateSelection } from "./sidepanelSelectionSync";
+import {
+  getBestActionTab,
+  requestBlockImage,
+  sendFillMessageWithVerify,
+  sendTabMessageWithBootstrap,
+} from "./tabActions";
 import type { UILang } from "./displayUtils";
 
 type UseSidePanelActionsOptions = {
@@ -36,37 +50,42 @@ type UseSidePanelActionsOptions = {
 };
 
 export function useSidePanelActions(options: UseSidePanelActionsOptions) {
-  const syncSelection = useCallback(async (payload: { blockId?: string; selected?: boolean; selectAll?: boolean }) => {
-    const activeTab = await getBestActionTab();
-    if (activeTab?.id) {
-      await sendTabMessageWithBootstrap(activeTab.id, { type: "UPDATE_CANDIDATE_SELECTION", ...payload });
-    }
-  }, []);
+  const syncSelection = useCallback(
+    async (payload: { blockId?: string; selected?: boolean; selectAll?: boolean }) => {
+      const activeTab = await getBestActionTab();
+      if (activeTab?.id) {
+        await sendTabMessageWithBootstrap(activeTab.id, { type: "UPDATE_CANDIDATE_SELECTION", ...payload });
+      }
+    },
+    [],
+  );
+
+  const applyDetectState = useCallback(
+    (next: ReturnType<typeof resetDetectState> | ReturnType<typeof startFullPageDetectState>) => {
+      options.setIsDetecting(next.isDetecting);
+      options.setIsFullPageScan("isFullPageScan" in next ? next.isFullPageScan : true);
+      options.setScanProgress(next.scanProgress);
+      options.setCandidates(next.candidates);
+      options.setExpandedIds(next.expandedIds);
+    },
+    [options],
+  );
 
   const handleDetect = useCallback(async () => {
-    const next = resetDetectState();
-    options.setIsDetecting(next.isDetecting);
-    options.setIsFullPageScan(next.isFullPageScan);
-    options.setScanProgress(next.scanProgress);
-    options.setCandidates(next.candidates);
-    options.setExpandedIds(next.expandedIds);
+    applyDetectState(resetDetectState());
     const activeTab = await getBestActionTab();
     if (activeTab?.id) {
       await sendTabMessageWithBootstrap(activeTab.id, { type: "START_AUTO_DETECT" });
     }
-  }, [options]);
+  }, [applyDetectState]);
 
   const handleFullPageDetect = useCallback(async () => {
-    const next = startFullPageDetectState();
-    options.setIsDetecting(next.isDetecting);
-    options.setCandidates(next.candidates);
-    options.setExpandedIds(next.expandedIds);
-    options.setScanProgress(next.scanProgress);
+    applyDetectState(startFullPageDetectState());
     const activeTab = await getBestActionTab();
     if (activeTab?.id) {
       await sendTabMessageWithBootstrap(activeTab.id, { type: "START_FULL_PAGE_DETECT" });
     }
-  }, [options]);
+  }, [applyDetectState]);
 
   const handleCancelFullPage = useCallback(async () => {
     const activeTab = await getBestActionTab();
@@ -77,16 +96,17 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     options.setScanProgress(null);
   }, [options]);
 
-  const toggleSelect = useCallback((id: string) => {
-    options.setCandidates((prev) => {
-      const next = prev.map((candidate) =>
-        candidate.block.id === id ? { ...candidate, selected: !candidate.selected } : candidate,
-      );
-      const target = next.find((candidate) => candidate.block.id === id);
-      void syncSelection({ blockId: id, selected: !!target?.selected });
-      return next;
-    });
-  }, [options, syncSelection]);
+  const toggleSelect = useCallback(
+    (id: string) => {
+      options.setCandidates((prev) => {
+        const next = toggleCandidateSelection(prev, id);
+        const target = next.find((candidate) => candidate.block.id === id);
+        void syncSelection({ blockId: id, selected: !!target?.selected });
+        return next;
+      });
+    },
+    [options, syncSelection],
+  );
 
   const handleFlash = useCallback(async (blockId: string) => {
     const activeTab = await getBestActionTab();
@@ -132,6 +152,9 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       addHistoryEntry,
       setCandidates: options.setCandidates,
       langSafe,
+      pickBatchReviewModel,
+      shouldRetryBatchParseForIncompleteResult,
+      preferBatchRetryResult,
     });
   }, [options.setCandidates]);
 
@@ -158,6 +181,9 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       addHistoryEntry,
       setCandidates: options.setCandidates,
       langSafe,
+      pickBatchReviewModel,
+      shouldRetryBatchParseForIncompleteResult,
+      preferBatchRetryResult,
     });
     options.setIsRetryingRisky(false);
   }, [options]);
@@ -168,7 +194,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       sendFillMessageWithVerify: (tabId, block, result) =>
         sendFillMessageWithVerify(tabId, block, result, isChoiceLikeResult),
     });
-    options.setFillFeedback(response?.message || (response?.ok ? "填写完成" : "填写失败"));
+    options.setFillFeedback(getSingleFillFeedback(options.uiLang, !!response?.ok, response?.message));
     window.setTimeout(() => options.setFillFeedback(""), 2200);
   }, [options]);
 
@@ -180,11 +206,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
         sendFillMessageWithVerify(tabId, block, result, isChoiceLikeResult),
     });
     options.setIsBatchFilling(false);
-    options.setFillFeedback(
-      options.uiLang === "en"
-        ? `Filled ${totalFilled} fields across ${totalQuestions} question(s)`
-        : `已在 ${totalQuestions} 题中填写 ${totalFilled} 个控件`,
-    );
+    options.setFillFeedback(getBatchFillFeedback(options.uiLang, totalFilled, totalQuestions));
     window.setTimeout(() => options.setFillFeedback(""), 2600);
   }, [options]);
 
@@ -204,12 +226,12 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   }, []);
 
   const handleClearSelection = useCallback(() => {
-    options.setCandidates((prev) => prev.map((candidate) => ({ ...candidate, selected: false })));
+    options.setCandidates((prev) => clearCandidateSelection(prev));
     void syncSelection({ selectAll: false });
   }, [options, syncSelection]);
 
   const handleSelectAll = useCallback(() => {
-    options.setCandidates((prev) => prev.map((candidate) => ({ ...candidate, selected: true })));
+    options.setCandidates((prev) => selectAllCandidates(prev));
     void syncSelection({ selectAll: true });
   }, [options, syncSelection]);
 

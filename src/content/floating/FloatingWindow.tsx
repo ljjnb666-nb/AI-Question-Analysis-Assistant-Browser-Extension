@@ -169,11 +169,12 @@ export const FloatingWindow: React.FC<Props> = ({
       <div onMouseDown={onHeaderMouseDown} onClick={() => setMin(false)} style={{
         position:"fixed", left:pos.x, top:pos.y, zIndex:initialState.zIndex,
         display:"flex", alignItems:"center", gap:8,
-        backgroundColor:"#1e1e2e", color:"#cdd6f4",
+        backgroundColor:"rgba(16, 24, 48, 0.9)", color:"#f8fafc",
         padding:"7px 14px", borderRadius:24,
-        boxShadow:"0 2px 14px rgba(0,0,0,0.55)",
+        boxShadow:"0 8px 24px rgba(0,0,0,0.3)",
+        backdropFilter:"blur(20px)",
         cursor:"pointer", fontSize:13, fontFamily:"system-ui,sans-serif",
-        userSelect:"none", border:"1px solid #313244",
+        userSelect:"none", border:"1px solid rgba(255, 255, 255, 0.08)",
       }}>
         <span style={{fontSize:16}}>📘</span>
         <span>
@@ -188,20 +189,21 @@ export const FloatingWindow: React.FC<Props> = ({
   return (
     <div style={{
       position:"fixed", left:pos.x, top:pos.y, width:size.w, height:size.h,
-      zIndex:initialState.zIndex, backgroundColor:"#1e1e2e", borderRadius:12,
-      boxShadow:"0 8px 32px rgba(0,0,0,0.6)", display:"flex", flexDirection:"column",
-      fontFamily:"system-ui,sans-serif", color:"#cdd6f4", overflow:"hidden",
-      boxSizing:"border-box", border:"1px solid #313244",
+      zIndex:initialState.zIndex, backgroundColor:"rgba(16, 24, 48, 0.85)", borderRadius:16,
+      boxShadow:"0 16px 40px rgba(0,0,0,0.4)", display:"flex", flexDirection:"column",
+      fontFamily:"system-ui,sans-serif", color:"#f8fafc", overflow:"hidden",
+      boxSizing:"border-box", border:"1px solid rgba(255, 255, 255, 0.06)",
+      backdropFilter:"blur(20px)",
     }}>
       {/* Header */}
       <div onMouseDown={onHeaderMouseDown} style={{
-        padding:"8px 12px", backgroundColor:"#181825",
+        padding:"8px 12px", backgroundColor:"rgba(10, 15, 30, 0.85)",
         display:"flex", alignItems:"center", justifyContent:"space-between",
-        cursor:"grab", borderBottom:"1px solid #313244", flexShrink:0, userSelect:"none",
+        cursor:"grab", borderBottom:"1px solid rgba(255, 255, 255, 0.06)", flexShrink:0, userSelect:"none",
       }}>
         <div style={{display:"flex", alignItems:"center", gap:6}}>
           <span style={{fontSize:16}}>📘</span>
-          <span style={{fontSize:13, fontWeight:600, color:"#cba6f7"}}>题目解析助手</span>
+          <span style={{fontSize:13, fontWeight:600, color:"#a5b4fc"}}>题目解析助手</span>
           {result && <RouteTag route={result.routeUsed} />}
         </div>
         <div style={{display:"flex", gap:4}}>
@@ -281,11 +283,11 @@ function snapToEdge(px: number, py: number, w: number, h: number, rawX: number, 
 
 const RouteTag: React.FC<{route: string}> = ({route}) => {
   const map: Record<string,[string,string]> = {
-    vision:["视觉","#f38ba8"], text:["文字","#89b4fa"], hybrid:["混合","#f9e2af"],
+    vision:["视觉","#fca5a5"], text:["文字","#93c5fd"], hybrid:["混合","#fde68a"],
   };
-  const [label, color] = map[route] ?? ["?","#6c7086"];
+  const [label, color] = map[route] ?? ["?","#94a3b8"];
   return (
-    <span style={{fontSize:10, padding:"1px 7px", borderRadius:10, backgroundColor:"#313244", color}}>
+    <span style={{fontSize:10, padding:"1px 7px", borderRadius:10, backgroundColor:"rgba(255, 255, 255, 0.04)", border:"1px solid rgba(255, 255, 255, 0.06)", color}}>
       {label}链路
     </span>
   );
@@ -294,16 +296,16 @@ const RouteTag: React.FC<{route: string}> = ({route}) => {
 const VisionSuggestion: React.FC<{onUpgrade: () => void}> = ({onUpgrade}) => (
   <div style={{
     padding:"8px 10px", borderRadius:7, marginBottom:10,
-    backgroundColor:"#2a1f3d", border:"1px solid #6d28d9",
+    backgroundColor:"rgba(99, 102, 241, 0.12)", border:"1px solid rgba(99, 102, 241, 0.2)",
     display:"flex", alignItems:"center", justifyContent:"space-between", gap:8,
   }}>
     <div>
-      <div style={{fontSize:12, color:"#c4b5fd", fontWeight:600}}>置信度较低</div>
-      <div style={{fontSize:11, color:"#a78bfa"}}>建议切换图题增强（视觉链路）重新解析</div>
+      <div style={{fontSize:12, color:"#c7d2fe", fontWeight:600}}>置信度较低</div>
+      <div style={{fontSize:11, color:"#a5b4fc"}}>建议切换图题增强（视觉链路）重新解析</div>
     </div>
     <button onClick={onUpgrade} style={{
       padding:"5px 10px", borderRadius:6, border:"none",
-      backgroundColor:"#7c3aed", color:"#fff",
+      background:"linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)", color:"#fff",
       cursor:"pointer", fontSize:11, fontWeight:600, flexShrink:0,
       fontFamily:"system-ui,sans-serif",
     }}>🖼 切换</button>
@@ -311,22 +313,22 @@ const VisionSuggestion: React.FC<{onUpgrade: () => void}> = ({onUpgrade}) => (
 );
 
 const LoadingState: React.FC<{streamingText: string | null}> = ({streamingText}) => (
-  <div style={{textAlign:"center", paddingTop:20, color:"#a6adc8"}}>
+  <div style={{textAlign:"center", paddingTop:20, color:"#94a3b8"}}>
     <div style={{fontSize:28, marginBottom:8}}>⏳</div>
     <div style={{fontSize:14}}>正在解析题目…</div>
     {streamingText ? (
       <div style={{
         marginTop:10, padding:"8px 10px", borderRadius:6,
-        backgroundColor:"#181825", border:"1px solid #313244",
-        fontSize:11, color:"#585b70", textAlign:"left",
+        backgroundColor:"rgba(15, 23, 42, 0.4)", border:"1px solid rgba(255, 255, 255, 0.04)",
+        fontSize:11, color:"#94a3b8", textAlign:"left",
         maxHeight:80, overflowY:"auto", whiteSpace:"pre-wrap",
         wordBreak:"break-all",
       }}>
-        <span style={{color:"#89b4fa", fontWeight:600}}>▍ </span>
+        <span style={{color:"#818cf8", fontWeight:600}}>▍ </span>
         {streamingText}
       </div>
     ) : (
-      <div style={{marginTop:6, fontSize:11, color:"#585b70"}}>AI 正在分析截图内容</div>
+      <div style={{marginTop:6, fontSize:11, color:"#64748b"}}>AI 正在分析截图内容</div>
     )}
   </div>
 );
@@ -341,9 +343,10 @@ const EmptyState: React.FC = () => (
 const ErrorState: React.FC<{error: string; onRetry: () => void}> = ({error, onRetry}) => (
   <div style={{textAlign:"center", paddingTop:16}}>
     <div style={{fontSize:24, marginBottom:8}}>⚠️</div>
-    <div style={{fontSize:13, marginBottom:10, color:"#f38ba8"}}>解析失败</div>
+    <div style={{fontSize:13, marginBottom:10, color:"#f87171"}}>解析失败</div>
     <div style={{
-      fontSize:11, color:"#585b70", backgroundColor:"#181825",
+      fontSize:11, color:"#fca5a5", backgroundColor:"rgba(69, 26, 26, 0.8)",
+      border:"1px solid rgba(239, 68, 68, 0.2)",
       padding:"6px 10px", borderRadius:6, marginBottom:12,
       wordBreak:"break-all", maxHeight:72, overflowY:"auto", textAlign:"left",
     }}>{error}</div>
@@ -363,26 +366,26 @@ const ResultContent: React.FC<ResultProps> = ({
   <div style={{fontSize:13, lineHeight:1.6}}>
     {result.warning && (
       <div style={{
-        padding:"6px 10px", borderRadius:6, backgroundColor:"#2c1f00",
-        border:"1px solid #7c5c00", color:"#f9e2af", marginBottom:10, fontSize:12,
+        padding:"6px 10px", borderRadius:6, backgroundColor:"rgba(67, 40, 15, 0.8)",
+        border:"1px solid rgba(245, 158, 11, 0.2)", color:"#fde68a", marginBottom:10, fontSize:12,
       }}>⚠️ {result.warning}</div>
     )}
 
     {/* Answer */}
     <div style={{marginBottom:10}}>
       <Label>答案</Label>
-      <div style={{fontSize:28, fontWeight:700, color:"#a6e3a1", letterSpacing:3}}>{result.answer}</div>
+      <div style={{fontSize:28, fontWeight:700, color:"#34d399", letterSpacing:3}}>{result.answer}</div>
     </div>
 
     {/* Brief */}
     <div style={{marginBottom:8}}>
       <Label>简短解析</Label>
-      <div style={{color:"#cdd6f4"}}>{result.briefExplanation}</div>
+      <div style={{color:"#f8fafc"}}>{result.briefExplanation}</div>
     </div>
 
     {/* Detail toggle */}
     <button onClick={onToggleDetail} style={{
-      background:"none", border:"none", color:"#89b4fa",
+      background:"none", border:"none", color:"#a5b4fc",
       cursor:"pointer", fontSize:12, padding:"2px 0", marginBottom: showDetail ? 8 : 4,
       fontFamily:"system-ui,sans-serif",
     }}>
@@ -391,7 +394,8 @@ const ResultContent: React.FC<ResultProps> = ({
 
     {showDetail && (
       <div style={{
-        color:"#cdd6f4", backgroundColor:"#181825",
+        color:"#edf3fb", backgroundColor:"rgba(15, 23, 42, 0.4)",
+        border:"1px solid rgba(255, 255, 255, 0.04)",
         padding:"8px 10px", borderRadius:6, fontSize:12,
         lineHeight:1.7, marginBottom:10, whiteSpace:"pre-wrap",
       }}>{result.detailedExplanation}</div>
@@ -400,9 +404,10 @@ const ResultContent: React.FC<ResultProps> = ({
     {/* Recognized text */}
     {result.recognizedText && (
       <details style={{marginBottom:8}}>
-        <summary style={{fontSize:11, color:"#6c7086", userSelect:"none"}}>识别文字</summary>
+        <summary style={{fontSize:11, color:"#94a3b8", userSelect:"none"}}>识别文字</summary>
         <div style={{
-          fontSize:11, color:"#585b70", backgroundColor:"#181825",
+          fontSize:11, color:"#94a3b8", backgroundColor:"rgba(15, 23, 42, 0.4)",
+          border:"1px solid rgba(255, 255, 255, 0.04)",
           padding:"6px", borderRadius:4, marginTop:4,
           maxHeight:60, overflowY:"auto", whiteSpace:"pre-wrap",
         }}>{result.recognizedText}</div>
@@ -411,16 +416,16 @@ const ResultContent: React.FC<ResultProps> = ({
 
     {/* Confidence */}
     <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:8}}>
-      <span style={{color:"#585b70", fontSize:11, flexShrink:0}}>置信度</span>
-      <div style={{flex:1, height:4, backgroundColor:"#313244", borderRadius:2, overflow:"hidden"}}>
+      <span style={{color:"#64748b", fontSize:11, flexShrink:0}}>置信度</span>
+      <div style={{flex:1, height:4, backgroundColor:"rgba(255, 255, 255, 0.04)", borderRadius:2, overflow:"hidden"}}>
         <div style={{
           height:"100%",
           width:`${Math.round(result.confidence*100)}%`,
-          backgroundColor: result.confidence>0.8 ? "#a6e3a1" : result.confidence>0.5 ? "#f9e2af" : "#f38ba8",
+          backgroundColor: result.confidence>0.8 ? "#10b981" : result.confidence>0.5 ? "#f59e0b" : "#ef4444",
           borderRadius:2, transition:"width 0.4s",
         }}/>
       </div>
-      <span style={{color:"#585b70", fontSize:11, flexShrink:0}}>{Math.round(result.confidence*100)}%</span>
+      <span style={{color:"#64748b", fontSize:11, flexShrink:0}}>{Math.round(result.confidence*100)}%</span>
     </div>
 
     {/* Feedback panel */}
@@ -441,18 +446,18 @@ const FeedbackPanel: React.FC<{result: ParseResult; block: QuestionBlock|null; o
   ].filter(Boolean).join("\n");
 
   return (
-    <div style={{backgroundColor:"#181825", border:"1px solid #313244", borderRadius:8, padding:"10px 12px", marginTop:8}}>
-      <div style={{fontSize:12, fontWeight:600, color:"#f9e2af", marginBottom:6}}>反馈错误</div>
+    <div style={{backgroundColor:"rgba(15, 23, 42, 0.6)", border:"1px solid rgba(255, 255, 255, 0.06)", borderRadius:8, padding:"10px 12px", marginTop:8}}>
+      <div style={{fontSize:12, fontWeight:600, color:"#fde68a", marginBottom:6}}>反馈错误</div>
       <textarea defaultValue={`解析有误，正确答案应为：\n\n--- 自动收集信息 ---\n${info}`} style={{
-        width:"100%", minHeight:80, backgroundColor:"#1e1e2e",
-        border:"1px solid #45475a", borderRadius:4, color:"#cdd6f4",
+        width:"100%", minHeight:80, backgroundColor:"rgba(10, 15, 30, 0.8)",
+        border:"1px solid rgba(255, 255, 255, 0.06)", borderRadius:4, color:"#edf3fb",
         fontSize:11, padding:6, resize:"vertical", boxSizing:"border-box",
         fontFamily:"system-ui,sans-serif",
       }}/>
       <div style={{display:"flex", gap:6, marginTop:6}}>
         {!sent
           ? <ActionBtn onClick={() => setSent(true)} primary>提交反馈</ActionBtn>
-          : <span style={{fontSize:12, color:"#a6e3a1"}}>✓ 感谢反馈</span>}
+          : <span style={{fontSize:12, color:"#10b981"}}>✓ 感谢反馈</span>}
         <ActionBtn onClick={onClose}>取消</ActionBtn>
       </div>
     </div>
@@ -463,23 +468,24 @@ const FeedbackPanel: React.FC<{result: ParseResult; block: QuestionBlock|null; o
 
 
 const Label: React.FC<{children: React.ReactNode}> = ({children}) => (
-  <div style={{color:"#a6adc8", fontSize:11, textTransform:"uppercase", letterSpacing:0.5, marginBottom:2}}>
+  <div style={{color:"#94a3b8", fontSize:11, textTransform:"uppercase", letterSpacing:0.5, marginBottom:2}}>
     {children}
   </div>
 );
 
 const iconBtnStyle: React.CSSProperties = {
-  background:"none", border:"none", color:"#a6adc8",
-  cursor:"pointer", fontSize:13, padding:"2px 6px",
-  borderRadius:4, lineHeight:1, fontFamily:"system-ui,sans-serif",
+  background:"rgba(255, 255, 255, 0.04)", backgroundColor: "transparent", border:"1px solid rgba(255, 255, 255, 0.06)", color:"#f1f5f9",
+  cursor:"pointer", fontSize:13, padding:"5px 8px",
+  borderRadius:10, lineHeight:1, fontFamily:'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
 };
 
 const ActionBtn: React.FC<{children: React.ReactNode; onClick: () => void; primary?: boolean}> = ({children, onClick, primary}) => (
   <button onClick={onClick} style={{
-    padding:"5px 12px", borderRadius:6, border:"none",
-    backgroundColor: primary ? "#4f9cf9" : "#313244",
-    color: primary ? "#fff" : "#cdd6f4",
-    cursor:"pointer", fontSize:12, fontWeight: primary ? 600 : 400,
-    fontFamily:"system-ui,sans-serif",
+    padding:"8px 12px", borderRadius:12, border: primary ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(255, 255, 255, 0.08)",
+    background: primary ? "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)" : "linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)",
+    backgroundColor: "transparent",
+    color: primary ? "#ffffff" : "#e2e8f0",
+    cursor:"pointer", fontSize:12, fontWeight: 600,
+    fontFamily:'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   }}>{children}</button>
 );

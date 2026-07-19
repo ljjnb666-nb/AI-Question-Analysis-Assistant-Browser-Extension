@@ -10,6 +10,16 @@
  */
 
 import type { ExtMessage } from "@/shared/types";
+import { logEvent } from "@/shared/utils/analytics";
+import { injectContentScriptIntoTab, isInjectablePageUrl, shouldBootstrapContentScript } from "@/shared/utils/messaging";
+import { getOrCreateDeviceId } from "@/shared/utils/storage";
+
+chrome.runtime.onInstalled.addListener((details) => {
+  void getOrCreateDeviceId();
+  if (details.reason === "install") {
+    logEvent("extension_installed", { reason: details.reason });
+  }
+});
 
 chrome.runtime.onMessage.addListener((
   message: ExtMessage,
@@ -81,10 +91,15 @@ async function clickRealPoint(
     await chrome.debugger.attach(target, "1.3");
   } catch (err) {
     const text = String(err);
-    if (!/Another debugger is already attached/i.test(text)) {
+    if (/Another debugger is already attached/i.test(text)) {
+      sendResponse({
+        ok: false,
+        error: "tab is already being debugged by another session",
+      });
+    } else {
       sendResponse({ ok: false, error: text });
-      return;
     }
+    return;
   }
 
   try {
@@ -127,8 +142,14 @@ async function clickRealPoint(
 async function relayToActiveTab(message: ExtMessage) {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      await chrome.tabs.sendMessage(tab.id, message);
+    if (tab?.id && isInjectablePageUrl(tab.url)) {
+      try {
+        await chrome.tabs.sendMessage(tab.id, message);
+      } catch (err) {
+        if (!shouldBootstrapContentScript(err)) throw err;
+        await injectContentScriptIntoTab(tab.id);
+        await chrome.tabs.sendMessage(tab.id, message);
+      }
     }
   } catch (err) {
     console.warn("[BG] relay to active tab failed:", err);
