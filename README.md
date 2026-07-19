@@ -22,7 +22,9 @@ src/
   shared/       contracts, storage, parsing, utilities
 ```
 
-See [ARCHITECTURE.md](/C:/Users/LJJ2004/所有项目/quiz-solver-ext/ARCHITECTURE.md) for module responsibilities and refactor rules.
+See [docs/ARCHITECTURE.md](/C:/Users/LJJ2004/所有项目/quiz-solver-ext/docs/ARCHITECTURE.md) for module responsibilities and refactor rules.
+
+See [docs/README.md](/C:/Users/LJJ2004/所有项目/quiz-solver-ext/docs/README.md) for the documentation and screenshot layout.
 
 ## Development
 
