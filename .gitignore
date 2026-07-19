@@ -3,7 +3,13 @@ dist/
 .playwright-mcp/
 artifacts/
 coverage/
-*.png
+/analytics-server/data/*
+!/analytics-server/data/.gitkeep
+analytics-server/data/*.sqlite*
+analytics-server/data/*.json
+/*.png
 tmp_req.json
 tmp_resp.json
 output/
+test-results/
+.env.analytics.local
