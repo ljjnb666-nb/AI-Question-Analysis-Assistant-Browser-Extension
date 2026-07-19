@@ -1,8 +1,8 @@
-import { decodeFormulaLikeText, normalizeFormulaPlaceholderGlyphs, normalizeMathDisplayText } from "./formulaTextNormalization";
+import { decodeFormulaLikeText, normalizeFormulaPlaceholderGlyphs as _normalizeFormulaPlaceholderGlyphs, normalizeMathDisplayText as _normalizeMathDisplayText } from "./formulaTextNormalization";
 import {
-  extractSemanticSvgLikeText,
+  extractSemanticSvgLikeText as _extractSemanticSvgLikeText,
   findNearbySemanticFormulaTextForImage as findNearbySemanticFormulaTextForImageBase,
-  hasNearbyLargeVisualImageForSemanticNode,
+  hasNearbyLargeVisualImageForSemanticNode as _hasNearbyLargeVisualImageForSemanticNode,
 } from "./formulaSvgSemantic";
 
 const FORMULA_EMBED_SELECTOR = "embed[data-svg-latex], embed[data-latex]";

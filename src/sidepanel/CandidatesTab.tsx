@@ -1,7 +1,7 @@
 import React, { useRef } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import type { DetectedCandidate, QuestionBlock } from "@/shared/types";
+import type { DetectedCandidate, QuestionBlock as _QuestionBlock } from "@/shared/types";
 import { CandidateCard } from "./candidateViews";
 import {
   CandidateAutoSolveCard,

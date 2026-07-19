@@ -1,6 +1,6 @@
 import React from "react";
 import { AuthPasswordField, AuthVerificationCodeInput } from "@/shared/auth/AuthFields";
-import type { PopupLang } from "./popupCopy";
+import type { PopupLang as _PopupLang } from "./popupCopy";
 
 export const popupCardStyle: React.CSSProperties = {
   borderRadius: 16,

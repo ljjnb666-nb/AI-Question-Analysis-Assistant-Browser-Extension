@@ -18,22 +18,22 @@ import {
   extractStructuredQuestionText,
 } from "./domStructuredText";
 import {
-  CIRCLED_RE,
-  OPTION_RE,
-  QUESTION_RE,
+  CIRCLED_RE as _CIRCLED_RE,
+  OPTION_RE as _OPTION_RE,
+  QUESTION_RE as _QUESTION_RE,
   countBlankMarkersInText,
   countOptionMarkersInText,
   hasStrongQuestionSignal,
   inferQuestionType,
   isJudgeLikeText,
-  normalizeMathDisplayText,
+  normalizeMathDisplayText as _normalizeMathDisplayText,
   normalizeText,
-  sanitizeChoicePreviewText,
-  sanitizeJudgePreviewText,
+  sanitizeChoicePreviewText as _sanitizeChoicePreviewText,
+  sanitizeJudgePreviewText as _sanitizeJudgePreviewText,
   sanitizePreviewTextByType,
-  stripSvgCssNoise,
+  stripSvgCssNoise as _stripSvgCssNoise,
 } from "./domText";
-import { bboxIntersectsRect, isExtensionUiElement, isLikelyActionText, isLikelyControlPanelText } from "./domDetectorShared";
+import { bboxIntersectsRect, isExtensionUiElement, isLikelyActionText as _isLikelyActionText, isLikelyControlPanelText } from "./domDetectorShared";
 import {
   completenessScore,
   deduplicateBlocks,
@@ -1079,7 +1079,7 @@ function isPintiaHost(): boolean {
   return (window.location.hostname || "").toLowerCase().includes("pintia.cn");
 }
 
-function isPintiaProgrammingProblemPage(): boolean {
+function _isPintiaProgrammingProblemPage(): boolean {
   if (!isPintiaHost()) return false;
   return /\/exam\/problems\/type\/7(?:\/|$|\?)/.test(window.location.pathname);
 }

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useReducer, useRef } from "reac
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { loadSettings } from "@/shared/utils/storage";
-import { findNextFractionExpression, normalizeRenderableMathText, type UILang } from "./displayUtils";
+import type { UILang } from "./displayUtils";
 import { isRiskyCandidate } from "./batchParseHeuristics";
 import { HistoryTab } from "./HistoryTab";
 import { SettingsTab } from "./settingsPanel";

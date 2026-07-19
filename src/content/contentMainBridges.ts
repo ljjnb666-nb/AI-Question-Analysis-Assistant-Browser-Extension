@@ -64,7 +64,7 @@ import {
 } from "./fullPagePlan";
 import { refineViewportCandidate } from "./viewportCandidateRefinement";
 import type { FloatingWindowManager } from "./floating/FloatingWindowManager";
-import type { HighlightLayer as HighlightLayerInstance } from "./highlight/HighlightLayer";
+import type { HighlightLayer as _HighlightLayerInstance } from "./highlight/HighlightLayer";
 import type { CandidateStatusMap, ContentMainBridgeState } from "./contentRuntimeState";
 
 const MANUAL_PARSE_TIER_TIMEOUTS_MS = [10_000, 20_000, 30_000] as const;

@@ -19,7 +19,7 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
   let parsedByFallback = false;
   try {
     parsed = JSON.parse(clean);
-  } catch (firstErr) {
+  } catch (_firstErr) {
     logWarn("Failed to parse JSON response, attempting extraction", "buildResult", { rawText: clean.slice(0, 100) });
     const extractedJson = extractLikelyJsonPayload(clean);
     if (extractedJson) {
