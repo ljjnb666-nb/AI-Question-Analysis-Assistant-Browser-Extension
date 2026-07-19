@@ -1,0 +1,20 @@
+services:
+  analytics-server:
+    image: syncmusic-backend
+    container_name: quiz-solver-analytics-local
+    entrypoint: []
+    command: ["node", "analytics-server/index.mjs"]
+    working_dir: /app
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    env_file:
+      - .env.analytics.local
+    environment:
+      NODE_ENV: production
+      ANALYTICS_HOST: 0.0.0.0
+      ANALYTICS_PORT: 8787
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://analytics.082515.online}
+      ANALYTICS_ADMIN_TOKEN: ${ANALYTICS_ADMIN_TOKEN:-local-dev-admin-token}
+    volumes:
+      - ./:/app

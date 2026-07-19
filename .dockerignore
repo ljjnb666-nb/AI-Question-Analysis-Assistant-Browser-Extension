@@ -1,0 +1,13 @@
+.git
+.github
+.vscode
+node_modules
+dist
+artifacts
+coverage
+playwright-report
+test-results
+analytics-server/data/*.sqlite-shm
+analytics-server/data/*.sqlite-wal
+analytics-server/data/server.out.log
+*.log

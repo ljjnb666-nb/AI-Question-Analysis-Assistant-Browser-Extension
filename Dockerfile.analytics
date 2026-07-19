@@ -1,0 +1,20 @@
+ARG BASE_IMAGE=node:24-bookworm-slim
+FROM ${BASE_IMAGE}
+
+WORKDIR /app
+ENTRYPOINT []
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY analytics-server ./analytics-server
+
+ENV NODE_ENV=production
+ENV ANALYTICS_HOST=0.0.0.0
+ENV ANALYTICS_PORT=8787
+EXPOSE 8787
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
+  CMD node -e "fetch('http://127.0.0.1:8787/healthz').then((res)=>process.exit(res.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "analytics-server/index.mjs"]

@@ -1,0 +1,18 @@
+services:
+  analytics-server:
+    image: syncmusic-backend
+    container_name: quiz-solver-analytics-prod
+    entrypoint: []
+    command: ["node", "analytics-server/index.mjs"]
+    working_dir: /app
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    env_file:
+      - .env.analytics.prod
+    environment:
+      NODE_ENV: production
+      ANALYTICS_HOST: 0.0.0.0
+      ANALYTICS_PORT: 8787
+    volumes:
+      - ./:/app
