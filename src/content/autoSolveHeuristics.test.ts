@@ -1,10 +1,26 @@
 import { describe, expect, it } from "vitest";
-import type { ParseResult, QuestionBlock } from "@/shared/types";
+import type { ParseResult, QuestionBlock, HistoryEntry } from "@/shared/types";
 import {
+  countExpectedBlankParts,
+  extractAutoSolveQuestionOrder,
+  extractChoiceKeysFromResultAnswer as _extractChoiceKeysFromResultAnswer,
+  findReusableHistoryEntry as _findReusableHistoryEntry,
+  getAutoSolveFingerprint as _getAutoSolveFingerprint,
+  inferAutoSolveQuestionType as _inferAutoSolveQuestionType,
+  isLikelyIncompleteStem as _isLikelyIncompleteStem,
+  isSameAutoSolveQuestion as _isSameAutoSolveQuestion,
   isStableChoiceParseResult,
+  looksLowQualityNonChoiceAnswer as _looksLowQualityNonChoiceAnswer,
+  looksMathHeavyForAuto as _looksMathHeavyForAuto,
+  looksNonChoiceStem as _looksNonChoiceStem,
   normalizeJudgeAnswer,
+  shouldForceSecondVisionReview as _shouldForceSecondVisionReview,
   shouldPersistAutoSolveParseResult,
+  shouldPreferSecondVisionResult as _shouldPreferSecondVisionResult,
+  shouldPreferVisionResult as _shouldPreferVisionResult,
   shouldRetryUnstableChoiceParse,
+  shouldRetryWithVisionForAuto as _shouldRetryWithVisionForAuto,
+  shouldStopAutoSolveAtTail as _shouldStopAutoSolveAtTail,
   shouldUseVisionForAutoSolve,
 } from "./autoSolveHeuristics";
 
@@ -107,5 +123,103 @@ describe("autoSolveHeuristics", () => {
         "根据下图波形判断系统稳定性，下列说法正确的是（ ）。A. 稳定 B. 临界稳定 C. 不稳定 D. 无法判断",
     });
     expect(shouldUseVisionForAutoSolve(block, "auto")).toBe(true);
+  });
+
+  it("retries choice results with explicit retry warning signals", () => {
+    const result: ParseResult = {
+      blockId: "choice-3",
+      questionType: "single_choice",
+      answer: "需人工确认",
+      confidence: 0.75,
+      briefExplanation: "选项结构化结论需人工确认",
+      detailedExplanation: "",
+      recognizedText: "1. sample A. x B. y",
+      routeUsed: "text",
+      optionSelections: {},
+    };
+
+    expect(shouldRetryUnstableChoiceParse(result)).toBe(true);
+  });
+
+  it("retries choice results with incomplete stem signals", () => {
+    const result: ParseResult = {
+      blockId: "choice-4",
+      questionType: "single_choice",
+      answer: "?",
+      confidence: 0.65,
+      briefExplanation: "",
+      detailedExplanation: "",
+      recognizedText: "题干不完整",
+      routeUsed: "text",
+      warning: "missing options",
+      optionSelections: {},
+    };
+
+    expect(shouldRetryUnstableChoiceParse(result)).toBe(true);
+  });
+
+  it("treats stable multi-choice results as ready to persist", () => {
+    const result: ParseResult = {
+      blockId: "multi-1",
+      questionType: "multi_choice",
+      answer: "A,C,D",
+      confidence: 0.92,
+      briefExplanation: "",
+      detailedExplanation: "",
+      recognizedText: "1. sample A. x B. y C. z D. w",
+      routeUsed: "vision",
+      optionSelections: { A: true, C: true, D: true },
+    };
+
+    expect(isStableChoiceParseResult(result)).toBe(true);
+    expect(shouldPersistAutoSolveParseResult(result)).toBe(true);
+  });
+
+  it("rejects single-choice results with multiple selections", () => {
+    const result: ParseResult = {
+      blockId: "single-bad",
+      questionType: "single_choice",
+      answer: "A,B",
+      confidence: 0.88,
+      briefExplanation: "",
+      detailedExplanation: "",
+      recognizedText: "1. sample A. x B. y",
+      routeUsed: "text",
+      optionSelections: { A: true, B: true },
+    };
+
+    expect(isStableChoiceParseResult(result)).toBe(false);
+    expect(shouldPersistAutoSolveParseResult(result)).toBe(false);
+  });
+
+  it("treats non-choice question types as always stable", () => {
+    const fillResult: ParseResult = {
+      blockId: "fill-1",
+      questionType: "fill_blank",
+      answer: "(1) 超前校正；(2) 稳态",
+      confidence: 0.85,
+      briefExplanation: "",
+      detailedExplanation: "",
+      recognizedText: "填空题",
+      routeUsed: "text",
+    };
+
+    expect(isStableChoiceParseResult(fillResult)).toBe(true);
+    expect(shouldPersistAutoSolveParseResult(fillResult)).toBe(true);
+    expect(shouldRetryUnstableChoiceParse(fillResult)).toBe(false);
+
+    const shortResult: ParseResult = {
+      blockId: "short-1",
+      questionType: "short_answer",
+      answer: "系统的稳定性取决于特征方程的根",
+      confidence: 0.90,
+      briefExplanation: "",
+      detailedExplanation: "",
+      recognizedText: "简答题",
+      routeUsed: "vision",
+    };
+
+    expect(isStableChoiceParseResult(shortResult)).toBe(true);
+    expect(shouldPersistAutoSolveParseResult(shortResult)).toBe(true);
   });
 });
