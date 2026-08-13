@@ -1,5 +1,5 @@
 import type { BoundingBox, QuestionBlock, QuestionType } from "@/shared/types";
-import { CIRCLED_RE, OPTION_RE, QUESTION_RE, countOptionMarkersInText, inferQuestionType, normalizeText } from "./domText";
+import { CIRCLED_RE, OPTION_RE, QUESTION_RE, inferQuestionType, normalizeText } from "./domText";
 import { isLikelyControlPanelText } from "./domDetectorShared";
 import { attachQuestionIdentity } from "../questionIdentity";
 import { evaluateQuestionCompleteness } from "./questionCompleteness";
@@ -159,7 +159,7 @@ function shouldMergeBlocks(a: QuestionBlock, b: QuestionBlock): boolean {
   return complementary || fragmentJoin; */
 }
 
-function extractLeadingQuestionNumber(text: string): number | null {
+function _extractLeadingQuestionNumber(text: string): number | null {
   const normalized = normalizeText(text);
   const match = normalized.match(/^(\d{1,3})\s*[\.、\)）]/);
   if (!match) return null;
