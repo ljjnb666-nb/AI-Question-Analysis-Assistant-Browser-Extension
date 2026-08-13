@@ -10,12 +10,11 @@ export function resolveQuestionOwnership(previous: QuestionFragment, next: Quest
   const nextStem = next.hasStrongStemSignal && !isOptionContinuation(next);
   if (previous.hasCompleteOptionSetSignal && nextStem) return different("complete-options-before-new-stem", .98);
   if (previous.viewportState === "clipped-top" && previous.hasOptionSignal && nextStem) return different("partial-top", .97);
-  if (previous.ownerElement && next.ownerElement && previous.ownerElement !== next.ownerElement) return different("different-owner-container", .96);
+  if (previous.ownerKey && next.ownerKey && previous.ownerKey !== next.ownerKey) return different("different-owner-container", .96);
   const complementary = previous.hasOptionSignal !== next.hasOptionSignal || (previous.hasQuestionStartSignal && next.hasOptionSignal);
   if (previous.nativeQuestionId && previous.nativeQuestionId === next.nativeQuestionId && complementary) return same("same-native-id", .98);
   if (previous.ordinalHint && previous.ordinalHint === next.ordinalHint && complementary) return same("same-ordinal", .95);
-  if (previous.ownerElement && previous.ownerElement === next.ownerElement && complementary) return same("same-owner-container", .94);
-  if (isOptionContinuation(next) && previous.hasOptionSignal && !next.hasStrongStemSignal) return same("option-continuation", .82);
+  if (previous.ownerKey && previous.ownerKey === next.ownerKey && complementary) return same("same-owner-container", .94);
   return { relation: "unknown", confidence: .25, reasons: ["conflicting-evidence"] };
 }
 

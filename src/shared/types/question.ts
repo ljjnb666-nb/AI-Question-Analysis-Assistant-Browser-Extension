@@ -21,6 +21,10 @@ export interface QuestionBlock {
   id: string;
   /** Optional during migration so legacy chrome.storage records remain readable. */
   identity?: QuestionIdentity;
+  /** Full semantic text used only to derive identity; never a UI preview. */
+  identitySourceText?: string;
+  /** Scan-local semantic owner; not persisted identity or history key. */
+  runtimeOwnerKey?: string;
   /** Optional so persisted Phase 0/1 records remain readable. */
   boundary?: QuestionBoundaryInfo;
   /** Optional so manual capture preserves legacy behavior. */

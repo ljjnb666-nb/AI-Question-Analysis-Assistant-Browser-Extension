@@ -15,11 +15,11 @@ export interface QuestionFragment {
   hasOptionSignal: boolean;
   hasCompleteOptionSetSignal: boolean;
   viewportState: ViewportState;
-  ownerElement?: Element | null;
+  ownerKey?: string;
 }
 
 const STEM_RE = /(?:which|what|please choose|calculate|given|determine|judge|select|下列|请选择|判断|计算|已知|根据|设)/i;
-export function questionFragmentFromBlock(block: QuestionBlock, ownerElement?: Element | null): QuestionFragment {
+export function questionFragmentFromBlock(block: QuestionBlock): QuestionFragment {
   const text = normalizeText(block.previewText);
   const optionKeys = Array.from(text.matchAll(/(?:^|\s)([A-F])(?:[.):：、】【])/g)).map(match => match[1]);
   const boundary = classifyViewportBoundary(block.bbox);
@@ -31,6 +31,6 @@ export function questionFragmentFromBlock(block: QuestionBlock, ownerElement?: E
     hasStrongStemSignal: STEM_RE.test(text) || /[?？]/.test(text),
     hasOptionSignal: countOptionMarkersInText(text) > 0,
     hasCompleteOptionSetSignal: new Set(optionKeys).size >= 4,
-    viewportState: boundary.state, ownerElement,
+    viewportState: boundary.state, ownerKey: block.runtimeOwnerKey,
   };
 }

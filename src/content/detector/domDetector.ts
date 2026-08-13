@@ -45,6 +45,7 @@ import {
 import { buildPreviewText, buildPreviewTextForBbox, getElementReadableText } from "./domDetectorPreview";
 import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "./domDetectorVisual";
 import { attachQuestionIdentity } from "../questionIdentity";
+import { classifyViewportBoundary } from "./questionBoundary";
 
 let mutationObserver: MutationObserver | null = null;
 let pendingRescan = false;
@@ -144,6 +145,9 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
       questionTypeGuess: guessed,
       confidence: 0.9,
       source: "auto_dom",
+      identitySourceText: text,
+      runtimeOwnerKey: `direct-card-${directIndex}`,
+      boundary: boundaryFromRawRect(rawRect, vh),
     }, rectSource, { identityText: text });
 
     const gid = `direct-card-${directIndex}`;
@@ -209,6 +213,9 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
       questionTypeGuess: candidateType,
       confidence: score.confidence,
       source: "auto_dom",
+      identitySourceText: text,
+      runtimeOwnerKey: getGroupId(el),
+      boundary: boundaryFromRawRect(rawRect, vh),
     }, el, { identityText: text });
 
     const gid = getGroupId(el);
@@ -280,6 +287,9 @@ function buildStableStructuredContainerCandidates(
       questionTypeGuess: candidateType,
       confidence: 0.94,
       source: "auto_dom",
+      identitySourceText: readableText,
+      runtimeOwnerKey: `structured-${index}`,
+      boundary: boundaryFromRawRect(rawRect, vh),
     }, hostContainer, { identityText: readableText }));
   }
 
@@ -338,6 +348,9 @@ function buildPintiaCodeProblemCandidates(
       questionTypeGuess: "short_answer",
       confidence: 0.91,
       source: "auto_dom",
+      identitySourceText: text,
+      runtimeOwnerKey: `pintia-code-${index}`,
+      boundary: boundaryFromRawRect(rawRect, vh),
     }, el, { identityText: text }));
   }
 
@@ -381,6 +394,9 @@ function buildPintiaQuestionListCandidates(
       questionTypeGuess: candidateType,
       confidence: 0.93,
       source: "auto_dom",
+      identitySourceText: text,
+      runtimeOwnerKey: `pintia-list-${index}`,
+      boundary: boundaryFromRawRect(rawRect, vh),
     }, el, { identityText: text }));
   }
 
@@ -505,6 +521,9 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
           questionTypeGuess: score.type,
           confidence: score.confidence * 0.9,
           source: "auto_dom",
+          identitySourceText: text,
+          runtimeOwnerKey: `iframe-${Array.from(iframes).indexOf(iframe)}-${(el as HTMLElement).tagName}`,
+          boundary: boundaryFromRawRect({ top: frameRect.top + r.top, height: r.height } as DOMRect, vh),
         }, el, { identityText: text }));
       }
     } catch (err) {
@@ -512,6 +531,15 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
     }
   }
   return blocks;
+}
+
+function boundaryFromRawRect(rect: Pick<DOMRect, "top" | "height">, viewportHeight: number) {
+  const evidence = classifyViewportBoundary({ y: rect.top, height: rect.height }, { innerHeight: viewportHeight } as Window);
+  return {
+    state: evidence.state === "fully-visible" ? "complete" as const : evidence.state === "clipped-top" ? "partial-top" as const : evidence.state === "clipped-bottom" ? "partial-bottom" as const : "partial-both" as const,
+    clippedTop: evidence.clippedTop, clippedBottom: evidence.clippedBottom, confidence: evidence.visibleRatio,
+    reasons: [evidence.clippedTop ? "Q_BOUNDARY_PARTIAL_TOP" : "", evidence.clippedBottom ? "Q_BOUNDARY_PARTIAL_BOTTOM" : ""].filter(Boolean),
+  };
 }
 
 function scoreElement(el: Element, text: string): { confidence: number; type: QuestionType; hasImage: boolean } {

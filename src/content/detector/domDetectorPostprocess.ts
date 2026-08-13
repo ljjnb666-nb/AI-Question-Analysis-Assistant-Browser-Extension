@@ -73,32 +73,23 @@ export function filterFragmentBlocks(blocks: QuestionBlock[]): QuestionBlock[] {
 export function mergeAdjacentQuestionBlocks(blocks: QuestionBlock[]): QuestionBlock[] {
   if (blocks.length <= 1) return blocks;
   const sorted = [...blocks].sort((a, b) => a.bbox.y - b.bbox.y || a.bbox.x - b.bbox.x);
-  const used = new Array(sorted.length).fill(false);
   const out: QuestionBlock[] = [];
-
-  for (let i = 0; i < sorted.length; i++) {
-    if (used[i]) continue;
-    let cur = sorted[i];
-    for (let j = i + 1; j < sorted.length; j++) {
-      if (used[j]) continue;
-      const next = sorted[j];
-      if (!shouldMergeBlocks(cur, next)) continue;
-      cur = mergeTwoBlocks(cur, next);
-      used[j] = true;
-    }
-    out.push(cur);
+  for (const block of sorted) {
+    const previous = out[out.length - 1];
+    if (previous && shouldMergeBlocks(previous, block)) out[out.length - 1] = mergeTwoBlocks(previous, block);
+    else out.push(block);
   }
 
   return out.map(withQuestionCompleteness);
 }
 
 export function withQuestionCompleteness(block: QuestionBlock): QuestionBlock {
-  const viewport = classifyViewportBoundary(block.bbox);
+  const viewport = block.boundary ? null : classifyViewportBoundary(block.bbox);
   const boundary = {
-    state: viewport.state === "fully-visible" ? "complete" as const : viewport.state === "clipped-top" ? "partial-top" as const : viewport.state === "clipped-bottom" ? "partial-bottom" as const : "partial-both" as const,
-    clippedTop: viewport.clippedTop, clippedBottom: viewport.clippedBottom,
-    confidence: viewport.visibleRatio,
-    reasons: [viewport.clippedTop ? "Q_BOUNDARY_PARTIAL_TOP" : "", viewport.clippedBottom ? "Q_BOUNDARY_PARTIAL_BOTTOM" : ""].filter(Boolean),
+    state: block.boundary?.state ?? (viewport!.state === "fully-visible" ? "complete" as const : viewport!.state === "clipped-top" ? "partial-top" as const : viewport!.state === "clipped-bottom" ? "partial-bottom" as const : "partial-both" as const),
+    clippedTop: block.boundary?.clippedTop ?? viewport!.clippedTop, clippedBottom: block.boundary?.clippedBottom ?? viewport!.clippedBottom,
+    confidence: block.boundary?.confidence ?? viewport!.visibleRatio,
+    reasons: block.boundary?.reasons ?? [viewport!.clippedTop ? "Q_BOUNDARY_PARTIAL_TOP" : "", viewport!.clippedBottom ? "Q_BOUNDARY_PARTIAL_BOTTOM" : ""].filter(Boolean),
   };
   const result = { ...block, boundary };
   return { ...result, completeness: evaluateQuestionCompleteness(result) };
@@ -130,7 +121,7 @@ function shouldMergeBlocks(a: QuestionBlock, b: QuestionBlock): boolean {
   if (a.id.startsWith("auto-direct-") && b.id.startsWith("auto-direct-")) return false;
   const ownership = resolveQuestionOwnership(questionFragmentFromBlock(a), questionFragmentFromBlock(b));
   return ownership.relation === "same-question" && ownership.confidence >= 0.8;
-
+/*
   const orderA = extractLeadingQuestionNumber(a.previewText);
   const orderB = extractLeadingQuestionNumber(b.previewText);
   if (orderA !== null && orderB !== null && orderA !== orderB) return false;
@@ -165,7 +156,7 @@ function shouldMergeBlocks(a: QuestionBlock, b: QuestionBlock): boolean {
       (!bLooksComplete && (aHasOptions || aLooksStem))
     );
 
-  return complementary || fragmentJoin;
+  return complementary || fragmentJoin; */
 }
 
 function extractLeadingQuestionNumber(text: string): number | null {
@@ -182,6 +173,7 @@ function mergeTwoBlocks(a: QuestionBlock, b: QuestionBlock): QuestionBlock {
   const right = Math.max(a.bbox.x + a.bbox.width, b.bbox.x + b.bbox.width);
   const bottom = Math.max(a.bbox.y + a.bbox.height, b.bbox.y + b.bbox.height);
 
+  const identityText = normalizeText([a.identitySourceText ?? a.previewText, b.identitySourceText ?? b.previewText].filter(Boolean).join(" "));
   const combinedText = normalizeText([a.previewText, b.previewText].filter(Boolean).join(" "));
   const typeA = a.questionTypeGuess;
   const typeB = b.questionTypeGuess;
@@ -200,10 +192,11 @@ function mergeTwoBlocks(a: QuestionBlock, b: QuestionBlock): QuestionBlock {
     id: a.id,
     bbox: { x: left, y: top, width: Math.max(20, right - left), height: Math.max(20, bottom - top) },
     previewText: combinedText.slice(0, 900),
+    identitySourceText: identityText,
     hasImage: a.hasImage || b.hasImage,
     questionTypeGuess: mergedType,
     confidence: Math.min(1, Math.max(a.confidence, b.confidence) + 0.05),
-  }, undefined, { identityText: combinedText, nativeQuestionId });
+  }, undefined, { identityText, nativeQuestionId });
 }
 
 function candidateQualityScore(block: QuestionBlock): number {

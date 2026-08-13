@@ -16,13 +16,12 @@ describe("resolveQuestionOwnership", () => {
   it("B3/B4/B6/B9 permits only complementary semantic fragments", () => {
     expect(resolveQuestionOwnership(fragment({ ordinalHint: 1, hasQuestionStartSignal: true }), fragment({ ordinalHint: 1, hasOptionSignal: true, optionKeys: ["C", "D"] })).relation).toBe("same-question");
     expect(resolveQuestionOwnership(fragment({ nativeQuestionId: "q1", hasQuestionStartSignal: true }), fragment({ nativeQuestionId: "q1", hasOptionSignal: true })).relation).toBe("same-question");
-    const owner = document.createElement("section");
-    expect(resolveQuestionOwnership(fragment({ ownerElement: owner, hasQuestionStartSignal: true }), fragment({ ownerElement: owner, hasOptionSignal: true, optionKeys: ["C", "D"] })).relation).toBe("same-question");
+    expect(resolveQuestionOwnership(fragment({ ownerKey: "same", hasQuestionStartSignal: true }), fragment({ ownerKey: "same", hasOptionSignal: true, optionKeys: ["C", "D"] })).relation).toBe("same-question");
   });
   it("B5/B7/B8 rejects authoritative conflicts", () => {
     expect(resolveQuestionOwnership(fragment({ nativeQuestionId: "a" }), fragment({ nativeQuestionId: "b" })).relation).toBe("different-question");
     expect(resolveQuestionOwnership(fragment({ ordinalHint: 1 }), fragment({ ordinalHint: 2 })).relation).toBe("different-question");
-    expect(resolveQuestionOwnership(fragment({ ownerElement: document.createElement("div") }), fragment({ ownerElement: document.createElement("div") })).relation).toBe("different-question");
+    expect(resolveQuestionOwnership(fragment({ ownerKey: "a" }), fragment({ ownerKey: "b" })).relation).toBe("different-question");
   });
   it("B10/B12 makes geometry-only evidence unknown and native identity win over distance", () => {
     expect(resolveQuestionOwnership(fragment(), fragment()).relation).toBe("unknown");

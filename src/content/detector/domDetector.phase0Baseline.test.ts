@@ -68,8 +68,8 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
   });
 
   it("merges legitimate stem plus option continuation with the same ordinal", () => {
-    const stem = { id: "stem", bbox: { x: 60, y: 20, width: 760, height: 120 }, previewText: "14. Which value is correct? A. one B. two", hasImage: false, questionTypeGuess: "single_choice" as const, confidence: .8, source: "auto_dom" as const };
-    const tail = { id: "tail", bbox: { x: 60, y: 144, width: 760, height: 80 }, previewText: "14. C. three D. four", hasImage: false, questionTypeGuess: "single_choice" as const, confidence: .8, source: "auto_dom" as const };
+    const stem = { id: "stem", bbox: { x: 60, y: 20, width: 760, height: 120 }, previewText: "14. Which value is correct? A. one B. two", hasImage: false, questionTypeGuess: "single_choice" as const, confidence: .8, source: "auto_dom" as const, runtimeOwnerKey: "q14" };
+    const tail = { id: "tail", bbox: { x: 60, y: 144, width: 760, height: 80 }, previewText: "14. C. three D. four", hasImage: false, questionTypeGuess: "single_choice" as const, confidence: .8, source: "auto_dom" as const, runtimeOwnerKey: "q14" };
     expect(mergeAdjacentQuestionBlocks([stem, tail])).toHaveLength(1);
   });
 

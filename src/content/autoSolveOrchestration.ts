@@ -13,6 +13,7 @@ import {
 import { prepareAutoSolveIteration } from "./autoSolveLoopState";
 import { handleAnsweredQuestionPhase } from "./autoSolveAnsweredQuestion";
 import { resolveAutoSolveQuestion } from "./autoSolveQuestionResolution";
+import { getAutomaticQuestionEligibility } from "./automaticQuestionEligibility";
 import { advanceAfterSolvedQuestion, toProgressBlock } from "./autoSolveFlow";
 import { reportSolvedQuestionAndAdvance } from "./autoSolveImmediateAdvance";
 import {
@@ -232,6 +233,12 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
       if (iteration.kind === "done") return;
 
       const { currentBlock, currentOrder } = iteration;
+      const eligibility = getAutomaticQuestionEligibility(currentBlock);
+      if (eligibility !== "eligible") {
+        deps.sendAutoSolveProgress({ running: true, solved, filled, total, current: solved + 1, statusText: `SKIPPED_${eligibility.toUpperCase()}`, currentQuestionId: currentBlock.id, currentPreview: currentBlock.previewText, currentBlock: toProgressBlock(currentBlock) });
+        if (driveFromOrderedPlan) incrementOrderedPlanCursor(orderedPlanState);
+        continue;
+      }
       const answerState = deps.inspectAutoSolveAnswerState(currentBlock);
       const answeredPhase = await handleAnsweredQuestionPhase(
         {
