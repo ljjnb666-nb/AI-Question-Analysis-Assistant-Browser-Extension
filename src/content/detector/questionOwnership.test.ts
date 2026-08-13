@@ -27,4 +27,8 @@ describe("resolveQuestionOwnership", () => {
     expect(resolveQuestionOwnership(fragment(), fragment()).relation).toBe("unknown");
     expect(resolveQuestionOwnership(fragment({ nativeQuestionId: "q", hasQuestionStartSignal: true }), fragment({ nativeQuestionId: "q", hasOptionSignal: true, bbox: { x: 0, y: 9000, width: 1, height: 1 } })).relation).toBe("same-question");
   });
+  it("uses trusted clipped boundary evidence even if the bbox was clamped", () => {
+    const previous = fragment({ viewportState: "clipped-top", hasOptionSignal: true });
+    expect(resolveQuestionOwnership(previous, fragment({ hasStrongStemSignal: true }), { verticalGap: 4, horizontalOverlapRatio: 1 }).relation).toBe("different-question");
+  });
 });

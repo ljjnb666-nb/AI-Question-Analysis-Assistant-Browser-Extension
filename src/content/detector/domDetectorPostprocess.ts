@@ -119,7 +119,9 @@ export function deduplicateBlocks(blocks: QuestionBlock[]): QuestionBlock[] {
 
 function shouldMergeBlocks(a: QuestionBlock, b: QuestionBlock): boolean {
   if (a.id.startsWith("auto-direct-") && b.id.startsWith("auto-direct-")) return false;
-  const ownership = resolveQuestionOwnership(questionFragmentFromBlock(a), questionFragmentFromBlock(b));
+  const verticalGap = Math.max(0, b.bbox.y - (a.bbox.y + a.bbox.height));
+  const overlap = Math.max(0, Math.min(a.bbox.x + a.bbox.width, b.bbox.x + b.bbox.width) - Math.max(a.bbox.x, b.bbox.x));
+  const ownership = resolveQuestionOwnership(questionFragmentFromBlock(a), questionFragmentFromBlock(b), { verticalGap, horizontalOverlapRatio: overlap / Math.max(1, Math.min(a.bbox.width, b.bbox.width)) });
   return ownership.relation === "same-question" && ownership.confidence >= 0.8;
 /*
   const orderA = extractLeadingQuestionNumber(a.previewText);

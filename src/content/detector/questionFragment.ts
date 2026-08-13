@@ -22,7 +22,9 @@ const STEM_RE = /(?:which|what|please choose|calculate|given|determine|judge|sel
 export function questionFragmentFromBlock(block: QuestionBlock): QuestionFragment {
   const text = normalizeText(block.previewText);
   const optionKeys = Array.from(text.matchAll(/(?:^|\s)([A-F])(?:[.):：、】【])/g)).map(match => match[1]);
-  const boundary = classifyViewportBoundary(block.bbox);
+  const boundaryState: ViewportState = block.boundary
+    ? block.boundary.state === "complete" ? "fully-visible" : block.boundary.state === "partial-top" ? "clipped-top" : block.boundary.state === "partial-bottom" ? "clipped-bottom" : "clipped-both"
+    : classifyViewportBoundary(block.bbox).state;
   return {
     runtimeId: block.id, text, bbox: block.bbox, questionType: block.questionTypeGuess,
     ordinalHint: block.identity?.ordinalHint,
@@ -31,6 +33,6 @@ export function questionFragmentFromBlock(block: QuestionBlock): QuestionFragmen
     hasStrongStemSignal: STEM_RE.test(text) || /[?？]/.test(text),
     hasOptionSignal: countOptionMarkersInText(text) > 0,
     hasCompleteOptionSetSignal: new Set(optionKeys).size >= 4,
-    viewportState: boundary.state, ownerKey: block.runtimeOwnerKey,
+    viewportState: boundaryState, ownerKey: block.runtimeOwnerKey,
   };
 }

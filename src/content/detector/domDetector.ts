@@ -96,16 +96,15 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
 
   const grouped = new Map<string, QuestionBlock>();
   const groupRank = new Map<string, number>();
-  const groupIdMap = new WeakMap<Element, string>();
-  let groupCounter = 0;
+  const ownerKeyMap = new WeakMap<Element, string>();
+  let ownerCounter = 0;
 
   const getGroupId = (el: Element): string => {
-    const container = findQuestionContainer(el);
-    if (!container) return `self-${(el as HTMLElement).tagName}`;
-    const existing = groupIdMap.get(container);
+    const container = findQuestionContainer(el) ?? el;
+    const existing = ownerKeyMap.get(container);
     if (existing) return existing;
-    const id = `g-${++groupCounter}`;
-    groupIdMap.set(container, id);
+    const id = `owner-${++ownerCounter}`;
+    ownerKeyMap.set(container, id);
     return id;
   };
 
@@ -491,7 +490,7 @@ function getStableQuestionCardContainers(): Element[] {
 function scanIframes(vw: number, vh: number): QuestionBlock[] {
   const blocks: QuestionBlock[] = [];
   const iframes = document.querySelectorAll("iframe");
-  for (const iframe of iframes) {
+  for (const [frameIndex, iframe] of Array.from(iframes).entries()) {
     try {
       const doc = iframe.contentDocument;
       if (!doc) continue;
@@ -499,6 +498,8 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
       if (!inViewport(frameRect, vw, vh)) continue;
 
       const els = doc.querySelectorAll("p,div,li,section,article");
+      const frameOwnerKeys = new WeakMap<Element, string>();
+      let frameOwnerCounter = 0;
       for (const el of els) {
         const text = normalizeText(el.textContent ?? "");
         if (!text || text.length < 12 || isLikelyControlPanelText(text)) continue;
@@ -522,7 +523,7 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
           confidence: score.confidence * 0.9,
           source: "auto_dom",
           identitySourceText: text,
-          runtimeOwnerKey: `iframe-${Array.from(iframes).indexOf(iframe)}-${(el as HTMLElement).tagName}`,
+          runtimeOwnerKey: getIframeRuntimeOwnerKey(el, frameIndex, frameOwnerKeys, () => ++frameOwnerCounter),
           boundary: boundaryFromRawRect({ top: frameRect.top + r.top, height: r.height } as DOMRect, vh),
         }, el, { identityText: text }));
       }
@@ -531,6 +532,15 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
     }
   }
   return blocks;
+}
+
+function getIframeRuntimeOwnerKey(el: Element, frameIndex: number, keys: WeakMap<Element, string>, next: () => number): string {
+  const owner = el.closest(".question-item,.questionBox,.base-question-component,article,section") ?? el;
+  const existing = keys.get(owner);
+  if (existing) return existing;
+  const key = `iframe-${frameIndex}-owner-${next()}`;
+  keys.set(owner, key);
+  return key;
 }
 
 function boundaryFromRawRect(rect: Pick<DOMRect, "top" | "height">, viewportHeight: number) {

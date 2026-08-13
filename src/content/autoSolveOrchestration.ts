@@ -237,6 +237,10 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
       if (eligibility !== "eligible") {
         deps.sendAutoSolveProgress({ running: true, solved, filled, total, current: solved + 1, statusText: `SKIPPED_${eligibility.toUpperCase()}`, currentQuestionId: currentBlock.id, currentPreview: currentBlock.previewText, currentBlock: toProgressBlock(currentBlock) });
         if (driveFromOrderedPlan) incrementOrderedPlanCursor(orderedPlanState);
+        else {
+          const advanceResult = await advanceAfterSolvedQuestion({ currentBlock, currentOrder, driveFromOrderedPlan, filled, fixedTotal, lastFingerprint, solved, total }, advanceAfterSolvedQuestionDeps);
+          if (advanceResult === "done") return;
+        }
         continue;
       }
       const answerState = deps.inspectAutoSolveAnswerState(currentBlock);
