@@ -13,6 +13,7 @@ export default defineConfig({
       exclude: [
         "node_modules/",
         "src/test/",
+        "**/testFixtures/**",
         "**/*.d.ts",
         "**/*.config.*",
         "**/mockData.ts",
