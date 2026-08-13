@@ -51,6 +51,13 @@ export async function resolveAutoSolveQuestion(
   let progressMessage: string;
   let filledDelta = 0;
 
+  if (
+    options.currentBlock.completeness?.state === "incomplete"
+    || (options.currentBlock.completeness?.state === "unknown" && options.currentBlock.completeness.confidence < 0.7)
+  ) {
+    return { filledDelta: 0, questionCompleted: true, progressMessage: "INCOMPLETE_QUESTION: automatic solver withheld this candidate." };
+  }
+
   try {
     const parseOnce = () => (
       options.needsHistoryReview

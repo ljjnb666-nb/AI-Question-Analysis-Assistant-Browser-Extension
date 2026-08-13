@@ -1,6 +1,11 @@
 import type { BoundingBox, QuestionBlock, QuestionType } from "@/shared/types";
 import { CIRCLED_RE, OPTION_RE, QUESTION_RE, countOptionMarkersInText, inferQuestionType, normalizeText } from "./domText";
 import { isLikelyControlPanelText } from "./domDetectorShared";
+import { attachQuestionIdentity } from "../questionIdentity";
+import { evaluateQuestionCompleteness } from "./questionCompleteness";
+import { questionFragmentFromBlock } from "./questionFragment";
+import { resolveQuestionOwnership } from "./questionOwnership";
+import { classifyViewportBoundary } from "./questionBoundary";
 
 export function isLikelyCompleteQuestionText(text: string, type: QuestionType): boolean {
   if (!text) return false;
@@ -84,7 +89,19 @@ export function mergeAdjacentQuestionBlocks(blocks: QuestionBlock[]): QuestionBl
     out.push(cur);
   }
 
-  return out;
+  return out.map(withQuestionCompleteness);
+}
+
+export function withQuestionCompleteness(block: QuestionBlock): QuestionBlock {
+  const viewport = classifyViewportBoundary(block.bbox);
+  const boundary = {
+    state: viewport.state === "fully-visible" ? "complete" as const : viewport.state === "clipped-top" ? "partial-top" as const : viewport.state === "clipped-bottom" ? "partial-bottom" as const : "partial-both" as const,
+    clippedTop: viewport.clippedTop, clippedBottom: viewport.clippedBottom,
+    confidence: viewport.visibleRatio,
+    reasons: [viewport.clippedTop ? "Q_BOUNDARY_PARTIAL_TOP" : "", viewport.clippedBottom ? "Q_BOUNDARY_PARTIAL_BOTTOM" : ""].filter(Boolean),
+  };
+  const result = { ...block, boundary };
+  return { ...result, completeness: evaluateQuestionCompleteness(result) };
 }
 
 export function deduplicateBlocks(blocks: QuestionBlock[]): QuestionBlock[] {
@@ -111,6 +128,8 @@ export function deduplicateBlocks(blocks: QuestionBlock[]): QuestionBlock[] {
 
 function shouldMergeBlocks(a: QuestionBlock, b: QuestionBlock): boolean {
   if (a.id.startsWith("auto-direct-") && b.id.startsWith("auto-direct-")) return false;
+  const ownership = resolveQuestionOwnership(questionFragmentFromBlock(a), questionFragmentFromBlock(b));
+  return ownership.relation === "same-question" && ownership.confidence >= 0.8;
 
   const orderA = extractLeadingQuestionNumber(a.previewText);
   const orderB = extractLeadingQuestionNumber(b.previewText);
@@ -173,7 +192,10 @@ function mergeTwoBlocks(a: QuestionBlock, b: QuestionBlock): QuestionBlock {
         ? typeB
         : inferQuestionType(combinedText);
 
-  return {
+  const nativeQuestionId = a.identity?.nativeQuestionId === b.identity?.nativeQuestionId
+    ? a.identity?.nativeQuestionId
+    : a.identity?.nativeQuestionId ?? b.identity?.nativeQuestionId;
+  return attachQuestionIdentity({
     ...a,
     id: a.id,
     bbox: { x: left, y: top, width: Math.max(20, right - left), height: Math.max(20, bottom - top) },
@@ -181,7 +203,7 @@ function mergeTwoBlocks(a: QuestionBlock, b: QuestionBlock): QuestionBlock {
     hasImage: a.hasImage || b.hasImage,
     questionTypeGuess: mergedType,
     confidence: Math.min(1, Math.max(a.confidence, b.confidence) + 0.05),
-  };
+  }, undefined, { identityText: combinedText, nativeQuestionId });
 }
 
 function candidateQualityScore(block: QuestionBlock): number {

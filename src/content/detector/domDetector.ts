@@ -40,6 +40,7 @@ import {
   filterFragmentBlocks,
   isLikelyCompleteQuestionText,
   mergeAdjacentQuestionBlocks,
+  withQuestionCompleteness,
 } from "./domDetectorPostprocess";
 import { buildPreviewText, buildPreviewTextForBbox, getElementReadableText } from "./domDetectorPreview";
 import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "./domDetectorVisual";
@@ -156,14 +157,14 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
 
   if (!preferDirectCardMode) {
     if (pintiaQuestionListBlocks.length > 0) {
-      return filterFragmentBlocks(deduplicateBlocks(pintiaQuestionListBlocks).sort((a, b) => a.bbox.y - b.bbox.y));
+      return filterFragmentBlocks(deduplicateBlocks(pintiaQuestionListBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
     }
     const stableContainerBlocks = buildStableStructuredContainerCandidates(stableQuestionCards, hostRightCutX, vw, vh);
     if (stableContainerBlocks.length > 0) {
-      return filterFragmentBlocks(deduplicateBlocks(stableContainerBlocks).sort((a, b) => a.bbox.y - b.bbox.y));
+      return filterFragmentBlocks(deduplicateBlocks(stableContainerBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
     }
     if (pintiaCodeProblemBlocks.length > 0 && !hasStructuredContainers) {
-      return filterFragmentBlocks(deduplicateBlocks(pintiaCodeProblemBlocks).sort((a, b) => a.bbox.y - b.bbox.y));
+      return filterFragmentBlocks(deduplicateBlocks(pintiaCodeProblemBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
     }
   }
 
@@ -225,7 +226,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
   // when direct-card mode is active, return card candidates only.
   // This prevents cross-question merging/fragment filtering side-effects.
   if (preferDirectCardMode && blocks.length > 0) {
-    return blocks.sort((a, b) => a.bbox.y - b.bbox.y);
+    return blocks.sort((a, b) => a.bbox.y - b.bbox.y).map(withQuestionCompleteness);
   }
 
   try {
@@ -235,7 +236,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
   }
 
   const merged = mergeAdjacentQuestionBlocks(deduplicateBlocks(blocks).sort((a, b) => a.bbox.y - b.bbox.y));
-  return filterFragmentBlocks(merged);
+  return filterFragmentBlocks(merged).map(withQuestionCompleteness);
 }
 
 function buildStableStructuredContainerCandidates(
