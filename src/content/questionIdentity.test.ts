@@ -57,13 +57,50 @@ describe("Question Model V2 stable identity", () => {
     expect(q4.stableId).not.toBe(q7.stableId);
   });
 
-  it("uses a stable native question id over ordinal movement and ignores unstable-looking ids", () => {
+  it("keeps the same stable native identity across equivalent rerenders", () => {
+    const native = document.createElement("div");
+    native.setAttribute("data-question-id", "1");
+    const first = buildQuestionIdentity(input({ element: native }));
+    const second = buildQuestionIdentity(input({ element: native }));
+    expect(first.strategy).toBe("native-id");
+    expect(first.contentFingerprint).toBe(second.contentFingerprint);
+    expect(first.stableId).toBe(second.stableId);
+  });
+
+  it("keeps a native identity stable when only the ordinal moves", () => {
     const native = document.createElement("div");
     native.setAttribute("data-question-id", "92831");
     const first = buildQuestionIdentity(input({ element: native }));
     const second = buildQuestionIdentity(input({ element: native, text: "6. Which answer is correct? A. one B. two C. three D. four" }));
-    expect(first.strategy).toBe("native-id");
+    expect(first.contentFingerprint).toBe(second.contentFingerprint);
     expect(first.stableId).toBe(second.stableId);
+  });
+
+  it("binds a native identity to semantic stem and option content", () => {
+    const native = document.createElement("div");
+    native.setAttribute("data-question-id", "1");
+    const base = buildQuestionIdentity(input({ element: native }));
+    const changedStem = buildQuestionIdentity(input({ element: native, text: "4. Which answer is incorrect? A. one B. two C. three D. four" }));
+    const changedOption = buildQuestionIdentity(input({ element: native, text: "4. Which answer is correct? A. one B. two C. changed D. four" }));
+    expect(changedStem.contentFingerprint).not.toBe(base.contentFingerprint);
+    expect(changedStem.stableId).not.toBe(base.stableId);
+    expect(changedOption.contentFingerprint).not.toBe(base.contentFingerprint);
+    expect(changedOption.stableId).not.toBe(base.stableId);
+  });
+
+  it("does not reuse history when a same-host native id is reused for different content", () => {
+    const native = document.createElement("div");
+    native.setAttribute("data-question-id", "1");
+    const questionA = attachQuestionIdentity({ id: "assignment-100", bbox: { x: 0, y: 0, width: 700, height: 200 }, previewText: "1. What is 1+1? A. 1 B. 2 C. 3 D. 4", hasImage: false, questionTypeGuess: "single_choice", confidence: 1, source: "auto_dom" }, native);
+    const questionB = attachQuestionIdentity({ id: "assignment-200", bbox: { x: 0, y: 0, width: 700, height: 200 }, previewText: "1. What is the capital of France? A. Paris B. Rome C. Berlin D. Madrid", hasImage: false, questionTypeGuess: "single_choice", confidence: 1, source: "auto_dom" }, native);
+    const entry = { id: "history-assignment-100", timestamp: 1, host: "example.com", block: questionA, result: { blockId: questionA.id, questionType: "single_choice" as const, answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: questionA.previewText, routeUsed: "text" as const, optionSelections: { B: true } } };
+    expect(questionA.identity.stableId).not.toBe(questionB.identity.stableId);
+    expect(findReusableHistoryEntry([entry], questionB, "example.com")).toBeNull();
+    const equivalent = attachQuestionIdentity({ ...questionA, id: "assignment-100-rerender" }, native);
+    expect(findReusableHistoryEntry([entry], equivalent, "example.com")).toBe(entry);
+  });
+
+  it("ignores unstable-looking native ids", () => {
     const unstable = document.createElement("div");
     unstable.id = "react-1720000000000";
     expect(extractNativeQuestionId(unstable)).toBeUndefined();

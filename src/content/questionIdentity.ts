@@ -68,6 +68,14 @@ export function isLikelyStableNativeQuestionId(value: string | null | undefined)
   return /^[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(normalized);
 }
 
+function isLikelyStrongNativeQuestionId(value: string | null | undefined): boolean {
+  const normalized = String(value || "").trim();
+  if (normalized.length < 1 || normalized.length > 160) return false;
+  if (/^(?:react|auto|css|vite|webpack|jsx|mui|radix)[-_]/i.test(normalized)) return false;
+  if (/^\d{10,}$/.test(normalized)) return false;
+  return /^[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(normalized);
+}
+
 function isLikelyQuestionInstanceElementId(value: string | null | undefined): boolean {
   const normalized = String(value || "").trim();
   if (!isLikelyStableNativeQuestionId(normalized) || GENERIC_CONTAINER_ID_RE.test(normalized)) return false;
@@ -84,7 +92,7 @@ export function extractNativeQuestionId(element?: Element | null): string | unde
   if (!element) return undefined;
   for (const attribute of STRONG_NATIVE_ID_ATTRIBUTES) {
     const value = element.getAttribute(attribute);
-    if (isLikelyStableNativeQuestionId(value)) return String(value).trim();
+    if (isLikelyStrongNativeQuestionId(value)) return String(value).trim();
   }
   for (const attribute of WEAK_NATIVE_ID_ATTRIBUTES) {
     const value = element.getAttribute(attribute);
@@ -112,7 +120,7 @@ export function buildQuestionIdentity(input: QuestionIdentityInput): QuestionIde
         ? "content+structure"
         : "content-only";
   const stableInput = nativeQuestionId
-    ? `native:${nativeQuestionId}`
+    ? `native:${nativeQuestionId}|content:${contentFingerprint}`
     : ordinalHint !== undefined
       ? `${contentFingerprint}|ordinal:${ordinalHint}`
       : structureHint
