@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAutoSolveFingerprint, getAutoSolveTextFingerprint } from "../autoSolveHeuristics";
 import { extractReadableQuestionNodeText } from "../questionText";
 import { detectCandidatesInViewport } from "./domDetector";
+import { mergeAdjacentQuestionBlocks } from "./domDetectorPostprocess";
 import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "./domDetectorVisual";
 import { createImageQuestionFixture, createOptionImageQuestionFixture, mockLocation, setElementRect, setViewport } from "./testFixtures/questionFixtureFactory";
 
@@ -31,6 +32,32 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
     createImageQuestionFixture({ id: "next-stem", top: 130, height: 760, stem: "a very similar next question stem?", clippedBottom: true });
     const blocks = detectCandidatesInViewport();
     expect(blocks.every((block) => !(block.previewText.includes("tail fragment") && block.previewText.includes("very similar next")))).toBe(true);
+  });
+
+  it.fails("KNOWN_BUG_CROSS_QUESTION_MERGE_WHEN_NEXT_ORDINAL_MISSING", () => {
+    // Phase 2 must remove `.fails` and keep this future regression expectation at two blocks.
+    // Both candidates intentionally enter the merge algorithm: only the first fragment has
+    // an ordinal, their gap is 4px, their columns fully overlap, and their types match.
+    const previous = {
+      id: "previous",
+      bbox: { x: 60, y: 0, width: 760, height: 160 },
+      previewText: "14. previous question tail A. one B. two C. three D. four",
+      hasImage: false,
+      questionTypeGuess: "single_choice" as const,
+      confidence: 0.8,
+      source: "auto_dom" as const,
+    };
+    const next = {
+      id: "next",
+      bbox: { x: 60, y: 164, width: 760, height: 160 },
+      previewText: "Which statement is correct? Please choose the best answer.",
+      hasImage: false,
+      questionTypeGuess: "single_choice" as const,
+      confidence: 0.8,
+      source: "auto_dom" as const,
+    };
+
+    expect(mergeAdjacentQuestionBlocks([previous, next])).toHaveLength(2);
   });
 
   it("does_not_merge_nearby_complete_questions_with_similar_stems_and_options", () => {
