@@ -125,7 +125,7 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
     expect(block.questionImageUrl).toBeUndefined();
   });
 
-  it("characterizes current limitation: question id changes after rerender while text fingerprint is stable", () => {
+  it("keeps stable question identity across equivalent DOM rerenders", () => {
     vi.spyOn(Date, "now").mockReturnValueOnce(101).mockReturnValueOnce(202);
     const build = () => createImageQuestionFixture({ id: "rerender", ordinal: 9, top: 40, stem: "rerendered question?" });
     build();
@@ -134,7 +134,8 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
     build();
     const second = detectCandidatesInViewport()[0];
     expect(first.id).not.toBe(second.id);
+    expect(first.identity?.stableId).toBe(second.identity?.stableId);
     expect(getAutoSolveTextFingerprint(first.previewText)).toBe(getAutoSolveTextFingerprint(second.previewText));
-    expect(getAutoSolveFingerprint(first)).not.toBe(getAutoSolveFingerprint(second));
+    expect(getAutoSolveFingerprint(first)).toBe(getAutoSolveFingerprint(second));
   });
 });

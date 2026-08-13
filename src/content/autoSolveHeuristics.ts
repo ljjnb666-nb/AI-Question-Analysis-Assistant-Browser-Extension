@@ -184,6 +184,7 @@ export function pickAutoSolveReviewModel(providerId: string, currentModel: strin
 }
 
 export function getAutoSolveFingerprint(block: QuestionBlock): string {
+  if (block.identity?.stableId) return `stable:${block.identity.stableId}`;
   const order = extractAutoSolveQuestionOrder(block.previewText || "");
   const approxTop = Math.round((block.bbox?.y ?? 0) / 24);
   const approxHeight = Math.round((block.bbox?.height ?? 0) / 24);
@@ -308,6 +309,11 @@ export function findReusableHistoryEntry(
   for (const entry of history) {
     if (entry.host && entry.host !== hostname) continue;
     if (!shouldPersistAutoSolveParseResult(entry.result)) continue;
+    if (block.identity?.stableId && entry.block.identity?.stableId === block.identity.stableId) return entry;
+    if (
+      block.identity?.contentFingerprint
+      && entry.block.identity?.contentFingerprint === block.identity.contentFingerprint
+    ) return entry;
     if (isSameAutoSolveQuestion(block.previewText || "", entry.block.previewText || "")) return entry;
     if (isSameAutoSolveQuestion(block.previewText || "", entry.result.recognizedText || "")) return entry;
   }

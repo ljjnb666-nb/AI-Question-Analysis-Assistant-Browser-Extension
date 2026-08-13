@@ -43,6 +43,7 @@ import {
 } from "./domDetectorPostprocess";
 import { buildPreviewText, buildPreviewTextForBbox, getElementReadableText } from "./domDetectorPreview";
 import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "./domDetectorVisual";
+import { attachQuestionIdentity } from "../questionIdentity";
 
 let mutationObserver: MutationObserver | null = null;
 let pendingRescan = false;
@@ -132,7 +133,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
       ? sanitizePreviewTextByType(text, guessed)
       : sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), guessed);
     if (!isLikelyCompleteQuestionText(previewText, guessed)) continue;
-    const candidate: QuestionBlock = {
+    const candidate = attachQuestionIdentity({
       id: `auto-direct-${Date.now()}-${directIndex}-${Math.random().toString(36).slice(2, 8)}`,
       bbox: candidateBbox,
       previewText: previewText.slice(0, 420),
@@ -142,7 +143,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
       questionTypeGuess: guessed,
       confidence: 0.9,
       source: "auto_dom",
-    };
+    }, rectSource);
 
     const gid = `direct-card-${directIndex}`;
     const rank = completenessScore(candidate.previewText, candidate.questionTypeGuess, candidate.confidence) + 20;
@@ -198,7 +199,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
     previewText = sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), candidateType);
     if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
 
-    const candidate: QuestionBlock = {
+    const candidate = attachQuestionIdentity({
       id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       bbox: candidateBbox,
       previewText: previewText.slice(0, 420),
@@ -207,7 +208,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
       questionTypeGuess: candidateType,
       confidence: score.confidence,
       source: "auto_dom",
-    };
+    }, el);
 
     const gid = getGroupId(el);
     const rank = completenessScore(candidate.previewText, candidateType, score.confidence);
@@ -268,7 +269,7 @@ function buildStableStructuredContainerCandidates(
     const candidateType = inferQuestionType(previewText);
     if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
 
-    out.push({
+    out.push(attachQuestionIdentity({
       id: `auto-structured-${Date.now()}-${index++}`,
       bbox: clampRectToBbox(rect, vw, vh),
       previewText: previewText.slice(0, 420),
@@ -278,7 +279,7 @@ function buildStableStructuredContainerCandidates(
       questionTypeGuess: candidateType,
       confidence: 0.94,
       source: "auto_dom",
-    });
+    }, hostContainer));
   }
 
   return out;
@@ -326,7 +327,7 @@ function buildPintiaCodeProblemCandidates(
     if (!text || text.length < 120) continue;
     if (isLikelyControlPanelText(text) || !isLikelyCompleteQuestionText(text, "short_answer")) continue;
 
-    out.push({
+    out.push(attachQuestionIdentity({
       id: `auto-pintia-code-${Date.now()}-${index}`,
       bbox: clampRectToBbox(rect, vw, vh),
       previewText: sanitizePreviewTextByType(text, "short_answer").slice(0, 900),
@@ -336,7 +337,7 @@ function buildPintiaCodeProblemCandidates(
       questionTypeGuess: "short_answer",
       confidence: 0.91,
       source: "auto_dom",
-    });
+    }, el));
   }
 
   return out;
@@ -370,7 +371,7 @@ function buildPintiaQuestionListCandidates(
     const previewText = sanitizePreviewTextByType(text, candidateType);
     if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
 
-    out.push({
+    out.push(attachQuestionIdentity({
       id: `auto-pintia-list-${Date.now()}-${index}`,
       bbox: clampRectToBbox(rect, vw, vh),
       previewText: previewText.slice(0, 420),
@@ -379,7 +380,7 @@ function buildPintiaQuestionListCandidates(
       questionTypeGuess: candidateType,
       confidence: 0.93,
       source: "auto_dom",
-    });
+    }, el));
   }
 
   return out;
@@ -489,7 +490,7 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
         if (score.confidence < 0.45) continue;
 
         const r = (el as HTMLElement).getBoundingClientRect();
-        blocks.push({
+        blocks.push(attachQuestionIdentity({
           id: `iframe-auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           bbox: {
             x: Math.max(0, frameRect.left + r.left),
@@ -503,7 +504,7 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
           questionTypeGuess: score.type,
           confidence: score.confidence * 0.9,
           source: "auto_dom",
-        });
+        }, el));
       }
     } catch (err) {
       logWarn("Failed to scan iframe content", "scanIframes", { error: String(err) });
