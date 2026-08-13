@@ -309,11 +309,10 @@ export function findReusableHistoryEntry(
   for (const entry of history) {
     if (entry.host && entry.host !== hostname) continue;
     if (!shouldPersistAutoSolveParseResult(entry.result)) continue;
-    if (block.identity?.stableId && entry.block.identity?.stableId === block.identity.stableId) return entry;
-    if (
-      block.identity?.contentFingerprint
-      && entry.block.identity?.contentFingerprint === block.identity.contentFingerprint
-    ) return entry;
+    if (block.identity && entry.block.identity) {
+      if (entry.block.identity.stableId === block.identity.stableId) return entry;
+      continue;
+    }
     if (isSameAutoSolveQuestion(block.previewText || "", entry.block.previewText || "")) return entry;
     if (isSameAutoSolveQuestion(block.previewText || "", entry.result.recognizedText || "")) return entry;
   }

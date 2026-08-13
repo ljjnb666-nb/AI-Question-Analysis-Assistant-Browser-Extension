@@ -143,7 +143,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
       questionTypeGuess: guessed,
       confidence: 0.9,
       source: "auto_dom",
-    }, rectSource);
+    }, rectSource, { identityText: text });
 
     const gid = `direct-card-${directIndex}`;
     const rank = completenessScore(candidate.previewText, candidate.questionTypeGuess, candidate.confidence) + 20;
@@ -208,7 +208,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
       questionTypeGuess: candidateType,
       confidence: score.confidence,
       source: "auto_dom",
-    }, el);
+    }, el, { identityText: text });
 
     const gid = getGroupId(el);
     const rank = completenessScore(candidate.previewText, candidateType, score.confidence);
@@ -279,7 +279,7 @@ function buildStableStructuredContainerCandidates(
       questionTypeGuess: candidateType,
       confidence: 0.94,
       source: "auto_dom",
-    }, hostContainer));
+    }, hostContainer, { identityText: readableText }));
   }
 
   return out;
@@ -337,7 +337,7 @@ function buildPintiaCodeProblemCandidates(
       questionTypeGuess: "short_answer",
       confidence: 0.91,
       source: "auto_dom",
-    }, el));
+    }, el, { identityText: text }));
   }
 
   return out;
@@ -380,7 +380,7 @@ function buildPintiaQuestionListCandidates(
       questionTypeGuess: candidateType,
       confidence: 0.93,
       source: "auto_dom",
-    }, el));
+    }, el, { identityText: text }));
   }
 
   return out;
@@ -504,7 +504,7 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
           questionTypeGuess: score.type,
           confidence: score.confidence * 0.9,
           source: "auto_dom",
-        }, el));
+        }, el, { identityText: text }));
       }
     } catch (err) {
       logWarn("Failed to scan iframe content", "scanIframes", { error: String(err) });

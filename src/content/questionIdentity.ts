@@ -1,7 +1,9 @@
 import type { QuestionBlock, QuestionIdentity, QuestionType } from "@/shared/types";
 
 const IDENTITY_VERSION = 1 as const;
-const NATIVE_ID_ATTRIBUTES = ["data-question-id", "data-questionid", "data-problem-id", "data-problemid", "data-item-id", "data-id", "name", "aria-labelledby"];
+const STRONG_NATIVE_ID_ATTRIBUTES = ["data-question-id", "data-questionid", "data-problem-id", "data-problemid", "data-item-id"];
+const WEAK_NATIVE_ID_ATTRIBUTES = ["data-id"];
+const GENERIC_CONTAINER_ID_RE = /^(?:question(?:box|content)?|problem|item|card|main|root|app|options?|answer)$/i;
 
 export type QuestionIdentityInput = {
   text: string;
@@ -37,7 +39,12 @@ export function canonicalizeQuestionImageUrl(raw?: string): string {
   if (!raw) return "";
   try {
     const url = new URL(raw, window.location.href);
-    return `${url.origin}${url.pathname}`;
+    const cacheParams = new Set(["timestamp", "ts", "cache", "cachebust", "cache_bust", "cb", "_"]);
+    const retained = Array.from(url.searchParams.entries())
+      .filter(([key]) => !cacheParams.has(key.toLowerCase()) && !key.toLowerCase().startsWith("utm_"))
+      .sort(([leftKey, leftValue], [rightKey, rightValue]) => leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue));
+    const query = retained.length ? `?${new URLSearchParams(retained).toString()}` : "";
+    return `${url.origin}${url.pathname}${query}`;
   } catch {
     return String(raw).split(/[?#]/, 1)[0];
   }
@@ -61,13 +68,30 @@ export function isLikelyStableNativeQuestionId(value: string | null | undefined)
   return /^[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(normalized);
 }
 
+function isLikelyQuestionInstanceElementId(value: string | null | undefined): boolean {
+  const normalized = String(value || "").trim();
+  if (!isLikelyStableNativeQuestionId(normalized) || GENERIC_CONTAINER_ID_RE.test(normalized)) return false;
+  return /^(?:question|problem|q)[_-](?:[A-Za-z0-9-]*\d[A-Za-z0-9-]*)$/i.test(normalized)
+    || /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(normalized);
+}
+
+function isLikelyWeakNativeQuestionId(value: string | null | undefined): boolean {
+  const normalized = String(value || "").trim();
+  return isLikelyStableNativeQuestionId(normalized) && (/[0-9]/.test(normalized) || /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(normalized));
+}
+
 export function extractNativeQuestionId(element?: Element | null): string | undefined {
   if (!element) return undefined;
-  const candidates: Array<string | null> = [element.getAttribute("id")];
-  for (const attribute of NATIVE_ID_ATTRIBUTES) candidates.push(element.getAttribute(attribute));
-  for (const value of candidates) {
+  for (const attribute of STRONG_NATIVE_ID_ATTRIBUTES) {
+    const value = element.getAttribute(attribute);
     if (isLikelyStableNativeQuestionId(value)) return String(value).trim();
   }
+  for (const attribute of WEAK_NATIVE_ID_ATTRIBUTES) {
+    const value = element.getAttribute(attribute);
+    if (isLikelyWeakNativeQuestionId(value)) return String(value).trim();
+  }
+  const elementId = element.getAttribute("id");
+  if (isLikelyQuestionInstanceElementId(elementId)) return String(elementId).trim();
   return undefined;
 }
 
@@ -111,11 +135,15 @@ export function buildQuestionIdentity(input: QuestionIdentityInput): QuestionIde
   };
 }
 
-export function attachQuestionIdentity<T extends QuestionBlock>(block: T, element?: Element | null): T & { identity: QuestionIdentity } {
+export function attachQuestionIdentity<T extends QuestionBlock>(
+  block: T,
+  element?: Element | null,
+  options?: { identityText?: string },
+): T & { identity: QuestionIdentity } {
   return {
     ...block,
     identity: buildQuestionIdentity({
-      text: block.previewText,
+      text: options?.identityText ?? block.previewText,
       questionType: block.questionTypeGuess,
       questionImageUrl: block.questionImageUrl,
       element,

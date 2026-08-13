@@ -138,4 +138,26 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
     expect(getAutoSolveTextFingerprint(first.previewText)).toBe(getAutoSolveTextFingerprint(second.previewText));
     expect(getAutoSolveFingerprint(first)).toBe(getAutoSolveFingerprint(second));
   });
+
+  it("derives identity from complete detector content rather than the 420-character preview", () => {
+    const prefix = Array.from({ length: 70 }, (_, index) => `semantic-token-${index}`).join(" ");
+    const render = (suffix: string) => {
+      createImageQuestionFixture({
+        id: "long-question",
+        ordinal: 12,
+        top: 40,
+        height: 320,
+        stem: `${prefix}${suffix}`,
+        options: ["A. one", "B. two", "C. three", "D. four"],
+      });
+      return detectCandidatesInViewport()[0];
+    };
+    const first = render("option C is alpha");
+    document.body.innerHTML = "";
+    const second = render("option C is beta");
+    expect(first.previewText).toBe(second.previewText);
+    expect(first.previewText.length).toBe(420);
+    expect(first.identity?.contentFingerprint).not.toBe(second.identity?.contentFingerprint);
+    expect(first.identity?.stableId).not.toBe(second.identity?.stableId);
+  });
 });
