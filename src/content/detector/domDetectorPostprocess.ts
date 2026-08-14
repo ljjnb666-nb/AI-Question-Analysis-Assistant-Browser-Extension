@@ -5,7 +5,7 @@ import { attachQuestionIdentity } from "../questionIdentity";
 import { evaluateQuestionCompleteness } from "./questionCompleteness";
 import { questionFragmentFromBlock } from "./questionFragment";
 import { resolveQuestionOwnership } from "./questionOwnership";
-import { classifyViewportBoundary } from "./questionBoundary";
+import { classifyViewportBoundary, mergeQuestionBoundaryInfo } from "./questionBoundary";
 
 export function isLikelyCompleteQuestionText(text: string, type: QuestionType): boolean {
   if (!text) return false;
@@ -198,6 +198,7 @@ function mergeTwoBlocks(a: QuestionBlock, b: QuestionBlock): QuestionBlock {
     hasImage: a.hasImage || b.hasImage,
     questionTypeGuess: mergedType,
     confidence: Math.min(1, Math.max(a.confidence, b.confidence) + 0.05),
+    boundary: mergeQuestionBoundaryInfo(a.boundary, b.boundary),
   }, undefined, { identityText, nativeQuestionId });
 }
 

@@ -73,6 +73,20 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
     expect(mergeAdjacentQuestionBlocks([stem, tail])).toHaveLength(1);
   });
 
+  it("accumulates boundary evidence across three streaming fragments", () => {
+    const base = { hasImage: false, questionTypeGuess: "single_choice" as const, confidence: .8, source: "auto_dom" as const, runtimeOwnerKey: "q-boundary" };
+    const boundary = (state: "complete" | "partial-top" | "partial-bottom") => ({ state, clippedTop: state === "partial-top", clippedBottom: state === "partial-bottom", confidence: .7, reasons: [state] });
+    const blocks = [
+      { ...base, id: "a", bbox: { x: 60, y: 0, width: 760, height: 80 }, previewText: "Which value? A. one", boundary: boundary("partial-top") },
+      { ...base, id: "b", bbox: { x: 60, y: 84, width: 760, height: 80 }, previewText: "B. two", boundary: boundary("complete") },
+      { ...base, id: "c", bbox: { x: 60, y: 168, width: 760, height: 80 }, previewText: "C. three D. four", boundary: boundary("partial-bottom") },
+    ];
+    const merged = mergeAdjacentQuestionBlocks(blocks);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].boundary).toMatchObject({ state: "partial-both", clippedTop: true, clippedBottom: true });
+    expect(merged[0].completeness?.boundaryComplete).toBe(false);
+  });
+
   it("does_not_promote_or_merge_a_question_only_marginally_visible_at_the_viewport_bottom", () => {
     createImageQuestionFixture({ id: "complete", ordinal: 40, top: 40, height: 320, stem: "complete visible question?" });
     createImageQuestionFixture({ id: "bottom-tail", ordinal: 41, top: 870, height: 300, stem: "bottom tail should not be complete", clippedBottom: true });
