@@ -123,50 +123,6 @@ function shouldMergeBlocks(a: QuestionBlock, b: QuestionBlock): boolean {
   const overlap = Math.max(0, Math.min(a.bbox.x + a.bbox.width, b.bbox.x + b.bbox.width) - Math.max(a.bbox.x, b.bbox.x));
   const ownership = resolveQuestionOwnership(questionFragmentFromBlock(a), questionFragmentFromBlock(b), { verticalGap, horizontalOverlapRatio: overlap / Math.max(1, Math.min(a.bbox.width, b.bbox.width)) });
   return ownership.relation === "same-question" && ownership.confidence >= 0.8;
-/*
-  const orderA = extractLeadingQuestionNumber(a.previewText);
-  const orderB = extractLeadingQuestionNumber(b.previewText);
-  if (orderA !== null && orderB !== null && orderA !== orderB) return false;
-
-  const aBottom = a.bbox.y + a.bbox.height;
-  const bTop = b.bbox.y;
-  const verticalGap = Math.max(0, bTop - aBottom);
-  if (verticalGap > 140) return false;
-
-  const overlapW = Math.max(0, Math.min(a.bbox.x + a.bbox.width, b.bbox.x + b.bbox.width) - Math.max(a.bbox.x, b.bbox.x));
-  const minW = Math.max(1, Math.min(a.bbox.width, b.bbox.width));
-  const horizontalOverlapRatio = overlapW / minW;
-  if (horizontalOverlapRatio < 0.45) return false;
-
-  const aText = normalizeText(a.previewText);
-  const bText = normalizeText(b.previewText);
-  const aHasOptions = countOptionMarkersInText(aText) >= 2;
-  const bHasOptions = countOptionMarkersInText(bText) >= 2;
-  if (aHasOptions && bHasOptions) return false;
-  const aLooksStem = QUESTION_RE.test(aText) || /下列|正确的是|错误的是|如图|图示/.test(aText);
-  const bLooksStem = QUESTION_RE.test(bText) || /下列|正确的是|错误的是|如图|图示/.test(bText);
-  const aLooksComplete = isLikelyCompleteQuestionText(aText, a.questionTypeGuess);
-  const bLooksComplete = isLikelyCompleteQuestionText(bText, b.questionTypeGuess);
-
-  const complementary = (aHasOptions && bLooksStem) || (bHasOptions && aLooksStem);
-  const sameType = a.questionTypeGuess === b.questionTypeGuess || a.questionTypeGuess === "unknown" || b.questionTypeGuess === "unknown";
-  const fragmentJoin =
-    sameType &&
-    Math.abs(verticalGap) <= 64 &&
-    (
-      (!aLooksComplete && (bHasOptions || bLooksStem)) ||
-      (!bLooksComplete && (aHasOptions || aLooksStem))
-    );
-
-  return complementary || fragmentJoin; */
-}
-
-function _extractLeadingQuestionNumber(text: string): number | null {
-  const normalized = normalizeText(text);
-  const match = normalized.match(/^(\d{1,3})\s*[\.、\)）]/);
-  if (!match) return null;
-  const n = Number(match[1]);
-  return Number.isFinite(n) ? n : null;
 }
 
 function mergeTwoBlocks(a: QuestionBlock, b: QuestionBlock): QuestionBlock {
