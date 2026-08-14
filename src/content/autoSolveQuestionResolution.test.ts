@@ -31,6 +31,12 @@ function makeResult(overrides: Partial<ParseResult> = {}): ParseResult {
 }
 
 describe("resolveAutoSolveQuestion", () => {
+  it("does not call a provider for an incomplete automatic candidate", async () => {
+    const parse = vi.fn();
+    const result = await resolveAutoSolveQuestion({ answerStateComplete: false, currentBlock: makeBlock({ completeness: { state: "incomplete", boundaryComplete: false, stemComplete: false, optionsComplete: "unknown", visualComplete: true, controlsComplete: "unknown", confidence: .9, reasons: ["Q_INCOMPLETE_STEM"] } }), filled: 0, history: [], historyEntry: null, needsHistoryReview: false, needsQuickAnsweredChoiceReview: false, solved: 0, total: 1 }, { fillParsedAnswerInPage: vi.fn(), isChoiceLikeQuestionType: vi.fn(), parseBlockForAutoSolve: parse, parseBlockForAutoSolveQuickReview: vi.fn(), parseBlockForAutoSolveReview: vi.fn(), recordAutoSolveHistory: vi.fn(), sendProgress: vi.fn(), shouldPersistAutoSolveParseResult: vi.fn(), shouldRetryUnstableChoiceParse: vi.fn(), toProgressBlock: block => block, verifyParsedAnswerInPage: vi.fn() });
+    expect(parse).not.toHaveBeenCalled();
+    expect(result.progressMessage).toContain("INCOMPLETE_QUESTION");
+  });
   it("retries unstable parses only once before continuing", async () => {
     const currentBlock = makeBlock();
     const parseBlockForAutoSolve = vi

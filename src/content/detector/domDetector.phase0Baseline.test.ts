@@ -34,7 +34,7 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
     expect(blocks.every((block) => !(block.previewText.includes("tail fragment") && block.previewText.includes("very similar next")))).toBe(true);
   });
 
-  it.fails("KNOWN_BUG_CROSS_QUESTION_MERGE_WHEN_NEXT_ORDINAL_MISSING", () => {
+  it("does not merge different questions when next ordinal is missing", () => {
     // Phase 2 must remove `.fails` and keep this future regression expectation at two blocks.
     // Both candidates intentionally enter the merge algorithm: only the first fragment has
     // an ordinal, their gap is 4px, their columns fully overlap, and their types match.
@@ -65,6 +65,26 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
     createImageQuestionFixture({ id: "q32", ordinal: 32, top: 310, height: 260, stem: "Which similar value is correct?", options: ["A. alpha", "B. beta", "C. theta", "D. delta"] });
     const blocks = detectCandidatesInViewport();
     expect(blocks.filter((block) => /3[12]\. single choice/.test(block.previewText))).toHaveLength(2);
+  });
+
+  it("merges legitimate stem plus option continuation with the same ordinal", () => {
+    const stem = { id: "stem", bbox: { x: 60, y: 20, width: 760, height: 120 }, previewText: "14. Which value is correct? A. one B. two", hasImage: false, questionTypeGuess: "single_choice" as const, confidence: .8, source: "auto_dom" as const, runtimeOwnerKey: "q14" };
+    const tail = { id: "tail", bbox: { x: 60, y: 144, width: 760, height: 80 }, previewText: "14. C. three D. four", hasImage: false, questionTypeGuess: "single_choice" as const, confidence: .8, source: "auto_dom" as const, runtimeOwnerKey: "q14" };
+    expect(mergeAdjacentQuestionBlocks([stem, tail])).toHaveLength(1);
+  });
+
+  it("accumulates boundary evidence across three streaming fragments", () => {
+    const base = { hasImage: false, questionTypeGuess: "single_choice" as const, confidence: .8, source: "auto_dom" as const, runtimeOwnerKey: "q-boundary" };
+    const boundary = (state: "complete" | "partial-top" | "partial-bottom") => ({ state, clippedTop: state === "partial-top", clippedBottom: state === "partial-bottom", confidence: .7, reasons: [state] });
+    const blocks = [
+      { ...base, id: "a", bbox: { x: 60, y: 0, width: 760, height: 80 }, previewText: "Which value? A. one", boundary: boundary("partial-top") },
+      { ...base, id: "b", bbox: { x: 60, y: 84, width: 760, height: 80 }, previewText: "B. two", boundary: boundary("complete") },
+      { ...base, id: "c", bbox: { x: 60, y: 168, width: 760, height: 80 }, previewText: "C. three D. four", boundary: boundary("partial-bottom") },
+    ];
+    const merged = mergeAdjacentQuestionBlocks(blocks);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].boundary).toMatchObject({ state: "partial-both", clippedTop: true, clippedBottom: true });
+    expect(merged[0].completeness?.boundaryComplete).toBe(false);
   });
 
   it("does_not_promote_or_merge_a_question_only_marginally_visible_at_the_viewport_bottom", () => {

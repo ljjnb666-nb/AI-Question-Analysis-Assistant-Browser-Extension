@@ -40,10 +40,12 @@ import {
   filterFragmentBlocks,
   isLikelyCompleteQuestionText,
   mergeAdjacentQuestionBlocks,
+  withQuestionCompleteness,
 } from "./domDetectorPostprocess";
 import { buildPreviewText, buildPreviewTextForBbox, getElementReadableText } from "./domDetectorPreview";
 import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "./domDetectorVisual";
 import { attachQuestionIdentity } from "../questionIdentity";
+import { classifyViewportBoundary } from "./questionBoundary";
 
 let mutationObserver: MutationObserver | null = null;
 let pendingRescan = false;
@@ -94,16 +96,15 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
 
   const grouped = new Map<string, QuestionBlock>();
   const groupRank = new Map<string, number>();
-  const groupIdMap = new WeakMap<Element, string>();
-  let groupCounter = 0;
+  const ownerKeyMap = new WeakMap<Element, string>();
+  let ownerCounter = 0;
 
   const getGroupId = (el: Element): string => {
-    const container = findQuestionContainer(el);
-    if (!container) return `self-${(el as HTMLElement).tagName}`;
-    const existing = groupIdMap.get(container);
+    const container = findQuestionContainer(el) ?? el;
+    const existing = ownerKeyMap.get(container);
     if (existing) return existing;
-    const id = `g-${++groupCounter}`;
-    groupIdMap.set(container, id);
+    const id = `owner-${++ownerCounter}`;
+    ownerKeyMap.set(container, id);
     return id;
   };
 
@@ -143,6 +144,9 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
       questionTypeGuess: guessed,
       confidence: 0.9,
       source: "auto_dom",
+      identitySourceText: text,
+      runtimeOwnerKey: `direct-card-${directIndex}`,
+      boundary: boundaryFromRawRect(rawRect, vh),
     }, rectSource, { identityText: text });
 
     const gid = `direct-card-${directIndex}`;
@@ -156,14 +160,14 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
 
   if (!preferDirectCardMode) {
     if (pintiaQuestionListBlocks.length > 0) {
-      return filterFragmentBlocks(deduplicateBlocks(pintiaQuestionListBlocks).sort((a, b) => a.bbox.y - b.bbox.y));
+      return filterFragmentBlocks(deduplicateBlocks(pintiaQuestionListBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
     }
     const stableContainerBlocks = buildStableStructuredContainerCandidates(stableQuestionCards, hostRightCutX, vw, vh);
     if (stableContainerBlocks.length > 0) {
-      return filterFragmentBlocks(deduplicateBlocks(stableContainerBlocks).sort((a, b) => a.bbox.y - b.bbox.y));
+      return filterFragmentBlocks(deduplicateBlocks(stableContainerBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
     }
     if (pintiaCodeProblemBlocks.length > 0 && !hasStructuredContainers) {
-      return filterFragmentBlocks(deduplicateBlocks(pintiaCodeProblemBlocks).sort((a, b) => a.bbox.y - b.bbox.y));
+      return filterFragmentBlocks(deduplicateBlocks(pintiaCodeProblemBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
     }
   }
 
@@ -208,6 +212,9 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
       questionTypeGuess: candidateType,
       confidence: score.confidence,
       source: "auto_dom",
+      identitySourceText: text,
+      runtimeOwnerKey: getGroupId(el),
+      boundary: boundaryFromRawRect(rawRect, vh),
     }, el, { identityText: text });
 
     const gid = getGroupId(el);
@@ -225,7 +232,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
   // when direct-card mode is active, return card candidates only.
   // This prevents cross-question merging/fragment filtering side-effects.
   if (preferDirectCardMode && blocks.length > 0) {
-    return blocks.sort((a, b) => a.bbox.y - b.bbox.y);
+    return blocks.sort((a, b) => a.bbox.y - b.bbox.y).map(withQuestionCompleteness);
   }
 
   try {
@@ -235,7 +242,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
   }
 
   const merged = mergeAdjacentQuestionBlocks(deduplicateBlocks(blocks).sort((a, b) => a.bbox.y - b.bbox.y));
-  return filterFragmentBlocks(merged);
+  return filterFragmentBlocks(merged).map(withQuestionCompleteness);
 }
 
 function buildStableStructuredContainerCandidates(
@@ -279,6 +286,9 @@ function buildStableStructuredContainerCandidates(
       questionTypeGuess: candidateType,
       confidence: 0.94,
       source: "auto_dom",
+      identitySourceText: readableText,
+      runtimeOwnerKey: `structured-${index}`,
+      boundary: boundaryFromRawRect(rawRect, vh),
     }, hostContainer, { identityText: readableText }));
   }
 
@@ -337,6 +347,9 @@ function buildPintiaCodeProblemCandidates(
       questionTypeGuess: "short_answer",
       confidence: 0.91,
       source: "auto_dom",
+      identitySourceText: text,
+      runtimeOwnerKey: `pintia-code-${index}`,
+      boundary: boundaryFromRawRect(rawRect, vh),
     }, el, { identityText: text }));
   }
 
@@ -380,6 +393,9 @@ function buildPintiaQuestionListCandidates(
       questionTypeGuess: candidateType,
       confidence: 0.93,
       source: "auto_dom",
+      identitySourceText: text,
+      runtimeOwnerKey: `pintia-list-${index}`,
+      boundary: boundaryFromRawRect(rawRect, vh),
     }, el, { identityText: text }));
   }
 
@@ -474,7 +490,7 @@ function getStableQuestionCardContainers(): Element[] {
 function scanIframes(vw: number, vh: number): QuestionBlock[] {
   const blocks: QuestionBlock[] = [];
   const iframes = document.querySelectorAll("iframe");
-  for (const iframe of iframes) {
+  for (const [frameIndex, iframe] of Array.from(iframes).entries()) {
     try {
       const doc = iframe.contentDocument;
       if (!doc) continue;
@@ -482,6 +498,8 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
       if (!inViewport(frameRect, vw, vh)) continue;
 
       const els = doc.querySelectorAll("p,div,li,section,article");
+      const frameOwnerKeys = new WeakMap<Element, string>();
+      let frameOwnerCounter = 0;
       for (const el of els) {
         const text = normalizeText(el.textContent ?? "");
         if (!text || text.length < 12 || isLikelyControlPanelText(text)) continue;
@@ -504,6 +522,9 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
           questionTypeGuess: score.type,
           confidence: score.confidence * 0.9,
           source: "auto_dom",
+          identitySourceText: text,
+          runtimeOwnerKey: getIframeRuntimeOwnerKey(el, frameIndex, frameOwnerKeys, () => ++frameOwnerCounter),
+          boundary: boundaryFromRawRect({ top: frameRect.top + r.top, height: r.height } as DOMRect, vh),
         }, el, { identityText: text }));
       }
     } catch (err) {
@@ -511,6 +532,24 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
     }
   }
   return blocks;
+}
+
+function getIframeRuntimeOwnerKey(el: Element, frameIndex: number, keys: WeakMap<Element, string>, next: () => number): string {
+  const owner = el.closest(".question-item,.questionBox,.base-question-component,article,section") ?? el;
+  const existing = keys.get(owner);
+  if (existing) return existing;
+  const key = `iframe-${frameIndex}-owner-${next()}`;
+  keys.set(owner, key);
+  return key;
+}
+
+function boundaryFromRawRect(rect: Pick<DOMRect, "top" | "height">, viewportHeight: number) {
+  const evidence = classifyViewportBoundary({ y: rect.top, height: rect.height }, { innerHeight: viewportHeight } as Window);
+  return {
+    state: evidence.state === "fully-visible" ? "complete" as const : evidence.state === "clipped-top" ? "partial-top" as const : evidence.state === "clipped-bottom" ? "partial-bottom" as const : "partial-both" as const,
+    clippedTop: evidence.clippedTop, clippedBottom: evidence.clippedBottom, confidence: evidence.visibleRatio,
+    reasons: [evidence.clippedTop ? "Q_BOUNDARY_PARTIAL_TOP" : "", evidence.clippedBottom ? "Q_BOUNDARY_PARTIAL_BOTTOM" : ""].filter(Boolean),
+  };
 }
 
 function scoreElement(el: Element, text: string): { confidence: number; type: QuestionType; hasImage: boolean } {

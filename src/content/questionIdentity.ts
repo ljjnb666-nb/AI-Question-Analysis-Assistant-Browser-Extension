@@ -10,6 +10,7 @@ export type QuestionIdentityInput = {
   questionType: QuestionType;
   questionImageUrl?: string;
   element?: Element | null;
+  nativeQuestionId?: string;
 };
 
 export function canonicalizeQuestionText(raw: string): string {
@@ -106,7 +107,7 @@ export function extractNativeQuestionId(element?: Element | null): string | unde
 export function buildQuestionIdentity(input: QuestionIdentityInput): QuestionIdentity {
   const text = canonicalizeQuestionText(input.text);
   const ordinalHint = extractOrdinalHint(text);
-  const nativeQuestionId = extractNativeQuestionId(input.element);
+  const nativeQuestionId = input.nativeQuestionId ?? extractNativeQuestionId(input.element);
   const imageHint = canonicalizeQuestionImageUrl(input.questionImageUrl);
   const optionSignal = /(?:^|\n|\s)[A-F][.):、]/.test(text);
   const structureHint = input.element?.tagName.toLowerCase() || "";
@@ -146,7 +147,7 @@ export function buildQuestionIdentity(input: QuestionIdentityInput): QuestionIde
 export function attachQuestionIdentity<T extends QuestionBlock>(
   block: T,
   element?: Element | null,
-  options?: { identityText?: string },
+  options?: { identityText?: string; nativeQuestionId?: string },
 ): T & { identity: QuestionIdentity } {
   return {
     ...block,
@@ -155,6 +156,7 @@ export function attachQuestionIdentity<T extends QuestionBlock>(
       questionType: block.questionTypeGuess,
       questionImageUrl: block.questionImageUrl,
       element,
+      nativeQuestionId: options?.nativeQuestionId,
     }),
   };
 }
