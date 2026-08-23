@@ -1,5 +1,6 @@
 import type { BoundingBox } from "./capture";
 import type { QuestionIdentity } from "./questionV2";
+import type { QuestionBoundaryInfo, QuestionCompleteness } from "./questionBoundary";
 
 export type QuestionType =
   | "single_choice"
@@ -20,6 +21,14 @@ export interface QuestionBlock {
   id: string;
   /** Optional during migration so legacy chrome.storage records remain readable. */
   identity?: QuestionIdentity;
+  /** Full semantic text used only to derive identity; never a UI preview. */
+  identitySourceText?: string;
+  /** Scan-local semantic owner; not persisted identity or history key. */
+  runtimeOwnerKey?: string;
+  /** Optional so persisted Phase 0/1 records remain readable. */
+  boundary?: QuestionBoundaryInfo;
+  /** Optional so manual capture preserves legacy behavior. */
+  completeness?: QuestionCompleteness;
   bbox: BoundingBox;
   previewText: string;
   displaySegments?: QuestionDisplaySegment[];
