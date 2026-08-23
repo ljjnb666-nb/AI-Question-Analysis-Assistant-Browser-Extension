@@ -33,6 +33,9 @@ import {
   splitAnswerParts as splitAnswerPartsCore,
 } from "./answerText";
 import type { FillAnswerResult, VerifyAnswerResult } from "./answerTypes";
+import { buildValidatedAnswerPlan } from "./answer/answerPlanValidator";
+import { buildControlMapping } from "./answer/controlMapping";
+import { buildActionPlan, executeTransaction, readSelectedOptionKeys, verifyAnswerPlan } from "./answer/transactionalExecutor";
 
 const TEXT_INPUT_SELECTOR = [
   "input:not([type='radio'])",
@@ -69,54 +72,55 @@ const scopeSelectors = {
 export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult): Promise<FillAnswerResult> {
   const directScope = await resolveDirectQuestionScope(block, result);
   if (directScope) {
-    const directPass = await fillAnswerIntoScope(directScope.scope, directScope.bbox, result);
-    if (directPass.ok || !shouldRetryFillWithTextRelocation(directPass)) return directPass;
+    return fillVerifiedAnswerIntoScope(directScope.scope, block, result);
   }
 
   ensureQuestionRegionVisible(block.bbox);
   const viewportBbox = normalizeBBoxToViewport(block.bbox);
   let scope = resolveQuestionScope(viewportBbox, scopeSelectors);
-  let effectiveBbox = viewportBbox;
   if (shouldRelocateScope(scope, block, result)) {
     const relocatedFirst = await relocateQuestionScopeByText(block, result);
     if (relocatedFirst) {
       scope = relocatedFirst.scope;
-      effectiveBbox = relocatedFirst.bbox;
     }
   }
 
-  const firstPass = await fillAnswerIntoScope(scope, effectiveBbox, result);
-  if (firstPass.ok || !shouldRetryFillWithTextRelocation(firstPass)) return firstPass;
-
-  const relocated = await relocateQuestionScopeByText(block, result);
-  if (!relocated) return firstPass;
-  return fillAnswerIntoScope(relocated.scope, relocated.bbox, result);
+  return fillVerifiedAnswerIntoScope(scope, block, result);
 }
 
 export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResult): VerifyAnswerResult {
   const directScope = resolveDirectQuestionScopeSync(block, result);
   if (directScope) {
-    const directPass = verifyAnswerInScope(directScope.scope, directScope.bbox, result);
-    if (directPass.ok || !shouldRetryVerifyWithTextRelocation(directPass)) return directPass;
+    return verifyVerifiedAnswerInScope(directScope.scope, block, result);
   }
 
   const viewportBbox = normalizeBBoxToViewport(block.bbox);
   let scope = resolveQuestionScope(viewportBbox, scopeSelectors);
-  let effectiveBbox = viewportBbox;
   if (shouldRelocateScope(scope, block, result)) {
     const relocatedFirst = relocateQuestionScopeByTextSync(block, result);
     if (relocatedFirst) {
       scope = relocatedFirst.scope;
-      effectiveBbox = relocatedFirst.bbox;
     }
   }
 
-  const firstPass = verifyAnswerInScope(scope, effectiveBbox, result);
-  if (firstPass.ok || !shouldRetryVerifyWithTextRelocation(firstPass)) return firstPass;
+  return verifyVerifiedAnswerInScope(scope, block, result);
+}
 
-  const relocated = relocateQuestionScopeByTextSync(block, result);
-  if (!relocated) return firstPass;
-  return verifyAnswerInScope(relocated.scope, relocated.bbox, result);
+async function fillVerifiedAnswerIntoScope(scope: Element, block: QuestionBlock, result: ParseResult): Promise<FillAnswerResult> {
+  const mapping = buildControlMapping(block, scope);
+  if (!mapping.ok) return { ok: false, filledCount: 0, message: mapping.code };
+  const validated = buildValidatedAnswerPlan(block, result, mapping);
+  if (!validated.ok) return { ok: false, filledCount: 0, message: validated.code };
+  const outcome = await executeTransaction(validated.plan, buildActionPlan(validated.plan, mapping), mapping);
+  return { ok: outcome.outcome === "FILLED_VERIFIED" || outcome.outcome === "NO_CHANGE_NEEDED", filledCount: outcome.filledCount, message: outcome.outcome };
+}
+
+function verifyVerifiedAnswerInScope(scope: Element, block: QuestionBlock, result: ParseResult): VerifyAnswerResult {
+  const mapping = buildControlMapping(block, scope);
+  if (!mapping.ok) return { ok: false, expectedKeys: [], actualKeys: [], message: mapping.code };
+  const validated = buildValidatedAnswerPlan(block, result, mapping);
+  if (!validated.ok) return { ok: false, expectedKeys: [], actualKeys: [], message: validated.code };
+  return { ok: verifyAnswerPlan(validated.plan, mapping), expectedKeys: validated.plan.kind === "boolean" ? [validated.plan.optionKey ?? ""] : "optionKeys" in validated.plan ? validated.plan.optionKeys : [], actualKeys: readSelectedOptionKeys(mapping), message: "DOM readback verification" };
 }
 
 export async function fillAnswerIntoScope(scope: Element, bbox: BoundingBox, result: ParseResult): Promise<FillAnswerResult> {
@@ -312,12 +316,4 @@ function normalizeCodeForEditor(code: string): string {
 function normalizeTextLikeAnswerForControl(answer: string, questionType: ParseResult["questionType"]): string {
   if (!looksLikeCodeAnswer(answer, questionType)) return answer;
   return normalizeCodeForEditor(answer);
-}
-
-function shouldRetryFillWithTextRelocation(result: FillAnswerResult): boolean {
-  return /未找到可填写的选项控件|未找到文本输入框|未写入任何输入框/.test(String(result.message || ""));
-}
-
-function shouldRetryVerifyWithTextRelocation(result: VerifyAnswerResult): boolean {
-  return /无法映射期望选项|未选中/.test(String(result.message || ""));
 }
