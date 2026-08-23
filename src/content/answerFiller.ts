@@ -37,9 +37,9 @@ import { buildValidatedAnswerPlan } from "./answer/answerPlanValidator";
 import { buildControlMapping } from "./answer/controlMapping";
 import { buildActionPlan, executeTransaction, readSelectedOptionKeys, verifyAnswerPlan } from "./answer/transactionalExecutor";
 import { snapshotControls } from "./answer/transactionalExecutor";
-import { stableHash } from "./questionIdentity";
+import { observeLiveQuestion } from "./liveQuestionObservation";
 
-const solveStartSnapshots = new Map<string, { controls: ReturnType<typeof snapshotControls>; revision: string }>();
+const solveStartSnapshots = new Map<string, { controls: ReturnType<typeof snapshotControls>; stableId: string; contentFingerprint: string }>();
 const autoSnapshotStatus = new Map<string, "captured" | "unavailable">();
 const snapshotKey = (block: QuestionBlock) => `${block.identity?.stableId ?? block.id}:${block.identity?.contentFingerprint ?? block.id}`;
 
@@ -50,7 +50,11 @@ export function captureSolveStartControlState(block: QuestionBlock): void {
   if (typeof document.elementsFromPoint !== "function") return;
   const scope = resolveQuestionScope(normalizeBBoxToViewport(block.bbox), scopeSelectors);
   const mapping = buildControlMapping(block, scope);
-  if (mapping.ok) { solveStartSnapshots.set(key, { controls: snapshotControls(mapping), revision: liveRevision(mapping.owner) }); autoSnapshotStatus.set(key, "captured"); }
+  if (mapping.ok) {
+    const live = observeLiveQuestion(block, mapping.owner).identity;
+    solveStartSnapshots.set(key, { controls: snapshotControls(mapping), stableId: live.stableId, contentFingerprint: live.contentFingerprint });
+    autoSnapshotStatus.set(key, "captured");
+  }
 }
 
 const TEXT_INPUT_SELECTOR = [
@@ -130,15 +134,13 @@ async function fillVerifiedAnswerIntoScope(scope: Element, block: QuestionBlock,
   const key = snapshotKey(block); const autoStatus = autoSnapshotStatus.get(key);
   const solveStart = solveStartSnapshots.get(key);
   if (autoStatus === "unavailable" || (autoStatus === "captured" && !solveStart)) return { ok: false, filledCount: 0, message: "USER_STATE_SNAPSHOT_UNAVAILABLE" };
-  if (solveStart && solveStart.revision !== liveRevision(mapping.owner)) { solveStartSnapshots.delete(key); autoSnapshotStatus.delete(key); return { ok: false, filledCount: 0, message: "STALE_ACTION_PLAN" }; }
+  const live = observeLiveQuestion(block, mapping.owner).identity;
+  if ((block.identity && (live.stableId !== block.identity.stableId || live.contentFingerprint !== block.identity.contentFingerprint)) || (solveStart && (solveStart.stableId !== live.stableId || solveStart.contentFingerprint !== live.contentFingerprint))) {
+    solveStartSnapshots.delete(key); autoSnapshotStatus.delete(key); return { ok: false, filledCount: 0, message: "STALE_ACTION_PLAN" };
+  }
   const outcome = await executeTransaction(validated.plan, buildActionPlan(validated.plan, mapping), mapping, solveStart?.controls);
   solveStartSnapshots.delete(key); autoSnapshotStatus.delete(key);
   return { ok: outcome.outcome === "FILLED_VERIFIED" || outcome.outcome === "NO_CHANGE_NEEDED", filledCount: outcome.filledCount, message: outcome.outcome };
-}
-
-function liveRevision(owner: Element): string {
-  const media = Array.from(owner.querySelectorAll("img,video,source,canvas,svg")).map((node) => `${node.tagName}:${node.getAttribute("src") ?? node.getAttribute("href") ?? node.outerHTML}`).join("\u001f");
-  return stableHash(`${owner.textContent ?? ""}\u001f${media}`);
 }
 
 function verifyVerifiedAnswerInScope(scope: Element, block: QuestionBlock, result: ParseResult): VerifyAnswerResult {

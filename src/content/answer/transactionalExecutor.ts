@@ -1,8 +1,7 @@
 import type { ActionPlan, AnswerPlan } from "@/shared/types";
 import { applyTextValue, clickElement } from "../answerDomUtils";
-import { stableHash } from "../questionIdentity";
 import { controlRegistry, type ControlRef } from "./controlRegistry";
-import type { ControlMappingResult } from "./controlMapping";
+import { controlIsVisibleAndEnabled, semanticFingerprintForControl, type ControlMappingResult } from "./controlMapping";
 
 export type FillOutcome = "FILLED_VERIFIED" | "NO_CHANGE_NEEDED" | "CONTROL_MAPPING_AMBIGUOUS" | "STALE_ACTION_PLAN" | "USER_STATE_CHANGED" | "FILL_VERIFICATION_FAILED" | "ROLLBACK_FAILED" | "UNSUPPORTED_CONTROL";
 export type TransactionResult = { outcome: FillOutcome; filledCount: number; message: string };
@@ -37,8 +36,18 @@ export async function executeTransaction(plan: AnswerPlan, action: ActionPlan, m
   }
   return verifyAnswerPlan(plan, mapping) ? { outcome: "FILLED_VERIFIED", filledCount: changed, message: "Filled and verified by DOM readback" } : rollback(before, mapping, "FILL_VERIFICATION_FAILED");
 }
-function revalidate(mapping: Extract<ControlMappingResult, { ok: true }>, plan: AnswerPlan) { return mapping.questionId === plan.questionId && mapping.owner.isConnected && [...mapping.options.values(), ...mapping.blanks].every((ref) => { const entry = controlRegistry.metadata(ref.controlId); const el = entry?.element; return entry?.questionId === plan.questionId && entry.owner === mapping.owner && el?.isConnected && semanticFingerprint(el, ref) === ref.semanticFingerprint; }); }
-function semanticFingerprint(el: HTMLElement, ref: ControlRef) { const text = String(el.getAttribute("aria-label") || el.closest("label")?.textContent || el.textContent || "").replace(/\s+/g, " ").trim(); const key = text.match(/(?:^|\s|[（(])([A-Fa-fＡ-Ｆ])\s*(?:[.、):：]|[）)\s])/)?.[1]?.normalize("NFKC").toUpperCase() ?? text; return stableHash(`${ref.controlType}\u001f${key}`); }
+function revalidate(mapping: Extract<ControlMappingResult, { ok: true }>, plan: AnswerPlan) {
+  return mapping.questionId === plan.questionId && mapping.owner.isConnected && [...mapping.options.values(), ...mapping.blanks].every((ref) => {
+    const entry = controlRegistry.metadata(ref.controlId); const el = entry?.element;
+    if (!el) return false;
+    const currentOwner = el?.closest(".question-item,.questionBox,.base-question-component,[data-question-id],[data-questionid],[data-problem-id],[data-problemid],[data-item-id]");
+    return entry?.questionId === plan.questionId
+      && entry.owner === mapping.owner
+      && Boolean(el?.isConnected && mapping.owner.contains(el) && currentOwner === mapping.owner)
+      && controlIsVisibleAndEnabled(el)
+      && semanticFingerprintForControl(el, ref) === ref.semanticFingerprint;
+  });
+}
 function perform(step: ActionPlan["steps"][number], ref: ControlRef) { const el = controlRegistry.get(ref.controlId); if (!el || !el.isConnected) return false; if (step.type === "set-text") return applyTextValue(el, step.value) || normalize(readValue(ref)) === normalize(step.value); if (step.type === "clear-text") return applyTextValue(el, "") || !readValue(ref); const desired = step.desiredSelected; if (isSelected(ref) === desired) return true; if (ref.controlType === "radio" || ref.controlType === "checkbox" || ref.controlType === "custom-choice") { clickElement(el); return isSelected(ref) === desired; } return false; }
 function rollback(snapshot: Snapshot, mapping: Extract<ControlMappingResult, { ok: true }>, failure: "UNSUPPORTED_CONTROL" | "FILL_VERIFICATION_FAILED"): TransactionResult { let ok = true;
   // Restore selected radio first: native radio semantics clear peers; never try to uncheck a radio by clicking itself.
