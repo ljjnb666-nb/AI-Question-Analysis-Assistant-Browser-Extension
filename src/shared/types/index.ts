@@ -4,5 +4,6 @@ export * from "./parse";
 export * from "./question";
 export * from "./questionV2";
 export * from "./questionBoundary";
+export * from "./mediaAsset";
 export * from "./settings";
 export * from "./ui";

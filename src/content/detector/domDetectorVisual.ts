@@ -17,7 +17,7 @@ export function isDecorativeQuestionImage(img: Element): boolean {
   if (/689dc301e4b07b838da42b38\.png/i.test(src)) return true;
 
   const rect = (img as HTMLElement).getBoundingClientRect?.();
-  if (rect && rect.width <= 28 && rect.height <= 28) return true;
+  if (rect && rect.width > 0 && rect.height > 0 && rect.width <= 28 && rect.height <= 28) return true;
 
   return false;
 }
