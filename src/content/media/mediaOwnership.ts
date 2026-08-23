@@ -15,12 +15,22 @@ export function isFormulaMediaRepresentation(element: Element): boolean {
 export function isMediaDecoration(element: Element): boolean {
   if (element.tagName.toLowerCase() === "img" && isDecorativeQuestionImage(element)) return true;
   const label = `${element.getAttribute("aria-label") ?? ""} ${element.getAttribute("alt") ?? ""} ${element.className ?? ""}`;
-  return /(?:logo|avatar|icon|checkbox|radio|navigation|advert)/i.test(label);
+  if (/(?:logo|avatar|icon|checkbox|radio|navigation|advert)/i.test(label)) return true;
+  const rect = (element as HTMLElement).getBoundingClientRect?.();
+  const tag = element.tagName.toLowerCase();
+  return tag === "svg" && Boolean(rect && rect.width > 0 && rect.height > 0 && rect.width <= 20 && rect.height <= 20 && !element.getAttribute("aria-label") && !element.getAttribute("title"));
+}
+
+export function resolveSemanticQuestionOwner(element: Element): Element | null {
+  return element.matches(QUESTION_SELECTOR) ? element : element.closest(QUESTION_SELECTOR);
 }
 
 export function isInsideDifferentQuestionOwner(element: Element, owner: Element): boolean {
-  const nearest = element.closest(QUESTION_SELECTOR);
-  return Boolean(nearest && nearest !== owner && !owner.contains(nearest));
+  const current = resolveSemanticQuestionOwner(owner);
+  const nearest = resolveSemanticQuestionOwner(element);
+  // A broad wrapper has no semantic question identity. Nested cards must never inherit it.
+  if (!current) return Boolean(nearest);
+  return Boolean(nearest && nearest !== current);
 }
 
 export function resolveMediaOwnership(element: Element, owner: Element): MediaOwnership {

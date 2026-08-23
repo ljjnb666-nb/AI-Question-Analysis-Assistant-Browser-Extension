@@ -2,6 +2,7 @@ import type { FloatingWindowState, AppSettings, HistoryEntry, ParseResult, Quest
 import { DEFAULT_SETTINGS } from "../types";
 import { logError } from "./errorLogger";
 import { decryptValue, encryptValue, isEncrypted } from "./encryption";
+import { sanitizeQuestionBlockForSerialization } from "./mediaSerialization";
 
 const KEYS = {
   floatingState: "floatingWindowState",
@@ -183,7 +184,7 @@ function sanitizeQuestionImageUrl(value?: string): string | undefined {
 }
 
 export function sanitizeBlockForHistory(block: QuestionBlock): QuestionBlock {
-  return {
+  return sanitizeQuestionBlockForSerialization({
     ...block,
     previewText: truncateText(block.previewText, MAX_PREVIEW_TEXT_CHARS),
     displaySegments: block.displaySegments?.slice(0, 12).map((segment) =>
@@ -191,7 +192,7 @@ export function sanitizeBlockForHistory(block: QuestionBlock): QuestionBlock {
     ),
     questionImageUrl: sanitizeQuestionImageUrl(block.questionImageUrl),
     imageDataUrl: undefined,
-  };
+  });
 }
 
 export function sanitizeResultForHistory(result: ParseResult): ParseResult {

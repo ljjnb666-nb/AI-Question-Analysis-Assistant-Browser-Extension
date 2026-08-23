@@ -1,4 +1,5 @@
 import type { QuestionBlock } from "@/shared/types";
+import { sanitizeQuestionBlockForSerialization } from "@/shared/utils/mediaSerialization";
 
 type DonePayload = {
   ok: boolean;
@@ -69,5 +70,5 @@ export async function advanceAfterSolvedQuestion(
 }
 
 export function toProgressBlock(block: QuestionBlock): QuestionBlock {
-  return { ...block, imageDataUrl: undefined };
+  return sanitizeQuestionBlockForSerialization(block);
 }

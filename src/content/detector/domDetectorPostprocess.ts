@@ -6,6 +6,7 @@ import { evaluateQuestionCompleteness } from "./questionCompleteness";
 import { questionFragmentFromBlock } from "./questionFragment";
 import { resolveQuestionOwnership } from "./questionOwnership";
 import { classifyViewportBoundary, mergeQuestionBoundaryInfo } from "./questionBoundary";
+import { mergeQuestionMediaEvidence } from "../media/mediaDiscovery";
 
 export function isLikelyCompleteQuestionText(text: string, type: QuestionType): boolean {
   if (!text) return false;
@@ -145,15 +146,14 @@ function mergeTwoBlocks(a: QuestionBlock, b: QuestionBlock): QuestionBlock {
   const nativeQuestionId = a.identity?.nativeQuestionId === b.identity?.nativeQuestionId
     ? a.identity?.nativeQuestionId
     : a.identity?.nativeQuestionId ?? b.identity?.nativeQuestionId;
+  const media = mergeQuestionMediaEvidence(a, b);
   return attachQuestionIdentity({
     ...a,
     id: a.id,
     bbox: { x: left, y: top, width: Math.max(20, right - left), height: Math.max(20, bottom - top) },
     previewText: combinedText.slice(0, 900),
     identitySourceText: identityText,
-    hasImage: a.hasImage || b.hasImage,
-    mediaAssets: [...(a.mediaAssets ?? []), ...(b.mediaAssets ?? [])],
-    primaryMediaAssetId: a.primaryMediaAssetId ?? b.primaryMediaAssetId,
+    ...media,
     questionTypeGuess: mergedType,
     confidence: Math.min(1, Math.max(a.confidence, b.confidence) + 0.05),
     boundary: mergeQuestionBoundaryInfo(a.boundary, b.boundary),

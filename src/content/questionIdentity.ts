@@ -1,4 +1,5 @@
 import type { MediaFingerprintHint, QuestionBlock, QuestionIdentity, QuestionType } from "@/shared/types";
+import { canonicalizeMediaUrl } from "@/shared/utils/mediaUrlPrivacy";
 
 const IDENTITY_VERSION = 1 as const;
 const STRONG_NATIVE_ID_ATTRIBUTES = ["data-question-id", "data-questionid", "data-problem-id", "data-problemid", "data-item-id"];
@@ -38,18 +39,7 @@ export function stableHash(input: string): string {
 }
 
 export function canonicalizeQuestionImageUrl(raw?: string): string {
-  if (!raw) return "";
-  try {
-    const url = new URL(raw, window.location.href);
-    const cacheParams = new Set(["timestamp", "ts", "cache", "cachebust", "cache_bust", "cb", "_", "expires", "signature", "x-amz-signature", "x-amz-credential", "x-amz-date", "x-amz-expires", "token", "access_token"]);
-    const retained = Array.from(url.searchParams.entries())
-      .filter(([key]) => !cacheParams.has(key.toLowerCase()) && !key.toLowerCase().startsWith("utm_"))
-      .sort(([leftKey, leftValue], [rightKey, rightValue]) => leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue));
-    const query = retained.length ? `?${new URLSearchParams(retained).toString()}` : "";
-    return `${url.origin}${url.pathname}${query}`;
-  } catch {
-    return String(raw).split(/[?#]/, 1)[0];
-  }
+  return canonicalizeMediaUrl(raw);
 }
 
 export function extractOrdinalHint(text: string): number | undefined {
