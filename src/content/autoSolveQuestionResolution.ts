@@ -1,4 +1,5 @@
 import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
+import { captureSolveStartControlState } from "./answerFiller";
 
 type AutoSolveProgressPayload = {
   currentBlock: QuestionBlock;
@@ -47,6 +48,7 @@ export async function resolveAutoSolveQuestion(
   options: ResolveQuestionOptions,
   deps: ResolveQuestionDeps,
 ): Promise<ResolveQuestionResult> {
+  captureSolveStartControlState(options.currentBlock);
   let questionCompleted = false;
   let progressMessage: string;
   let filledDelta = 0;

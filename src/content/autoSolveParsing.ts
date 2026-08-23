@@ -6,7 +6,6 @@ import {
   shouldRetryWithVisionForAuto,
   shouldUseVisionForAutoSolve,
 } from "./autoSolveHeuristics";
-import { captureSolveStartControlState } from "./answerFiller";
 
 type ProviderInfo = {
   supportsVision: boolean;
@@ -62,7 +61,6 @@ export async function parseBlockForAutoSolve(
   deps: AutoSolveParsingDeps,
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
-  captureSolveStartControlState(block);
   const settings = await deps.loadSettings();
   const provider = deps.getProvider(settings.providerId ?? "anthropic");
   const wantsVision = provider.supportsVision && shouldUseVisionForAutoSolve(block, settings.preferredRoute);

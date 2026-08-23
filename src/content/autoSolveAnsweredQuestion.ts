@@ -1,4 +1,5 @@
 import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
+import { captureSolveStartControlState } from "./answerFiller";
 
 type AnswerState = {
   mode: "choice" | "text" | "none";
@@ -72,6 +73,7 @@ export async function handleAnsweredQuestionPhase(
   options: AnsweredQuestionOptions,
   deps: AnsweredQuestionDeps,
 ): Promise<AnsweredQuestionResult> {
+  captureSolveStartControlState(options.currentBlock);
   let solved = options.solved;
   let filled = options.filled;
 

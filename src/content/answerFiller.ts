@@ -46,6 +46,9 @@ const snapshotKey = (block: QuestionBlock) => `${block.identity?.stableId ?? blo
 /** Called by the auto-solve parser before the provider request; runtime only. */
 export function captureSolveStartControlState(block: QuestionBlock): void {
   const key = snapshotKey(block);
+  // An auto-solve attempt owns this baseline. Provider/review retries must not
+  // replace it after a user has interacted with the question.
+  if (autoSnapshotStatus.has(key)) return;
   autoSnapshotStatus.set(key, "unavailable");
   if (typeof document.elementsFromPoint !== "function") return;
   const scope = resolveQuestionScope(normalizeBBoxToViewport(block.bbox), scopeSelectors);
@@ -55,6 +58,17 @@ export function captureSolveStartControlState(block: QuestionBlock): void {
     solveStartSnapshots.set(key, { controls: snapshotControls(mapping), stableId: live.stableId, contentFingerprint: live.contentFingerprint });
     autoSnapshotStatus.set(key, "captured");
   }
+}
+
+export function finishAutoSolveQuestionAttempt(block: QuestionBlock): void {
+  const key = snapshotKey(block);
+  solveStartSnapshots.delete(key);
+  autoSnapshotStatus.delete(key);
+}
+
+/** Runtime-only, read-only test seam; no DOM or user answer data is exposed. */
+export function hasAutoSolveQuestionAttempt(block: QuestionBlock): boolean {
+  return autoSnapshotStatus.has(snapshotKey(block));
 }
 
 const TEXT_INPUT_SELECTOR = [
@@ -89,10 +103,10 @@ const scopeSelectors = {
   choiceInputSelector: CHOICE_INPUT_SELECTOR,
 };
 
-export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult): Promise<FillAnswerResult> {
+export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult, options: { mode?: "auto" | "manual" } = {}): Promise<FillAnswerResult> {
   const directScope = await resolveDirectQuestionScope(block, result);
   if (directScope) {
-    return fillVerifiedAnswerIntoScope(directScope.scope, block, result);
+    return fillVerifiedAnswerIntoScope(directScope.scope, block, result, options.mode ?? "manual");
   }
 
   ensureQuestionRegionVisible(block.bbox);
@@ -105,7 +119,7 @@ export async function fillParsedAnswerInPage(block: QuestionBlock, result: Parse
     }
   }
 
-  return fillVerifiedAnswerIntoScope(scope, block, result);
+  return fillVerifiedAnswerIntoScope(scope, block, result, options.mode ?? "manual");
 }
 
 export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResult): VerifyAnswerResult {
@@ -126,20 +140,19 @@ export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResu
   return verifyVerifiedAnswerInScope(scope, block, result);
 }
 
-async function fillVerifiedAnswerIntoScope(scope: Element, block: QuestionBlock, result: ParseResult): Promise<FillAnswerResult> {
+async function fillVerifiedAnswerIntoScope(scope: Element, block: QuestionBlock, result: ParseResult, mode: "auto" | "manual"): Promise<FillAnswerResult> {
   const mapping = buildControlMapping(block, scope);
   if (!mapping.ok) return { ok: false, filledCount: 0, message: mapping.code };
   const validated = buildValidatedAnswerPlan(block, result, mapping);
   if (!validated.ok) return { ok: false, filledCount: 0, message: validated.code };
   const key = snapshotKey(block); const autoStatus = autoSnapshotStatus.get(key);
   const solveStart = solveStartSnapshots.get(key);
-  if (autoStatus === "unavailable" || (autoStatus === "captured" && !solveStart)) return { ok: false, filledCount: 0, message: "USER_STATE_SNAPSHOT_UNAVAILABLE" };
+  if (mode === "auto" && (autoStatus !== "captured" || !solveStart)) return { ok: false, filledCount: 0, message: "USER_STATE_SNAPSHOT_UNAVAILABLE" };
   const live = observeLiveQuestion(block, mapping.owner).identity;
   if ((block.identity && (live.stableId !== block.identity.stableId || live.contentFingerprint !== block.identity.contentFingerprint)) || (solveStart && (solveStart.stableId !== live.stableId || solveStart.contentFingerprint !== live.contentFingerprint))) {
-    solveStartSnapshots.delete(key); autoSnapshotStatus.delete(key); return { ok: false, filledCount: 0, message: "STALE_ACTION_PLAN" };
+    return { ok: false, filledCount: 0, message: "STALE_ACTION_PLAN" };
   }
   const outcome = await executeTransaction(validated.plan, buildActionPlan(validated.plan, mapping), mapping, solveStart?.controls);
-  solveStartSnapshots.delete(key); autoSnapshotStatus.delete(key);
   return { ok: outcome.outcome === "FILLED_VERIFIED" || outcome.outcome === "NO_CHANGE_NEEDED", filledCount: outcome.filledCount, message: outcome.outcome };
 }
 

@@ -13,6 +13,7 @@ import {
 import { prepareAutoSolveIteration } from "./autoSolveLoopState";
 import { handleAnsweredQuestionPhase } from "./autoSolveAnsweredQuestion";
 import { resolveAutoSolveQuestion } from "./autoSolveQuestionResolution";
+import { captureSolveStartControlState, finishAutoSolveQuestionAttempt } from "./answerFiller";
 import { getAutomaticQuestionEligibility } from "./automaticQuestionEligibility";
 import { advanceAfterSolvedQuestion, toProgressBlock } from "./autoSolveFlow";
 import { reportSolvedQuestionAndAdvance } from "./autoSolveImmediateAdvance";
@@ -44,7 +45,7 @@ type AutoSolveDeps = {
   extractQuestionImageUrlFromBBox: (bbox: QuestionBlock["bbox"]) => string | null;
   extractRichQuestionPreviewFromElement: (node: Element) => string;
   extractTextFromBBox: (bbox: QuestionBlock["bbox"]) => string;
-  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => Promise<{ ok: boolean; filledCount: number; message: string }>;
+  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options?: { mode?: "auto" | "manual" }) => Promise<{ ok: boolean; filledCount: number; message: string }>;
   findBestDetectedCandidateForBBox: (bbox: QuestionBlock["bbox"]) => QuestionBlock | null;
   findMatchingFullPageCandidate: (
     candidates: QuestionBlock[],
@@ -244,6 +245,8 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
         continue;
       }
       const answerState = deps.inspectAutoSolveAnswerState(currentBlock);
+      captureSolveStartControlState(currentBlock);
+      try {
       const answeredPhase = await handleAnsweredQuestionPhase(
         {
           answerState,
@@ -260,7 +263,7 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
           total,
         },
         {
-          fillParsedAnswerInPage: deps.fillParsedAnswerInPage,
+          fillParsedAnswerInPage: (block, result) => deps.fillParsedAnswerInPage(block, result, { mode: "auto" }),
           findReusableHistoryEntry: deps.findReusableHistoryEntry,
           isChoiceLikeQuestionType: deps.isChoiceLikeQuestionType,
           reportSolvedQuestionAndAdvance: (options) => reportSolvedQuestionAndAdvance(options, reportSolvedQuestionAndAdvanceDeps),
@@ -288,7 +291,7 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
           total,
         },
         {
-          fillParsedAnswerInPage: deps.fillParsedAnswerInPage,
+          fillParsedAnswerInPage: (block, result) => deps.fillParsedAnswerInPage(block, result, { mode: "auto" }),
           isChoiceLikeQuestionType: deps.isChoiceLikeQuestionType,
           parseBlockForAutoSolve: deps.parseBlockForAutoSolve,
           parseBlockForAutoSolveQuickReview: deps.parseBlockForAutoSolveQuickReview,
@@ -378,6 +381,11 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
       );
       if (driveFromOrderedPlan) incrementOrderedPlanCursor(orderedPlanState);
       if (advanceResult === "done") return;
+      } finally {
+        // The attempt spans history reuse, reviews, retries, fill and advance.
+        // It is runtime-only and this cleanup is intentionally idempotent.
+        finishAutoSolveQuestionAttempt(currentBlock);
+      }
     }
 
     deps.sendAutoSolveDone({

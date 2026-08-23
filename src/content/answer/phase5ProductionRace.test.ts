@@ -54,7 +54,7 @@ describe("Phase 5 production-path races", () => {
     document.getElementById("b")!.addEventListener("click", () => clicks++);
     const original = document.elementsFromPoint;
     Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: undefined });
-    try { captureSolveStartControlState(block); expect((await fillParsedAnswerInPage(block, result)).message).toBe("USER_STATE_SNAPSHOT_UNAVAILABLE"); expect(clicks).toBe(0); }
+    try { captureSolveStartControlState(block); expect((await fillParsedAnswerInPage(block, result, { mode: "auto" })).message).toBe("USER_STATE_SNAPSHOT_UNAVAILABLE"); expect(clicks).toBe(0); }
     finally { Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: original }); }
   });
 });

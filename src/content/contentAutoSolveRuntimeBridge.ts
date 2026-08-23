@@ -11,6 +11,7 @@ import {
   recordAutoSolveHistory as recordAutoSolveHistoryCore,
   shouldReviewLowConfidenceHistory as shouldReviewLowConfidenceHistoryCore,
 } from "./autoSolveParsing";
+import { captureSolveStartControlState } from "./answerFiller";
 import type {
   sendAutoSolveDone as sendAutoSolveDoneCore,
   sendAutoSolveProgress as sendAutoSolveProgressCore,
@@ -65,6 +66,7 @@ type AutoSolveBridgeDeps = {
 export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
   let activeAttempt: AbortController | null = null;
   function beginAttempt(block: QuestionBlock): ParseQuestionRuntimeContext {
+    captureSolveStartControlState(block);
     activeAttempt?.abort();
     const controller = new AbortController();
     activeAttempt = controller;

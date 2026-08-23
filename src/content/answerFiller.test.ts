@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BoundingBox, ParseResult } from "@/shared/types";
-import { fillAnswerIntoScope, fillParsedAnswerInPage, normalizeChoiceAnswerKeys, splitAnswerParts, verifyAnswerInScope } from "./answerFiller";
+import { captureSolveStartControlState, fillAnswerIntoScope, fillParsedAnswerInPage, finishAutoSolveQuestionAttempt, hasAutoSolveQuestionAttempt, normalizeChoiceAnswerKeys, splitAnswerParts, verifyAnswerInScope } from "./answerFiller";
+import { observeLiveQuestion } from "./liveQuestionObservation";
 
 function setRect(el: Element, rect: { left: number; top: number; width: number; height: number }) {
   Object.defineProperty(el, "getBoundingClientRect", {
@@ -17,6 +18,27 @@ function setRect(el: Element, rect: { left: number; top: number; width: number; 
 }
 
 describe("answerFiller", () => {
+  it("enforces the explicit auto/manual snapshot contract and has idempotent finish", async () => {
+    document.body.innerHTML = '<section class="question-item" id="q-mode">1. prompt <button>A. a</button><button id="b">B. b</button></section>';
+    const owner = document.getElementById("q-mode")!;
+    document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
+    const block = observeLiveQuestion({ id: "q-mode", bbox: { x: 0, y: 0, width: 500, height: 240 }, previewText: "1. prompt A. a B. b", questionTypeGuess: "single_choice", hasImage: false, confidence: 1, source: "auto_dom" }, owner);
+    const result: ParseResult = { blockId: block.id, questionType: "single_choice", answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
+    let clicks = 0;
+    document.getElementById("b")!.addEventListener("click", () => clicks++);
+
+    expect((await fillParsedAnswerInPage(block, result, { mode: "auto" })).message).toBe("USER_STATE_SNAPSHOT_UNAVAILABLE");
+    expect(clicks).toBe(0);
+    const manual = await fillParsedAnswerInPage(block, result, { mode: "manual" });
+    expect(manual.message).not.toBe("USER_STATE_SNAPSHOT_UNAVAILABLE");
+
+    captureSolveStartControlState(block);
+    expect(hasAutoSolveQuestionAttempt(block)).toBe(true);
+    finishAutoSolveQuestionAttempt(block);
+    finishAutoSolveQuestionAttempt(block);
+    expect(hasAutoSolveQuestionAttempt(block)).toBe(false);
+  });
+
   it("normalizes judge and choice answer keys", () => {
     expect(normalizeChoiceAnswerKeys("B", "single_choice")).toEqual(["B"]);
     expect(normalizeChoiceAnswerKeys("D,A,C", "multi_choice")).toEqual(["A", "C", "D"]);
