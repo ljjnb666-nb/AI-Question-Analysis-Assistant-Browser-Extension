@@ -1,4 +1,4 @@
-import type { QuestionBlock, QuestionIdentity, QuestionType } from "@/shared/types";
+import type { MediaFingerprintHint, QuestionBlock, QuestionIdentity, QuestionType } from "@/shared/types";
 
 const IDENTITY_VERSION = 1 as const;
 const STRONG_NATIVE_ID_ATTRIBUTES = ["data-question-id", "data-questionid", "data-problem-id", "data-problemid", "data-item-id"];
@@ -9,6 +9,7 @@ export type QuestionIdentityInput = {
   text: string;
   questionType: QuestionType;
   questionImageUrl?: string;
+  mediaFingerprintHints?: MediaFingerprintHint[];
   element?: Element | null;
   nativeQuestionId?: string;
 };
@@ -40,7 +41,7 @@ export function canonicalizeQuestionImageUrl(raw?: string): string {
   if (!raw) return "";
   try {
     const url = new URL(raw, window.location.href);
-    const cacheParams = new Set(["timestamp", "ts", "cache", "cachebust", "cache_bust", "cb", "_"]);
+    const cacheParams = new Set(["timestamp", "ts", "cache", "cachebust", "cache_bust", "cb", "_", "expires", "signature", "x-amz-signature", "x-amz-credential", "x-amz-date", "x-amz-expires", "token", "access_token"]);
     const retained = Array.from(url.searchParams.entries())
       .filter(([key]) => !cacheParams.has(key.toLowerCase()) && !key.toLowerCase().startsWith("utm_"))
       .sort(([leftKey, leftValue], [rightKey, rightValue]) => leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue));
@@ -109,10 +110,11 @@ export function buildQuestionIdentity(input: QuestionIdentityInput): QuestionIde
   const ordinalHint = extractOrdinalHint(text);
   const nativeQuestionId = input.nativeQuestionId ?? extractNativeQuestionId(input.element);
   const imageHint = canonicalizeQuestionImageUrl(input.questionImageUrl);
+  const mediaSummary = canonicalizeMediaFingerprintHints(input.mediaFingerprintHints);
   const optionSignal = /(?:^|\n|\s)[A-F][.):、]/.test(text);
   const structureHint = input.element?.tagName.toLowerCase() || "";
   const contentText = removeLeadingOrdinal(text);
-  const contentFingerprint = `cf_v${IDENTITY_VERSION}_${stableHash([input.questionType, contentText, imageHint].join("\u001f"))}`;
+  const contentFingerprint = `cf_v${IDENTITY_VERSION}_${stableHash([input.questionType, contentText, imageHint, mediaSummary].join("\u001f"))}`;
   const strategy = nativeQuestionId
     ? "native-id"
     : ordinalHint !== undefined
@@ -138,10 +140,19 @@ export function buildQuestionIdentity(input: QuestionIdentityInput): QuestionIde
       nativeId: Boolean(nativeQuestionId),
       content: Boolean(text),
       options: optionSignal,
-      media: Boolean(imageHint),
+      media: Boolean(imageHint || mediaSummary),
       structure: Boolean(structureHint),
     },
   };
+}
+
+export function canonicalizeMediaFingerprintHints(hints?: MediaFingerprintHint[]): string {
+  if (!hints?.length) return "";
+  return [...hints]
+    .map((hint) => ({ role: hint.role, optionKey: hint.optionKey ?? "", contentFingerprint: hint.contentFingerprint, semanticOrder: hint.semanticOrder ?? 0 }))
+    .sort((a, b) => a.role.localeCompare(b.role) || a.optionKey.localeCompare(b.optionKey) || a.semanticOrder - b.semanticOrder || a.contentFingerprint.localeCompare(b.contentFingerprint))
+    .map((hint) => `${hint.role}:${hint.optionKey}:${hint.semanticOrder}:${hint.contentFingerprint}`)
+    .join("|");
 }
 
 export function attachQuestionIdentity<T extends QuestionBlock>(
@@ -155,6 +166,7 @@ export function attachQuestionIdentity<T extends QuestionBlock>(
       text: options?.identityText ?? block.previewText,
       questionType: block.questionTypeGuess,
       questionImageUrl: block.questionImageUrl,
+      mediaFingerprintHints: block.mediaAssets?.map((asset) => ({ role: asset.ownership.role, optionKey: asset.ownership.optionKey, contentFingerprint: asset.contentFingerprint, semanticOrder: asset.semanticOrder })),
       element,
       nativeQuestionId: options?.nativeQuestionId,
     }),

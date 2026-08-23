@@ -45,11 +45,17 @@ import {
 import { buildPreviewText, buildPreviewTextForBbox, getElementReadableText } from "./domDetectorPreview";
 import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "./domDetectorVisual";
 import { attachQuestionIdentity } from "../questionIdentity";
+import { collectMediaAssets, projectLegacyMedia } from "../media/mediaDiscovery";
 import { classifyViewportBoundary } from "./questionBoundary";
 
 let mutationObserver: MutationObserver | null = null;
 let pendingRescan = false;
 let onCandidatesChanged: ((blocks: QuestionBlock[]) => void) | null = null;
+
+function attachDetectedQuestionIdentity(block: QuestionBlock, owner: Element, options?: { identityText?: string; nativeQuestionId?: string }): QuestionBlock & { identity: NonNullable<QuestionBlock["identity"]> } {
+  const withMedia = projectLegacyMedia(block, collectMediaAssets(owner), owner);
+  return attachQuestionIdentity(withMedia, owner, options);
+}
 
 export function watchForPageChanges(callback: (blocks: QuestionBlock[]) => void): () => void {
   onCandidatesChanged = callback;
@@ -134,7 +140,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
       ? sanitizePreviewTextByType(text, guessed)
       : sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), guessed);
     if (!isLikelyCompleteQuestionText(previewText, guessed)) continue;
-    const candidate = attachQuestionIdentity({
+    const candidate = attachDetectedQuestionIdentity({
       id: `auto-direct-${Date.now()}-${directIndex}-${Math.random().toString(36).slice(2, 8)}`,
       bbox: candidateBbox,
       previewText: previewText.slice(0, 420),
@@ -203,7 +209,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
     previewText = sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), candidateType);
     if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
 
-    const candidate = attachQuestionIdentity({
+    const candidate = attachDetectedQuestionIdentity({
       id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       bbox: candidateBbox,
       previewText: previewText.slice(0, 420),
@@ -276,7 +282,7 @@ function buildStableStructuredContainerCandidates(
     const candidateType = inferQuestionType(previewText);
     if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
 
-    out.push(attachQuestionIdentity({
+    out.push(attachDetectedQuestionIdentity({
       id: `auto-structured-${Date.now()}-${index++}`,
       bbox: clampRectToBbox(rect, vw, vh),
       previewText: previewText.slice(0, 420),
@@ -337,7 +343,7 @@ function buildPintiaCodeProblemCandidates(
     if (!text || text.length < 120) continue;
     if (isLikelyControlPanelText(text) || !isLikelyCompleteQuestionText(text, "short_answer")) continue;
 
-    out.push(attachQuestionIdentity({
+    out.push(attachDetectedQuestionIdentity({
       id: `auto-pintia-code-${Date.now()}-${index}`,
       bbox: clampRectToBbox(rect, vw, vh),
       previewText: sanitizePreviewTextByType(text, "short_answer").slice(0, 900),
@@ -384,7 +390,7 @@ function buildPintiaQuestionListCandidates(
     const previewText = sanitizePreviewTextByType(text, candidateType);
     if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
 
-    out.push(attachQuestionIdentity({
+    out.push(attachDetectedQuestionIdentity({
       id: `auto-pintia-list-${Date.now()}-${index}`,
       bbox: clampRectToBbox(rect, vw, vh),
       previewText: previewText.slice(0, 420),
@@ -508,7 +514,7 @@ function scanIframes(vw: number, vh: number): QuestionBlock[] {
         if (score.confidence < 0.45) continue;
 
         const r = (el as HTMLElement).getBoundingClientRect();
-        blocks.push(attachQuestionIdentity({
+        blocks.push(attachDetectedQuestionIdentity({
           id: `iframe-auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           bbox: {
             x: Math.max(0, frameRect.left + r.left),

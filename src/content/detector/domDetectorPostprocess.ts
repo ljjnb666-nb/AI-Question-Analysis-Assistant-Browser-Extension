@@ -152,6 +152,8 @@ function mergeTwoBlocks(a: QuestionBlock, b: QuestionBlock): QuestionBlock {
     previewText: combinedText.slice(0, 900),
     identitySourceText: identityText,
     hasImage: a.hasImage || b.hasImage,
+    mediaAssets: [...(a.mediaAssets ?? []), ...(b.mediaAssets ?? [])],
+    primaryMediaAssetId: a.primaryMediaAssetId ?? b.primaryMediaAssetId,
     questionTypeGuess: mergedType,
     confidence: Math.min(1, Math.max(a.confidence, b.confidence) + 0.05),
     boundary: mergeQuestionBoundaryInfo(a.boundary, b.boundary),

@@ -103,7 +103,7 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
     expect(extractReadableQuestionNodeText(image, readableTextDeps)).toBe("[图片]");
   });
 
-  it("preserves a primary question image URL while structured display segments retain both images", () => {
+  it("IMG-D1/M2 preserves every meaningful stem image and keeps a deterministic legacy primary", () => {
     createImageQuestionFixture({ id: "multi-image", ordinal: 4, top: 40, stem: "Read both diagrams?", images: [
       { src: "https://example.com/small.png", width: 200, height: 100 },
       { src: "https://example.com/large.png", width: 400, height: 220 },
@@ -112,17 +112,22 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
     expect(block.hasImage).toBe(true);
     expect(block.questionImageUrl).toBe("https://example.com/large.png");
     expect(block.displaySegments?.filter((segment) => segment.type === "image")).toHaveLength(2);
+    expect(block.mediaAssets?.filter((asset) => asset.ownership.role === "stem")).toHaveLength(2);
+    expect(block.displaySegments?.filter((segment) => segment.type === "image").every((segment) => !!segment.mediaAssetId)).toBe(true);
   });
 
-  it("characterizes CURRENT_LIMITATION_OPTION_IMAGE_OWNERSHIP", () => {
+  it("IMG-D2 assigns A/B/C/D image options to their option keys", () => {
     createOptionImageQuestionFixture("option-images", 40);
     const block = detectCandidatesInViewport().find((candidate) => candidate.previewText.includes("Which image is correct"))!;
     expect(block.hasImage).toBe(true);
     expect(block.questionImageUrl).toBe("https://example.com/a.png");
     expect(block.displaySegments?.filter((segment) => segment.type === "image")).toHaveLength(0);
+    expect(block.mediaAssets?.map((asset) => [asset.ownership.role, asset.ownership.optionKey])).toEqual([
+      ["option", "A"], ["option", "B"], ["option", "C"], ["option", "D"],
+    ]);
   });
 
-  it("characterizes CURRENT_LIMITATION_DATA_URL_MEDIA", () => {
+  it("IMG-D4 supports data:image through a payload ref rather than QuestionBlock base64", () => {
     const host = createImageQuestionFixture({ id: "data-image", ordinal: 5, top: 40, stem: "Use this image?", images: [{ src: "data:image/png;base64,AAAA", width: 300, height: 180 }] });
     const image = host.querySelector("img")!;
     expect(extractReadableQuestionNodeText(image, readableTextDeps)).toBe("[图片]");
@@ -130,10 +135,12 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
     const block = detectCandidatesInViewport().find((candidate) => candidate.previewText.includes("Use this image"))!;
     expect(block.hasImage).toBe(true);
     expect(block.questionImageUrl).toBeUndefined();
-    expect(block.displaySegments?.some((segment) => segment.type === "image" && segment.url.startsWith("data:image/"))).toBe(true);
+    expect(block.displaySegments?.some((segment) => segment.type === "image" && segment.url.startsWith("media://") && !!segment.mediaAssetId)).toBe(true);
+    expect(block.mediaAssets).toHaveLength(1);
+    expect(JSON.stringify(block.mediaAssets)).not.toContain("AAAA");
   });
 
-  it("characterizes CURRENT_LIMITATION_CANVAS_MEDIA", () => {
+  it("IMG-D5 represents permitted or tainted canvas explicitly", () => {
     const host = createImageQuestionFixture({ id: "canvas-question", ordinal: 6, top: 40, stem: "Inspect the canvas?" });
     const canvas = document.createElement("canvas");
     host.querySelector(".questionContent")!.append(canvas);
@@ -143,6 +150,15 @@ describe("Universal Question Engine V2 Phase 0 baseline lock", () => {
     const block = detectCandidatesInViewport().find((candidate) => candidate.previewText.includes("Inspect the canvas"))!;
     expect(block.hasImage).toBe(true);
     expect(block.questionImageUrl).toBeUndefined();
+    expect(block.mediaAssets?.find((asset) => asset.kind === "canvas")?.availability).toMatch(/available|tainted|blocked/);
+  });
+
+  it("IMG-D3 never assigns the next question image to the previous question", () => {
+    createImageQuestionFixture({ id: "q12", ordinal: 12, top: 40, stem: "first diagram question?", images: [{ src: "https://example.com/first.png", width: 220, height: 100 }] });
+    createImageQuestionFixture({ id: "q13", ordinal: 13, top: 360, stem: "next diagram question?", images: [{ src: "https://example.com/next.png", width: 220, height: 100 }] });
+    const first = detectCandidatesInViewport().find((candidate) => candidate.previewText.includes("first diagram"))!;
+    expect(first.mediaAssets?.map((asset) => asset.contentFingerprint)).toHaveLength(1);
+    expect(first.questionImageUrl).toBe("https://example.com/first.png");
   });
 
   it("keeps stable question identity across equivalent DOM rerenders", () => {

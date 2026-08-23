@@ -1,6 +1,7 @@
 import type { BoundingBox } from "./capture";
 import type { QuestionIdentity } from "./questionV2";
 import type { QuestionBoundaryInfo, QuestionCompleteness } from "./questionBoundary";
+import type { MediaAssetRef } from "./mediaAsset";
 
 export type QuestionType =
   | "single_choice"
@@ -14,7 +15,7 @@ export type QuestionSource = "manual_capture" | "auto_dom" | "auto_visual";
 
 export type QuestionDisplaySegment =
   | { type: "text"; text: string; role?: "title" | "meta" | "section"; label?: string }
-  | { type: "image"; url: string };
+  | { type: "image"; url: string; mediaAssetId?: string };
 
 export interface QuestionBlock {
   /** Runtime observation id. It is intentionally not a stable question identity. */
@@ -32,6 +33,9 @@ export interface QuestionBlock {
   bbox: BoundingBox;
   previewText: string;
   displaySegments?: QuestionDisplaySegment[];
+  /** Canonical media evidence. Payload bytes never belong in this serializable block. */
+  mediaAssets?: MediaAssetRef[];
+  primaryMediaAssetId?: string;
   hasImage: boolean;
   questionImageUrl?: string;
   questionTypeGuess: QuestionType;

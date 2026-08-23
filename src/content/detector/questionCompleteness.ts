@@ -9,7 +9,10 @@ export function evaluateQuestionCompleteness(block: QuestionBlock): QuestionComp
   const options = countOptionMarkersInText(text);
   const stemComplete: boolean | "unknown" = /^[A-F][.):：、】【]/.test(text) ? false : text.length >= 8 ? true : "unknown";
   const optionsComplete: boolean | "unknown" = choice ? (options >= 4 ? true : boundary?.clippedBottom ? false : "unknown") : true;
-  const visualComplete: boolean | "unknown" = VISUAL_RE.test(text) ? (block.hasImage || block.questionImageUrl || block.displaySegments?.some(s => s.type === "image") ? true : false) : true;
+  const visualAssets = block.mediaAssets ?? [];
+  const usableMedia = visualAssets.some((asset) => asset.ownership.role === "stem" && (asset.availability === "available" || asset.availability === "url-only"));
+  const uncertainMedia = visualAssets.some((asset) => asset.ownership.role === "stem" && ["pending", "blocked", "tainted", "unresolved"].includes(asset.availability));
+  const visualComplete: boolean | "unknown" = VISUAL_RE.test(text) ? (usableMedia ? true : uncertainMedia ? "unknown" : (block.hasImage || block.questionImageUrl || block.displaySegments?.some(s => s.type === "image") ? true : false)) : true;
   const boundaryComplete: boolean | "unknown" = boundary ? boundary.state === "complete" : "unknown";
   const reasons: string[] = [];
   if (boundary?.clippedTop) reasons.push("Q_BOUNDARY_PARTIAL_TOP");
