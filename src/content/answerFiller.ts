@@ -36,6 +36,18 @@ import type { FillAnswerResult, VerifyAnswerResult } from "./answerTypes";
 import { buildValidatedAnswerPlan } from "./answer/answerPlanValidator";
 import { buildControlMapping } from "./answer/controlMapping";
 import { buildActionPlan, executeTransaction, readSelectedOptionKeys, verifyAnswerPlan } from "./answer/transactionalExecutor";
+import { snapshotControls } from "./answer/transactionalExecutor";
+import { stableHash } from "./questionIdentity";
+
+const solveStartSnapshots = new Map<string, { controls: ReturnType<typeof snapshotControls>; ownerFingerprint: string }>();
+
+/** Called by the auto-solve parser before the provider request; runtime only. */
+export function captureSolveStartControlState(block: QuestionBlock): void {
+  if (typeof document.elementsFromPoint !== "function") return;
+  const scope = resolveQuestionScope(normalizeBBoxToViewport(block.bbox), scopeSelectors);
+  const mapping = buildControlMapping(block, scope);
+  if (mapping.ok) solveStartSnapshots.set(mapping.questionId, { controls: snapshotControls(mapping), ownerFingerprint: stableHash(mapping.owner.textContent ?? "") });
+}
 
 const TEXT_INPUT_SELECTOR = [
   "input:not([type='radio'])",
@@ -111,7 +123,10 @@ async function fillVerifiedAnswerIntoScope(scope: Element, block: QuestionBlock,
   if (!mapping.ok) return { ok: false, filledCount: 0, message: mapping.code };
   const validated = buildValidatedAnswerPlan(block, result, mapping);
   if (!validated.ok) return { ok: false, filledCount: 0, message: validated.code };
-  const outcome = await executeTransaction(validated.plan, buildActionPlan(validated.plan, mapping), mapping);
+  const solveStart = solveStartSnapshots.get(validated.plan.questionId);
+  if (solveStart && solveStart.ownerFingerprint !== stableHash(mapping.owner.textContent ?? "")) return { ok: false, filledCount: 0, message: "STALE_ACTION_PLAN" };
+  const outcome = await executeTransaction(validated.plan, buildActionPlan(validated.plan, mapping), mapping, solveStart?.controls);
+  solveStartSnapshots.delete(validated.plan.questionId);
   return { ok: outcome.outcome === "FILLED_VERIFIED" || outcome.outcome === "NO_CHANGE_NEEDED", filledCount: outcome.filledCount, message: outcome.outcome };
 }
 

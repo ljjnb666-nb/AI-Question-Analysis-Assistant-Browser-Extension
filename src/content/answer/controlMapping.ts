@@ -23,14 +23,14 @@ export function buildControlMapping(block: QuestionBlock, owner: Element): Contr
   const blanks: ControlRef[] = [];
   const textControls: ControlRef[] = [];
   for (const found of discoverControls(owner)) {
+    if (found.controlType === "custom-choice" && found.element.querySelector("input[type=radio],input[type=checkbox]")) continue;
     if (!found.visible || !found.enabled) continue;
     const key = normalizeOptionKey(found.text);
     const role = found.controlType === "radio" || found.controlType === "checkbox" || found.controlType === "custom-choice" ? "option" : found.controlType === "text" || found.controlType === "textarea" || found.controlType === "contenteditable" ? "blank" : null;
     if (!role) continue;
     const reason: ControlMappingReason[] = key ? ["EXPLICIT_LABEL"] : [];
     const ref: ControlRef = { controlId: `control_v1_${stableHash(`${questionId}\u001f${role}\u001f${key ?? blanks.length}\u001f${found.text}`)}`, questionId, role, optionKey: key ?? undefined, blankIndex: role === "blank" ? blanks.length : undefined, controlType: found.controlType, semanticFingerprint: stableHash(`${found.controlType}\u001f${key ?? found.text}`), semanticText: found.text, enabled: found.enabled, visible: found.visible, confidence: key ? 1 : .75, reasons: reason };
-    found.element.dataset.qsQuestionId = questionId;
-    controlRegistry.put(ref, found.element);
+    controlRegistry.put(ref, found.element, owner);
     if (role === "option") {
       if (!key) continue;
       if (options.has(key)) return { ok: false, code: "CONTROL_MAPPING_AMBIGUOUS", message: `Multiple active controls map to ${key}` };

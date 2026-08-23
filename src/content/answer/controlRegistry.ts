@@ -19,13 +19,14 @@ export interface ControlRef {
 
 /** Runtime-only ownership of DOM nodes. Never serialize this registry. */
 export class ControlRegistry {
-  private readonly elements = new Map<string, HTMLElement>();
-  put(ref: ControlRef, element: HTMLElement) { this.elements.set(ref.controlId, element); return ref; }
-  get(controlId: string) { return this.elements.get(controlId) ?? null; }
+  private readonly elements = new Map<string, { element: HTMLElement; questionId: string; semanticFingerprint: string; owner: Element }>();
+  put(ref: ControlRef, element: HTMLElement, owner: Element) { this.elements.set(ref.controlId, { element, questionId: ref.questionId, semanticFingerprint: ref.semanticFingerprint, owner }); return ref; }
+  get(controlId: string) { return this.elements.get(controlId)?.element ?? null; }
+  metadata(controlId: string) { return this.elements.get(controlId) ?? null; }
   delete(controlId: string) { this.elements.delete(controlId); }
   clear(questionId?: string) {
     if (!questionId) return this.elements.clear();
-    for (const [id, element] of this.elements) if (element.dataset.qsQuestionId === questionId) this.elements.delete(id);
+    for (const [id, entry] of this.elements) if (entry.questionId === questionId) this.elements.delete(id);
   }
 }
 

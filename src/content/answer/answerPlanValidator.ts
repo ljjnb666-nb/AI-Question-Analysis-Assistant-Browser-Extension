@@ -2,6 +2,7 @@ import type { ParseResult, QuestionBlock, ValidatedAnswerPlan } from "@/shared/t
 import { stableHash } from "../questionIdentity";
 import { normalizeChoiceAnswerKeys, splitAnswerParts } from "../answerText";
 import { booleanKey, type ControlMappingResult } from "./controlMapping";
+import { countExpectedBlankParts, normalizeJudgeAnswer } from "../autoSolveHeuristics";
 
 export function buildValidatedAnswerPlan(block: QuestionBlock, result: ParseResult, mapping: ControlMappingResult): ValidatedAnswerPlan {
   if (!mapping.ok) return { ok: false, code: "INVALID_ANSWER", message: mapping.message };
@@ -19,7 +20,9 @@ export function buildValidatedAnswerPlan(block: QuestionBlock, result: ParseResu
     return { ok: true, plan: { ...base, kind: "multiple-choice", optionKeys: keys, answerSemanticHash: hash(keys.join(",")) } };
   }
   if (result.questionType === "judge") {
-    const value = /^(?:true|正确|对|是|yes)$/i.test(String(result.answer).trim());
+    const normalized = normalizeJudgeAnswer(result.answer);
+    if (normalized === null) return { ok: false, code: "INVALID_ANSWER", message: "Judge answer is not an explicit true or false semantic" };
+    const value = normalized === "对";
     // Map from each control's own semantic label, never from A/B position.
     const semantic = [...mapping.options.entries()].filter(([, ref]) => booleanKey(ref.semanticText ?? "") === value);
     const chosen = semantic.length === 1 ? semantic[0][0] : undefined;
@@ -27,8 +30,10 @@ export function buildValidatedAnswerPlan(block: QuestionBlock, result: ParseResu
     return { ok: true, plan: { ...base, kind: "boolean", value, optionKey: chosen, answerSemanticHash: hash(String(value)) } };
   }
   if (result.questionType === "fill_blank") {
-    const parts = splitAnswerParts(result.answer, mapping.blanks.length);
-    if (!mapping.blanks.length || parts.length !== mapping.blanks.length || parts.some((part) => !part.trim())) return { ok: false, code: "ANSWER_BLANK_COUNT_MISMATCH", message: "Answer blank count does not match discovered controls" };
+    const expected = countExpectedBlankParts(block.previewText) || countExpectedBlankParts(result.recognizedText);
+    if (!expected || mapping.blanks.length !== expected) return { ok: false, code: "ANSWER_BLANK_COUNT_MISMATCH", message: "Semantic blank count and writable control count differ" };
+    const parts = splitAnswerParts(result.answer, expected);
+    if (parts.length !== expected || parts.some((part) => !part.trim())) return { ok: false, code: "ANSWER_BLANK_COUNT_MISMATCH", message: "Answer blank count does not match semantic expectation" };
     return { ok: true, plan: { ...base, kind: "fill-blank", blanks: parts.map((value, index) => ({ index, value })), answerSemanticHash: hash(parts.join("\u001f")) } };
   }
   if (result.questionType === "short_answer") {
