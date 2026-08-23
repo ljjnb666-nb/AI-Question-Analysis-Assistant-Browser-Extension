@@ -3,7 +3,7 @@
  */
 
 import type { AppSettings, ParseResult, QuestionBlock } from "../types";
-import { PROVIDERS, getProvider } from "../ai/providers";
+import { PROVIDERS, getProvider, resolveEffectiveProviderMediaCapabilities } from "../ai/providers";
 import type { ProviderConfig, ProviderId } from "../ai/providers";
 import { buildResult } from "../ai/parseResult";
 import { callAnthropic, callGemini, callOpenAICompat } from "../ai/providerClients";
@@ -34,6 +34,7 @@ export async function parseQuestion(
   if (block.source !== "manual_capture" && block.mediaAssets?.length) {
     if (block.completeness?.state !== "complete") throw new Error("QUESTION_NOT_ELIGIBLE");
     const built = await buildSolverQuestionPackage(block, { signal: runtimeContext?.signal });
+    if (isRuntimeContextStale(block, runtimeContext)) throw new Error("STALE_QUESTION_REVISION");
     if (!built.ok) throw new Error(built.code);
     return parseQuestionPackage(built.package, block, settings, onStream, runtimeContext);
   }
@@ -69,7 +70,8 @@ async function parseQuestionCore(
   if (questionPackage?.media.length) {
     if (settings.preferredRoute === "text") throw new Error("CANONICAL_MEDIA_REQUIRES_VISION");
     if (!provider.supportsVision || modelLikelyTextOnly) throw new Error("MEDIA_REQUIRES_VISION");
-    const prepared = await prepareQuestionPackageForProvider(questionPackage, provider, runtimeContext);
+    const effectiveProvider = resolveEffectiveProviderMediaCapabilities(provider, settings.customProviderProtocol);
+    const prepared = await prepareQuestionPackageForProvider(questionPackage, effectiveProvider, runtimeContext);
     if (!prepared.ok) throw new Error(prepared.code);
     questionPackage = prepared.package;
   }
@@ -107,6 +109,7 @@ async function parseQuestionCore(
     }
 
     try {
+      if (isRuntimeContextStale(block, runtimeContext, questionPackage)) throw new Error("STALE_QUESTION_REVISION");
       let result: ParseResult;
       const useCustomAnthropic =
         provider.id === "custom" && settings.customProviderProtocol === "anthropic";
@@ -124,7 +127,7 @@ async function parseQuestionCore(
       return result;
     } catch (err) {
       lastError = normalizeNetworkError(err, provider, settings);
-      if (/^(?:MEDIA_SOURCE_UNAVAILABLE|MEDIA_BLOCKED|MEDIA_BUDGET_EXCEEDED|STALE_QUESTION_REVISION|CANONICAL_MEDIA_REQUIRES_VISION|MEDIA_REQUIRES_VISION)/.test(lastError.message)) break;
+      if (/^(?:MEDIA_SOURCE_UNAVAILABLE|MEDIA_BLOCKED|MEDIA_BUDGET_EXCEEDED|STALE_QUESTION_REVISION|CANONICAL_MEDIA_REQUIRES_VISION|MEDIA_REQUIRES_VISION|QUESTION_NOT_ELIGIBLE)/.test(lastError.message)) break;
       const is4xx = lastError.message.includes(" 4") && !lastError.message.includes("429");
       if (is4xx) break;
     }
@@ -132,6 +135,19 @@ async function parseQuestionCore(
 
   logEvent("parse_error", { blockId: block.id, error: lastError?.message, exhausted: true });
   throw lastError ?? new Error("Parse failed after retries");
+}
+
+function isRuntimeContextStale(
+  block: QuestionBlock,
+  runtimeContext?: ParseQuestionRuntimeContext,
+  questionPackage?: SolverQuestionPackage,
+): boolean {
+  if (runtimeContext?.signal?.aborted) return true;
+  const identity = {
+    questionId: questionPackage?.questionId ?? block.identity?.stableId ?? block.id,
+    contentFingerprint: questionPackage?.contentFingerprint ?? block.identity?.contentFingerprint ?? block.id,
+  };
+  return runtimeContext?.isQuestionRevisionCurrent?.(identity) === false;
 }
 
 export function normalizeNetworkError(

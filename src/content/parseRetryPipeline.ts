@@ -1,5 +1,6 @@
 import type { AppSettings, ParseResult, QuestionBlock } from "@/shared/types";
 import type { AnalyticsEvent } from "@/shared/utils/analytics";
+import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 
 type StreamCallback = (partial: string) => void;
 
@@ -9,6 +10,7 @@ type ParseRetryDeps = {
     block: QuestionBlock,
     settings: AppSettings,
     onStream?: StreamCallback,
+    runtimeContext?: ParseQuestionRuntimeContext,
   ) => Promise<ParseResult>;
   setStreamingText: (text: string) => void;
   withTimeout: <T>(promise: Promise<T>, timeoutMs: number, timeoutReason: string) => Promise<T>;
@@ -20,10 +22,11 @@ export async function parseWithStreamingFallback(
   onStream: StreamCallback,
   timeoutMs: number,
   deps: ParseRetryDeps,
+  runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   try {
     return await deps.withTimeout(
-      deps.parseQuestion(block, settings, onStream),
+      deps.parseQuestion(block, settings, onStream, runtimeContext),
       timeoutMs,
       "stream_timeout",
     );
@@ -33,7 +36,7 @@ export async function parseWithStreamingFallback(
     deps.logEvent("parse_stream_timeout_fallback", { blockId: block.id, timeoutMs });
     deps.setStreamingText("流式响应超时，正在切换为普通请求重试...");
     return deps.withTimeout(
-      deps.parseQuestion(block, settings),
+      deps.parseQuestion(block, settings, undefined, runtimeContext),
       Math.max(8_000, Math.floor(timeoutMs * 0.9)),
       "non_stream_timeout",
     );
@@ -47,6 +50,7 @@ export async function parseWithTieredRetries(
   onStream: StreamCallback,
   tierTimeoutsMs: readonly number[],
   deps: ParseRetryDeps,
+  runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   const preferred = settings.preferredRoute;
   const routePlan: Array<"text" | "auto" | "vision"> = [];
@@ -83,7 +87,7 @@ export async function parseWithTieredRetries(
     try {
       deps.setStreamingText(`第 ${i + 1} 次尝试：${route} 路由，超时 ${Math.round(timeoutMs / 1000)}s...`);
       const startedAt = Date.now();
-      const result = await parseWithStreamingFallback(block, tierSettings, onStream, timeoutMs, deps);
+      const result = await parseWithStreamingFallback(block, tierSettings, onStream, timeoutMs, deps, runtimeContext);
       const elapsedMs = Date.now() - startedAt;
       deps.logEvent("manual_parse_attempt_succeeded", {
         blockId: block.id,
@@ -123,6 +127,7 @@ export async function parseWithTieredRetries(
         route,
         error: msg,
       });
+      if (isNonRetryableParseError(msg)) throw err;
       if (i < tierTimeoutsMs.length - 1) {
         deps.setStreamingText(
           `第 ${i + 1} 次失败：${msg.slice(0, 80)}\n正在第 ${i + 2} 次重试（${routePlan[i + 1]} / ${tierTimeoutsMs[i + 1] / 1000}s）...`,
@@ -132,4 +137,8 @@ export async function parseWithTieredRetries(
   }
 
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr ?? "parse_failed"));
+}
+
+export function isNonRetryableParseError(message: string): boolean {
+  return /^(?:MEDIA_SOURCE_UNAVAILABLE|MEDIA_BLOCKED|MEDIA_BUDGET_EXCEEDED|STALE_QUESTION_REVISION|CANONICAL_MEDIA_REQUIRES_VISION|MEDIA_REQUIRES_VISION|QUESTION_NOT_ELIGIBLE)/.test(message);
 }

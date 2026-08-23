@@ -188,6 +188,16 @@ export function getProvider(id: string): ProviderConfig {
   return PROVIDERS.find((provider) => provider.id === id) ?? PROVIDERS[0];
 }
 
+/** The custom endpoint's wire protocol, not its editable default, owns media semantics. */
+export function resolveEffectiveProviderMediaCapabilities(
+  provider: ProviderConfig,
+  customProviderProtocol?: "openai" | "anthropic",
+): ProviderConfig {
+  if (provider.id !== "custom" || customProviderProtocol !== "anthropic") return provider;
+  const anthropic = getProvider("anthropic");
+  return { ...provider, supportsRemoteImageUrl: anthropic.supportsRemoteImageUrl, supportsInlineBase64: anthropic.supportsInlineBase64, supportsMultipleImages: anthropic.supportsMultipleImages };
+}
+
 export function getProviderShortName(id: string): string {
   const provider = getProvider(id);
   return PROVIDER_SHORT_NAMES[provider.id];

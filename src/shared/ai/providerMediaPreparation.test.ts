@@ -29,9 +29,34 @@ describe("provider-aware canonical media preparation", () => {
     const abort = new AbortController(); abort.abort(); expect(await prepareQuestionPackageForProvider(pkg, getProvider("anthropic"), { signal: abort.signal })).toMatchObject({ ok: false, code: "STALE_QUESTION_REVISION" });
     expect(await prepareQuestionPackageForProvider(pkg, getProvider("anthropic"), { fetch: vi.fn(async () => new Response(new Blob(["x"], { type: "image/png" }))), isQuestionRevisionCurrent: () => false })).toMatchObject({ ok: false, code: "STALE_QUESTION_REVISION" });
   });
+  it("AB1/AB2/AB3/AB4 never use a fallback for abort or stale revisions", async () => {
+    let rejectFetch!: (reason?: unknown) => void;
+    const pendingFetch = vi.fn(() => new Promise<Response>((_, reject) => { rejectFetch = reject; }));
+    const abort = new AbortController();
+    const pending = prepareQuestionPackageForProvider(pkg, getProvider("anthropic"), { fetch: pendingFetch, signal: abort.signal, screenshotFallback: { dataUrl: png, questionId: "q", contentFingerprint: "fp" } });
+    abort.abort(); rejectFetch(new DOMException("aborted", "AbortError"));
+    expect(await pending).toMatchObject({ ok: false, code: "STALE_QUESTION_REVISION" });
+    const failedFetch = vi.fn(async () => new Response("x", { status: 500 }));
+    expect(await prepareQuestionPackageForProvider(pkg, getProvider("anthropic"), { fetch: failedFetch, isQuestionRevisionCurrent: () => false, screenshotFallback: { dataUrl: png, questionId: "q", contentFingerprint: "fp" } })).toMatchObject({ ok: false, code: "STALE_QUESTION_REVISION" });
+    expect(await prepareQuestionPackageForProvider(pkg, getProvider("anthropic"), { fetch: failedFetch, screenshotFallback: { dataUrl: png, questionId: "q", contentFingerprint: "fp" } })).toMatchObject({ ok: true, package: { mediaFallbackUsed: true } });
+    expect(await prepareQuestionPackageForProvider(pkg, getProvider("anthropic"), { fetch: failedFetch, screenshotFallback: { dataUrl: png, questionId: "other", contentFingerprint: "fp" } })).toMatchObject({ ok: false, code: "MEDIA_SOURCE_UNAVAILABLE" });
+  });
+  it("SVG1/SVG2 reject serialized and data-url SVG before the provider", async () => {
+    const fallback = { dataUrl: png, questionId: "q", contentFingerprint: "fp" };
+    expect(await prepareQuestionPackageForProvider({ ...pkg, media: [{ ...pkg.media[0], mimeType: "image/svg+xml", source: { kind: "serialized-svg", svg: "<svg/>" } }] }, getProvider("openai"), { screenshotFallback: fallback })).toMatchObject({ ok: true, package: { mediaFallbackUsed: true } });
+    expect(await prepareQuestionPackageForProvider({ ...pkg, media: [{ ...pkg.media[0], source: { kind: "data-url", dataUrl: "data:image/svg+xml;base64,PHN2Zy8+" } }] }, getProvider("openai"))).toMatchObject({ ok: false, code: "MEDIA_SOURCE_UNAVAILABLE" });
+  });
   it("BUD1/BUD2/BUD3 count remote inline bytes but leave remote-direct untouched", async () => {
     const body = new Uint8Array(1_900_000); const media = Array.from({ length: 4 }, (_, i) => ({ ...pkg.media[i], source: { kind: "remote-url" as const, url: `https://media.test/${i}` } })); const fetch = vi.fn(async () => new Response(new Blob([body], { type: "image/png" })));
     expect(await prepareQuestionPackageForProvider({ ...pkg, media }, getProvider("anthropic"), { fetch })).toMatchObject({ ok: false, code: "MEDIA_BUDGET_EXCEEDED" });
     fetch.mockClear(); expect(await prepareQuestionPackageForProvider({ ...pkg, media: media.slice(0, 3) }, getProvider("openai"), { fetch })).toMatchObject({ ok: true }); expect(fetch).not.toHaveBeenCalled();
+  });
+  it("CP1/CP3 resolves custom protocol media capabilities before the provider call", async () => {
+    const mediaFetch = vi.fn(async () => new Response(new Blob(["img"], { type: "image/png" })));
+    expect(await prepareQuestionPackageForProvider({ ...pkg, media: pkg.media.slice(0, 1) }, getProvider("custom"), { fetch: mediaFetch })).toMatchObject({ ok: true });
+    expect(mediaFetch).not.toHaveBeenCalled();
+    const effectiveAnthropic = { ...getProvider("custom"), supportsRemoteImageUrl: false };
+    expect(await prepareQuestionPackageForProvider({ ...pkg, media: pkg.media.slice(0, 1) }, effectiveAnthropic, { fetch: mediaFetch })).toMatchObject({ ok: true, package: { media: [{ source: { kind: "data-url" } }] } });
+    expect(mediaFetch).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,5 @@
 import type { AppSettings, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
+import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import {
   buildAutoSolveReviewSettings,
   pickAutoSolveReviewModel,
@@ -19,9 +20,10 @@ type AutoSolveParsingDeps = {
     settings: AppSettings,
     providerSupportsVision: boolean,
     onStream: (partial: string) => void,
+    runtimeContext?: ParseQuestionRuntimeContext,
   ) => Promise<ParseResult>;
   withTimeout: <T>(promise: Promise<T>, timeoutMs: number, timeoutReason: string) => Promise<T>;
-  parseQuestion: (block: QuestionBlock, settings: AppSettings) => Promise<ParseResult>;
+  parseQuestion: (block: QuestionBlock, settings: AppSettings, onStream?: (partial: string) => void, runtimeContext?: ParseQuestionRuntimeContext) => Promise<ParseResult>;
   addHistoryEntry: (entry: HistoryEntry) => Promise<void>;
 };
 
@@ -57,6 +59,7 @@ export async function parseBlockForAutoSolve(
   block: QuestionBlock,
   timeouts: AutoSolveTimeouts,
   deps: AutoSolveParsingDeps,
+  runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   const settings = await deps.loadSettings();
   const provider = deps.getProvider(settings.providerId ?? "anthropic");
@@ -73,7 +76,7 @@ export async function parseBlockForAutoSolve(
     : { ...settings, preferredRoute: "auto" as const };
 
   let result = await deps.withTimeout(
-    deps.parseWithTieredRetries(parseBlock, firstPassSettings, provider.supportsVision, () => {}),
+    deps.parseWithTieredRetries(parseBlock, firstPassSettings, provider.supportsVision, () => {}, withScreenshotFallback(parseBlock, runtimeContext)),
     timeouts.parseTimeoutMs,
     "auto_solve_parse_timeout",
   );
@@ -87,7 +90,7 @@ export async function parseBlockForAutoSolve(
           parseBlock,
           { ...settings, preferredRoute: "vision" as const },
           provider.supportsVision,
-          () => {},
+          () => {}, withScreenshotFallback(parseBlock, runtimeContext),
         ),
         timeouts.parseTimeoutMs,
         "auto_solve_vision_retry_timeout",
@@ -103,6 +106,7 @@ export async function parseBlockForAutoSolveReview(
   previousResult: ParseResult | null,
   timeouts: AutoSolveTimeouts,
   deps: AutoSolveParsingDeps,
+  runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   const settings = await deps.loadSettings();
   const provider = deps.getProvider(settings.providerId ?? "anthropic");
@@ -117,7 +121,7 @@ export async function parseBlockForAutoSolveReview(
   );
 
   let result = await deps.withTimeout(
-    deps.parseWithTieredRetries(parseBlock, reviewSettings, provider.supportsVision, () => {}),
+    deps.parseWithTieredRetries(parseBlock, reviewSettings, provider.supportsVision, () => {}, withScreenshotFallback(parseBlock, runtimeContext)),
     timeouts.reviewTimeoutMs,
     "auto_solve_review_timeout",
   );
@@ -133,7 +137,7 @@ export async function parseBlockForAutoSolveReview(
         { ...block, hasImage: true, imageDataUrl: parseBlock.imageDataUrl },
         { ...reviewSettings, preferredRoute: "vision" as const },
         provider.supportsVision,
-        () => {},
+        () => {}, withScreenshotFallback(parseBlock, runtimeContext),
       ),
       timeouts.reviewTimeoutMs,
       "auto_solve_review_vision_timeout",
@@ -147,6 +151,7 @@ export async function parseBlockForAutoSolveQuickReview(
   block: QuestionBlock,
   timeouts: AutoSolveTimeouts,
   deps: AutoSolveParsingDeps,
+  runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   const settings = await deps.loadSettings();
   const provider = deps.getProvider(settings.providerId ?? "anthropic");
@@ -165,10 +170,19 @@ export async function parseBlockForAutoSolveQuickReview(
   );
 
   return deps.withTimeout(
-    deps.parseQuestion(parseBlock, quickReviewSettings),
+    deps.parseQuestion(parseBlock, quickReviewSettings, undefined, withScreenshotFallback(parseBlock, runtimeContext)),
     timeouts.quickReviewTimeoutMs,
     "auto_solve_quick_review_timeout",
   );
+}
+
+function withScreenshotFallback(block: QuestionBlock, runtimeContext?: ParseQuestionRuntimeContext): ParseQuestionRuntimeContext | undefined {
+  if (!runtimeContext) return undefined;
+  const questionId = block.identity?.stableId ?? block.id;
+  const contentFingerprint = block.identity?.contentFingerprint ?? block.id;
+  return block.imageDataUrl
+    ? { ...runtimeContext, screenshotFallback: { dataUrl: block.imageDataUrl, questionId, contentFingerprint } }
+    : runtimeContext;
 }
 
 export function shouldReviewLowConfidenceHistory(

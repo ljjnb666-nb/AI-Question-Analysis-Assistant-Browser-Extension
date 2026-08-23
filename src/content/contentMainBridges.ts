@@ -1,4 +1,5 @@
 import type { QuestionBlock } from "@/shared/types";
+import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import { cropScreenshot } from "@/shared/utils/cropImage";
 import { logEvent } from "@/shared/utils/analytics";
 import { getProvider, parseQuestion } from "@/shared/utils/parseRouter";
@@ -102,6 +103,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     settings: Awaited<ReturnType<typeof loadSettings>>,
     providerSupportsVision: boolean,
     onStream: (partial: string) => void,
+    runtimeContext?: ParseQuestionRuntimeContext,
   ) {
     return parseWithTieredRetriesCore(
       block,
@@ -110,6 +112,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
       onStream,
       MANUAL_PARSE_TIER_TIMEOUTS_MS,
       parseRetryDeps,
+      runtimeContext,
     );
   }
 
@@ -232,6 +235,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
   });
 
   const {
+    abortCurrentSolveAttempt,
     clickNextQuestionButton,
     detectZhihuishuCurrentQuestionBlock,
     findNextQuestionButton,
@@ -279,6 +283,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
   });
 
   return {
+    abortCurrentSolveAttempt,
     captureBlockImage,
     clickNextQuestionButton,
     detectZhihuishuCurrentQuestionBlock,

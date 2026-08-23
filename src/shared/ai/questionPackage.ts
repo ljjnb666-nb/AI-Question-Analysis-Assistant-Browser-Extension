@@ -10,7 +10,8 @@ export interface SolverQuestionPackage {
   media: SolverMediaPart[];
   mediaFallbackUsed?: boolean;
 }
-export interface QuestionScreenshotFallback { dataUrl: string; questionId?: string; contentFingerprint: string; }
+/** Automatic fallbacks are revision-bound; manual capture intentionally does not use this path. */
+export interface QuestionScreenshotFallback { dataUrl: string; questionId: string; contentFingerprint: string; }
 
 export type SolverMediaRole = "stem" | "option";
 

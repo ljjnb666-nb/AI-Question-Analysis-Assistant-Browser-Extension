@@ -1,4 +1,5 @@
 import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
+import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import type {
   findNextQuestionButton as findNextQuestionButtonCore,
   clickNextQuestionButton as clickNextQuestionButtonCore,
@@ -62,19 +63,41 @@ type AutoSolveBridgeDeps = {
 };
 
 export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
+  let activeAttempt: AbortController | null = null;
+  function beginAttempt(block: QuestionBlock): ParseQuestionRuntimeContext {
+    activeAttempt?.abort();
+    const controller = new AbortController();
+    activeAttempt = controller;
+    const questionId = block.identity?.stableId ?? block.id;
+    const contentFingerprint = block.identity?.contentFingerprint ?? block.id;
+    return {
+      signal: controller.signal,
+      isQuestionRevisionCurrent: (identity) => {
+        const live = pickLiveAutoSolveBlock();
+        const liveQuestionId = live?.identity?.stableId ?? live?.id;
+        const liveFingerprint = live?.identity?.contentFingerprint ?? live?.id;
+        return !controller.signal.aborted
+          && identity.questionId === questionId
+          && identity.contentFingerprint === contentFingerprint
+          && liveQuestionId === questionId
+          && liveFingerprint === contentFingerprint;
+      },
+    };
+  }
+  function abortCurrentSolveAttempt() { activeAttempt?.abort(); activeAttempt = null; }
   async function parseBlockForAutoSolve(block: QuestionBlock) {
-    return parseBlockForAutoSolveCore(block, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps);
+    return parseBlockForAutoSolveCore(block, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps, beginAttempt(block));
   }
 
   async function parseBlockForAutoSolveReview(
     block: QuestionBlock,
     previousResult: ParseResult | null,
   ) {
-    return parseBlockForAutoSolveReviewCore(block, previousResult, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps);
+    return parseBlockForAutoSolveReviewCore(block, previousResult, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps, beginAttempt(block));
   }
 
   async function parseBlockForAutoSolveQuickReview(block: QuestionBlock) {
-    return parseBlockForAutoSolveQuickReviewCore(block, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps);
+    return parseBlockForAutoSolveQuickReviewCore(block, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps, beginAttempt(block));
   }
 
   function shouldReviewLowConfidenceHistory(entry: HistoryEntry | null): boolean {
@@ -166,6 +189,7 @@ export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
   }
 
   return {
+    abortCurrentSolveAttempt,
     clickNextQuestionButton,
     detectZhihuishuCurrentQuestionBlock,
     findNextQuestionButton,
