@@ -2,6 +2,7 @@ import type { QuestionBlock } from "@/shared/types";
 import { stableHash } from "../questionIdentity";
 import { discoverControls } from "./controlDiscovery";
 import { controlRegistry, type ControlMappingReason, type ControlRef } from "./controlRegistry";
+import { countExpectedBlankParts } from "../autoSolveHeuristics";
 
 export type ControlMappingFailure = "CONTROL_MAPPING_AMBIGUOUS" | "CONTROL_NOT_FOUND" | "CONTROL_COUNT_MISMATCH";
 export type ControlMappingResult = { ok: true; questionId: string; owner: Element; options: Map<string, ControlRef>; blanks: ControlRef[]; text: ControlRef | null; confidence: number } | { ok: false; code: ControlMappingFailure; message: string };
@@ -38,6 +39,9 @@ export function buildControlMapping(block: QuestionBlock, owner: Element): Contr
     } else { blanks.push(ref); textControls.push(ref); }
   }
   const text = textControls.length === 1 ? textControls[0] : null;
+  const expectedBlanks = countExpectedBlankParts(block.previewText);
+  if (block.questionTypeGuess === "short_answer" && text) { text.confidence = .95; text.reasons.push("UNIQUE_TEXT_CONTROL"); }
+  if (block.questionTypeGuess === "fill_blank" && expectedBlanks > 0 && blanks.length === expectedBlanks) for (const ref of blanks) { ref.confidence = .9; ref.reasons.push("SEMANTIC_BLANK_COUNT"); }
   const confidence = options.size || blanks.length ? Math.min(...[...options.values(), ...blanks].map((ref) => ref.confidence)) : 0;
   return { ok: true, questionId, owner, options, blanks, text, confidence };
 }

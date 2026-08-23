@@ -1,6 +1,6 @@
 export type ControlRole = "option" | "blank" | "text-answer";
 export type ControlType = "radio" | "checkbox" | "text" | "textarea" | "contenteditable" | "custom-choice";
-export type ControlMappingReason = "EXPLICIT_LABEL" | "INPUT_VALUE" | "ASSOCIATED_LABEL" | "WRAPPING_LABEL" | "ARIA_LABEL" | "SEMANTIC_CONTAINER" | "DOM_ORDER_FALLBACK";
+export type ControlMappingReason = "EXPLICIT_LABEL" | "INPUT_VALUE" | "ASSOCIATED_LABEL" | "WRAPPING_LABEL" | "ARIA_LABEL" | "SEMANTIC_CONTAINER" | "DOM_ORDER_FALLBACK" | "UNIQUE_TEXT_CONTROL" | "SEMANTIC_BLANK_COUNT";
 
 export interface ControlRef {
   controlId: string;
