@@ -66,6 +66,7 @@ export async function decideRoute(block: QuestionBlock, settings: AppSettings): 
   const mathHeavy = looksFormulaOrDiagramHeavy(questionText);
 
   if (visualNeed === "strong") {
+    if (block.mediaAssets?.some((asset) => asset.ownership.role === "stem" || asset.ownership.role === "option")) return "vision";
     if (block.imageDataUrl) return "vision";
     return "hybrid";
   }
@@ -129,14 +130,15 @@ export function hasHighCoveragePreviewText(text?: string, questionTypeGuess?: Qu
   return normalized.length >= 130;
 }
 
-export function inferVisualNeed(block: Pick<QuestionBlock, "previewText" | "hasImage" | "imageDataUrl" | "questionTypeGuess">): VisualNeed {
+export function inferVisualNeed(block: Pick<QuestionBlock, "previewText" | "hasImage" | "imageDataUrl" | "questionTypeGuess" | "mediaAssets">): VisualNeed {
   const normalized = normalizePreviewText(block.previewText);
   if (block.imageDataUrl && !normalized) return "strong";
   if (STRONG_VISUAL_PATTERNS.some((pattern) => pattern.test(normalized))) return "strong";
-  if (block.hasImage && !hasSufficientPreviewText(normalized, block.questionTypeGuess)) return "strong";
+  const hasCanonicalMedia = Boolean(block.mediaAssets?.some((asset) => asset.ownership.role === "stem" || asset.ownership.role === "option"));
+  if ((block.hasImage || hasCanonicalMedia) && !hasSufficientPreviewText(normalized, block.questionTypeGuess)) return "strong";
   if (detectVisualKeywords(normalized)) return "possible";
   if (WEAK_VISUAL_PATTERNS.some((pattern) => pattern.test(normalized))) return "possible";
-  if (block.hasImage || block.imageDataUrl) return "possible";
+  if (block.hasImage || block.imageDataUrl || hasCanonicalMedia) return "possible";
   return "none";
 }
 

@@ -11,6 +11,8 @@ import { decideRoute, hasSufficientPreviewText } from "../ai/routeDecision";
 import { mockParse } from "../ai/mockParse";
 import { logEvent } from "./analytics";
 import { detectVisualKeywords } from "./ocr";
+import type { SolverQuestionPackage } from "../ai/questionPackage";
+import { buildSolverQuestionPackage } from "../../content/solver/questionPackageBuilder";
 
 export { PROVIDERS, getProvider, decideRoute, hasSufficientPreviewText, buildResult, mockParse };
 export type { ProviderConfig, ProviderId };
@@ -23,12 +25,38 @@ export async function parseQuestion(
   settings: AppSettings,
   onStream?: (partial: string) => void,
 ): Promise<ParseResult> {
+  // Canonical auto-detected questions must hydrate their owned media before a
+  // provider call. Manual/legacy capture intentionally remains on its old path.
+  if (block.source !== "manual_capture" && block.mediaAssets?.length) {
+    if (block.completeness?.state !== "complete") throw new Error("QUESTION_NOT_ELIGIBLE");
+    const built = await buildSolverQuestionPackage(block, { screenshotFallbackDataUrl: block.imageDataUrl });
+    if (!built.ok) throw new Error(built.code);
+    return parseQuestionPackage(built.package, block, settings, onStream);
+  }
+  return parseQuestionCore(block, settings, onStream);
+}
+
+export async function parseQuestionPackage(
+  questionPackage: SolverQuestionPackage,
+  block: QuestionBlock,
+  settings: AppSettings,
+  onStream?: (partial: string) => void,
+): Promise<ParseResult> {
+  return parseQuestionCore(block, settings, onStream, questionPackage);
+}
+
+async function parseQuestionCore(
+  block: QuestionBlock,
+  settings: AppSettings,
+  onStream?: (partial: string) => void,
+  questionPackage?: SolverQuestionPackage,
+): Promise<ParseResult> {
   const route = await decideRoute(block, settings);
   const provider = getProvider(settings.providerId ?? "anthropic");
   const modelName = String(settings.apiModel || provider.defaultModel || "").toLowerCase();
   const imageQuestion =
     Boolean(block.hasImage) ||
-    Boolean(block.imageDataUrl) ||
+    Boolean(block.imageDataUrl) || Boolean(questionPackage?.media.length) ||
     detectVisualKeywords(block.previewText || "");
   const modelLikelyTextOnly = isLikelyTextOnlyModel(modelName);
 
@@ -45,7 +73,7 @@ export async function parseQuestion(
     );
   }
 
-  if (imageQuestion && provider.supportsVision && route === "vision" && !block.imageDataUrl) {
+  if (imageQuestion && provider.supportsVision && route === "vision" && !block.imageDataUrl && !questionPackage?.media.length) {
     throw new Error(getMissingScreenshotMessage(settings.language));
   }
 
@@ -70,11 +98,11 @@ export async function parseQuestion(
         provider.id === "custom" && settings.customProviderProtocol === "anthropic";
 
       if (provider.id === "anthropic" || useCustomAnthropic) {
-        result = await callAnthropic(block, route, settings, onStream);
+        result = await callAnthropic(block, route, settings, onStream, questionPackage);
       } else if (provider.id === "gemini") {
-        result = await callGemini(block, route, settings);
+        result = await callGemini(block, route, settings, questionPackage);
       } else {
-        result = await callOpenAICompat(block, route, settings, provider, onStream);
+        result = await callOpenAICompat(block, route, settings, provider, onStream, questionPackage);
       }
 
       const duration = Date.now() - startTime;
