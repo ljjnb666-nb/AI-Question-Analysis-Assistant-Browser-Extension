@@ -53,4 +53,12 @@ describe("buildSolverQuestionPackage", () => {
     const result = await buildSolverQuestionPackage({ ...block(), source: "manual_capture", imageDataUrl: png });
     expect(result).toMatchObject({ ok: true, package: { media: [{ assetId: "legacy-screenshot" }] } });
   });
+  it("P4-7/P4-13/P4-15 explicitly cover canvas, blocked, and cross-question evidence", async () => {
+    const store = new MediaPayloadStore(); const canvas = { ...asset("canvas", "stem"), kind: "canvas" as const, sourceKind: "canvas-snapshot" as const }; store.put(canvas.assetId, { dataUrl: png, mimeType: "image/png" });
+    expect(await buildSolverQuestionPackage(block([canvas]), { payloadStore: store })).toMatchObject({ ok: true, package: { media: [{ assetId: "canvas" }] } });
+    const blocked = { ...canvas, assetId: "blocked", availability: "blocked" as const };
+    expect(await buildSolverQuestionPackage(block([blocked]), { payloadStore: store })).toMatchObject({ ok: false, code: "MEDIA_BLOCKED" });
+    const cross = { ...canvas, assetId: "cross", ownership: { ...canvas.ownership, reasons: ["CROSS_QUESTION_OWNER" as const] } };
+    expect(await buildSolverQuestionPackage(block([cross]), { payloadStore: store })).toMatchObject({ ok: true, package: { media: [] } });
+  });
 });

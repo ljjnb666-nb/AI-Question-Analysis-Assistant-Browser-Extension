@@ -306,7 +306,6 @@ export async function callGemini(
   return buildResult(block, route, data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}");
 }
 
-const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024;
 async function asOpenAIImageUrl(item: Extract<SolverContentPart, { type: "image" }>, supportsRemote: boolean): Promise<string> {
   if (supportsRemote && item.source.kind === "remote-url") return item.source.url;
   const inline = await asInlineImage(item);
@@ -319,13 +318,8 @@ async function asInlineImage(item: Extract<SolverContentPart, { type: "image" }>
     return { mimeType: match[1].toLowerCase(), base64: match[2] };
   }
   if (item.source.kind === "serialized-svg") return { mimeType: "image/svg+xml", base64: bytesToBase64(new TextEncoder().encode(item.source.svg)) };
-  if (item.source.kind === "remote-url") {
-    const response = await fetch(item.source.url, { credentials: "omit" });
-    if (!response.ok) throw new Error("MEDIA_SOURCE_UNAVAILABLE");
-    const blob = await response.blob();
-    if (!/^image\/(?:png|jpeg|webp|gif)$/i.test(blob.type) || blob.size > MAX_INLINE_IMAGE_BYTES) throw new Error("MEDIA_SOURCE_UNAVAILABLE");
-    return { mimeType: blob.type.toLowerCase(), base64: bytesToBase64(new Uint8Array(await blob.arrayBuffer())) };
-  }
+  // Remote acquisition belongs exclusively to prepareQuestionPackageForProvider.
+  if (item.source.kind === "remote-url") throw new Error("MEDIA_SOURCE_UNAVAILABLE");
   throw new Error("MEDIA_SOURCE_UNAVAILABLE");
 }
 function bytesToBase64(bytes: Uint8Array): string {

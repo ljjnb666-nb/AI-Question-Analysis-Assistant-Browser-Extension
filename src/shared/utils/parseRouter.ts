@@ -12,26 +12,30 @@ import { mockParse } from "../ai/mockParse";
 import { logEvent } from "./analytics";
 import { detectVisualKeywords } from "./ocr";
 import type { SolverQuestionPackage } from "../ai/questionPackage";
+import type { QuestionScreenshotFallback } from "../ai/questionPackage";
 import { buildSolverQuestionPackage } from "../../content/solver/questionPackageBuilder";
+import { prepareQuestionPackageForProvider } from "../ai/providerMediaPreparation";
 
 export { PROVIDERS, getProvider, decideRoute, hasSufficientPreviewText, buildResult, mockParse };
 export type { ProviderConfig, ProviderId };
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1_000;
+export type ParseQuestionRuntimeContext = { signal?: AbortSignal; screenshotFallback?: QuestionScreenshotFallback; isQuestionRevisionCurrent?: (identity: { questionId: string; contentFingerprint: string }) => boolean };
 
 export async function parseQuestion(
   block: QuestionBlock,
   settings: AppSettings,
   onStream?: (partial: string) => void,
+  runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   // Canonical auto-detected questions must hydrate their owned media before a
   // provider call. Manual/legacy capture intentionally remains on its old path.
   if (block.source !== "manual_capture" && block.mediaAssets?.length) {
     if (block.completeness?.state !== "complete") throw new Error("QUESTION_NOT_ELIGIBLE");
-    const built = await buildSolverQuestionPackage(block, { screenshotFallbackDataUrl: block.imageDataUrl });
+    const built = await buildSolverQuestionPackage(block, { signal: runtimeContext?.signal });
     if (!built.ok) throw new Error(built.code);
-    return parseQuestionPackage(built.package, block, settings, onStream);
+    return parseQuestionPackage(built.package, block, settings, onStream, runtimeContext);
   }
   return parseQuestionCore(block, settings, onStream);
 }
@@ -41,8 +45,9 @@ export async function parseQuestionPackage(
   block: QuestionBlock,
   settings: AppSettings,
   onStream?: (partial: string) => void,
+  runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
-  return parseQuestionCore(block, settings, onStream, questionPackage);
+  return parseQuestionCore(block, settings, onStream, questionPackage, runtimeContext);
 }
 
 async function parseQuestionCore(
@@ -50,6 +55,7 @@ async function parseQuestionCore(
   settings: AppSettings,
   onStream?: (partial: string) => void,
   questionPackage?: SolverQuestionPackage,
+  runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   const route = await decideRoute(block, settings);
   const provider = getProvider(settings.providerId ?? "anthropic");
@@ -59,6 +65,14 @@ async function parseQuestionCore(
     Boolean(block.imageDataUrl) || Boolean(questionPackage?.media.length) ||
     detectVisualKeywords(block.previewText || "");
   const modelLikelyTextOnly = isLikelyTextOnlyModel(modelName);
+
+  if (questionPackage?.media.length) {
+    if (settings.preferredRoute === "text") throw new Error("CANONICAL_MEDIA_REQUIRES_VISION");
+    if (!provider.supportsVision || modelLikelyTextOnly) throw new Error("MEDIA_REQUIRES_VISION");
+    const prepared = await prepareQuestionPackageForProvider(questionPackage, provider, runtimeContext);
+    if (!prepared.ok) throw new Error(prepared.code);
+    questionPackage = prepared.package;
+  }
 
   if (route === "text" && imageQuestion && !hasSufficientPreviewText(block.previewText)) {
     if (provider.supportsVision) {
@@ -110,6 +124,7 @@ async function parseQuestionCore(
       return result;
     } catch (err) {
       lastError = normalizeNetworkError(err, provider, settings);
+      if (/^(?:MEDIA_SOURCE_UNAVAILABLE|MEDIA_BLOCKED|MEDIA_BUDGET_EXCEEDED|STALE_QUESTION_REVISION|CANONICAL_MEDIA_REQUIRES_VISION|MEDIA_REQUIRES_VISION)/.test(lastError.message)) break;
       const is4xx = lastError.message.includes(" 4") && !lastError.message.includes("429");
       if (is4xx) break;
     }

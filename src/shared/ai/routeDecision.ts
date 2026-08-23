@@ -52,6 +52,7 @@ const FORMULA_PATTERNS = /(g\(s\)|h\(s\)|g\(j|h\(j|f\(x\)|jw|σ|theta|λ|μ|∑|
 
 export async function decideRoute(block: QuestionBlock, settings: AppSettings): Promise<RouteUsed> {
   const provider = getProvider(settings.providerId ?? "anthropic");
+  const canonicalMedia = Boolean(block.mediaAssets?.some((asset) => (asset.ownership.role === "stem" || asset.ownership.role === "option") && !asset.ownership.reasons.includes("CROSS_QUESTION_OWNER")));
   const questionText = buildPreferredQuestionText(block);
   if (settings.preferredRoute !== "auto") {
     if (!provider.supportsVision) return "text";
@@ -59,6 +60,9 @@ export async function decideRoute(block: QuestionBlock, settings: AppSettings): 
   }
 
   if (!provider.supportsVision) return "text";
+  // Correctness first: canonical option/stem evidence must never be silently
+  // discarded merely because OCR text happens to be long.
+  if (canonicalMedia) return "vision";
 
   const visualNeed = inferVisualNeed(block);
   const textSufficient = hasSufficientPreviewText(questionText, block.questionTypeGuess);

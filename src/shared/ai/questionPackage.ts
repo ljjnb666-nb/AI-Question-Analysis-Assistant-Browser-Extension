@@ -10,6 +10,7 @@ export interface SolverQuestionPackage {
   media: SolverMediaPart[];
   mediaFallbackUsed?: boolean;
 }
+export interface QuestionScreenshotFallback { dataUrl: string; questionId?: string; contentFingerprint: string; }
 
 export type SolverMediaRole = "stem" | "option";
 
@@ -34,7 +35,7 @@ export type SolverContentPart =
 
 export type QuestionPackageBuildResult =
   | { ok: true; package: SolverQuestionPackage }
-  | { ok: false; code: "MEDIA_SOURCE_UNAVAILABLE" | "MEDIA_BLOCKED" | "MEDIA_BUDGET_EXCEEDED"; assetId?: string };
+  | { ok: false; code: "MEDIA_SOURCE_UNAVAILABLE" | "MEDIA_BLOCKED" | "MEDIA_BUDGET_EXCEEDED" | "STALE_QUESTION_REVISION" | "MEDIA_REQUIRES_VISION" | "CANONICAL_MEDIA_REQUIRES_VISION"; assetId?: string };
 
 /** Labels are extension-generated; page text never controls media ownership. */
 export function buildSolverRequestContent(questionText: string, media: SolverMediaPart[]): SolverContentPart[] {
