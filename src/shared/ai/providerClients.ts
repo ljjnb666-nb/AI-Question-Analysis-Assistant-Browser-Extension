@@ -4,6 +4,8 @@ import { getProvider } from "./providers";
 import type { ProviderConfig } from "./providers";
 import { buildResult } from "./parseResult";
 import { buildPreferredQuestionText } from "./questionPromptText";
+import { buildSolverRequestContent } from "./questionPackage";
+import type { SolverContentPart, SolverQuestionPackage } from "./questionPackage";
 import { logError, logWarn } from "../utils/errorLogger";
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -46,16 +48,26 @@ export async function callAnthropic(
   route: RouteUsed,
   settings: AppSettings,
   onStream?: (partial: string) => void,
+  questionPackage?: SolverQuestionPackage,
 ): Promise<ParseResult> {
   const provider = getProvider("anthropic");
   const baseUrl = settings.customBaseUrl || provider.baseUrl;
   const content: unknown[] = [];
 
-  if ((route === "vision" || route === "hybrid") && block.imageDataUrl) {
-    const base64 = block.imageDataUrl.replace(/^data:image\/\w+;base64,/, "");
-    content.push({ type: "image", source: { type: "base64", media_type: "image/png", data: base64 } });
-  }
-  content.push({ type: "text", text: buildUserQuestionPrompt(block, route, settings) });
+  const prompt = buildUserQuestionPrompt(block, route, settings);
+  if ((route === "vision" || route === "hybrid") && questionPackage) {
+    for (const item of buildSolverRequestContent(prompt, questionPackage.media)) {
+      if (item.type === "text") content.push({ type: "text", text: item.text });
+      else {
+        const inline = await asInlineImage(item);
+        content.push({ type: "image", source: { type: "base64", media_type: inline.mimeType, data: inline.base64 } });
+      }
+    }
+  } else if ((route === "vision" || route === "hybrid") && block.imageDataUrl) {
+    const inline = await asInlineImage({ type: "image", assetId: "legacy", role: "stem", source: { kind: "data-url", dataUrl: block.imageDataUrl } });
+    content.push({ type: "image", source: { type: "base64", media_type: inline.mimeType, data: inline.base64 } });
+    content.push({ type: "text", text: prompt });
+  } else content.push({ type: "text", text: prompt });
 
   // Some custom Anthropic-compatible gateways keep SSE connections open,
   // causing UI-side hangs. Prefer non-stream mode for custom provider.
@@ -148,6 +160,7 @@ export async function callOpenAICompat(
   settings: AppSettings,
   provider: ProviderConfig,
   onStream?: (partial: string) => void,
+  questionPackage?: SolverQuestionPackage,
 ): Promise<ParseResult> {
   const useVision = provider.supportsVision && (route === "vision" || route === "hybrid");
   // Custom OpenAI-compatible endpoints may not fully support SSE semantics.
@@ -156,7 +169,14 @@ export async function callOpenAICompat(
 
   // For non-vision providers, use simple string content
   let userContent: unknown;
-  if (useVision && block.imageDataUrl) {
+  if (useVision && questionPackage) {
+    const contentArray: unknown[] = [];
+    for (const item of buildSolverRequestContent(buildUserQuestionPrompt(block, route, settings), questionPackage.media)) {
+      if (item.type === "text") contentArray.push({ type: "text", text: item.text });
+      else contentArray.push({ type: "image_url", image_url: { url: await asOpenAIImageUrl(item, provider.supportsRemoteImageUrl), detail: "high" } });
+    }
+    userContent = contentArray;
+  } else if (useVision && block.imageDataUrl) {
     const contentArray: unknown[] = [];
     contentArray.push({ type: "image_url", image_url: { url: block.imageDataUrl, detail: "high" } });
     contentArray.push({ type: "text", text: buildUserQuestionPrompt(block, route, settings) });
@@ -250,17 +270,27 @@ export async function callGemini(
   block: QuestionBlock,
   route: RouteUsed,
   settings: AppSettings,
+  questionPackage?: SolverQuestionPackage,
 ): Promise<ParseResult> {
   const provider = getProvider("gemini");
   const model = settings.apiModel || provider.defaultModel;
   const url = `${provider.baseUrl}/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
 
   const parts: unknown[] = [];
-  if ((route === "vision" || route === "hybrid") && block.imageDataUrl) {
-    const base64 = block.imageDataUrl.replace(/^data:image\/\w+;base64,/, "");
-    parts.push({ inline_data: { mime_type: "image/png", data: base64 } });
-  }
-  parts.push({ text: `${getSystemPrompt()}\n\n${buildUserQuestionPrompt(block, route, settings)}` });
+  const prompt = `${getSystemPrompt()}\n\n${buildUserQuestionPrompt(block, route, settings)}`;
+  if ((route === "vision" || route === "hybrid") && questionPackage) {
+    for (const item of buildSolverRequestContent(prompt, questionPackage.media)) {
+      if (item.type === "text") parts.push({ text: item.text });
+      else {
+        const inline = await asInlineImage(item);
+        parts.push({ inline_data: { mime_type: inline.mimeType, data: inline.base64 } });
+      }
+    }
+  } else if ((route === "vision" || route === "hybrid") && block.imageDataUrl) {
+    const inline = await asInlineImage({ type: "image", assetId: "legacy", role: "stem", source: { kind: "data-url", dataUrl: block.imageDataUrl } });
+    parts.push({ inline_data: { mime_type: inline.mimeType, data: inline.base64 } });
+    parts.push({ text: prompt });
+  } else parts.push({ text: prompt });
 
   const res = await fetchWithTimeout(url, {
     method: "POST",
@@ -274,5 +304,27 @@ export async function callGemini(
   if (!res.ok) throw new Error(`Gemini API ${res.status}: ${await res.text()}`);
   const data = await res.json() as { candidates: Array<{ content: { parts: Array<{ text: string }> } }> };
   return buildResult(block, route, data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}");
+}
+
+async function asOpenAIImageUrl(item: Extract<SolverContentPart, { type: "image" }>, supportsRemote: boolean): Promise<string> {
+  if (supportsRemote && item.source.kind === "remote-url") return item.source.url;
+  const inline = await asInlineImage(item);
+  return `data:${inline.mimeType};base64,${inline.base64}`;
+}
+async function asInlineImage(item: Extract<SolverContentPart, { type: "image" }>): Promise<{ mimeType: string; base64: string }> {
+  if (item.source.kind === "data-url") {
+    const match = item.source.dataUrl.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=]+)$/i);
+    if (!match) throw new Error("MEDIA_SOURCE_UNAVAILABLE");
+    return { mimeType: match[1].toLowerCase(), base64: match[2] };
+  }
+  if (item.source.kind === "serialized-svg") return { mimeType: "image/svg+xml", base64: bytesToBase64(new TextEncoder().encode(item.source.svg)) };
+  // Remote acquisition belongs exclusively to prepareQuestionPackageForProvider.
+  if (item.source.kind === "remote-url") throw new Error("MEDIA_SOURCE_UNAVAILABLE");
+  throw new Error("MEDIA_SOURCE_UNAVAILABLE");
+}
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 

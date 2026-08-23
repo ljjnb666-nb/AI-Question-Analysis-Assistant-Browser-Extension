@@ -3,7 +3,7 @@
  */
 
 import type { AppSettings, ParseResult, QuestionBlock } from "../types";
-import { PROVIDERS, getProvider } from "../ai/providers";
+import { PROVIDERS, getProvider, resolveEffectiveProviderMediaCapabilities } from "../ai/providers";
 import type { ProviderConfig, ProviderId } from "../ai/providers";
 import { buildResult } from "../ai/parseResult";
 import { callAnthropic, callGemini, callOpenAICompat } from "../ai/providerClients";
@@ -11,26 +11,70 @@ import { decideRoute, hasSufficientPreviewText } from "../ai/routeDecision";
 import { mockParse } from "../ai/mockParse";
 import { logEvent } from "./analytics";
 import { detectVisualKeywords } from "./ocr";
+import type { SolverQuestionPackage } from "../ai/questionPackage";
+import type { QuestionScreenshotFallback } from "../ai/questionPackage";
+import { buildSolverQuestionPackage } from "../../content/solver/questionPackageBuilder";
+import { prepareQuestionPackageForProvider } from "../ai/providerMediaPreparation";
 
 export { PROVIDERS, getProvider, decideRoute, hasSufficientPreviewText, buildResult, mockParse };
 export type { ProviderConfig, ProviderId };
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1_000;
+export type ParseQuestionRuntimeContext = { signal?: AbortSignal; screenshotFallback?: QuestionScreenshotFallback; isQuestionRevisionCurrent?: (identity: { questionId: string; contentFingerprint: string }) => boolean };
 
 export async function parseQuestion(
   block: QuestionBlock,
   settings: AppSettings,
   onStream?: (partial: string) => void,
+  runtimeContext?: ParseQuestionRuntimeContext,
+): Promise<ParseResult> {
+  // Canonical auto-detected questions must hydrate their owned media before a
+  // provider call. Manual/legacy capture intentionally remains on its old path.
+  if (block.source !== "manual_capture" && block.mediaAssets?.length) {
+    if (block.completeness?.state !== "complete") throw new Error("QUESTION_NOT_ELIGIBLE");
+    const built = await buildSolverQuestionPackage(block, { signal: runtimeContext?.signal });
+    if (isRuntimeContextStale(block, runtimeContext)) throw new Error("STALE_QUESTION_REVISION");
+    if (!built.ok) throw new Error(built.code);
+    return parseQuestionPackage(built.package, block, settings, onStream, runtimeContext);
+  }
+  return parseQuestionCore(block, settings, onStream);
+}
+
+export async function parseQuestionPackage(
+  questionPackage: SolverQuestionPackage,
+  block: QuestionBlock,
+  settings: AppSettings,
+  onStream?: (partial: string) => void,
+  runtimeContext?: ParseQuestionRuntimeContext,
+): Promise<ParseResult> {
+  return parseQuestionCore(block, settings, onStream, questionPackage, runtimeContext);
+}
+
+async function parseQuestionCore(
+  block: QuestionBlock,
+  settings: AppSettings,
+  onStream?: (partial: string) => void,
+  questionPackage?: SolverQuestionPackage,
+  runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   const route = await decideRoute(block, settings);
   const provider = getProvider(settings.providerId ?? "anthropic");
   const modelName = String(settings.apiModel || provider.defaultModel || "").toLowerCase();
   const imageQuestion =
     Boolean(block.hasImage) ||
-    Boolean(block.imageDataUrl) ||
+    Boolean(block.imageDataUrl) || Boolean(questionPackage?.media.length) ||
     detectVisualKeywords(block.previewText || "");
   const modelLikelyTextOnly = isLikelyTextOnlyModel(modelName);
+
+  if (questionPackage?.media.length) {
+    if (settings.preferredRoute === "text") throw new Error("CANONICAL_MEDIA_REQUIRES_VISION");
+    if (!provider.supportsVision || modelLikelyTextOnly) throw new Error("MEDIA_REQUIRES_VISION");
+    const effectiveProvider = resolveEffectiveProviderMediaCapabilities(provider, settings.customProviderProtocol);
+    const prepared = await prepareQuestionPackageForProvider(questionPackage, effectiveProvider, runtimeContext);
+    if (!prepared.ok) throw new Error(prepared.code);
+    questionPackage = prepared.package;
+  }
 
   if (route === "text" && imageQuestion && !hasSufficientPreviewText(block.previewText)) {
     if (provider.supportsVision) {
@@ -45,7 +89,7 @@ export async function parseQuestion(
     );
   }
 
-  if (imageQuestion && provider.supportsVision && route === "vision" && !block.imageDataUrl) {
+  if (imageQuestion && provider.supportsVision && route === "vision" && !block.imageDataUrl && !questionPackage?.media.length) {
     throw new Error(getMissingScreenshotMessage(settings.language));
   }
 
@@ -65,16 +109,17 @@ export async function parseQuestion(
     }
 
     try {
+      if (isRuntimeContextStale(block, runtimeContext, questionPackage)) throw new Error("STALE_QUESTION_REVISION");
       let result: ParseResult;
       const useCustomAnthropic =
         provider.id === "custom" && settings.customProviderProtocol === "anthropic";
 
       if (provider.id === "anthropic" || useCustomAnthropic) {
-        result = await callAnthropic(block, route, settings, onStream);
+        result = await callAnthropic(block, route, settings, onStream, questionPackage);
       } else if (provider.id === "gemini") {
-        result = await callGemini(block, route, settings);
+        result = await callGemini(block, route, settings, questionPackage);
       } else {
-        result = await callOpenAICompat(block, route, settings, provider, onStream);
+        result = await callOpenAICompat(block, route, settings, provider, onStream, questionPackage);
       }
 
       const duration = Date.now() - startTime;
@@ -82,6 +127,7 @@ export async function parseQuestion(
       return result;
     } catch (err) {
       lastError = normalizeNetworkError(err, provider, settings);
+      if (/^(?:MEDIA_SOURCE_UNAVAILABLE|MEDIA_BLOCKED|MEDIA_BUDGET_EXCEEDED|STALE_QUESTION_REVISION|CANONICAL_MEDIA_REQUIRES_VISION|MEDIA_REQUIRES_VISION|QUESTION_NOT_ELIGIBLE)/.test(lastError.message)) break;
       const is4xx = lastError.message.includes(" 4") && !lastError.message.includes("429");
       if (is4xx) break;
     }
@@ -89,6 +135,19 @@ export async function parseQuestion(
 
   logEvent("parse_error", { blockId: block.id, error: lastError?.message, exhausted: true });
   throw lastError ?? new Error("Parse failed after retries");
+}
+
+function isRuntimeContextStale(
+  block: QuestionBlock,
+  runtimeContext?: ParseQuestionRuntimeContext,
+  questionPackage?: SolverQuestionPackage,
+): boolean {
+  if (runtimeContext?.signal?.aborted) return true;
+  const identity = {
+    questionId: questionPackage?.questionId ?? block.identity?.stableId ?? block.id,
+    contentFingerprint: questionPackage?.contentFingerprint ?? block.identity?.contentFingerprint ?? block.id,
+  };
+  return runtimeContext?.isQuestionRevisionCurrent?.(identity) === false;
 }
 
 export function normalizeNetworkError(

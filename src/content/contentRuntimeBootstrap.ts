@@ -73,6 +73,7 @@ export function bootstrapContentRuntime(): ContentRuntimeMessageListener {
   }
   const {
     captureBlockImage,
+    abortCurrentSolveAttempt,
     clickNextQuestionButton,
     findNextQuestionButton,
     handleAutoDetect,
@@ -205,6 +206,7 @@ export function bootstrapContentRuntime(): ContentRuntimeMessageListener {
     startManualCapture,
     stopAutoSolveAll: () => {
       runtimeState.setAutoSolveStopRequested(true);
+      abortCurrentSolveAttempt();
     },
     stopSpaWatch: runtimeState.stopSpaWatch,
     verifyParsedAnswerInPage,
