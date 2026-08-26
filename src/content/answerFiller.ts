@@ -33,6 +33,43 @@ import {
   splitAnswerParts as splitAnswerPartsCore,
 } from "./answerText";
 import type { FillAnswerResult, VerifyAnswerResult } from "./answerTypes";
+import { buildValidatedAnswerPlan } from "./answer/answerPlanValidator";
+import { buildControlMapping } from "./answer/controlMapping";
+import { buildActionPlan, executeTransaction, readSelectedOptionKeys, verifyAnswerPlan } from "./answer/transactionalExecutor";
+import { snapshotControls } from "./answer/transactionalExecutor";
+import { observeLiveQuestion } from "./liveQuestionObservation";
+
+const solveStartSnapshots = new Map<string, { controls: ReturnType<typeof snapshotControls>; stableId: string; contentFingerprint: string }>();
+const autoSnapshotStatus = new Map<string, "captured" | "unavailable">();
+const snapshotKey = (block: QuestionBlock) => `${block.identity?.stableId ?? block.id}:${block.identity?.contentFingerprint ?? block.id}`;
+
+/** Called by the auto-solve parser before the provider request; runtime only. */
+export function captureSolveStartControlState(block: QuestionBlock): void {
+  const key = snapshotKey(block);
+  // An auto-solve attempt owns this baseline. Provider/review retries must not
+  // replace it after a user has interacted with the question.
+  if (autoSnapshotStatus.has(key)) return;
+  autoSnapshotStatus.set(key, "unavailable");
+  if (typeof document.elementsFromPoint !== "function") return;
+  const scope = resolveQuestionScope(normalizeBBoxToViewport(block.bbox), scopeSelectors);
+  const mapping = buildControlMapping(block, scope);
+  if (mapping.ok) {
+    const live = observeLiveQuestion(block, mapping.owner).identity;
+    solveStartSnapshots.set(key, { controls: snapshotControls(mapping), stableId: live.stableId, contentFingerprint: live.contentFingerprint });
+    autoSnapshotStatus.set(key, "captured");
+  }
+}
+
+export function finishAutoSolveQuestionAttempt(block: QuestionBlock): void {
+  const key = snapshotKey(block);
+  solveStartSnapshots.delete(key);
+  autoSnapshotStatus.delete(key);
+}
+
+/** Runtime-only, read-only test seam; no DOM or user answer data is exposed. */
+export function hasAutoSolveQuestionAttempt(block: QuestionBlock): boolean {
+  return autoSnapshotStatus.has(snapshotKey(block));
+}
 
 const TEXT_INPUT_SELECTOR = [
   "input:not([type='radio'])",
@@ -66,57 +103,65 @@ const scopeSelectors = {
   choiceInputSelector: CHOICE_INPUT_SELECTOR,
 };
 
-export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult): Promise<FillAnswerResult> {
+export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult, options: { mode?: "auto" | "manual" } = {}): Promise<FillAnswerResult> {
   const directScope = await resolveDirectQuestionScope(block, result);
   if (directScope) {
-    const directPass = await fillAnswerIntoScope(directScope.scope, directScope.bbox, result);
-    if (directPass.ok || !shouldRetryFillWithTextRelocation(directPass)) return directPass;
+    return fillVerifiedAnswerIntoScope(directScope.scope, block, result, options.mode ?? "manual");
   }
 
   ensureQuestionRegionVisible(block.bbox);
   const viewportBbox = normalizeBBoxToViewport(block.bbox);
   let scope = resolveQuestionScope(viewportBbox, scopeSelectors);
-  let effectiveBbox = viewportBbox;
   if (shouldRelocateScope(scope, block, result)) {
     const relocatedFirst = await relocateQuestionScopeByText(block, result);
     if (relocatedFirst) {
       scope = relocatedFirst.scope;
-      effectiveBbox = relocatedFirst.bbox;
     }
   }
 
-  const firstPass = await fillAnswerIntoScope(scope, effectiveBbox, result);
-  if (firstPass.ok || !shouldRetryFillWithTextRelocation(firstPass)) return firstPass;
-
-  const relocated = await relocateQuestionScopeByText(block, result);
-  if (!relocated) return firstPass;
-  return fillAnswerIntoScope(relocated.scope, relocated.bbox, result);
+  return fillVerifiedAnswerIntoScope(scope, block, result, options.mode ?? "manual");
 }
 
 export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResult): VerifyAnswerResult {
   const directScope = resolveDirectQuestionScopeSync(block, result);
   if (directScope) {
-    const directPass = verifyAnswerInScope(directScope.scope, directScope.bbox, result);
-    if (directPass.ok || !shouldRetryVerifyWithTextRelocation(directPass)) return directPass;
+    return verifyVerifiedAnswerInScope(directScope.scope, block, result);
   }
 
   const viewportBbox = normalizeBBoxToViewport(block.bbox);
   let scope = resolveQuestionScope(viewportBbox, scopeSelectors);
-  let effectiveBbox = viewportBbox;
   if (shouldRelocateScope(scope, block, result)) {
     const relocatedFirst = relocateQuestionScopeByTextSync(block, result);
     if (relocatedFirst) {
       scope = relocatedFirst.scope;
-      effectiveBbox = relocatedFirst.bbox;
     }
   }
 
-  const firstPass = verifyAnswerInScope(scope, effectiveBbox, result);
-  if (firstPass.ok || !shouldRetryVerifyWithTextRelocation(firstPass)) return firstPass;
+  return verifyVerifiedAnswerInScope(scope, block, result);
+}
 
-  const relocated = relocateQuestionScopeByTextSync(block, result);
-  if (!relocated) return firstPass;
-  return verifyAnswerInScope(relocated.scope, relocated.bbox, result);
+async function fillVerifiedAnswerIntoScope(scope: Element, block: QuestionBlock, result: ParseResult, mode: "auto" | "manual"): Promise<FillAnswerResult> {
+  const mapping = buildControlMapping(block, scope);
+  if (!mapping.ok) return { ok: false, filledCount: 0, message: mapping.code };
+  const validated = buildValidatedAnswerPlan(block, result, mapping);
+  if (!validated.ok) return { ok: false, filledCount: 0, message: validated.code };
+  const key = snapshotKey(block); const autoStatus = autoSnapshotStatus.get(key);
+  const solveStart = solveStartSnapshots.get(key);
+  if (mode === "auto" && (autoStatus !== "captured" || !solveStart)) return { ok: false, filledCount: 0, message: "USER_STATE_SNAPSHOT_UNAVAILABLE" };
+  const live = observeLiveQuestion(block, mapping.owner).identity;
+  if ((block.identity && (live.stableId !== block.identity.stableId || live.contentFingerprint !== block.identity.contentFingerprint)) || (solveStart && (solveStart.stableId !== live.stableId || solveStart.contentFingerprint !== live.contentFingerprint))) {
+    return { ok: false, filledCount: 0, message: "STALE_ACTION_PLAN" };
+  }
+  const outcome = await executeTransaction(validated.plan, buildActionPlan(validated.plan, mapping), mapping, solveStart?.controls);
+  return { ok: outcome.outcome === "FILLED_VERIFIED" || outcome.outcome === "NO_CHANGE_NEEDED", filledCount: outcome.filledCount, message: outcome.outcome };
+}
+
+function verifyVerifiedAnswerInScope(scope: Element, block: QuestionBlock, result: ParseResult): VerifyAnswerResult {
+  const mapping = buildControlMapping(block, scope);
+  if (!mapping.ok) return { ok: false, expectedKeys: [], actualKeys: [], message: mapping.code };
+  const validated = buildValidatedAnswerPlan(block, result, mapping);
+  if (!validated.ok) return { ok: false, expectedKeys: [], actualKeys: [], message: validated.code };
+  return { ok: verifyAnswerPlan(validated.plan, mapping), expectedKeys: validated.plan.kind === "boolean" ? [validated.plan.optionKey ?? ""] : "optionKeys" in validated.plan ? validated.plan.optionKeys : [], actualKeys: readSelectedOptionKeys(mapping), message: "DOM readback verification" };
 }
 
 export async function fillAnswerIntoScope(scope: Element, bbox: BoundingBox, result: ParseResult): Promise<FillAnswerResult> {
@@ -312,12 +357,4 @@ function normalizeCodeForEditor(code: string): string {
 function normalizeTextLikeAnswerForControl(answer: string, questionType: ParseResult["questionType"]): string {
   if (!looksLikeCodeAnswer(answer, questionType)) return answer;
   return normalizeCodeForEditor(answer);
-}
-
-function shouldRetryFillWithTextRelocation(result: FillAnswerResult): boolean {
-  return /未找到可填写的选项控件|未找到文本输入框|未写入任何输入框/.test(String(result.message || ""));
-}
-
-function shouldRetryVerifyWithTextRelocation(result: VerifyAnswerResult): boolean {
-  return /无法映射期望选项|未选中/.test(String(result.message || ""));
 }

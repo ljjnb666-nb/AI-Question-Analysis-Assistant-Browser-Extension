@@ -8,7 +8,7 @@ type ContentMessageRouterDeps = {
   captureBlockImage: (bbox: BoundingBox) => Promise<string | null>;
   clearHighlights: () => void;
   closeFloatingResult: () => void;
-  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => Promise<unknown>;
+  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options: { mode: "manual" }) => Promise<unknown>;
   flashCandidate: (blockId: string) => void;
   handleAutoDetect: () => void;
   handleFullPageDetect: () => void;
@@ -92,7 +92,7 @@ export function handleContentMessage(
       }
       void (async () => {
         try {
-          const fillResult = await deps.fillParsedAnswerInPage(message.block as QuestionBlock, message.result as ParseResult);
+          const fillResult = await deps.fillParsedAnswerInPage(message.block as QuestionBlock, message.result as ParseResult, { mode: "manual" });
           sendResponse(fillResult);
         } catch (err) {
           sendResponse({ ok: false, filledCount: 0, message: err instanceof Error ? err.message : String(err) });
