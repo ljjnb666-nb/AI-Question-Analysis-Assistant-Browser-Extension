@@ -38,6 +38,7 @@ import { buildControlMapping } from "./answer/controlMapping";
 import { buildActionPlan, executeTransaction, readSelectedOptionKeys, verifyAnswerPlan } from "./answer/transactionalExecutor";
 import { snapshotControls } from "./answer/transactionalExecutor";
 import { observeLiveQuestion } from "./liveQuestionObservation";
+import { hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock } from "./revision/questionRevisionRuntime";
 
 const solveStartSnapshots = new Map<string, { controls: ReturnType<typeof snapshotControls>; stableId: string; contentFingerprint: string }>();
 const autoSnapshotStatus = new Map<string, "captured" | "unavailable">();
@@ -148,6 +149,7 @@ async function fillVerifiedAnswerIntoScope(scope: Element, block: QuestionBlock,
   const key = snapshotKey(block); const autoStatus = autoSnapshotStatus.get(key);
   const solveStart = solveStartSnapshots.get(key);
   if (mode === "auto" && (autoStatus !== "captured" || !solveStart)) return { ok: false, filledCount: 0, message: "USER_STATE_SNAPSHOT_UNAVAILABLE" };
+  if (mode === "auto" && hasQuestionRevisionAttempt() && !isCurrentQuestionRevisionBlock(block)) return { ok: false, filledCount: 0, message: "STALE_QUESTION_REVISION" };
   const live = observeLiveQuestion(block, mapping.owner).identity;
   if ((block.identity && (live.stableId !== block.identity.stableId || live.contentFingerprint !== block.identity.contentFingerprint)) || (solveStart && (solveStart.stableId !== live.stableId || solveStart.contentFingerprint !== live.contentFingerprint))) {
     return { ok: false, filledCount: 0, message: "STALE_ACTION_PLAN" };
