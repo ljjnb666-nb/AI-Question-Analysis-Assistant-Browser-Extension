@@ -30,3 +30,15 @@ fingerprint is retained but cannot be reused for a changed revision.
 Known limit: this phase does not expand into iframe, Shadow DOM, portal, or
 virtualized-component handling; those remain Phase 7 scope. It also never
 submits, hands in, or finishes an assignment.
+
+## Regression coverage
+
+The runtime suite covers semantic text/option/formula fingerprint changes,
+media identity changes through the existing Phase 5 production races, equivalent
+binding re-renders, user interaction and extension-UI noise, question removal,
+replacement, `pushState` route changes, watcher cleanup, and a production
+`runAutoSolveAll` deferred-provider late-result race. The browser E2E suite
+continues to load the packaged popup and side panel; dynamic-content behavior is
+kept deterministic in the content-runtime integration tests because browser
+extension injection is intentionally on-demand rather than a static content
+script.

@@ -38,7 +38,7 @@ import { buildControlMapping } from "./answer/controlMapping";
 import { buildActionPlan, executeTransaction, readSelectedOptionKeys, verifyAnswerPlan } from "./answer/transactionalExecutor";
 import { snapshotControls } from "./answer/transactionalExecutor";
 import { observeLiveQuestion } from "./liveQuestionObservation";
-import { hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock } from "./revision/questionRevisionRuntime";
+import { clearQuestionRevisionAttemptForBlock, hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock } from "./revision/questionRevisionRuntime";
 
 const solveStartSnapshots = new Map<string, { controls: ReturnType<typeof snapshotControls>; stableId: string; contentFingerprint: string }>();
 const autoSnapshotStatus = new Map<string, "captured" | "unavailable">();
@@ -65,6 +65,7 @@ export function finishAutoSolveQuestionAttempt(block: QuestionBlock): void {
   const key = snapshotKey(block);
   solveStartSnapshots.delete(key);
   autoSnapshotStatus.delete(key);
+  clearQuestionRevisionAttemptForBlock(block);
 }
 
 /** Runtime-only, read-only test seam; no DOM or user answer data is exposed. */

@@ -23,6 +23,15 @@ export function clearQuestionRevisionAttempt(controller?: AbortController): void
   if (!controller || activeAttempt?.controller === controller) activeAttempt = null;
 }
 
+/** Mirrors the Phase 5 question-attempt finally cleanup without touching a newer question. */
+export function clearQuestionRevisionAttemptForBlock(block: QuestionBlock): void {
+  const stableId = block.identity?.stableId ?? block.id;
+  const contentFingerprint = block.identity?.contentFingerprint ?? block.id;
+  if (activeAttempt?.stableId === stableId && activeAttempt.contentFingerprint === contentFingerprint) {
+    activeAttempt = null;
+  }
+}
+
 export function abortQuestionRevisionAttempt(): void {
   activeAttempt?.controller.abort(STALE_QUESTION_REVISION);
 }
