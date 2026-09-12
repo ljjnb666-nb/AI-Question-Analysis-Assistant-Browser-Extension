@@ -20,7 +20,7 @@ import {
   type ScanScrollRoot,
   cancelFullPageScan,
 } from "./detector/fullPageDetector";
-import { detectCandidatesInViewport, watchForPageChanges } from "./detector/domDetector";
+import { detectCandidatesAcrossRoots, watchForPageChanges } from "./detector/domDetector";
 import { installFormulaEmbedFallback } from "./formulaEmbedFallback";
 import { HighlightLayer } from "./highlight/HighlightLayer";
 import {
@@ -141,7 +141,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
       activeDetectMode: options.state.getActiveDetectMode(),
       highlightLayer: options.state.getHighlightLayer(),
       activeCandidates: options.state.getActiveCandidates(),
-      detectCandidatesInViewport,
+      detectCandidatesInViewport: detectCandidatesAcrossRoots,
       findMatchingCandidate,
       candidateStatusMap: options.candidateStatusMap,
       notifySidePanel,
@@ -195,7 +195,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     cancelFullPageScan,
     createHighlightLayer: (bridgeOptions) => new HighlightLayer(bridgeOptions),
     detectCandidatesFullPage,
-    detectCandidatesInViewport,
+    detectCandidatesInViewport: detectCandidatesAcrossRoots,
     destroyHighlightLayer: () => {
       options.state.getHighlightLayer()?.destroy();
       options.state.setHighlightLayer(null);

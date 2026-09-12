@@ -1,3 +1,4 @@
+import { isHtmlElementNode } from "./detector/domDetectorShared";
 type DetectMode = "viewport" | "fullpage" | null;
 
 type LayoutWatchDeps = {
@@ -56,7 +57,7 @@ export function createLayoutWatchController(deps: LayoutWatchDeps) {
 
     if (deps.getActiveDetectMode() === "fullpage") {
       const scrollRoot = deps.resolveFullPageScrollRoot();
-      if (scrollRoot instanceof HTMLElement) {
+if (isHtmlElementNode(scrollRoot)) {
         nextObserved.add(scrollRoot);
         if (scrollRoot.parentElement) nextObserved.add(scrollRoot.parentElement);
       }

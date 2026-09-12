@@ -4,6 +4,9 @@ import { discoverControls } from "./controlDiscovery";
 import { controlRegistry, type ControlMappingReason, type ControlRef } from "./controlRegistry";
 import { countExpectedBlankParts } from "../autoSolveHeuristics";
 import { resolveCanonicalQuestionOwner } from "../liveQuestionObservation";
+import { TOP_ROOT_KEY } from "../roots/rootContext";
+import { sharedRootRegistry } from "../roots/rootRegistry";
+import { getTraversalRoot } from "../roots/rootDom";
 import { isVisible, normalizeText } from "../answerDomUtils";
 
 export type ControlMappingFailure = "CONTROL_MAPPING_AMBIGUOUS" | "CONTROL_NOT_FOUND" | "CONTROL_COUNT_MISMATCH";
@@ -27,6 +30,9 @@ export function buildControlMapping(block: QuestionBlock, owner: Element): Contr
   const options = new Map<string, ControlRef>();
   const blanks: ControlRef[] = [];
   const textControls: ControlRef[] = [];
+  // Runtime control ids are root-scoped: identical labels in different roots
+  // must never alias into the same registry entry.
+  const controlRootKey = sharedRootRegistry().rootKeyOfRoot(getTraversalRoot(semanticOwner)) ?? TOP_ROOT_KEY;
   for (const found of discoverControls(semanticOwner)) {
     if (found.controlType === "custom-choice" && found.element.querySelector("input[type=radio],input[type=checkbox]")) continue;
     if (!found.visible || !found.enabled) continue;
@@ -36,7 +42,7 @@ export function buildControlMapping(block: QuestionBlock, owner: Element): Contr
     const reason: ControlMappingReason[] = key ? ["EXPLICIT_LABEL"] : [];
     const blankEvidence = role === "blank" ? blankIndexEvidence(found.element, found.text) : null;
     const blankIndex = blankEvidence?.index ?? blanks.length;
-    const ref: ControlRef = { controlId: `control_v1_${stableHash(`${questionId}\u001f${role}\u001f${key ?? blankIndex}\u001f${found.text}`)}`, questionId, role, optionKey: key ?? undefined, blankIndex: role === "blank" ? blankIndex : undefined, controlType: found.controlType, semanticFingerprint: semanticFingerprintForControl(found.element, { controlType: found.controlType, role, optionKey: key ?? undefined, blankIndex, semanticText: found.text }), semanticText: found.text, enabled: found.enabled, visible: found.visible, confidence: key ? 1 : blankEvidence ? .95 : .75, reasons: blankEvidence ? ["SEMANTIC_CONTAINER"] : reason };
+    const ref: ControlRef = { controlId: `control_v1_${stableHash(`${questionId}\u001f${controlRootKey}\u001f${role}\u001f${key ?? blankIndex}\u001f${found.text}`)}`, questionId, role, optionKey: key ?? undefined, blankIndex: role === "blank" ? blankIndex : undefined, controlType: found.controlType, semanticFingerprint: semanticFingerprintForControl(found.element, { controlType: found.controlType, role, optionKey: key ?? undefined, blankIndex, semanticText: found.text }), semanticText: found.text, enabled: found.enabled, visible: found.visible, confidence: key ? 1 : blankEvidence ? .95 : .75, reasons: blankEvidence ? ["SEMANTIC_CONTAINER"] : reason };
     controlRegistry.put(ref, found.element, semanticOwner);
     if (role === "option") {
       if (!key) continue;

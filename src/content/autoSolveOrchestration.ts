@@ -39,6 +39,7 @@ type AutoSolveDeps = {
   activeDetectMode: "viewport" | "fullpage" | null;
   clickNextQuestionButton: () => boolean;
   detectCandidatesFullPage: () => Promise<QuestionBlock[]>;
+  detectCandidatesAcrossRoots?: () => QuestionBlock[];
   detectCandidatesInViewport: () => QuestionBlock[];
   detectTotalQuestionCount: () => number;
   extractAutoSolveQuestionOrder: (text: string) => number | null;
@@ -151,6 +152,7 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
         sortAutoSolveCandidates: deps.sortAutoSolveCandidates,
       })),
     detectCandidatesFullPage: deps.detectCandidatesFullPage,
+    detectRootCandidates: deps.detectCandidatesAcrossRoots,
     detectTotalQuestionCount: deps.detectTotalQuestionCount,
     extractAutoSolveQuestionOrder: deps.extractAutoSolveQuestionOrder,
     getScrollLeft: deps.getScrollLeft,
@@ -211,7 +213,8 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
           getOrderedPlanSize: (state) => getOrderedPlanSize(state as typeof orderedPlanState),
           lastFingerprint,
           orderedPlanState,
-          pickLiveAutoSolveBlock: deps.pickLiveAutoSolveBlock,
+          allowEmptyPlanRetry: true,
+        pickLiveAutoSolveBlock: deps.pickLiveAutoSolveBlock,
           repeatedCount,
           resolveOrderedPlanViewportBlock: (state) =>
             resolveOrderedPlanViewportBlock(state as typeof orderedPlanState, orderedPlanDeps),
@@ -232,6 +235,12 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
       lastFingerprint = iteration.state.lastFingerprint;
       repeatedCount = iteration.state.repeatedCount;
       if (iteration.kind === "done") return;
+      if (iteration.kind === "done-retry") {
+        lastFingerprint = iteration.state.lastFingerprint;
+        repeatedCount = iteration.state.repeatedCount;
+        total = iteration.state.total;
+        continue;
+      }
 
       const { currentBlock, currentOrder } = iteration;
       const eligibility = getAutomaticQuestionEligibility(currentBlock);

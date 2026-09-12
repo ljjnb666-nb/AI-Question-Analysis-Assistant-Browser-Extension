@@ -54,6 +54,7 @@ export function createOrderedPlanDeps(options: {
   activeDetectMode: "viewport" | "fullpage" | null;
   buildOrderedPlanFromDomQuestionCards: (root: ScanScrollRoot) => QuestionBlock[];
   detectCandidatesFullPage: () => Promise<QuestionBlock[]>;
+  detectRootCandidates?: () => QuestionBlock[];
   detectTotalQuestionCount: () => number;
   getScrollLeft: (scrollRoot: ScanScrollRoot) => number;
   mergeOrderedPlanWithDetectedCandidates: (domPlan: QuestionBlock[], refined: QuestionBlock[]) => QuestionBlock[];
@@ -80,6 +81,7 @@ export function createOrderedPlanDeps(options: {
     activeDetectMode: options.activeDetectMode,
     buildOrderedPlanFromDomQuestionCards: options.buildOrderedPlanFromDomQuestionCards,
     detectCandidatesFullPage: options.detectCandidatesFullPage,
+    detectRootCandidates: options.detectRootCandidates,
     detectTotalQuestionCount: options.detectTotalQuestionCount,
     extractAutoSolveQuestionOrder: options.extractAutoSolveQuestionOrder,
     getActiveCandidates: () => options.activeCandidates,

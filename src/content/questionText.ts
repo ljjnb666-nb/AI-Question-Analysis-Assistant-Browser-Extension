@@ -1,3 +1,4 @@
+import { isElementNode, isHtmlElementNode } from "./detector/domDetectorShared";
 import type { BoundingBox } from "@/shared/types";
 import {
   decodeFormulaLikeText,
@@ -55,7 +56,7 @@ export function extractMixedReadableQuestionText(
       continue;
     }
 
-    if (!(child instanceof Element) || deps.isExtensionUiElement(child)) continue;
+if (!isElementNode(child) || deps.isExtensionUiElement(child)) continue;
     if (child.hasAttribute(FORMULA_HIDDEN_ATTR)) continue;
 
     const tag = child.tagName.toLowerCase();
@@ -310,7 +311,7 @@ export function collectTextFromContainer(
   for (const node of nodes) {
     if (deps.isExtensionUiElement(node)) continue;
     if (shouldSkipNestedSemanticNode(node, container)) continue;
-    if (node instanceof HTMLElement && !deps.isElementVisible(node)) continue;
+if (isHtmlElementNode(node) && !deps.isElementVisible(node)) continue;
     const rect = node.getBoundingClientRect();
     const interArea = deps.intersectionArea(rect, bbox);
     if (interArea < 8) continue;
@@ -382,7 +383,7 @@ export function collectTextFromRegion(
 
   for (const node of nodes) {
     if (deps.isExtensionUiElement(node)) continue;
-    if (node instanceof HTMLElement) {
+if (isHtmlElementNode(node)) {
       if (node.offsetParent === null) continue;
       const style = getComputedStyle(node);
       if (style.visibility === "hidden" || style.display === "none") continue;

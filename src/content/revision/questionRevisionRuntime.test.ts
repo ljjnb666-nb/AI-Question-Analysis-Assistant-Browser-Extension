@@ -44,9 +44,10 @@ describe("Phase 6 active provider revision gate", () => {
     const { version } = registry.observe(block, owner);
     owner.remove();
     expect(JSON.parse(JSON.stringify(version))).toEqual(version);
-    expect(registry.current("q12")?.bindingEpoch).toBe(version.bindingEpoch);
-    expect(registry.remove("q12")?.stableId).toBe("q12");
-    expect(registry.current("q12")).toBeUndefined();
+    const instanceKey = `root-top ${version.stableId}`;
+    expect(registry.currentForInstance(instanceKey)?.bindingEpoch).toBe(version.bindingEpoch);
+    expect(registry.removeForInstance(instanceKey)?.stableId).toBe("q12");
+    expect(registry.currentForInstance(instanceKey)).toBeUndefined();
   });
 
   it("aborts through the shared helper without clearing a different controller", () => {

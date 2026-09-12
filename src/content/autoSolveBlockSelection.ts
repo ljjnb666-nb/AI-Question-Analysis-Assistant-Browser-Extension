@@ -1,3 +1,4 @@
+import { isHtmlElementNode } from "./detector/domDetectorShared";
 import type { BoundingBox, QuestionBlock, QuestionType } from "@/shared/types";
 
 type ResolvedQuestionBlock = {
@@ -57,23 +58,23 @@ export function detectZhihuishuCurrentQuestionBlock(
   if (!/zhihuishu\.com$/i.test(location.hostname)) return null;
 
   const questionBoxes = Array.from(document.querySelectorAll(".questionBox"))
-    .filter((el): el is HTMLElement => el instanceof HTMLElement)
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el))
     .filter((el) => !deps.isExtensionUiElement(el))
     .filter((el) => deps.isElementVisible(el));
 
   const fallbackBoxes = questionBoxes.length > 0
     ? questionBoxes
     : Array.from(document.querySelectorAll(".Classificationquestionall-div"))
-      .filter((el): el is HTMLElement => el instanceof HTMLElement)
+      .filter((el): el is HTMLElement =>isHtmlElementNode( el))
       .filter((el) => !deps.isExtensionUiElement(el))
       .filter((el) => deps.isElementVisible(el))
       .map((el) => {
         const innerQuestionBox = el.querySelector(".questionBox");
-        return innerQuestionBox instanceof HTMLElement ? innerQuestionBox : el;
+        return isHtmlElementNode(innerQuestionBox) ? innerQuestionBox : el;
       });
 
   const boxes = fallbackBoxes
-    .filter((el): el is HTMLElement => el instanceof HTMLElement)
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el))
     .map((el) => {
       const rect = el.getBoundingClientRect();
       const text = deps.extractRichQuestionPreviewFromElement(el);

@@ -1,3 +1,4 @@
+import { isElementNode, isHtmlElementNode } from "./domDetectorShared";
 import type { QuestionDisplaySegment } from "@/shared/types";
 import {
   extractSemanticSvgLikeText,
@@ -75,7 +76,7 @@ export function extractReadableNodeText(node: Element): string {
     return normalizeText(extractSemanticSvgLikeText(node) || "[公式]");
   }
 
-  if (node instanceof HTMLElement) {
+if (isHtmlElementNode(node)) {
     if (node.matches(".option-item")) {
       const orderText = normalizeText((node.querySelector(".option-order") as HTMLElement | null)?.innerText || "");
       const contentNode = node.querySelector(".option-content,.markdown-latex-container,.ml-p");
@@ -123,7 +124,7 @@ export function extractStructuredQuestionText(container: Element): string {
   };
 
   const titleBox = container.querySelector(".title-box,.questionTit,.question-title,[id='title'],[id$='-title'],[id*='question-title']");
-  if (titleBox instanceof HTMLElement) {
+if (isHtmlElementNode(titleBox)) {
     push(titleBox.innerText || titleBox.textContent || "");
   }
 
@@ -141,7 +142,7 @@ export function extractStructuredQuestionText(container: Element): string {
 
   const optionNodes = Array.from(container.querySelectorAll(".option-item, li, label"))
     .filter((node) => {
-      if (!(node instanceof HTMLElement)) return false;
+if (!isHtmlElementNode(node)) return false;
       if (!isElementVisible(node)) return false;
       const text = normalizeText(node.innerText || node.textContent || "");
       return /^[A-D][\.\):\uFF1A\u3001]/.test(text) || /^[\u2460\u2461\u2462\u2463]/.test(text);
@@ -151,7 +152,7 @@ export function extractStructuredQuestionText(container: Element): string {
   }
 
   if (pieces.length === 0) {
-    push(container instanceof HTMLElement ? (container.innerText || container.textContent || "") : (container.textContent || ""));
+push(isHtmlElementNode(container) ? ((container.innerText || container.textContent || "")) : (container.textContent || ""));
   }
 
   return normalizeText(dedupeJoinedStructuredText(pieces).join(" "));
@@ -161,7 +162,7 @@ export function extractStructuredQuestionDisplaySegments(container: Element): Qu
   const stemNode = container.querySelector(
     ".qeustion-content,.questionContent,.question-content,.stem,.question-body,.content,[id$='-content'],[id='question-content'],[id='content']",
   );
-  if (!(stemNode instanceof HTMLElement)) return undefined;
+if (!isHtmlElementNode(stemNode)) return undefined;
 
   const segments = buildOrderedDisplaySegments(stemNode, (child) =>
     child.matches(".option-item,.option-content,.optionUl,ul,ol,.sign-box,.flex.items-center.gap-12px"),
@@ -186,7 +187,7 @@ function readInlineOrderedChildContent(
   shouldSkipChild?: (child: Element) => boolean,
 ): string {
   if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
-  if (!(node instanceof Element)) return "";
+if (!isElementNode(node)) return "";
   if (shouldSkipChild?.(node)) return "";
   if (node.hasAttribute(FORMULA_HIDDEN_ATTR)) return "";
 
@@ -259,7 +260,7 @@ function buildOrderedDisplaySegments(
       pushText(node.textContent || "");
       return;
     }
-    if (!(node instanceof Element)) return;
+if (!isElementNode(node)) return;
     if (shouldSkipChild?.(node)) return;
     if (isExtensionUiElement(node)) return;
 

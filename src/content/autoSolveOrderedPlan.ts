@@ -19,6 +19,8 @@ type ViewportRefinement = {
 type OrderedPlanDeps = {
   activeDetectMode: "viewport" | "fullpage" | null;
   detectCandidatesFullPage: () => Promise<QuestionBlock[]>;
+  /** Cross-root detection fallback for pages whose questions live outside the top document. */
+  detectRootCandidates?: () => QuestionBlock[];
   detectTotalQuestionCount: () => number;
   extractAutoSolveQuestionOrder: (text: string) => number | null;
   getActiveCandidates: () => QuestionBlock[];
@@ -56,10 +58,16 @@ export async function ensureOrderedPlan(
   const domPlan = deps.sequentialScrollMode
     ? deps.buildOrderedPlanFromDomQuestionCards(deps.scrollRoot)
     : [];
-  const roughCandidates = shouldForceFullPagePlan
+  let roughCandidates = shouldForceFullPagePlan
     ? await deps.detectCandidatesFullPage()
     : deps.getActiveCandidates();
-  const refined = await deps.refineFullPageCandidatesViaManualPipeline(roughCandidates);
+  let refined = await deps.refineFullPageCandidatesViaManualPipeline(roughCandidates);
+  if (roughCandidates.length === 0 && refined.length === 0 && deps.detectRootCandidates) {
+    // The top document has no questions; try every accessible root. Root
+    // blocks are already canonical, so they skip the manual refinement.
+    roughCandidates = deps.detectRootCandidates();
+    refined = roughCandidates;
+  }
 
   state.orderedPlan = domPlan.length > 0
     ? deps.mergeOrderedPlanWithDetectedCandidates(domPlan, refined)

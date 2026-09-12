@@ -1,3 +1,5 @@
+import { getTraversalRoot } from "./roots/rootDom";
+import { sharedRootRegistry, topViewportPointForElement } from "./roots/rootRegistry";
 import type { BoundingBox } from "@/shared/types";
 
 export function applyTextValue(control: HTMLElement, value: string): boolean {
@@ -64,7 +66,8 @@ export function intersectionArea(rect: DOMRect, bbox: BoundingBox): number {
 }
 
 export function isVisible(el: HTMLElement): boolean {
-  const style = getComputedStyle(el);
+  // Frame-owned elements must be styled by their own window, never the top one.
+  const style = (el.ownerDocument?.defaultView ?? window).getComputedStyle(el);
   return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
 }
 
@@ -100,11 +103,26 @@ export async function requestRealClick(target: HTMLElement): Promise<boolean> {
   const rect = target.getBoundingClientRect();
   if (rect.width <= 1 || rect.height <= 1) return false;
 
+  // The debugger click path uses top-tab viewport coordinates. Frame-owned
+  // controls must be transformed through their frame chain; ambiguous or
+  // detached transforms refuse the click instead of guessing.
+  const traversalRoot = getTraversalRoot(target);
+  let clickX = rect.left + rect.width / 2;
+  let clickY = rect.top + rect.height / 2;
+  if (traversalRoot !== document) {
+    const context = sharedRootRegistry().rootKeyOfRoot(traversalRoot);
+    if (!context) return false;
+    const transformed = topViewportPointForElement(sharedRootRegistry(), target, { x: clickX, y: clickY });
+    if (!transformed) return false;
+    clickX = transformed.x;
+    clickY = transformed.y;
+  }
+
   try {
     const response = await chrome.runtime.sendMessage({
       type: "REAL_CLICK",
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2,
+      x: clickX,
+      y: clickY,
     });
     await pause(80);
     return Boolean(response?.ok);

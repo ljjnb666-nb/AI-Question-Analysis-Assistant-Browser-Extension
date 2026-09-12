@@ -1,5 +1,6 @@
+import { isHtmlElementNode } from "./detector/domDetectorShared";
 import type { ExtMessage, ParseResult, QuestionBlock } from "@/shared/types";
-import { detectCandidatesInViewport } from "./detector/domDetector";
+import { detectCandidatesAcrossRoots } from "./detector/domDetector";
 
 export function isExtensionContextInvalidatedError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err || "");
@@ -60,7 +61,7 @@ export function findNextQuestionButton(
   isElementVisible: (el: HTMLElement) => boolean,
 ): HTMLElement | null {
   const nodes = Array.from(document.querySelectorAll("button,a,span,div"))
-    .filter((el): el is HTMLElement => el instanceof HTMLElement)
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el))
     .filter((el) => !isExtensionUiElement(el))
     .filter((el) => isElementVisible(el))
     .filter((el) => /下一题|next/i.test(normalizeQuestionText(el.innerText || el.textContent || "")));
@@ -161,7 +162,9 @@ export function pickLiveAutoSolveBlock(
   detectZhihuishuCurrentQuestionBlock: () => QuestionBlock | null,
   pickAutoSolveBlock: (blocks: QuestionBlock[]) => QuestionBlock | null,
 ): QuestionBlock | null {
-  return detectZhihuishuCurrentQuestionBlock() ?? pickAutoSolveBlock(detectCandidatesInViewport());
+  // Live re-resolution must cover every accessible root, not just the top
+  // document; identical semantic questions stay root-scoped downstream.
+  return detectZhihuishuCurrentQuestionBlock() ?? pickAutoSolveBlock(detectCandidatesAcrossRoots());
 }
 
 export function isChoiceLikeQuestionType(questionType: ParseResult["questionType"]): boolean {

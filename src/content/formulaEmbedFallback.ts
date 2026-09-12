@@ -1,3 +1,4 @@
+import { isElementNode, isHtmlElementNode } from "./detector/domDetectorShared";
 import { decodeFormulaLikeText, normalizeFormulaPlaceholderGlyphs as _normalizeFormulaPlaceholderGlyphs, normalizeMathDisplayText as _normalizeMathDisplayText } from "./formulaTextNormalization";
 import {
   extractSemanticSvgLikeText as _extractSemanticSvgLikeText,
@@ -59,10 +60,10 @@ export function syncFormulaEmbedFallback(embed: Element): boolean {
   fallback.textContent = text;
   applyFallbackStyles(fallback);
 
-  if (!embed.hasAttribute(FORMULA_HIDDEN_ATTR) && embed instanceof HTMLElement) {
+  if (!embed.hasAttribute(FORMULA_HIDDEN_ATTR) &&isHtmlElementNode( embed)) {
     embed.setAttribute(FORMULA_HIDDEN_ATTR, embed.style.display || "");
   }
-  if (embed instanceof HTMLElement) {
+if (isHtmlElementNode(embed)) {
     embed.style.display = "none";
   }
   embed.setAttribute(FORMULA_PROCESSED_ATTR, "1");
@@ -77,7 +78,7 @@ export function installFormulaEmbedFallback(): () => void {
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       for (const added of mutation.addedNodes) {
-        if (!(added instanceof Element)) continue;
+if (!isElementNode(added)) continue;
         if (added.matches(FORMULA_EMBED_SELECTOR)) {
           syncFormulaEmbedFallback(added);
           continue;

@@ -53,7 +53,7 @@ function imageAsset(img: HTMLImageElement, _owner: Element, order: number, store
 }
 
 function backgroundAsset(element: HTMLElement, order: number, store: MediaPayloadStore, locatorStore: MediaSourceLocatorStore, ownership: MediaAssetRef["ownership"]): MediaAssetRef | null {
-  const value = getComputedStyle(element).backgroundImage || "";
+  const value = (element.ownerDocument.defaultView ?? window).getComputedStyle(element).backgroundImage || "";
   const match = value.match(/^\s*url\(\s*["']?(.+?)["']?\s*\)\s*$/i);
   if (!match || /gradient\(/i.test(value)) return null;
   return refForUrl(match[1], "background-image", "css-background", element, order, store, locatorStore, ownership);

@@ -1,3 +1,4 @@
+import { isExtensionUiElement, isHtmlElementNode } from "./detector/domDetectorShared";
 import type { BoundingBox, ParseResult, QuestionBlock } from "@/shared/types";
 import { fillChoiceLikeAnswer as fillChoiceLikeAnswerCore, verifyChoiceAnswerInScope } from "./answerChoiceInteraction";
 import {
@@ -38,11 +39,15 @@ import { buildControlMapping } from "./answer/controlMapping";
 import { buildActionPlan, executeTransaction, readSelectedOptionKeys, verifyAnswerPlan } from "./answer/transactionalExecutor";
 import { snapshotControls } from "./answer/transactionalExecutor";
 import { observeLiveQuestion } from "./liveQuestionObservation";
-import { clearQuestionRevisionAttemptForBlock, hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock } from "./revision/questionRevisionRuntime";
+import { clearQuestionRevisionAttemptForBlock, hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock, STALE_ROOT_CONTEXT } from "./revision/questionRevisionRuntime";
+import { rootAttachmentOf } from "./roots/rootContext";
+import { resolveFillRootContext, sharedRootRegistry } from "./roots/rootRegistry";
 
 const solveStartSnapshots = new Map<string, { controls: ReturnType<typeof snapshotControls>; stableId: string; contentFingerprint: string }>();
 const autoSnapshotStatus = new Map<string, "captured" | "unavailable">();
-const snapshotKey = (block: QuestionBlock) => `${block.identity?.stableId ?? block.id}:${block.identity?.contentFingerprint ?? block.id}`;
+// Runtime solve-start state is root-scoped: identical semantic questions in
+// different accessible roots must never share a baseline (or a snapshot key).
+const snapshotKey = (block: QuestionBlock) => `${rootAttachmentOf(block).rootKey ?? "root-top"}:${block.identity?.stableId ?? block.id}:${block.identity?.contentFingerprint ?? block.id}`;
 
 /** Called by the auto-solve parser before the provider request; runtime only. */
 export function captureSolveStartControlState(block: QuestionBlock): void {
@@ -52,7 +57,18 @@ export function captureSolveStartControlState(block: QuestionBlock): void {
   if (autoSnapshotStatus.has(key)) return;
   autoSnapshotStatus.set(key, "unavailable");
   if (typeof document.elementsFromPoint !== "function") return;
-  const scope = resolveQuestionScope(normalizeBBoxToViewport(block.bbox), scopeSelectors);
+  const rootContext = resolveFillRootContext(sharedRootRegistry(), block);
+  if (!rootContext.ok) return;
+  let scope: Element;
+  try {
+    scope = rootContext.shadowRoot
+      ? resolveShadowQuestionScope(rootContext.shadowRoot, rootContext.localBBox, block) ?? rootContext.shadowRoot.host
+      : resolveQuestionScope(normalizeBBoxToViewport(rootContext.localBBox), scopeSelectors, rootContext.doc);
+  } catch {
+    // Scope resolution unavailable in this root (e.g. no elementsFromPoint):
+    // the snapshot stays "unavailable" and every fill fails closed.
+    return;
+  }
   const mapping = buildControlMapping(block, scope);
   if (mapping.ok) {
     const live = observeLiveQuestion(block, mapping.owner).identity;
@@ -105,17 +121,77 @@ const scopeSelectors = {
   choiceInputSelector: CHOICE_INPUT_SELECTOR,
 };
 
+type ResolvedFillScope = { ok: true; doc: Document; localBBox: BoundingBox; shadowRoot: ShadowRoot | null } | { ok: false; message: string };
+
+/**
+ * Locate a question scope inside an open shadow root. Identity match wins:
+ * the canonical stableId proves ownership without geometry. Geometry is only
+ * a fallback hint; the root boundary itself is already component-scoped.
+ */
+function resolveShadowQuestionScope(shadowRoot: ShadowRoot, bbox: BoundingBox, block: QuestionBlock): Element | null {
+  const candidates = Array.from(shadowRoot.querySelectorAll(".question-item,.questionBox,.base-question-component"))
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el) && !isExtensionUiElement(el) && isVisible(el));
+  if (!candidates.length) return null;
+  if (block.identity?.stableId) {
+    for (const candidate of candidates) {
+      if (observeLiveQuestion(block, candidate).identity.stableId === block.identity.stableId) return candidate;
+    }
+  }
+  let best: Element | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const candidate of candidates) {
+    const rect = candidate.getBoundingClientRect();
+    const inter = intersectionArea(rect, bbox);
+    if (inter <= 0) continue;
+    const area = Math.max(1, rect.width * rect.height);
+    const bboxArea = Math.max(1, bbox.width * bbox.height);
+    const score = (inter / Math.min(area, bboxArea)) * 140 + candidate.querySelectorAll("input,textarea,[contenteditable='true'],button").length * 6;
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+  return best ?? candidates[0]!;
+}
+
+/**
+ * Resolves the fill context for a question. Root-aware: frame-owned questions
+ * resolve inside their frame document with local coordinates, shadow-owned
+ * questions hit-test within their open shadow root. A root that disappeared
+ * or was replaced since detection fails closed.
+ */
+function resolveFillScopeForBlock(block: QuestionBlock): ResolvedFillScope {
+  const rootContext = resolveFillRootContext(sharedRootRegistry(), block);
+  if (!rootContext.ok) return { ok: false, message: STALE_ROOT_CONTEXT };
+  const { doc, shadowRoot, localBBox } = rootContext;
+  return { ok: true, doc, localBBox, shadowRoot };
+}
+
 export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult, options: { mode?: "auto" | "manual" } = {}): Promise<FillAnswerResult> {
-  const directScope = await resolveDirectQuestionScope(block, result);
+  const resolved = resolveFillScopeForBlock(block);
+  if (!resolved.ok) {
+    return { ok: false, filledCount: 0, message: resolved.message };
+  }
+  const { doc, localBBox, shadowRoot } = resolved;
+
+  const directScope = await resolveDirectQuestionScope(block, result, doc).catch(() => null);
   if (directScope) {
     return fillVerifiedAnswerIntoScope(directScope.scope, block, result, options.mode ?? "manual");
   }
 
-  ensureQuestionRegionVisible(block.bbox);
-  const viewportBbox = normalizeBBoxToViewport(block.bbox);
-  let scope = resolveQuestionScope(viewportBbox, scopeSelectors);
+  if (shadowRoot) {
+    const shadowScope = resolveShadowQuestionScope(shadowRoot, localBBox, block) ?? shadowRoot.host;
+    if (shadowScope) {
+      return fillVerifiedAnswerIntoScope(shadowScope, block, result, options.mode ?? "manual");
+    }
+    return { ok: false, filledCount: 0, message: STALE_ROOT_CONTEXT };
+  }
+
+  ensureQuestionRegionVisible(localBBox);
+  const viewportBbox = normalizeBBoxToViewport(localBBox);
+  let scope = resolveQuestionScope(viewportBbox, scopeSelectors, doc);
   if (shouldRelocateScope(scope, block, result)) {
-    const relocatedFirst = await relocateQuestionScopeByText(block, result);
+    const relocatedFirst = await relocateQuestionScopeByText(block, result, doc);
     if (relocatedFirst) {
       scope = relocatedFirst.scope;
     }
@@ -125,15 +201,28 @@ export async function fillParsedAnswerInPage(block: QuestionBlock, result: Parse
 }
 
 export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResult): VerifyAnswerResult {
-  const directScope = resolveDirectQuestionScopeSync(block, result);
+  // Verification must run in the question's own root: a shadow/frame question
+  // verified against the top document always fails closed with a bogus scope.
+  const rootContext = resolveFillRootContext(sharedRootRegistry(), block);
+  if (!rootContext.ok) return { ok: false, expectedKeys: [], actualKeys: [], message: STALE_ROOT_CONTEXT };
+  const { doc, shadowRoot, localBBox } = rootContext;
+
+  const directScope = resolveDirectQuestionScopeSync(block, result, doc);
   if (directScope) {
     return verifyVerifiedAnswerInScope(directScope.scope, block, result);
   }
 
-  const viewportBbox = normalizeBBoxToViewport(block.bbox);
-  let scope = resolveQuestionScope(viewportBbox, scopeSelectors);
+  if (shadowRoot) {
+    const shadowScope = resolveShadowQuestionScope(shadowRoot, localBBox, block) ?? shadowRoot.host;
+    if (shadowScope) {
+      return verifyVerifiedAnswerInScope(shadowScope, block, result);
+    }
+    return { ok: false, expectedKeys: [], actualKeys: [], message: STALE_ROOT_CONTEXT };
+  }
+
+  let scope = resolveQuestionScope(normalizeBBoxToViewport(localBBox), scopeSelectors, doc);
   if (shouldRelocateScope(scope, block, result)) {
-    const relocatedFirst = relocateQuestionScopeByTextSync(block, result);
+    const relocatedFirst = relocateQuestionScopeByTextSync(block, result, doc);
     if (relocatedFirst) {
       scope = relocatedFirst.scope;
     }
@@ -291,7 +380,7 @@ function tryFillCodeEditor(
 
 function findBestCodeEditor(): HTMLElement | null {
   const editors = Array.from(document.querySelectorAll(CODE_EDITOR_SELECTOR))
-    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .filter((node): node is HTMLElement =>isHtmlElementNode( node))
     .filter((node) => isVisible(node) && node.isContentEditable);
   if (!editors.length) return null;
 

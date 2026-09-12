@@ -1,3 +1,4 @@
+import { isHtmlElementNode } from "./detector/domDetectorShared";
 import type { BoundingBox, ParseResult, QuestionBlock } from "@/shared/types";
 import {
   getScrollLeft,
@@ -20,16 +21,17 @@ const QUESTION_SCOPE_SELECTOR = ".question-item,.base-question-component,.questi
 export function resolveQuestionScope(
   bbox: BoundingBox,
   selectors: { textInputSelector: string; choiceInputSelector: string },
+  searchDocument: Document = document,
 ): Element {
-  const structuredScope = findBestStructuredQuestionScope(bbox, selectors);
+  const structuredScope = findBestStructuredQuestionScope(bbox, selectors, searchDocument);
   if (structuredScope) return structuredScope;
 
   const cx = bbox.x + bbox.width / 2;
   const cy = bbox.y + bbox.height / 2;
-  const stack = document.elementsFromPoint(cx, cy);
-  const anchor = stack.find((el) => !isExtensionUiElement(el)) || document.body;
+  const stack = searchDocument.elementsFromPoint(cx, cy);
+  const anchor = stack.find((el) => !isExtensionUiElement(el)) || searchDocument.body;
   const explicitScope = anchor.closest?.(QUESTION_SCOPE_SELECTOR);
-  if (explicitScope instanceof HTMLElement && !isExtensionUiElement(explicitScope)) {
+if (isHtmlElementNode(explicitScope) && !isExtensionUiElement(explicitScope)) {
     return explicitScope;
   }
 
@@ -74,7 +76,7 @@ export function resolveQuestionScope(
 }
 
 export function shouldRelocateScope(scope: Element, block: QuestionBlock, result: ParseResult): boolean {
-  const host = scope instanceof HTMLElement ? scope : null;
+  const host =isHtmlElementNode( scope) ? scope : null;
   if (!host) return false;
   if (host.matches(".question-item")) return false;
   const nestedQuestionCount = host.querySelectorAll(".question-item").length;
@@ -82,7 +84,7 @@ export function shouldRelocateScope(scope: Element, block: QuestionBlock, result
 
   const ordinal = extractQuestionOrdinal(block, result);
   if (!ordinal) return false;
-  const orderedQuestionItems = getOrderedQuestionItems();
+  const orderedQuestionItems = getOrderedQuestionItems(host.ownerDocument);
   const expectedScope = orderedQuestionItems[ordinal - 1];
   return Boolean(expectedScope && expectedScope !== host && !host.contains(expectedScope));
 }
@@ -90,8 +92,9 @@ export function shouldRelocateScope(scope: Element, block: QuestionBlock, result
 export async function resolveDirectQuestionScope(
   block: QuestionBlock,
   result: ParseResult,
+  searchDocument: Document = document,
 ): Promise<{ scope: Element; bbox: BoundingBox } | null> {
-  const direct = resolveDirectQuestionScopeSync(block, result);
+  const direct = resolveDirectQuestionScopeSync(block, result, searchDocument);
   if (!direct) return null;
   direct.scope.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "instant" as ScrollBehavior });
   await pause(60);
@@ -104,9 +107,10 @@ export async function resolveDirectQuestionScope(
 export function resolveDirectQuestionScopeSync(
   block: QuestionBlock,
   result: ParseResult,
+  searchDocument: Document = document,
 ): { scope: Element; bbox: BoundingBox } | null {
   const ordinal = extractQuestionOrdinal(block, result);
-  const orderedQuestionItems = getOrderedQuestionItems();
+  const orderedQuestionItems = getOrderedQuestionItems(searchDocument);
   if (ordinal && ordinal >= 1 && ordinal <= orderedQuestionItems.length) {
     const scope = orderedQuestionItems[ordinal - 1];
     return {
@@ -115,14 +119,15 @@ export function resolveDirectQuestionScopeSync(
     };
   }
 
-  return relocateQuestionScopeByTextSync(block, result);
+  return relocateQuestionScopeByTextSync(block, result, searchDocument);
 }
 
 export async function relocateQuestionScopeByText(
   block: QuestionBlock,
   result: ParseResult,
+  searchDocument: Document = document,
 ): Promise<{ scope: Element; bbox: BoundingBox } | null> {
-  const relocated = relocateQuestionScopeByTextSync(block, result);
+  const relocated = relocateQuestionScopeByTextSync(block, result, searchDocument);
   if (!relocated) return null;
   relocated.scope.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "instant" as ScrollBehavior });
   await pause(60);
@@ -135,9 +140,10 @@ export async function relocateQuestionScopeByText(
 export function relocateQuestionScopeByTextSync(
   block: QuestionBlock,
   result: ParseResult,
+  searchDocument: Document = document,
 ): { scope: Element; bbox: BoundingBox } | null {
-  const scopes = Array.from(document.querySelectorAll(QUESTION_SCOPE_SELECTOR))
-    .filter((el): el is HTMLElement => el instanceof HTMLElement && !isExtensionUiElement(el));
+  const scopes = Array.from(searchDocument.querySelectorAll(QUESTION_SCOPE_SELECTOR))
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el) && !isExtensionUiElement(el));
   if (!scopes.length) return null;
 
   const needles = buildQuestionLookupNeedles(block, result);
@@ -145,7 +151,7 @@ export function relocateQuestionScopeByTextSync(
 
   const ordinal = extractQuestionOrdinal(block, result);
   if (ordinal) {
-    const orderedQuestionItems = getOrderedQuestionItems();
+    const orderedQuestionItems = getOrderedQuestionItems(searchDocument);
     const ordinalScope = orderedQuestionItems[ordinal - 1];
     if (ordinalScope) {
       const haystack = normalizeLookupText(ordinalScope.innerText || ordinalScope.textContent || "");
@@ -227,7 +233,7 @@ export function ensureQuestionRegionVisible(bbox: BoundingBox): void {
 
 export function collectTextControls(scope: Element, bbox: BoundingBox, textInputSelector: string): HTMLElement[] {
   return Array.from(scope.querySelectorAll(textInputSelector))
-    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .filter((node): node is HTMLElement =>isHtmlElementNode( node))
     .filter((node) => isVisible(node))
     .filter((node) => rectIntersectsExpandedBBox(node.getBoundingClientRect(), bbox, 40, 320))
     .sort((a, b) => compareRectPosition(a.getBoundingClientRect(), b.getBoundingClientRect()));
@@ -268,9 +274,10 @@ function extractQuestionOrdinal(block: QuestionBlock, result: ParseResult): numb
 function findBestStructuredQuestionScope(
   bbox: BoundingBox,
   selectors: { textInputSelector: string; choiceInputSelector: string },
+  searchDocument: Document = document,
 ): Element | null {
-  const scopeCandidates = Array.from(document.querySelectorAll(QUESTION_SCOPE_SELECTOR))
-    .filter((el): el is HTMLElement => el instanceof HTMLElement && !isExtensionUiElement(el) && isVisible(el));
+  const scopeCandidates = Array.from(searchDocument.querySelectorAll(QUESTION_SCOPE_SELECTOR))
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el) && !isExtensionUiElement(el) && isVisible(el));
 
   let best: Element | null = null;
   let bestScore = Number.NEGATIVE_INFINITY;
@@ -349,7 +356,7 @@ function getScrollViewportHeight(scrollRoot: ScanScrollRoot): number {
   return scrollRoot === window ? window.innerHeight : (scrollRoot as HTMLElement).clientHeight;
 }
 
-function getOrderedQuestionItems(): HTMLElement[] {
-  return Array.from(document.querySelectorAll(".question-item"))
-    .filter((el): el is HTMLElement => el instanceof HTMLElement && !isExtensionUiElement(el));
+function getOrderedQuestionItems(searchDocument: Document = document): HTMLElement[] {
+  return Array.from(searchDocument.querySelectorAll(".question-item"))
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el) && !isExtensionUiElement(el));
 }

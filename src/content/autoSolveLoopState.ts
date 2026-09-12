@@ -30,6 +30,7 @@ type LoopState = {
 };
 
 type PrepareIterationOptions = {
+  allowEmptyPlanRetry?: boolean;
   driveFromOrderedPlan: boolean;
   filled: number;
   getOrderedPlanCursor: (state: OrderedPlanStateLike) => number;
@@ -50,6 +51,7 @@ type PrepareIterationOptions = {
 
 type PrepareIterationResult =
   | { kind: "done"; state: LoopState }
+  | { kind: "done-retry"; state: LoopState }
   | {
     kind: "ready";
     currentBlock: QuestionBlock;
@@ -90,6 +92,29 @@ export async function prepareAutoSolveIteration(
     : options.pickLiveAutoSolveBlock();
   if (!currentBlock) {
     if (options.driveFromOrderedPlan && options.getOrderedPlanCursor(options.orderedPlanState) >= options.getOrderedPlanSize(options.orderedPlanState)) {
+      // An empty plan may simply mean the page's questions (e.g. inside
+      // same-origin frames) had not loaded when the plan was first built.
+      // Retrying keeps the ordered-plan loop bounded while allowing late
+      // roots to surface; a permanently empty page ends the run after the
+      // orchestration's round budget.
+      if (options.allowEmptyPlanRetry) {
+        options.sendAutoSolveProgress({
+          running: true,
+          solved: options.solved,
+          filled: options.filled,
+          total: options.total,
+          current: options.solved + 1,
+          statusText: "未发现题目，等待页面内容出现...",
+        });
+        return {
+          kind: "done-retry",
+          state: {
+            lastFingerprint: options.lastFingerprint,
+            repeatedCount: options.repeatedCount,
+            total: options.total,
+          },
+        };
+      }
       options.sendAutoSolveDone({
         ok: true,
         solved: options.solved,

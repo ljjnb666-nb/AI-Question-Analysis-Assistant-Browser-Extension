@@ -4,7 +4,7 @@
  */
 
 import { FloatingWindowManager } from "./floating/FloatingWindowManager";
-import { detectCandidatesInViewport } from "./detector/domDetector";
+import { detectCandidatesAcrossRoots, detectCandidatesInViewport } from "./detector/domDetector";
 import {
   detectCandidatesFullPage,
   cancelFullPageScan,
@@ -106,6 +106,7 @@ export function bootstrapContentRuntime(): ContentRuntimeMessageListener {
   const workflows = createContentMainWorkflows({
     clickNextQuestionButton,
     detectCandidatesFullPage: async () => detectCandidatesFullPage(() => {}),
+    detectCandidatesAcrossRoots,
     detectCandidatesInViewport,
     detectTotalQuestionCount,
     extractAutoSolveQuestionOrder,

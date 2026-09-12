@@ -1,3 +1,4 @@
+import { isHtmlElementNode } from "./detector/domDetectorShared";
 import type { BoundingBox, QuestionBlock } from "@/shared/types";
 
 type AnswerState = {
@@ -18,7 +19,7 @@ type AutoSolveDomStateDeps = {
 
 export function detectTotalQuestionCount(deps: Pick<AutoSolveDomStateDeps, "isElementVisible" | "isExtensionUiElement" | "normalizeQuestionText">): number {
   const containers = Array.from(document.querySelectorAll("div,section,aside,article"))
-    .filter((el): el is HTMLElement => el instanceof HTMLElement)
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el))
     .filter((el) => !deps.isExtensionUiElement(el))
     .filter((el) => /答题卡/.test(deps.normalizeQuestionText(el.innerText || el.textContent || "")));
 
@@ -40,7 +41,7 @@ export function inspectAutoSolveAnswerState(
 ): AnswerState {
   const scope = resolveAutoSolveAnswerScope(block, deps);
   const textControls = Array.from(scope.querySelectorAll("input:not([type='radio']):not([type='checkbox']):not([type='hidden']):not([type='button']):not([type='submit']), textarea, [contenteditable='true']"))
-    .filter((el): el is HTMLElement => el instanceof HTMLElement)
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el))
     .filter((el) => rectIntersectsExpandedBBox(el.getBoundingClientRect(), block.bbox, 40, 320));
   if (textControls.length > 0) {
     const answeredCount = textControls.filter((el) => {
@@ -70,7 +71,7 @@ export function inspectAutoSolveAnswerState(
   }
 
   const optionRows = Array.from(scope.querySelectorAll("div,li,label,span,p"))
-    .filter((el): el is HTMLElement => el instanceof HTMLElement)
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el))
     .filter((el) => rectIntersectsExpandedBBox(el.getBoundingClientRect(), block.bbox, 28, 260))
     .filter((el) => {
       const normalized = deps.normalizeQuestionText(el.innerText || el.textContent || "");
@@ -99,7 +100,7 @@ export function extractSelectedChoiceAnswer(
 ): string {
   const scope = resolveAutoSolveAnswerScope(block, deps);
   const selectedRows = Array.from(scope.querySelectorAll("div,li,label,span,p"))
-    .filter((el): el is HTMLElement => el instanceof HTMLElement)
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el))
     .filter((el) => rectIntersectsExpandedBBox(el.getBoundingClientRect(), block.bbox, 28, 260))
     .filter((el) => {
       const cls = String(el.className || "");
@@ -140,7 +141,7 @@ export function hasVisibleAutoSolveMedia(
 ): boolean {
   const mediaNodes = Array.from(scope.querySelectorAll("img, canvas, svg, math, figure, mjx-container, .MathJax, .katex, embed"));
   return mediaNodes.some((node) => {
-    if (!(node instanceof HTMLElement) || !deps.isElementVisible(node)) return false;
+if (!isHtmlElementNode(node) || !deps.isElementVisible(node)) return false;
     if (node.tagName.toLowerCase() === "img" && deps.isDecorativeQuestionImage(node)) return false;
     if (/^(svg|math|mjx-container|embed)$/i.test(node.tagName) || node.matches(".MathJax, .katex")) {
       return isStandaloneVisualMathNode(node);
