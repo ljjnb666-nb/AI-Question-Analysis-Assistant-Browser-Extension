@@ -24,8 +24,28 @@ and revision gate before the existing Phase 5 one-shot canonical pre-mutation
 observation and transactional fill.
 
 No route URL, DOM node, MutationRecord, AbortController, or revision data is
-persisted. History remains keyed by canonical semantic identity, so an old
-fingerprint is retained but cannot be reused for a changed revision.
+persisted. History reuse requires both the stable ID and the content
+fingerprint to match, so an old revision's history entry is retained but can
+never be reused for a changed revision.
+
+## Production runtime boot
+
+The content runtime stays on-demand: `chrome.scripting` injects the small
+`content-main.js` bootstrap stub, which dynamically imports the heavy runtime
+module inside the isolated world. Three build/manifest facts make that path
+actually work in a browser, and all are covered by the browser E2E suite:
+
+- `web_accessible_resources` exposes `content/*.js` to http(s) pages, because
+  MV3 blocks content-script access to extension modules that are not listed.
+- `vite.contentRuntime.config.ts` emits the runtime module as a real ES module
+  (`export { bootstrapContentRuntime }`); the content-script build format is
+  IIFE and cannot expose exports to a dynamic `import()`.
+- `observeLiveQuestion()` reconstructs identity from the same structured
+  stem/options text the detector used, instead of `innerText`. Real browsers
+  insert layout line breaks into `innerText` for block-level option markup,
+  which would change the canonical text and fail every transactional fill
+  closed with `STALE_ACTION_PLAN`. This kept unit tests green while breaking
+  real-browser fills, and the browser E2E suite now pins the behavior.
 
 Known limit: this phase does not expand into iframe, Shadow DOM, portal, or
 virtualized-component handling; those remain Phase 7 scope. It also never
@@ -33,12 +53,19 @@ submits, hands in, or finishes an assignment.
 
 ## Regression coverage
 
-The runtime suite covers semantic text/option/formula fingerprint changes,
-media identity changes through the existing Phase 5 production races, equivalent
-binding re-renders, user interaction and extension-UI noise, question removal,
-replacement, `pushState` route changes, watcher cleanup, and a production
-`runAutoSolveAll` deferred-provider late-result race. The browser E2E suite
-continues to load the packaged popup and side panel; dynamic-content behavior is
-kept deterministic in the content-runtime integration tests because browser
-extension injection is intentionally on-demand rather than a static content
-script.
+The runtime suite covers semantic text/option/formula fingerprint changes, stem
+image and CSS background-image media swaps, equivalent formula re-renders,
+class/ARIA-reflected answer state, extension-UI and unrelated-sibling noise
+with bounded reconciliation, question removal, replacement, `pushState` route
+changes including the never-reconciled final-gate case, watcher cleanup,
+DOM-free runtime revision state, and a production `runAutoSolveAll`
+deferred-provider late-result race.
+
+The browser E2E suite (`e2e/spaRevision.spec.ts`) loads the packaged extension,
+injects the production content runtime through the real on-demand bootstrap
+path, starts auto-detect and auto-solve over `chrome.runtime` messages, and
+holds the provider endpoint on a local origin. Scenario A replaces the
+question's semantic content while the provider is pending and proves the late
+stale result mutates nothing. Scenario B rerenders the same semantic question
+and proves the result fills only the new live controls, never the detached
+ones, with the extension remaining operational.

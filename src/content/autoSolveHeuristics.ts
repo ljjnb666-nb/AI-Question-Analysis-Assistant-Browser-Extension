@@ -310,7 +310,10 @@ export function findReusableHistoryEntry(
     if (entry.host && entry.host !== hostname) continue;
     if (!shouldPersistAutoSolveParseResult(entry.result)) continue;
     if (block.identity && entry.block.identity) {
-      if (entry.block.identity.stableId === block.identity.stableId) return entry;
+      // Same question with a changed content revision must not reuse the old
+      // answer; the stale history entry is kept, just not reusable.
+      if (entry.block.identity.stableId === block.identity.stableId
+        && entry.block.identity.contentFingerprint === block.identity.contentFingerprint) return entry;
       continue;
     }
     if (isSameAutoSolveQuestion(block.previewText || "", entry.block.previewText || "")) return entry;

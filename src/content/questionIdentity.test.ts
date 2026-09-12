@@ -31,6 +31,30 @@ describe("Question Model V2 stable identity", () => {
     expect(findReusableHistoryEntry([legacyEntry], current, "example.com")).toBe(legacyEntry);
   });
 
+  it("SPA-HIST1 keeps stale-revision history entries but never reuses them", () => {
+    const current = attachQuestionIdentity({ id: "runtime-current", bbox: { x: 0, y: 0, width: 700, height: 200 }, previewText: input().text, hasImage: false, questionTypeGuess: "single_choice", confidence: 1, source: "auto_dom" });
+    const staleIdentityEntry = {
+      id: "history-stale-fingerprint",
+      timestamp: 1,
+      host: "example.com",
+      block: { ...current, identity: { ...current.identity!, contentFingerprint: "cf_v1_stale" } },
+      result: { blockId: "runtime-current", questionType: "single_choice" as const, answer: "A", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: current.previewText, routeUsed: "text" as const, optionSelections: { A: true } },
+    };
+    const entries = [staleIdentityEntry];
+    expect(findReusableHistoryEntry(entries, current, "example.com")).toBeNull();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toBe(staleIdentityEntry);
+
+    const identityA = buildQuestionIdentity({ text: "12. 2 + 2 = ? A. 3 B. 4", questionType: "single_choice", nativeQuestionId: "12" });
+    const identityB = buildQuestionIdentity({ text: "12. 3 + 3 = ? A. 5 B. 6", questionType: "single_choice", nativeQuestionId: "12" });
+    expect(identityA.nativeQuestionId).toBe(identityB.nativeQuestionId);
+    expect(identityA.contentFingerprint).not.toBe(identityB.contentFingerprint);
+    const reusedNativeIdEntry = { id: "history-native-reuse", timestamp: 2, host: "example.com", block: { ...current, identity: identityA }, result: staleIdentityEntry.result };
+    const historyWithReusedNativeId = [reusedNativeIdEntry];
+    expect(findReusableHistoryEntry(historyWithReusedNativeId, { ...current, identity: identityB }, "example.com")).toBeNull();
+    expect(historyWithReusedNativeId).toHaveLength(1);
+  });
+
   it("fails closed when two V2 identities have different stable ids despite matching content", () => {
     const q4 = attachQuestionIdentity({ id: "runtime-q4", bbox: { x: 0, y: 0, width: 700, height: 200 }, previewText: input().text, hasImage: false, questionTypeGuess: "single_choice", confidence: 1, source: "auto_dom" });
     const q7 = attachQuestionIdentity({ ...q4, id: "runtime-q7", previewText: "7. Which answer is correct? A. one B. two C. three D. four" });

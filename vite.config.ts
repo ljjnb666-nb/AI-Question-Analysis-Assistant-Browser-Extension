@@ -22,11 +22,11 @@ export default defineConfig({
       // builds flaky when SchemaStore rate-limits or is unreachable.
       skipManifestValidation: true,
       // sidepanel.html is already picked up via manifest's side_panel.default_path
-      // Build content bootstrap and the heavy runtime as separate entries so the runtime
-      // is only loaded on demand after a user action.
+      // Build the content bootstrap entry here; the heavy runtime module is
+      // emitted as an ES module by vite.contentRuntime.config.ts so the stub
+      // can dynamically import it inside the isolated world on demand.
       additionalInputs: [
         "content/content-main.ts",
-        "content/contentRuntimeBootstrap.ts",
       ],
     }),
   ],
