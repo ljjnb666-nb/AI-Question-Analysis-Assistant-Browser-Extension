@@ -304,18 +304,27 @@ export function countExpectedBlankParts(text: string): number {
 export function findReusableHistoryEntry(
   history: HistoryEntry[],
   block: QuestionBlock,
-  hostname: string,
+  hostname?: string,
 ): HistoryEntry | null {
+  const blockStableId = block.identity?.stableId;
+  const blockFingerprint = block.identity?.contentFingerprint;
   for (const entry of history) {
     if (entry.host && entry.host !== hostname) continue;
     if (!shouldPersistAutoSolveParseResult(entry.result)) continue;
-    if (block.identity && entry.block.identity) {
-      // Same question with a changed content revision must not reuse the old
-      // answer; the stale history entry is kept, just not reusable.
-      if (entry.block.identity.stableId === block.identity.stableId
-        && entry.block.identity.contentFingerprint === block.identity.contentFingerprint) return entry;
+    if (blockStableId && blockFingerprint) {
+      // An identity-bearing current question may only reuse history that is
+      // proven to belong to the exact same content revision. Legacy entries
+      // without identity cannot prove it: textual equality cannot see media
+      // or option changes. They fail closed; the stored entry is kept, just
+      // not automatically reusable.
+      const entryStableId = entry.block.identity?.stableId;
+      const entryFingerprint = entry.block.identity?.contentFingerprint;
+      if (!entryStableId || !entryFingerprint) continue;
+      if (entryStableId === blockStableId && entryFingerprint === blockFingerprint) return entry;
       continue;
     }
+    // Legacy text fallback remains only for current questions that genuinely
+    // carry no canonical identity themselves.
     if (isSameAutoSolveQuestion(block.previewText || "", entry.block.previewText || "")) return entry;
     if (isSameAutoSolveQuestion(block.previewText || "", entry.result.recognizedText || "")) return entry;
   }

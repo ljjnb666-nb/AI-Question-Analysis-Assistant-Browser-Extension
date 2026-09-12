@@ -1,9 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { findReusableHistoryEntry, getAutoSolveFingerprint } from "./autoSolveHeuristics";
+import { loadHistory, sanitizeHistoryEntry } from "@/shared/utils/storage";
 import { attachQuestionIdentity, buildQuestionIdentity, canonicalizeQuestionImageUrl, canonicalizeQuestionText, extractNativeQuestionId, stableHash } from "./questionIdentity";
 
 function input(overrides: Partial<Parameters<typeof buildQuestionIdentity>[0]> = {}) {
   return { text: "4. Which answer is correct? A. one B. two C. three D. four", questionType: "single_choice" as const, ...overrides };
+}
+
+function identityWith(stableId: string, contentFingerprint: string) {
+  return {
+    stableId,
+    contentFingerprint,
+    identityVersion: 1 as const,
+    strategy: "native-id" as const,
+    nativeQuestionId: "12",
+    ordinalHint: 12,
+    signals: { nativeId: true, content: true, options: true, media: false, structure: true },
+  };
 }
 
 describe("Question Model V2 stable identity", () => {
@@ -27,8 +40,10 @@ describe("Question Model V2 stable identity", () => {
     };
     expect(findReusableHistoryEntry([stableEntry], current, "example.com")).toBe(stableEntry);
     expect(findReusableHistoryEntry([stableEntry], current, "other.example")).toBeNull();
+    // Legacy identity-less entries stay readable, but an identity-bearing
+    // current question must never auto-reuse them (fail closed).
     const legacyEntry = { ...stableEntry, block: { ...stableEntry.block, identity: undefined } };
-    expect(findReusableHistoryEntry([legacyEntry], current, "example.com")).toBe(legacyEntry);
+    expect(findReusableHistoryEntry([legacyEntry], current, "example.com")).toBeNull();
   });
 
   it("SPA-HIST1 keeps stale-revision history entries but never reuses them", () => {
@@ -53,6 +68,115 @@ describe("Question Model V2 stable identity", () => {
     const historyWithReusedNativeId = [reusedNativeIdEntry];
     expect(findReusableHistoryEntry(historyWithReusedNativeId, { ...current, identity: identityB }, "example.com")).toBeNull();
     expect(historyWithReusedNativeId).toHaveLength(1);
+  });
+
+  describe("HIST legacy history reuse policy", () => {
+    const result = (answer: string) => ({
+      blockId: "history-block",
+      questionType: "single_choice" as const,
+      answer,
+      confidence: 0.99,
+      briefExplanation: "",
+      detailedExplanation: "",
+      recognizedText: "",
+      routeUsed: "text" as const,
+      optionSelections: { [answer]: true },
+    });
+    const baseBlock = {
+      id: "q-12",
+      bbox: { x: 0, y: 0, width: 640, height: 200 },
+      previewText: "根据下图选择正确答案。 A. 甲 B. 乙 C. 丙 D. 丁",
+      hasImage: true,
+      questionTypeGuess: "single_choice" as const,
+      confidence: 1,
+      source: "auto_dom" as const,
+    };
+    const host = "example.com";
+
+    it("HIST-LEGACY1 denies identity-less history against an identity-bearing current question", () => {
+      const current = attachQuestionIdentity({ ...baseBlock, id: "runtime-q12" });
+      const legacyEntry = {
+        id: "history-legacy",
+        timestamp: 1,
+        host,
+        block: { ...baseBlock, id: "history-block", identity: undefined },
+        result: result("B"),
+      };
+      expect(current.identity?.stableId).toBeTruthy();
+      expect(current.identity?.contentFingerprint).toBeTruthy();
+      expect(findReusableHistoryEntry([legacyEntry], current, host)).toBeNull();
+      // The entry itself is untouched and still readable.
+      expect(legacyEntry.block.identity).toBeUndefined();
+      expect(legacyEntry.result.answer).toBe("B");
+    });
+
+    it("HIST-LEGACY2 proves text equality cannot see the media revision change", () => {
+      // The legacy answer was produced against diagram-A. The stored entry
+      // carries no identity, so textual equality with the live stem is the
+      // only thing a legacy match could rely on — and the live question now
+      // shows diagram-B. Text equality is identical for both diagrams, so a
+      // text-based reuse would fill a stale answer into the new media
+      // revision; only the canonical fingerprint can rule it out.
+      const legacyEntry = {
+        id: "history-legacy-diagram-a",
+        timestamp: 1,
+        host,
+        block: { ...baseBlock, id: "history-block", questionImageUrl: "http://img.test/diagram-a.png", identity: undefined },
+        result: result("B"),
+      };
+      const current = attachQuestionIdentity({ ...baseBlock, id: "runtime-q12", questionImageUrl: "http://img.test/diagram-b.png" });
+      expect(current.identity?.signals.media).toBe(true);
+      expect(findReusableHistoryEntry([legacyEntry], current, host)).toBeNull();
+    });
+
+    it("HIST-EXACT1 keeps valid reuse when stableId and fingerprint both match", () => {
+      const identity = identityWith("q_v1_q12", "FP_A");
+      const historyEntry = {
+        id: "history-exact",
+        timestamp: 1,
+        host,
+        block: { ...baseBlock, id: "history-block", identity },
+        result: result("B"),
+      };
+      const current = { ...baseBlock, id: "runtime-q12", identity: identityWith("q_v1_q12", "FP_A") };
+      expect(findReusableHistoryEntry([historyEntry], current, host)).toBe(historyEntry);
+    });
+
+    it("HIST-MISMATCH1 denies reuse on a changed fingerprint", () => {
+      const historyEntry = {
+        id: "history-mismatch",
+        timestamp: 1,
+        host,
+        block: { ...baseBlock, id: "history-block", identity: identityWith("q_v1_q12", "FP_A") },
+        result: result("B"),
+      };
+      const current = { ...baseBlock, id: "runtime-q12", identity: identityWith("q_v1_q12", "FP_B") };
+      expect(findReusableHistoryEntry([historyEntry], current, host)).toBeNull();
+    });
+
+    it("HIST-PRESERVE1 keeps legacy history readable after storage round-trip without reusing it", async () => {
+      const legacyEntry = {
+        id: "history-legacy-persisted",
+        timestamp: 1,
+        host,
+        block: { ...baseBlock, id: "history-block", identity: undefined },
+        result: result("B"),
+      };
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({ parseHistory: [legacyEntry] } as never);
+
+      const stored = await loadHistory();
+      // Still readable for display/export/manual inspection; nothing was
+      // deleted and no identity was synthesized from the truncated text.
+      expect(stored).toHaveLength(1);
+      const persisted = sanitizeHistoryEntry(stored[0]!);
+      expect(persisted.block.identity).toBeUndefined();
+      expect(persisted.block.previewText).toContain("根据下图选择正确答案");
+      expect(persisted.result.answer).toBe("B");
+
+      const current = attachQuestionIdentity({ ...baseBlock, id: "runtime-q12", questionImageUrl: "http://img.test/diagram-b.png" });
+      expect(findReusableHistoryEntry(stored, current, host)).toBeNull();
+      expect(findReusableHistoryEntry([persisted], current, host)).toBeNull();
+    });
   });
 
   it("fails closed when two V2 identities have different stable ids despite matching content", () => {

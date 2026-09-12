@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import { handleAnsweredQuestionPhase } from "./autoSolveAnsweredQuestion";
+import { findReusableHistoryEntry } from "./autoSolveHeuristics";
 import { captureSolveStartControlState, fillParsedAnswerInPage, finishAutoSolveQuestionAttempt, hasAutoSolveQuestionAttempt } from "./answerFiller";
 import { observeLiveQuestion } from "./liveQuestionObservation";
 import { resolveAutoSolveQuestion } from "./autoSolveQuestionResolution";
@@ -109,6 +110,54 @@ describe("handleAnsweredQuestionPhase", () => {
     } finally {
       finishAutoSolveQuestionAttempt(block);
       expect(hasAutoSolveQuestionAttempt(block)).toBe(false);
+    }
+  });
+
+  it("HIST-LEGACY production flow denies identity-less history and falls through to a fresh parse", async () => {
+    document.body.innerHTML = '<section class="question-item" id="q-legacy">根据下图选择正确答案。 <button>A. 甲</button><button id="b">B. 乙</button><button>C. 丙</button><button>D. 丁</button></section>';
+    const owner = document.getElementById("q-legacy")!;
+    document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
+    const current = observeLiveQuestion(
+      makeBlock({ id: "q-legacy", previewText: "根据下图选择正确答案。 A. 甲 B. 乙 C. 丙 D. 丁", hasImage: true, questionImageUrl: "http://img.test/diagram-b.png" }),
+      owner,
+    );
+    expect(current.identity?.stableId).toBeTruthy();
+    expect(current.identity?.contentFingerprint).toBeTruthy();
+
+    const legacyEntry: HistoryEntry = {
+      id: "hist-legacy",
+      timestamp: 1,
+      host: "example.com",
+      block: {
+        id: "hist-legacy",
+        bbox: { x: 0, y: 0, width: 320, height: 120 },
+        previewText: "根据下图选择正确答案。 A. 甲 B. 乙 C. 丙 D. 丁",
+        hasImage: true,
+        questionImageUrl: "http://img.test/diagram-a.png",
+        confidence: 0.9,
+        questionTypeGuess: "single_choice",
+        source: "auto_dom",
+      },
+      result: makeResult({ blockId: "hist-legacy", questionType: "single_choice", answer: "B", confidence: 0.99 }),
+    };
+    // The matcher itself must be the real production policy, not a stub.
+    expect(findReusableHistoryEntry([legacyEntry], current, "example.com")).toBeNull();
+
+    const fill = vi.fn();
+    const reportSolvedQuestionAndAdvance = vi.fn(async () => "continued" as const);
+    try {
+      const outcome = await handleAnsweredQuestionPhase(
+        { answerState: { mode: "none", answeredCount: 0, totalCount: 0, complete: false }, currentBlock: current, currentOrder: 12, driveFromOrderedPlan: false, filled: 0, fixedTotal: 1, history: [legacyEntry], lastFingerprint: "q-legacy", locationHostname: "example.com", repeatedCount: 0, solved: 0, total: 1 },
+        { fillParsedAnswerInPage: fill, findReusableHistoryEntry, isChoiceLikeQuestionType: (questionType) => questionType === "single_choice", reportSolvedQuestionAndAdvance, sendAutoSolveProgress: vi.fn(), shouldReviewLowConfidenceHistory: () => false, toProgressBlock: (block) => block, verifyParsedAnswerInPage: () => ({ ok: true, message: "verified" }) },
+      );
+      // The stale legacy answer never reaches the fill path; the workflow
+      // falls through to the current-question parse/review path instead.
+      expect(outcome.handled).toBe(false);
+      expect(outcome.historyEntry).toBeNull();
+      expect(fill).not.toHaveBeenCalled();
+      expect(reportSolvedQuestionAndAdvance).not.toHaveBeenCalled();
+    } finally {
+      finishAutoSolveQuestionAttempt(current);
     }
   });
 
