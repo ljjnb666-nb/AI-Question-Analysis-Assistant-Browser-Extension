@@ -47,10 +47,8 @@ import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "./domD
 import { attachQuestionIdentity } from "../questionIdentity";
 import { collectMediaAssets, projectLegacyMedia } from "../media/mediaDiscovery";
 import { classifyViewportBoundary } from "./questionBoundary";
+import { startQuestionRevisionWatch } from "../revision/questionRevisionWatch";
 
-let mutationObserver: MutationObserver | null = null;
-let pendingRescan = false;
-let onCandidatesChanged: ((blocks: QuestionBlock[]) => void) | null = null;
 
 function attachDetectedQuestionIdentity(block: QuestionBlock, owner: Element, options?: { identityText?: string; nativeQuestionId?: string }): QuestionBlock & { identity: NonNullable<QuestionBlock["identity"]> } {
   const withMedia = projectLegacyMedia(block, collectMediaAssets(owner), owner);
@@ -58,31 +56,10 @@ function attachDetectedQuestionIdentity(block: QuestionBlock, owner: Element, op
 }
 
 export function watchForPageChanges(callback: (blocks: QuestionBlock[]) => void): () => void {
-  onCandidatesChanged = callback;
-
-  mutationObserver?.disconnect();
-  mutationObserver = new MutationObserver(() => {
-    if (pendingRescan) return;
-    pendingRescan = true;
-    setTimeout(() => {
-      pendingRescan = false;
-      const blocks = detectCandidatesInViewport();
-      if (blocks.length > 0) onCandidatesChanged?.(blocks);
-    }, 800);
+  return startQuestionRevisionWatch({
+    detectCandidates: detectCandidatesInViewport,
+    onCandidates: callback,
   });
-
-  mutationObserver.observe(document.body, {
-    childList: true,
-    subtree: true,
-    characterData: false,
-    attributes: false,
-  });
-
-  return () => {
-    mutationObserver?.disconnect();
-    mutationObserver = null;
-    onCandidatesChanged = null;
-  };
 }
 
 export function detectCandidatesInViewport(): QuestionBlock[] {

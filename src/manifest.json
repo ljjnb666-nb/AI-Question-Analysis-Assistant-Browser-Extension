@@ -33,5 +33,11 @@
   "host_permissions": [
     "http://*/*",
     "https://*/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content/contentRuntimeBootstrap.js"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
   ]
 }

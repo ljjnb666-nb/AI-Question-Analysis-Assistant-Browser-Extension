@@ -65,13 +65,23 @@ const result = spawnSync(process.execPath, [viteBin, "build"], {
 });
 
 if (result.status === 0) {
-  buildFallbackManifest();
-  if (!existsSync(path.join(distDir, "manifest.json"))) {
-    console.error("[build-extension] dist/manifest.json is missing after build.");
-    process.exit(1);
+  // The on-demand runtime is emitted separately as an ES module so the
+  // content-main bootstrap stub can import it inside the isolated world.
+  const runtimeResult = spawnSync(process.execPath, [viteBin, "build", "-c", "vite.contentRuntime.config.ts"], {
+    cwd: rootDir,
+    stdio: "inherit",
+    shell: false,
+  });
+  if (runtimeResult.status === 0) {
+    buildFallbackManifest();
+    if (!existsSync(path.join(distDir, "manifest.json"))) {
+      console.error("[build-extension] dist/manifest.json is missing after build.");
+      process.exit(1);
+    }
+    console.log("[build-extension] Wrote dist/manifest.json");
+    process.exit(0);
   }
-  console.log("[build-extension] Wrote dist/manifest.json");
-  process.exit(0);
+  process.exit(runtimeResult.status ?? 1);
 }
 
 if (hasBuiltArtifacts()) {

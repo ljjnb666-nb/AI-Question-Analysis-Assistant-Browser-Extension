@@ -12,6 +12,7 @@ import {
   shouldReviewLowConfidenceHistory as shouldReviewLowConfidenceHistoryCore,
 } from "./autoSolveParsing";
 import { captureSolveStartControlState } from "./answerFiller";
+import { beginQuestionRevisionAttempt, clearQuestionRevisionAttempt, isQuestionRevisionCurrent } from "./revision/questionRevisionRuntime";
 import type {
   sendAutoSolveDone as sendAutoSolveDoneCore,
   sendAutoSolveProgress as sendAutoSolveProgressCore,
@@ -72,6 +73,7 @@ export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
     activeAttempt = controller;
     const questionId = block.identity?.stableId ?? block.id;
     const contentFingerprint = block.identity?.contentFingerprint ?? block.id;
+    const revision = beginQuestionRevisionAttempt(block, controller);
     return {
       signal: controller.signal,
       isQuestionRevisionCurrent: (identity) => {
@@ -81,12 +83,13 @@ export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
         return !controller.signal.aborted
           && identity.questionId === questionId
           && identity.contentFingerprint === contentFingerprint
+          && isQuestionRevisionCurrent(revision)
           && liveQuestionId === questionId
           && liveFingerprint === contentFingerprint;
       },
     };
   }
-  function abortCurrentSolveAttempt() { activeAttempt?.abort(); activeAttempt = null; }
+  function abortCurrentSolveAttempt() { activeAttempt?.abort(); clearQuestionRevisionAttempt(activeAttempt ?? undefined); activeAttempt = null; }
   async function parseBlockForAutoSolve(block: QuestionBlock) {
     return parseBlockForAutoSolveCore(block, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps, beginAttempt(block));
   }

@@ -3,6 +3,8 @@ import type { ParseResult, QuestionBlock } from "@/shared/types";
 import { fillParsedAnswerInPage, hasAutoSolveQuestionAttempt } from "./answerFiller";
 import { observeLiveQuestion } from "./liveQuestionObservation";
 import { runAutoSolveAll } from "./autoSolveOrchestration";
+import { beginQuestionRevisionAttempt, clearQuestionRevisionAttempt } from "./revision/questionRevisionRuntime";
+import { startQuestionRevisionWatch } from "./revision/questionRevisionWatch";
 
 function deferred<T>() {
   let reject!: (reason?: unknown) => void;
@@ -59,11 +61,37 @@ describe("runAutoSolveAll attempt ownership", () => {
     let running = false; let stopped = false;
     const controller = { isRunning: () => running, setRunning: (value: boolean) => { running = value; }, isStopRequested: () => stopped, requestStop: (value: boolean) => { stopped = value; } };
     const workflow = runAutoSolveAll(controller, orchestrationDeps(block, () => pending.promise) as never);
-    await vi.waitFor(() => expect(hasAutoSolveQuestionAttempt(block)).toBe(true));
+    await vi.waitFor(() => expect(hasAutoSolveQuestionAttempt(block)).toBe(true), { timeout: 5000 });
     controller.requestStop(true);
     pending.reject(new DOMException("aborted", "AbortError"));
     await workflow;
     expect(hasAutoSolveQuestionAttempt(block)).toBe(false);
     expect(running).toBe(false);
+  });
+
+  it("SPA-RACE1 production orchestration rejects a late stale provider result with zero DOM mutation", async () => {
+    const current = question();
+    const pending = deferred<ParseResult>();
+    let candidates = [current];
+    let running = false; let stopped = false; let clicks = 0;
+    document.getElementById("b")!.addEventListener("click", () => clicks += 1);
+    const provider = new AbortController();
+    const stopWatch = startQuestionRevisionWatch({ detectCandidates: () => candidates, onCandidates: () => {} });
+    const controller = { isRunning: () => running, setRunning: (value: boolean) => { running = value; }, isStopRequested: () => stopped, requestStop: (value: boolean) => { stopped = value; } };
+    const workflow = runAutoSolveAll(controller, orchestrationDeps(current, async () => {
+      beginQuestionRevisionAttempt(current, provider);
+      return pending.promise;
+    }) as never);
+    await vi.waitFor(() => expect(hasAutoSolveQuestionAttempt(current)).toBe(true), { timeout: 5000 });
+    const owner = document.getElementById("q-run")!;
+    owner.firstChild!.textContent = "12. revised prompt ";
+    candidates = [{ ...current, identity: { ...current.identity!, contentFingerprint: "cf-revised" } }];
+    document.body.append(document.createElement("div"));
+    await vi.waitFor(() => expect(provider.signal.aborted).toBe(true), { timeout: 5000 });
+    pending.resolve(parsed(current));
+    await workflow;
+    expect(clicks).toBe(0);
+    expect(hasAutoSolveQuestionAttempt(current)).toBe(false);
+    stopWatch(); clearQuestionRevisionAttempt(provider);
   });
 });

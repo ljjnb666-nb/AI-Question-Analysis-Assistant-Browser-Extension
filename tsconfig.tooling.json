@@ -8,6 +8,7 @@
     "e2e/**/*.ts",
     "playwright.config.ts",
     "vite.config.ts",
+    "vite.contentRuntime.config.ts",
     "vitest.config.ts"
   ]
 }

@@ -1,6 +1,7 @@
 import type { QuestionBlock } from "@/shared/types";
 import { collectMediaAssets, projectLegacyMedia } from "./media/mediaDiscovery";
 import { attachQuestionIdentity, extractOrdinalHint } from "./questionIdentity";
+import { extractStructuredQuestionText } from "./detector/domStructuredText";
 
 const QUESTION_OWNER_SELECTOR = ".question-item,.questionBox,.base-question-component,[data-question-id],[data-questionid],[data-problem-id],[data-problemid],[data-item-id]";
 
@@ -9,7 +10,16 @@ const QUESTION_OWNER_SELECTOR = ".question-item,.questionBox,.base-question-comp
  * It is used only immediately before a mutation; it does not watch or heal DOM.
  */
 export function observeLiveQuestion(block: QuestionBlock, owner: Element) {
-  const text = String((owner as HTMLElement).innerText || owner.textContent || "").trim();
+  // Detection attaches identity from the structured stem/options extraction,
+  // so the live reconstruction must read the same source. Real browsers insert
+  // layout line breaks into innerText for block-level option markup, which
+  // would otherwise change the canonical text and fail every fill closed.
+  const text = String(
+    extractStructuredQuestionText(owner)
+    || (owner as HTMLElement).innerText
+    || owner.textContent
+    || "",
+  ).trim();
   const withMedia = projectLegacyMedia({ ...block, previewText: text || block.previewText }, collectMediaAssets(owner), owner);
   return attachQuestionIdentity(withMedia, owner, { identityText: text || block.previewText });
 }
