@@ -210,6 +210,8 @@ export async function recordAutoSolveHistory(
     result,
     host: location.hostname,
   };
+  // A successful persistence result means history committed at the final
+  // pre-dispatch authority check; callers revalidate before later side effects.
   const committed = await deps.addHistoryEntryIfCurrent(entry, isCurrent);
   if (!committed) return false;
   history.unshift(entry);

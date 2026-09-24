@@ -165,15 +165,17 @@ export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
       deps.autoSolveParsingDeps,
       () => isAttemptCurrent(attempt, block),
     );
-    const stillCurrent = isAttemptCurrent(attempt, block);
-    if (!stillCurrent) {
-      logEvent("provider_result_discarded_stale", { blockId: block.id, source: "auto_solve_commit" });
-      return false;
-    }
     if (committed) {
+      // parse_success records an authorized history commit. The resolver
+      // independently revalidates before progress, fill, and advancement.
       logEvent("parse_success", { blockId: block.id, route: result.routeUsed, source: "auto_solve_commit" });
+      return true;
     }
-    return committed;
+    if (!isAttemptCurrent(attempt, block)) {
+      // This diagnostic means the result lost authority before history commit.
+      logEvent("provider_result_discarded_stale", { blockId: block.id, source: "auto_solve_commit" });
+    }
+    return false;
   }
 
   function sendAutoSolveProgress(payload: {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ParseResult, QuestionBlock } from "@/shared/types";
+import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import { resolveAutoSolveQuestion } from "./autoSolveQuestionResolution";
 import {
   fillParsedAnswerInPage,
@@ -174,6 +174,50 @@ describe("resolveAutoSolveQuestion", () => {
     expect(recordAutoSolveHistory).not.toHaveBeenCalled();
     expect(fillParsedAnswerInPage).not.toHaveBeenCalled();
     expect(sendProgress).not.toHaveBeenCalled();
+  });
+
+  it("AUTO-COMMIT1 keeps authorized history but stops progress and fill when authority is lost during storage", async () => {
+    const block = makeBlock();
+    const historyWrite = deferred<boolean>();
+    const historyDispatched = deferred<void>();
+    const committedHistory: HistoryEntry[] = [];
+    let current = true;
+    const result = makeResult({ confidence: 0.95 });
+    const fillParsedAnswerInPage = vi.fn(async () => ({ ok: true, filledCount: 1, message: "filled" }));
+    const sendProgress = vi.fn();
+    const recordAutoSolveHistory = vi.fn(async (history: HistoryEntry[], currentBlock: QuestionBlock, parsed: ParseResult) => {
+      expect(current).toBe(true);
+      historyDispatched.resolve();
+      const committed = await historyWrite.promise;
+      if (committed) {
+        const entry: HistoryEntry = { id: "committed-during-storage", timestamp: 1, block: currentBlock, result: parsed, host: "example.test" };
+        history.unshift(entry);
+        committedHistory.push(entry);
+      }
+      return committed;
+    });
+    const workflow = resolveAutoSolveQuestion(
+      { answerStateComplete: false, currentBlock: block, filled: 0, history: [], historyEntry: null, needsHistoryReview: false, needsQuickAnsweredChoiceReview: false, solved: 0, total: 1 },
+      {
+        ...resolveDeps(vi.fn(async () => result)),
+        fillParsedAnswerInPage,
+        isCurrentAutoSolveResult: () => current,
+        recordAutoSolveHistory,
+        sendProgress,
+        shouldRetryUnstableChoiceParse: () => false,
+      },
+    );
+
+    await historyDispatched.promise;
+    current = false;
+    historyWrite.resolve(true);
+    const outcome = await workflow;
+
+    expect(committedHistory).toHaveLength(1);
+    expect(recordAutoSolveHistory).toHaveBeenCalledTimes(1);
+    expect(outcome).toMatchObject({ stale: true, filledDelta: 0, questionCompleted: false });
+    expect(sendProgress).not.toHaveBeenCalled();
+    expect(fillParsedAnswerInPage).not.toHaveBeenCalled();
   });
 
   it("RC-C lets only the latest overlapping parse resolve, persist, and fill", async () => {

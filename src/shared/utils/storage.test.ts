@@ -37,6 +37,12 @@ const mockResult: ParseResult = {
   routeUsed: "vision",
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
 function createLargeHistoryEntry(id: string): HistoryEntry {
   return {
     id,
@@ -261,6 +267,25 @@ describe("storage", () => {
 
       expect(chrome.storage.local.get).toHaveBeenCalledWith("parseHistory");
       expect(chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    it("RC-J keeps a successful history commit when authority changes while storage.set is pending", async () => {
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({ parseHistory: [] } as never);
+      const storageWrite = deferred<void>();
+      vi.mocked(chrome.storage.local.set).mockImplementationOnce(() => storageWrite.promise as never);
+      let current = true;
+      const isCurrent = vi.fn(async () => current);
+
+      const commit = addHistoryEntryIfCurrent(entry, isCurrent);
+      await vi.waitFor(() => expect(chrome.storage.local.set).toHaveBeenCalledTimes(1));
+      expect(isCurrent).toHaveBeenCalledTimes(2);
+      current = false;
+      storageWrite.resolve();
+
+      await expect(commit).resolves.toBe(true);
+      expect(isCurrent).toHaveBeenCalledTimes(2);
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({ parseHistory: [expect.objectContaining({ id: "attempt-current" })] });
+      expect(await isCurrent()).toBe(false);
     });
   });
 

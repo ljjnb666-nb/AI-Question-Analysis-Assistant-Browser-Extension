@@ -54,10 +54,25 @@ const makeCandidate = (id = "block-1", overrides: Partial<DetectedCandidate> = {
 
 function createSetCandidates(initial: DetectedCandidate[]) {
   let state = initial;
+  let staleBoundaryPassed = false;
+  let updatesAfterStaleBoundary = 0;
   const setCandidates = (updater: (prev: DetectedCandidate[]) => DetectedCandidate[]) => {
+    if (staleBoundaryPassed) updatesAfterStaleBoundary += 1;
     state = updater(state);
   };
-  return { setCandidates, getState: () => state };
+  return {
+    setCandidates,
+    getState: () => state,
+    replaceState: (next: DetectedCandidate[]) => { state = next; },
+    markStaleBoundary: () => { staleBoundaryPassed = true; },
+    getUpdatesAfterStaleBoundary: () => updatesAfterStaleBoundary,
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
 }
 
 function createDeps(overrides: Record<string, unknown> = {}) {
@@ -163,6 +178,56 @@ describe("Side Panel result commit authority", () => {
     expect(store.getState()[0].result).toBeUndefined();
     expect(deps.logDiscardedStaleResult).toHaveBeenCalledTimes(1);
     expect(deps.logCommittedResult).not.toHaveBeenCalled();
+  });
+
+  it("RC-SIDEPANEL-COMMIT keeps committed history and success telemetry but leaves a newer candidate untouched", async () => {
+    const candidate = makeCandidate("commit-race", { selected: true, status: "idle", result: undefined });
+    const nextCandidate = makeCandidate("commit-race", {
+      block: makeBlock("commit-race", {
+        identity: { ...identityFor("commit-race"), contentFingerprint: "next-revision" },
+        runtimeQuestionHandle: "rqh_nextrevision0123456789abcdef",
+      }),
+      status: "idle",
+      result: undefined,
+    });
+    const store = createSetCandidates([candidate]);
+    const storageWrite = deferred<void>();
+    const historyDispatched = deferred<void>();
+    let current = true;
+    const { deps, history } = createDeps({
+      getProvider: () => ({ supportsVision: false }),
+      isCandidateCurrent: vi.fn(async () => current),
+      parseQuestion: vi.fn(async () => makeResult({ blockId: candidate.block.id, answer: "committed answer" })),
+      addHistoryEntryIfCurrent: vi.fn(async (entry: unknown, isAuthorized: () => Promise<boolean>) => {
+        expect(await isAuthorized()).toBe(true);
+        historyDispatched.resolve();
+        await storageWrite.promise;
+        history.push(entry);
+        return true;
+      }),
+    });
+    const workflow = runBatchParse([candidate], { ...deps, setCandidates: store.setCandidates });
+
+    await historyDispatched.promise;
+    current = false;
+    store.replaceState([nextCandidate]);
+    store.markStaleBoundary();
+    storageWrite.resolve();
+    await workflow;
+    const sendFillMessageWithVerify = vi.fn(async () => ({ ok: true, filledCount: 1 }));
+    await expect(runFillCandidate(store.getState()[0], {
+      isCandidateCurrent: async () => true,
+      setCandidates: store.setCandidates,
+      sendFillMessageWithVerify,
+    })).resolves.toBeNull();
+
+    expect(history).toHaveLength(1);
+    expect(store.getState()).toEqual([nextCandidate]);
+    expect(store.getState()[0]).toBe(nextCandidate);
+    expect(store.getUpdatesAfterStaleBoundary()).toBe(0);
+    expect(sendFillMessageWithVerify).not.toHaveBeenCalled();
+    expect(deps.logCommittedResult).toHaveBeenCalledTimes(1);
+    expect(deps.logDiscardedStaleResult).not.toHaveBeenCalled();
   });
 
   it("prevents an older vision completion from overwriting a newer attempt", async () => {

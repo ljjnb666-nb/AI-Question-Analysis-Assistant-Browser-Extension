@@ -275,9 +275,10 @@ export async function addHistoryEntry(entry: HistoryEntry): Promise<void> {
 }
 
 /**
- * Persists a history result only while its originating attempt still owns the
- * commit. The final async authority check runs after the storage read and
- * immediately before the storage write is issued.
+ * Returns false when authority fails before a history write is dispatched or
+ * all storage writes fail. Returns true when the final authority check passed
+ * and the dispatched storage write completed. That successful dispatch is
+ * the history commit point; later authority changes do not revoke the record.
  */
 export async function addHistoryEntryIfCurrent(
   entry: HistoryEntry,
@@ -303,6 +304,8 @@ async function writeHistoryEntry(
   );
   if (isCurrent && !(await isCurrent())) return false;
   try {
+    // HISTORY_COMMIT_POINT: the final authority check above authorizes this
+    // write. A later revision change cannot undo a successful storage commit.
     await chrome.storage.local.set({ [KEYS.history]: updated });
     return true;
   } catch (err) {
@@ -311,6 +314,7 @@ async function writeHistoryEntry(
     const compact = trimHistoryEntries(updated, updated.length, HISTORY_RETRY_LIMIT_BYTES);
     if (isCurrent && !(await isCurrent())) return false;
     try {
+      // A compact retry is a new dispatch and needs its own final authority check.
       await chrome.storage.local.set({ [KEYS.history]: compact });
       return true;
     } catch (compactErr) {

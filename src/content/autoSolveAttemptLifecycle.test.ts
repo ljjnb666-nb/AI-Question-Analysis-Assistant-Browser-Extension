@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ParseResult, QuestionBlock } from "@/shared/types";
+import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import { fillParsedAnswerInPage, hasAutoSolveQuestionAttempt } from "./answerFiller";
 import { observeLiveQuestion } from "./liveQuestionObservation";
 import { attachRuntimeRoot, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
@@ -68,6 +68,57 @@ describe("runAutoSolveAll attempt ownership", () => {
     pending.reject(new DOMException("aborted", "AbortError"));
     await workflow;
     expect(hasAutoSolveQuestionAttempt(block)).toBe(false);
+    expect(running).toBe(false);
+  });
+
+  it("AUTO-COMMIT2 keeps history committed but stops progress, fill, and advance when authority changes during storage", async () => {
+    const block = question();
+    const storageWrite = deferred<boolean>();
+    const historyDispatched = deferred<void>();
+    let current = true;
+    let running = false;
+    let stopped = false;
+    let committedHistoryWrites = 0;
+    let progressCallsAtDispatch = 0;
+    const sendAutoSolveProgress = vi.fn();
+    const fillParsedAnswerInPage = vi.fn(async () => ({ ok: true, filledCount: 1, message: "filled" }));
+    const resolveQuestionAdvance = vi.fn(async () => false);
+    const controller = {
+      isRunning: () => running,
+      setRunning: (value: boolean) => { running = value; },
+      isStopRequested: () => stopped,
+      requestStop: (value: boolean) => { stopped = value; },
+    };
+    const deps = {
+      ...orchestrationDeps(block, async () => parsed(block)),
+      fillParsedAnswerInPage,
+      isCurrentAutoSolveResult: () => current,
+      recordAutoSolveHistory: async (history: HistoryEntry[], currentBlock: QuestionBlock, result: ParseResult) => {
+        expect(current).toBe(true);
+        progressCallsAtDispatch = sendAutoSolveProgress.mock.calls.length;
+        historyDispatched.resolve();
+        const committed = await storageWrite.promise;
+        if (committed) {
+          history.push({ id: "committed-in-flight", timestamp: 1, block: currentBlock, result, host: "example.test" });
+          committedHistoryWrites += 1;
+        }
+        return committed;
+      },
+      resolveQuestionAdvance,
+      sendAutoSolveProgress,
+    };
+
+    const workflow = runAutoSolveAll(controller, deps as never);
+    await historyDispatched.promise;
+    current = false;
+    controller.requestStop(true);
+    storageWrite.resolve(true);
+    await workflow;
+
+    expect(committedHistoryWrites).toBe(1);
+    expect(sendAutoSolveProgress).toHaveBeenCalledTimes(progressCallsAtDispatch);
+    expect(fillParsedAnswerInPage).not.toHaveBeenCalled();
+    expect(resolveQuestionAdvance).not.toHaveBeenCalled();
     expect(running).toBe(false);
   });
 

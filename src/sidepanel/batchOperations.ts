@@ -330,9 +330,12 @@ async function commitCandidateResult(
     }
     return false;
   }
+  // A successful history write is the parse commit event even if its origin
+  // becomes stale while storage is pending. Later candidate state still needs
+  // a fresh authority check.
+  deps.logCommittedResult(candidate, result);
   if (!await isAuthorized(candidate, lease, deps)) {
-    deps.logDiscardedStaleResult(candidate, result);
-    clearStaleCandidate(candidate, deps, lease);
+    // Do not rewrite a stale candidate or erase a newer candidate here.
     return false;
   }
   deps.setCandidates((previous) => previous.map((current) =>
@@ -340,7 +343,6 @@ async function commitCandidateResult(
       ? { ...current, status: "success" as const, result, error: undefined, debugInfo }
       : current,
   ));
-  deps.logCommittedResult(candidate, result);
   return true;
 }
 
