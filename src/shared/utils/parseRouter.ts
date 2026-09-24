@@ -15,13 +15,20 @@ import type { SolverQuestionPackage } from "../ai/questionPackage";
 import type { QuestionScreenshotFallback } from "../ai/questionPackage";
 import { buildSolverQuestionPackage } from "../../content/solver/questionPackageBuilder";
 import { prepareQuestionPackageForProvider } from "../ai/providerMediaPreparation";
+import { StaleQuestionRevisionError } from "./parseAttemptErrors";
 
 export { PROVIDERS, getProvider, decideRoute, hasSufficientPreviewText, buildResult, mockParse };
 export type { ProviderConfig, ProviderId };
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1_000;
-export type ParseQuestionRuntimeContext = { signal?: AbortSignal; screenshotFallback?: QuestionScreenshotFallback; isQuestionRevisionCurrent?: (identity: { questionId: string; contentFingerprint: string }) => boolean };
+export type ParseQuestionRuntimeContext = {
+  signal?: AbortSignal;
+  screenshotFallback?: QuestionScreenshotFallback;
+  isQuestionRevisionCurrent?: (identity: { questionId: string; contentFingerprint: string }) => boolean;
+  /** Let the owning workflow report success only after its result commit fence. */
+  deferSuccessTelemetry?: boolean;
+};
 
 export async function parseQuestion(
   block: QuestionBlock,
@@ -34,11 +41,11 @@ export async function parseQuestion(
   if (block.source !== "manual_capture" && block.mediaAssets?.length) {
     if (block.completeness?.state !== "complete") throw new Error("QUESTION_NOT_ELIGIBLE");
     const built = await buildSolverQuestionPackage(block, { signal: runtimeContext?.signal });
-    if (isRuntimeContextStale(block, runtimeContext)) throw new Error("STALE_QUESTION_REVISION");
+    if (isRuntimeContextStale(block, runtimeContext)) throw new StaleQuestionRevisionError();
     if (!built.ok) throw new Error(built.code);
     return parseQuestionPackage(built.package, block, settings, onStream, runtimeContext);
   }
-  return parseQuestionCore(block, settings, onStream);
+  return parseQuestionCore(block, settings, onStream, undefined, runtimeContext);
 }
 
 export async function parseQuestionPackage(
@@ -59,6 +66,7 @@ async function parseQuestionCore(
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   const route = await decideRoute(block, settings);
+  if (isRuntimeContextStale(block, runtimeContext, questionPackage)) throw new StaleQuestionRevisionError();
   const provider = getProvider(settings.providerId ?? "anthropic");
   const modelName = String(settings.apiModel || provider.defaultModel || "").toLowerCase();
   const imageQuestion =
@@ -96,7 +104,12 @@ async function parseQuestionCore(
   logEvent(`route_used_${route}` as "route_used_text", { blockId: block.id, provider: provider.id });
 
   if (!settings.apiKey && !provider.keyOptional) {
-    return mockParse(block, route);
+    const result = await mockParse(block, route);
+    if (isRuntimeContextStale(block, runtimeContext, questionPackage)) {
+      logEvent("provider_result_discarded_stale", { blockId: block.id, source: "mock" });
+      throw new StaleQuestionRevisionError();
+    }
+    return result;
   }
 
   const startTime = Date.now();
@@ -108,6 +121,7 @@ async function parseQuestionCore(
       logEvent("parse_error", { blockId: block.id, attempt, error: lastError?.message });
     }
 
+    let providerResultAvailable = false;
     try {
       if (isRuntimeContextStale(block, runtimeContext, questionPackage)) throw new Error("STALE_QUESTION_REVISION");
       let result: ParseResult;
@@ -121,11 +135,25 @@ async function parseQuestionCore(
       } else {
         result = await callOpenAICompat(block, route, settings, provider, onStream, questionPackage);
       }
+      providerResultAvailable = true;
+      if (isRuntimeContextStale(block, runtimeContext, questionPackage)) {
+        logEvent("provider_result_discarded_stale", { blockId: block.id, route, provider: provider.id });
+        throw new StaleQuestionRevisionError();
+      }
 
       const duration = Date.now() - startTime;
-      logEvent("parse_success", { blockId: block.id, route, provider: provider.id, duration, attempt });
+      if (!runtimeContext?.deferSuccessTelemetry) {
+        logEvent("parse_success", { blockId: block.id, route, provider: provider.id, duration, attempt });
+      }
       return result;
     } catch (err) {
+      if (isRuntimeContextStale(block, runtimeContext, questionPackage)) {
+        if (providerResultAvailable && !(err instanceof StaleQuestionRevisionError)) {
+          logEvent("provider_result_discarded_stale", { blockId: block.id, route, provider: provider.id });
+        }
+        lastError = new StaleQuestionRevisionError();
+        break;
+      }
       lastError = normalizeNetworkError(err, provider, settings);
       if (/^(?:MEDIA_SOURCE_UNAVAILABLE|MEDIA_BLOCKED|MEDIA_BUDGET_EXCEEDED|STALE_QUESTION_REVISION|CANONICAL_MEDIA_REQUIRES_VISION|MEDIA_REQUIRES_VISION|QUESTION_NOT_ELIGIBLE)/.test(lastError.message)) break;
       const is4xx = lastError.message.includes(" 4") && !lastError.message.includes("429");
@@ -133,7 +161,9 @@ async function parseQuestionCore(
     }
   }
 
-  logEvent("parse_error", { blockId: block.id, error: lastError?.message, exhausted: true });
+  if (!(lastError instanceof StaleQuestionRevisionError)) {
+    logEvent("parse_error", { blockId: block.id, error: lastError?.message, exhausted: true });
+  }
   throw lastError ?? new Error("Parse failed after retries");
 }
 

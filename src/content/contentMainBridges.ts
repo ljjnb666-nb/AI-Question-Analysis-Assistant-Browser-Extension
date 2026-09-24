@@ -3,7 +3,7 @@ import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import { cropScreenshot } from "@/shared/utils/cropImage";
 import { logEvent } from "@/shared/utils/analytics";
 import { getProvider, parseQuestion } from "@/shared/utils/parseRouter";
-import { addHistoryEntry, loadSettings } from "@/shared/utils/storage";
+import { addHistoryEntryIfCurrent, loadSettings } from "@/shared/utils/storage";
 import { createAutoSolveRuntimeBridge } from "./contentAutoSolveRuntimeBridge";
 import { createCaptureBridge, sendToBackgroundWithTimeout } from "./contentCaptureBridge";
 import { createContentDetectionBridge } from "./contentDetectionBridge";
@@ -128,7 +128,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     parseWithTieredRetries,
     withTimeout,
     parseQuestion,
-    addHistoryEntry,
+    addHistoryEntryIfCurrent,
   };
   const questionNavDeps = {
     normalizeQuestionText,
@@ -242,6 +242,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     parseBlockForAutoSolve,
     parseBlockForAutoSolveQuickReview,
     parseBlockForAutoSolveReview,
+    isCurrentAutoSolveResult,
     pickAutoSolveBlock,
     pickLiveAutoSolveBlock,
     recordAutoSolveHistory,
@@ -251,7 +252,6 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     sortAutoSolveCandidates,
     waitForQuestionAdvance,
   } = createAutoSolveRuntimeBridge({
-    addHistoryEntry,
     autoSolveParsingDeps,
     autoSolveParsingTimeouts,
     clickNextQuestionButtonCore,
@@ -297,6 +297,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     parseBlockForAutoSolve,
     parseBlockForAutoSolveQuickReview,
     parseBlockForAutoSolveReview,
+    isCurrentAutoSolveResult,
     parseWithTieredRetries,
     pickAutoSolveBlock,
     pickLiveAutoSolveBlock,

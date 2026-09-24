@@ -1,4 +1,4 @@
-import type { ExtMessage, ParseResult, QuestionBlock } from "@/shared/types";
+import type { CandidateOrigin, ExtMessage, ParseResult, QuestionBlock } from "@/shared/types";
 
 type FillResponse = { ok?: boolean; filledCount?: number; message?: string } | null;
 type VerifyResponse = { ok?: boolean; expectedKeys?: string[]; actualKeys?: string[]; message?: string } | null;
@@ -72,11 +72,34 @@ export async function getBestActionTab(): Promise<chrome.tabs.Tab | null> {
 }
 
 export async function requestBlockImage(tabId: number, bbox: QuestionBlock["bbox"]): Promise<string | null> {
+  // captureVisibleTab returns the active tab in its window. Do not ask the
+  // originating content script to crop a screenshot of a different tab.
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (activeTab?.id !== tabId) return null;
   const resp = await sendTabMessageWithBootstrap<{ ok?: boolean; dataUrl?: string }>(
     tabId,
     { type: "CAPTURE_BLOCK_IMAGE", bbox },
   );
   return resp.response?.ok && resp.response.dataUrl ? resp.response.dataUrl : null;
+}
+
+/** Revalidate the fixed origin tab and its live runtime owner before result commit or Fill. */
+export async function isCandidateResultAuthorityCurrent(origin: CandidateOrigin | undefined, block: QuestionBlock): Promise<boolean> {
+  if (!origin?.tabId || !origin.url || !block.runtimeQuestionHandle || !block.identity?.stableId || !block.identity.contentFingerprint) return false;
+  try {
+    const before = await chrome.tabs.get(origin.tabId);
+    if (before.url !== origin.url) return false;
+    const validation = await sendTabMessageWithBootstrap<{ ok?: boolean; currentUrl?: string }>(origin.tabId, {
+      type: "VALIDATE_QUESTION_RESULT_AUTHORITY",
+      block,
+      expectedUrl: origin.url,
+    });
+    if (!validation.ok || !validation.response?.ok || validation.response.currentUrl !== origin.url) return false;
+    const after = await chrome.tabs.get(origin.tabId);
+    return after.url === origin.url;
+  } catch {
+    return false;
+  }
 }
 
 export async function sendFillMessage(

@@ -101,6 +101,7 @@ type CreateContentMainWorkflowsOptions = {
     block: QuestionBlock,
     previousResult: ParseResult | null,
   ) => Promise<ParseResult>;
+  isCurrentAutoSolveResult: (block: QuestionBlock, result: ParseResult) => boolean;
   pauseMs: (ms: number) => Promise<void>;
   pickBestAutoSolvePreviewText: (
     rawPreviewText: string,
@@ -116,7 +117,7 @@ type CreateContentMainWorkflowsOptions = {
     history: HistoryEntry[],
     block: QuestionBlock,
     result: ParseResult,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   refineFullPageCandidatesViaManualPipeline: (candidates: QuestionBlock[]) => Promise<QuestionBlock[]>;
   refineViewportCandidate: (
     candidate: QuestionBlock,
@@ -297,6 +298,7 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         parseBlockForAutoSolve: options.parseBlockForAutoSolve,
         parseBlockForAutoSolveQuickReview: options.parseBlockForAutoSolveQuickReview,
         parseBlockForAutoSolveReview: options.parseBlockForAutoSolveReview,
+        isCurrentAutoSolveResult: options.isCurrentAutoSolveResult,
         pauseMs: options.pauseMs,
         pickBestAutoSolvePreviewText: options.pickBestAutoSolvePreviewText,
         pickLiveAutoSolveBlock: options.pickLiveAutoSolveBlock,

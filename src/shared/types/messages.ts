@@ -33,6 +33,7 @@ export type MessageType =
   | "FULL_PAGE_DETECT_DONE"
   | "FULL_PAGE_DETECT_CANCELLED"
   | "CAPTURE_BLOCK_IMAGE"
+  | "VALIDATE_QUESTION_RESULT_AUTHORITY"
   | "FILL_PARSED_ANSWER"
   | "VERIFY_PARSED_ANSWER"
   | "REAL_CLICK"
@@ -178,6 +179,12 @@ export interface CaptureBlockImageMsg extends BaseMessage {
   bbox: BoundingBox;
 }
 
+export interface ValidateQuestionResultAuthorityMsg extends BaseMessage {
+  type: "VALIDATE_QUESTION_RESULT_AUTHORITY";
+  block: QuestionBlock;
+  expectedUrl: string;
+}
+
 export interface FillParsedAnswerMsg extends BaseMessage {
   type: "FILL_PARSED_ANSWER";
   block: QuestionBlock;
@@ -254,6 +261,7 @@ export type ExtMessage =
   | FullPageDetectDoneMsg
   | FullPageDetectCancelledMsg
   | CaptureBlockImageMsg
+  | ValidateQuestionResultAuthorityMsg
   | FillParsedAnswerMsg
   | VerifyParsedAnswerMsg
   | RealClickMsg

@@ -69,3 +69,26 @@ question's semantic content while the provider is pending and proves the late
 stale result mutates nothing. Scenario B rerenders the same semantic question
 and proves the result fills only the new live controls, never the detached
 ones, with the extension remaining operational.
+
+## Phase 8A result commit authority
+
+Provider completion does not imply commit authority. Auto-solve results are
+bound to the solve attempt that produced them, revalidated after provider work,
+and checked again at the conditional history write, progress, and fill-input
+boundaries. A result stale before history dispatch is discarded as
+`STALE_QUESTION_REVISION` and is not persisted. The history commit point is the
+successful final authority validation immediately before the authoritative
+storage write is dispatched. Once that write succeeds, a later revision change
+does not revoke the committed history record; progress, candidate state, fill,
+and advancement each still require current authority.
+
+`parse_success` means the authoritative history commit succeeded.
+`provider_result_discarded_stale` means the result lost authority before that
+commit point. The two events cannot describe the same result commit.
+
+Side Panel candidates retain their originating tab and URL. Parse, vision
+retry, risky retry, and Fill use that origin and revalidate the live question's
+stable identity, semantic fingerprint, and runtime owner. A per-candidate
+attempt lease prevents older asynchronous retries from replacing newer state.
+Screenshot capture is skipped when the origin is not the active tab because
+the browser screenshot API captures the active tab in a window.

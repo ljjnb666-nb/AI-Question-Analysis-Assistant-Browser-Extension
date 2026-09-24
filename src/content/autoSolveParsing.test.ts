@@ -63,7 +63,7 @@ function createDeps() {
     parseWithTieredRetries: vi.fn(async () => makeResult()),
     withTimeout,
     parseQuestion: vi.fn(async () => makeResult()),
-    addHistoryEntry: vi.fn(async () => {}),
+    addHistoryEntryIfCurrent: vi.fn(async (_entry, isCurrent) => isCurrent()),
   };
 }
 
@@ -151,9 +151,9 @@ describe("autoSolveParsing", () => {
     expect(history[0]?.block.runtimeQuestionHandle).toBeUndefined();
     expect(history[0]?.block.runtimeOwnerKey).toBeUndefined();
     expect(Object.getOwnPropertySymbols(history[0]!.block)).toHaveLength(0);
-    expect(deps.addHistoryEntry).toHaveBeenCalledWith(expect.objectContaining({
+    expect(deps.addHistoryEntryIfCurrent).toHaveBeenCalledWith(expect.objectContaining({
       block: expect.objectContaining({ runtimeQuestionHandle: undefined, runtimeOwnerKey: undefined }),
-    }));
+    }), expect.any(Function));
     owner.remove();
   });
 });

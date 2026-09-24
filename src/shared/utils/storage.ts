@@ -271,23 +271,54 @@ export async function getOrCreateDeviceId(): Promise<string> {
 }
 
 export async function addHistoryEntry(entry: HistoryEntry): Promise<void> {
-  await pruneIfNeeded();
+  await writeHistoryEntry(entry);
+}
+
+/**
+ * Returns false when authority fails before a history write is dispatched or
+ * all storage writes fail. Returns true when the final authority check passed
+ * and the dispatched storage write completed. That successful dispatch is
+ * the history commit point; later authority changes do not revoke the record.
+ */
+export async function addHistoryEntryIfCurrent(
+  entry: HistoryEntry,
+  isCurrent: () => boolean | Promise<boolean>,
+): Promise<boolean> {
+  return writeHistoryEntry(entry, isCurrent);
+}
+
+async function writeHistoryEntry(
+  entry: HistoryEntry,
+  isCurrent?: () => boolean | Promise<boolean>,
+): Promise<boolean> {
+  if (isCurrent) {
+    if (!(await isCurrent())) return false;
+  } else {
+    await pruneIfNeeded();
+  }
   const history = await loadHistory();
   const updated = trimHistoryEntries(
     [sanitizeHistoryEntry(entry), ...history.map(sanitizeHistoryEntry)],
     MAX_HISTORY,
     HISTORY_SOFT_LIMIT_BYTES,
   );
+  if (isCurrent && !(await isCurrent())) return false;
   try {
+    // HISTORY_COMMIT_POINT: the final authority check above authorizes this
+    // write. A later revision change cannot undo a successful storage commit.
     await chrome.storage.local.set({ [KEYS.history]: updated });
+    return true;
   } catch (err) {
-    if (isExtensionContextInvalidatedError(err)) return;
+    if (isExtensionContextInvalidatedError(err)) return false;
     logError("Failed to save parse history", err, "addHistoryEntry", { count: updated.length });
     const compact = trimHistoryEntries(updated, updated.length, HISTORY_RETRY_LIMIT_BYTES);
+    if (isCurrent && !(await isCurrent())) return false;
     try {
+      // A compact retry is a new dispatch and needs its own final authority check.
       await chrome.storage.local.set({ [KEYS.history]: compact });
+      return true;
     } catch (compactErr) {
-      if (isExtensionContextInvalidatedError(compactErr)) return;
+      if (isExtensionContextInvalidatedError(compactErr)) return false;
       throw compactErr;
     }
   }

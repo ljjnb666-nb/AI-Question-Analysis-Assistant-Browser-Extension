@@ -32,10 +32,13 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
     if (maybeLang === "zh" || maybeLang === "en") handlers.setUiLang(maybeLang);
   };
 
-  const onMessage = (msg: Record<string, unknown>) => {
+  const onMessage = (msg: Record<string, unknown>, sender: chrome.runtime.MessageSender) => {
+    const origin = sender.tab?.id && sender.tab.url
+      ? { tabId: sender.tab.id, url: sender.tab.url }
+      : undefined;
     if (msg.type === "AUTO_DETECT_RESULT_READY") {
       const snapshots = (msg.candidates as CandidateSnapshot[]) ?? [];
-      handlers.setCandidates((prev) => mergeCandidateSnapshots(prev, snapshots));
+      handlers.setCandidates((prev) => mergeCandidateSnapshots(prev, snapshots, origin));
       handlers.setIsDetecting(false);
     }
     if (msg.type === "FULL_PAGE_DETECT_PROGRESS") {
@@ -46,7 +49,7 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
       handlers.setIsFullPageScan(false);
       handlers.setScanProgress(null);
       const blocks = (msg.candidates as QuestionBlock[]) ?? [];
-      handlers.setCandidates(mapFullPageDoneCandidates(blocks));
+      handlers.setCandidates(mapFullPageDoneCandidates(blocks, origin));
       handlers.setExpandedIds({});
     }
     if (msg.type === "AUTO_SOLVE_PROGRESS") {

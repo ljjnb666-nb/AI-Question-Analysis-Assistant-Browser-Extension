@@ -1,6 +1,7 @@
 import type { AppSettings, ParseResult, QuestionBlock } from "@/shared/types";
 import type { AnalyticsEvent } from "@/shared/utils/analytics";
 import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
+import { isStaleQuestionRevisionError } from "@/shared/utils/parseAttemptErrors";
 
 type StreamCallback = (partial: string) => void;
 
@@ -89,29 +90,32 @@ export async function parseWithTieredRetries(
       const startedAt = Date.now();
       const result = await parseWithStreamingFallback(block, tierSettings, onStream, timeoutMs, deps, runtimeContext);
       const elapsedMs = Date.now() - startedAt;
-      deps.logEvent("manual_parse_attempt_succeeded", {
-        blockId: block.id,
-        attempt: i + 1,
-        timeoutMs,
-        route,
-        elapsedMs,
-        confidence: result.confidence,
-        answer: result.answer,
-        routeUsed: result.routeUsed,
-      });
-      console.info("[ManualParse] attempt success", {
-        blockId: block.id,
-        attempt: i + 1,
-        timeoutMs,
-        route,
-        elapsedMs,
-        answer: result.answer,
-        confidence: result.confidence,
-        routeUsed: result.routeUsed,
-      });
+      if (!runtimeContext?.deferSuccessTelemetry) {
+        deps.logEvent("manual_parse_attempt_succeeded", {
+          blockId: block.id,
+          attempt: i + 1,
+          timeoutMs,
+          route,
+          elapsedMs,
+          confidence: result.confidence,
+          answer: result.answer,
+          routeUsed: result.routeUsed,
+        });
+        console.info("[ManualParse] attempt success", {
+          blockId: block.id,
+          attempt: i + 1,
+          timeoutMs,
+          route,
+          elapsedMs,
+          answer: result.answer,
+          confidence: result.confidence,
+          routeUsed: result.routeUsed,
+        });
+      }
       return result;
     } catch (err) {
       lastErr = err;
+      if (isStaleQuestionRevisionError(err)) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       deps.logEvent("manual_parse_attempt_failed", {
         blockId: block.id,

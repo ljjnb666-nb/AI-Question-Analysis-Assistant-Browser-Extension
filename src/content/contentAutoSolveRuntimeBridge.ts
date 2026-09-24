@@ -1,5 +1,6 @@
 import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
+import { logEvent } from "@/shared/utils/analytics";
 import type {
   findNextQuestionButton as findNextQuestionButtonCore,
   clickNextQuestionButton as clickNextQuestionButtonCore,
@@ -28,7 +29,6 @@ import {
 } from "./autoSolveBlockSelection";
 
 type AutoSolveBridgeDeps = {
-  addHistoryEntry: (entry: HistoryEntry) => Promise<void>;
   autoSolveParsingDeps: Parameters<typeof parseBlockForAutoSolveCore>[2];
   autoSolveParsingTimeouts: {
     parseTimeoutMs: number;
@@ -65,44 +65,86 @@ type AutoSolveBridgeDeps = {
 };
 
 export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
-  let activeAttempt: AbortController | null = null;
-  function beginAttempt(block: QuestionBlock): ParseQuestionRuntimeContext {
+  type ActiveSolveAttempt = {
+    controller: AbortController;
+    questionId: string;
+    contentFingerprint: string;
+    revision: ReturnType<typeof beginQuestionRevisionAttempt>;
+  };
+  let activeAttempt: ActiveSolveAttempt | null = null;
+  const resultAttempts = new WeakMap<ParseResult, ActiveSolveAttempt>();
+
+  function isAttemptCurrent(attempt: ActiveSolveAttempt, block: QuestionBlock): boolean {
+    const live = pickLiveAutoSolveBlock();
+    const liveQuestionId = live?.identity?.stableId ?? live?.id;
+    const liveFingerprint = live?.identity?.contentFingerprint ?? live?.id;
+    return activeAttempt === attempt
+      && !attempt.controller.signal.aborted
+      && attempt.questionId === (block.identity?.stableId ?? block.id)
+      && attempt.contentFingerprint === (block.identity?.contentFingerprint ?? block.id)
+      && isQuestionRevisionCurrent(attempt.revision)
+      && liveQuestionId === attempt.questionId
+      && liveFingerprint === attempt.contentFingerprint;
+  }
+
+  function beginAttempt(block: QuestionBlock): { attempt: ActiveSolveAttempt; runtimeContext: ParseQuestionRuntimeContext } {
     captureSolveStartControlState(block);
-    activeAttempt?.abort();
+    activeAttempt?.controller.abort();
     const controller = new AbortController();
-    activeAttempt = controller;
     const questionId = block.identity?.stableId ?? block.id;
     const contentFingerprint = block.identity?.contentFingerprint ?? block.id;
     const revision = beginQuestionRevisionAttempt(block, controller);
-    return {
+    const attempt: ActiveSolveAttempt = { controller, questionId, contentFingerprint, revision };
+    activeAttempt = attempt;
+    const runtimeContext: ParseQuestionRuntimeContext = {
       signal: controller.signal,
+      deferSuccessTelemetry: true,
       isQuestionRevisionCurrent: (identity) => {
-        const live = pickLiveAutoSolveBlock();
-        const liveQuestionId = live?.identity?.stableId ?? live?.id;
-        const liveFingerprint = live?.identity?.contentFingerprint ?? live?.id;
-        return !controller.signal.aborted
-          && identity.questionId === questionId
+        return identity.questionId === questionId
           && identity.contentFingerprint === contentFingerprint
-          && isQuestionRevisionCurrent(revision)
-          && liveQuestionId === questionId
-          && liveFingerprint === contentFingerprint;
+          && isAttemptCurrent(attempt, block);
       },
     };
+    return { attempt, runtimeContext };
   }
-  function abortCurrentSolveAttempt() { activeAttempt?.abort(); clearQuestionRevisionAttempt(activeAttempt ?? undefined); activeAttempt = null; }
+  function abortCurrentSolveAttempt() {
+    const current = activeAttempt;
+    current?.controller.abort();
+    clearQuestionRevisionAttempt(current?.controller);
+    activeAttempt = null;
+  }
+
+  async function parseForAttempt(block: QuestionBlock, parse: (runtimeContext: ParseQuestionRuntimeContext) => Promise<ParseResult>): Promise<ParseResult> {
+    const { attempt, runtimeContext } = beginAttempt(block);
+    const result = await parse(runtimeContext);
+    // Provider completion does not imply commit authority. Bind this result to
+    // the exact attempt that produced it; every commit revalidates this lease.
+    const boundResult = { ...result };
+    resultAttempts.set(boundResult, attempt);
+    return boundResult;
+  }
+
+  function isCurrentAutoSolveResult(block: QuestionBlock, result: ParseResult): boolean {
+    const attempt = resultAttempts.get(result);
+    return Boolean(attempt && isAttemptCurrent(attempt, block));
+  }
+
   async function parseBlockForAutoSolve(block: QuestionBlock) {
-    return parseBlockForAutoSolveCore(block, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps, beginAttempt(block));
+    return parseForAttempt(block, (runtimeContext) =>
+      parseBlockForAutoSolveCore(block, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps, runtimeContext));
   }
 
   async function parseBlockForAutoSolveReview(
     block: QuestionBlock,
     previousResult: ParseResult | null,
   ) {
-    return parseBlockForAutoSolveReviewCore(block, previousResult, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps, beginAttempt(block));
+    return parseForAttempt(block, (runtimeContext) =>
+      parseBlockForAutoSolveReviewCore(block, previousResult, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps, runtimeContext));
   }
 
   async function parseBlockForAutoSolveQuickReview(block: QuestionBlock) {
-    return parseBlockForAutoSolveQuickReviewCore(block, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps, beginAttempt(block));
+    return parseForAttempt(block, (runtimeContext) =>
+      parseBlockForAutoSolveQuickReviewCore(block, deps.autoSolveParsingTimeouts, deps.autoSolveParsingDeps, runtimeContext));
   }
 
   function shouldReviewLowConfidenceHistory(entry: HistoryEntry | null): boolean {
@@ -113,8 +155,27 @@ export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
     history: HistoryEntry[],
     block: QuestionBlock,
     result: ParseResult,
-  ): Promise<void> {
-    await recordAutoSolveHistoryCore(history, block, result, { addHistoryEntry: deps.addHistoryEntry });
+  ): Promise<boolean> {
+    const attempt = resultAttempts.get(result);
+    if (!attempt) return false;
+    const committed = await recordAutoSolveHistoryCore(
+      history,
+      block,
+      result,
+      deps.autoSolveParsingDeps,
+      () => isAttemptCurrent(attempt, block),
+    );
+    if (committed) {
+      // parse_success records an authorized history commit. The resolver
+      // independently revalidates before progress, fill, and advancement.
+      logEvent("parse_success", { blockId: block.id, route: result.routeUsed, source: "auto_solve_commit" });
+      return true;
+    }
+    if (!isAttemptCurrent(attempt, block)) {
+      // This diagnostic means the result lost authority before history commit.
+      logEvent("provider_result_discarded_stale", { blockId: block.id, source: "auto_solve_commit" });
+    }
+    return false;
   }
 
   function sendAutoSolveProgress(payload: {
@@ -201,6 +262,7 @@ export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
     parseBlockForAutoSolve,
     parseBlockForAutoSolveQuickReview,
     parseBlockForAutoSolveReview,
+    isCurrentAutoSolveResult,
     pickAutoSolveBlock,
     pickLiveAutoSolveBlock,
     recordAutoSolveHistory,

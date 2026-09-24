@@ -38,6 +38,7 @@ export type AnalyticsEvent =
   | "manual_parse_attempt_started"
   | "manual_parse_attempt_succeeded"
   | "manual_parse_attempt_failed"
+  | "provider_result_discarded_stale"
   | "route_used_text"
   | "route_used_vision"
   | "route_used_hybrid"

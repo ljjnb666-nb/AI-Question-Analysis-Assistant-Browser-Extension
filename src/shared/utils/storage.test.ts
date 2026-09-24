@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetStorageCacheForTests,
   addHistoryEntry,
+  addHistoryEntryIfCurrent,
   clearHistory,
   getOrCreateDeviceId,
   loadHistory,
@@ -35,6 +36,12 @@ const mockResult: ParseResult = {
   recognizedText: "recognized",
   routeUsed: "vision",
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
 
 function createLargeHistoryEntry(id: string): HistoryEntry {
   return {
@@ -229,6 +236,56 @@ describe("storage", () => {
       expect(savedHistory[0].id).toBe("new-1");
       expect(savedHistory.length).toBeLessThan(50);
       expect(savedHistory.length).toBeGreaterThanOrEqual(10);
+    });
+  });
+
+  describe("addHistoryEntryIfCurrent", () => {
+    const entry: HistoryEntry = {
+      id: "attempt-current",
+      timestamp: Date.now(),
+      block: mockBlock,
+      result: mockResult,
+      host: "example.com",
+    };
+
+    it("writes a current entry exactly once", async () => {
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({ parseHistory: [] } as never);
+      const isCurrent = vi.fn(async () => true);
+
+      await expect(addHistoryEntryIfCurrent(entry, isCurrent)).resolves.toBe(true);
+
+      expect(isCurrent).toHaveBeenCalledTimes(2);
+      expect(chrome.storage.local.set).toHaveBeenCalledTimes(1);
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({ parseHistory: [expect.objectContaining({ id: "attempt-current" })] });
+    });
+
+    it("does not write when the attempt becomes stale after the storage read", async () => {
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({ parseHistory: [] } as never);
+      const isCurrent = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+      await expect(addHistoryEntryIfCurrent(entry, isCurrent)).resolves.toBe(false);
+
+      expect(chrome.storage.local.get).toHaveBeenCalledWith("parseHistory");
+      expect(chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    it("RC-J keeps a successful history commit when authority changes while storage.set is pending", async () => {
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({ parseHistory: [] } as never);
+      const storageWrite = deferred<void>();
+      vi.mocked(chrome.storage.local.set).mockImplementationOnce(() => storageWrite.promise as never);
+      let current = true;
+      const isCurrent = vi.fn(async () => current);
+
+      const commit = addHistoryEntryIfCurrent(entry, isCurrent);
+      await vi.waitFor(() => expect(chrome.storage.local.set).toHaveBeenCalledTimes(1));
+      expect(isCurrent).toHaveBeenCalledTimes(2);
+      current = false;
+      storageWrite.resolve();
+
+      await expect(commit).resolves.toBe(true);
+      expect(isCurrent).toHaveBeenCalledTimes(2);
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({ parseHistory: [expect.objectContaining({ id: "attempt-current" })] });
+      expect(await isCurrent()).toBe(false);
     });
   });
 

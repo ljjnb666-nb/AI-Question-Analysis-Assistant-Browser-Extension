@@ -13,6 +13,8 @@ import {
 // test fixture for a committed credential.
 const TEST_API_KEY = ["test", "key"].join("-");
 import { DEFAULT_SETTINGS, type QuestionBlock, type AppSettings } from "../types";
+import * as analytics from "./analytics";
+import { StaleQuestionRevisionError } from "./parseAttemptErrors";
 
 describe("parseRouter", () => {
   afterEach(() => {
@@ -951,6 +953,111 @@ describe("parseRouter", () => {
       await parseQuestion(block, settings);
       const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
       expect(url).toBe("https://api.minimaxi.com/v1/chat/completions");
+    });
+  });
+
+  describe("result commit authority", () => {
+    const automaticBlock: QuestionBlock = {
+      id: "auto-revision-test",
+      identity: {
+        stableId: "stable-auto-revision-test",
+        contentFingerprint: "fingerprint-auto-revision-test",
+        identityVersion: 1,
+        strategy: "content-only",
+        signals: { nativeId: false, content: true, options: true, media: false, structure: true },
+      },
+      runtimeQuestionHandle: "rqh_auto_revision_test_00000000000000",
+      bbox: { x: 0, y: 0, width: 320, height: 120 },
+      previewText: "1 + 1 equals? A. 1 B. 2 C. 3",
+      hasImage: false,
+      questionTypeGuess: "single_choice",
+      confidence: 0.9,
+      source: "auto_dom",
+    };
+
+    it("propagates runtime revision validation through the non-media path", async () => {
+      const isQuestionRevisionCurrent = vi.fn(() => false);
+
+      await expect(parseQuestion(
+        automaticBlock,
+        { ...DEFAULT_SETTINGS, apiKey: "" },
+        undefined,
+        { isQuestionRevisionCurrent },
+      )).rejects.toBeInstanceOf(StaleQuestionRevisionError);
+
+      expect(isQuestionRevisionCurrent).toHaveBeenCalledWith({
+        questionId: "stable-auto-revision-test",
+        contentFingerprint: "fingerprint-auto-revision-test",
+      });
+    });
+
+    it("discards a late provider response and emits only the stale-result diagnostic", async () => {
+      let release!: (response: Response) => void;
+      let revisionCurrent = true;
+      const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { release = resolve; }));
+      vi.stubGlobal("fetch", fetchMock);
+      const logEvent = vi.spyOn(analytics, "logEvent");
+      const settings: AppSettings = {
+        ...DEFAULT_SETTINGS,
+        providerId: "custom",
+        apiKey: TEST_API_KEY,
+        apiModel: "test-model",
+        preferredRoute: "text",
+        language: "en",
+        customBaseUrl: "https://provider.example.test/v1",
+      };
+      const pending = parseQuestion(automaticBlock, settings, undefined, {
+        isQuestionRevisionCurrent: () => revisionCurrent,
+      });
+
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      revisionCurrent = false;
+      release(new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({
+          questionType: "single_choice",
+          answer: "B",
+          confidence: 0.99,
+          briefExplanation: "mocked",
+          detailedExplanation: "mocked explanation",
+          recognizedText: automaticBlock.previewText,
+        }) } }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+      await expect(pending).rejects.toBeInstanceOf(StaleQuestionRevisionError);
+      const events = logEvent.mock.calls.map(([event]) => event);
+      expect(events).toContain("provider_result_discarded_stale");
+      expect(events).not.toContain("parse_success");
+      expect(events).not.toContain("parse_error");
+    });
+
+    it("defers parse-success analytics when the caller owns a later commit fence", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({
+          questionType: "single_choice",
+          answer: "B",
+          confidence: 0.99,
+          briefExplanation: "mocked",
+          detailedExplanation: "mocked explanation",
+          recognizedText: automaticBlock.previewText,
+        }) } }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } })));
+      const logEvent = vi.spyOn(analytics, "logEvent");
+      const settings: AppSettings = {
+        ...DEFAULT_SETTINGS,
+        providerId: "custom",
+        apiKey: TEST_API_KEY,
+        apiModel: "test-model",
+        preferredRoute: "text",
+        language: "en",
+        customBaseUrl: "https://provider.example.test/v1",
+      };
+
+      await expect(parseQuestion(automaticBlock, settings, undefined, {
+        isQuestionRevisionCurrent: () => true,
+        deferSuccessTelemetry: true,
+      })).resolves.toMatchObject({ answer: "B" });
+
+      expect(logEvent).not.toHaveBeenCalledWith("parse_success", expect.any(Object));
     });
   });
 
