@@ -1,6 +1,6 @@
 import type { CandidateOrigin, ExtMessage, ParseResult, QuestionBlock } from "@/shared/types";
 
-type FillResponse = { ok?: boolean; filledCount?: number; message?: string } | null;
+type FillResponse = { ok?: boolean; filledCount?: number; message?: string; code?: string; stopAutomation?: boolean } | null;
 type VerifyResponse = { ok?: boolean; expectedKeys?: string[]; actualKeys?: string[]; message?: string } | null;
 
 export function shouldBootstrapContentScript(error: unknown): boolean {
@@ -107,7 +107,7 @@ export async function sendFillMessage(
   block: QuestionBlock,
   result: ParseResult,
 ): Promise<FillResponse> {
-  const resp = await sendTabMessageWithBootstrap<{ ok?: boolean; filledCount?: number; message?: string }>(
+  const resp = await sendTabMessageWithBootstrap<{ ok?: boolean; filledCount?: number; message?: string; code?: string; stopAutomation?: boolean }>(
     tabId,
     { type: "FILL_PARSED_ANSWER", block, result },
   );
@@ -173,20 +173,11 @@ export async function sendFillMessageWithVerify(
       message: firstFill.ok && (firstFill.filledCount ?? 0) > 0 ? firstFill.message : firstVerify.message,
     };
   }
-
-  const retryFill = await sendFillMessage(tabId, block, result);
-  const retryVerify = await sendVerifyMessage(tabId, block, result);
-  if (retryVerify?.ok) {
-    return {
-      ok: true,
-      filledCount: (firstFill?.filledCount ?? 0) + (retryFill?.filledCount ?? 0),
-      message: retryFill?.filledCount ? `重试后已纠正：${retryFill.message}` : `重试后已纠正：${retryVerify?.message || "校验通过"}`,
-    };
-  }
-
   return {
     ok: false,
-    filledCount: (firstFill?.filledCount ?? 0) + (retryFill?.filledCount ?? 0),
-    message: retryVerify?.message || firstVerify?.message || retryFill?.message || firstFill?.message || "填写后校验失败",
+    filledCount: 0,
+    code: "PARTIAL_MUTATION_UNPROVABLE",
+    stopAutomation: true,
+    message: `PARTIAL_MUTATION_UNPROVABLE: ${firstVerify?.message || "Fill was applied but fresh sidepanel verification failed"}`,
   };
 }

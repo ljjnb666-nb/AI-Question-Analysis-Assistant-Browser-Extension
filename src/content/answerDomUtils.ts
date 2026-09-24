@@ -34,6 +34,48 @@ export function applyTextValue(control: HTMLElement, value: string): boolean {
   return false;
 }
 
+/** Set a text control's value without focus or event dispatch; the transaction revalidates before each event. */
+export function setTextValueForTransaction(control: HTMLElement, value: string): boolean {
+  if (isHTMLInputInOwnerRealm(control)) {
+    if (control.value === value) return false;
+    setNativeInputValue(control, value);
+    return true;
+  }
+  if (isHTMLTextAreaInOwnerRealm(control)) {
+    if (control.value === value) return false;
+    setNativeTextareaValue(control, value);
+    return true;
+  }
+  if (control.isContentEditable) {
+    if ((control.textContent || "") === value) return false;
+    if (!replaceContentEditableText(control, value)) control.textContent = value;
+    return true;
+  }
+  return false;
+}
+
+/** Dispatch one text event at a time so each possible framework rerender is a transaction boundary. */
+export function dispatchTextEventForTransaction(control: HTMLElement, eventType: "input" | "change" | "keyup" | "blur"): void {
+  const view = control.ownerDocument.defaultView ?? window;
+  if (eventType === "input" || eventType === "change") {
+    control.dispatchEvent(new view.Event(eventType, { bubbles: true }));
+  } else if (eventType === "keyup") {
+    control.dispatchEvent(new view.KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
+  } else {
+    control.dispatchEvent(new view.FocusEvent("blur", { bubbles: true }));
+  }
+}
+
+/** A single native click activation is one synchronous mutation boundary. */
+export function clickControlForTransaction(control: HTMLElement): void {
+  if (typeof control.click === "function") {
+    control.click();
+    return;
+  }
+  const view = control.ownerDocument.defaultView ?? window;
+  control.dispatchEvent(new view.MouseEvent("click", { bubbles: true, cancelable: true }));
+}
+
 export function clickElement(target: HTMLElement) {
   const view = target.ownerDocument.defaultView ?? window;
   target.dispatchEvent(new view.PointerEvent("pointerover", { bubbles: true }));

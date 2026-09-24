@@ -48,7 +48,7 @@ type FillDeps = {
     tabId: number,
     block: QuestionBlock,
     result: ParseResult,
-  ) => Promise<{ ok?: boolean; filledCount?: number; message?: string } | null>;
+  ) => Promise<{ ok?: boolean; filledCount?: number; message?: string; stopAutomation?: boolean; code?: string } | null>;
 };
 
 const STALE_CANDIDATE_RESULT = "STALE_QUESTION_REVISION";
@@ -253,7 +253,7 @@ async function runVisionRetryForCandidate(candidate: DetectedCandidate, deps: Vi
 export async function runFillCandidate(
   candidate: DetectedCandidate,
   deps: FillDeps,
-): Promise<{ ok?: boolean; filledCount?: number; message?: string } | null> {
+): Promise<{ ok?: boolean; filledCount?: number; message?: string; stopAutomation?: boolean; code?: string } | null> {
   if (!candidate.result) return null;
   if (!candidate.origin?.tabId || !await deps.isCandidateCurrent(candidate)) {
     clearFilledCandidateResult(candidate, deps.setCandidates);
@@ -267,23 +267,32 @@ export async function runFillCandidate(
 export async function runBatchFill(
   candidates: DetectedCandidate[],
   deps: FillDeps,
-): Promise<{ totalFilled: number; totalQuestions: number }> {
+): Promise<{ totalFilled: number; totalQuestions: number; stopCode?: string; stopMessage?: string }> {
   const targets = candidates.filter((candidate) => candidate.selected && candidate.status === "success" && candidate.result);
   let totalFilled = 0;
   let totalQuestions = 0;
+  let stopCode: string | undefined;
+  let stopMessage: string | undefined;
   for (const candidate of targets) {
     if (!candidate.origin?.tabId || !await deps.isCandidateCurrent(candidate)) {
       clearFilledCandidateResult(candidate, deps.setCandidates);
       continue;
     }
     const response = await deps.sendFillMessageWithVerify(candidate.origin.tabId, candidate.block, candidate.result!);
-    totalFilled += response?.filledCount ?? 0;
-    totalQuestions += 1;
+    if (response?.ok) {
+      totalFilled += response.filledCount ?? 0;
+      totalQuestions += 1;
+    }
     if (response?.message === STALE_CANDIDATE_RESULT || !await deps.isCandidateCurrent(candidate)) {
       clearFilledCandidateResult(candidate, deps.setCandidates);
     }
+    if (response?.stopAutomation) {
+      stopCode = response.code;
+      stopMessage = response.message;
+      break;
+    }
   }
-  return { totalFilled, totalQuestions };
+  return { totalFilled, totalQuestions, ...(stopCode ? { stopCode } : {}), ...(stopMessage ? { stopMessage } : {}) };
 }
 
 async function isAuthorized(candidate: DetectedCandidate, lease: CandidateAttemptLease, deps: AttemptDeps): Promise<boolean> {

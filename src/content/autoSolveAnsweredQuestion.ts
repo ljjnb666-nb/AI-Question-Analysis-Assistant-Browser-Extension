@@ -38,7 +38,7 @@ type AnsweredQuestionOptions = {
 };
 
 type AnsweredQuestionDeps = {
-  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => Promise<{ ok: boolean; filledCount: number; message: string }>;
+  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => Promise<{ ok: boolean; filledCount: number; message: string; stopAutomation?: boolean }>;
   findReusableHistoryEntry: (history: HistoryEntry[], block: QuestionBlock, hostname?: string) => HistoryEntry | null;
   isChoiceLikeQuestionType: (questionType: ParseResult["questionType"]) => boolean;
   reportSolvedQuestionAndAdvance: (options: {
@@ -67,6 +67,7 @@ type AnsweredQuestionResult = {
   needsHistoryReview: boolean;
   needsQuickAnsweredChoiceReview: boolean;
   solved: number;
+  stopAutomation?: boolean;
 };
 
 export async function handleAnsweredQuestionPhase(
@@ -194,11 +195,37 @@ export async function handleAnsweredQuestionPhase(
     });
 
     const fillResult = await deps.fillParsedAnswerInPage(options.currentBlock, historyEntry.result);
+    if (fillResult.stopAutomation) {
+      return {
+        answerState: options.answerState,
+        done: false,
+        filled,
+        handled: true,
+        historyEntry,
+        needsHistoryReview,
+        needsQuickAnsweredChoiceReview,
+        solved,
+        stopAutomation: true,
+      };
+    }
     const isChoiceHistoryResult = deps.isChoiceLikeQuestionType(historyEntry.result.questionType);
     const verifyResult = isChoiceHistoryResult
       ? deps.verifyParsedAnswerInPage(options.currentBlock, historyEntry.result)
       : { ok: true, message: fillResult.message };
-    const historyFillAccepted = isChoiceHistoryResult ? verifyResult.ok : fillResult.ok;
+    const historyFillAccepted = fillResult.ok && (!isChoiceHistoryResult || verifyResult.ok);
+    if (fillResult.ok && isChoiceHistoryResult && !verifyResult.ok) {
+      return {
+        answerState: options.answerState,
+        done: false,
+        filled,
+        handled: true,
+        historyEntry,
+        needsHistoryReview,
+        needsQuickAnsweredChoiceReview,
+        solved,
+        stopAutomation: true,
+      };
+    }
 
     if (historyFillAccepted) {
       filled += fillResult.filledCount;

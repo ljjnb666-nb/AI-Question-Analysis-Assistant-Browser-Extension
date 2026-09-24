@@ -23,7 +23,7 @@ type ResolveQuestionOptions = {
 };
 
 type ResolveQuestionDeps = {
-  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => Promise<{ ok: boolean; filledCount: number; message: string }>;
+  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => Promise<{ ok: boolean; filledCount: number; message: string; code?: string; stopAutomation?: boolean }>;
   isChoiceLikeQuestionType: (questionType: ParseResult["questionType"]) => boolean;
   parseBlockForAutoSolve: (block: QuestionBlock) => Promise<ParseResult>;
   parseBlockForAutoSolveQuickReview: (block: QuestionBlock) => Promise<ParseResult>;
@@ -42,6 +42,7 @@ type ResolveQuestionResult = {
   progressMessage: string;
   questionCompleted: boolean;
   stale?: boolean;
+  stopAutomation?: boolean;
 };
 
 const MAX_AUTO_SOLVE_PARSE_RETRIES = 1;
@@ -125,11 +126,14 @@ export async function resolveAutoSolveQuestion(
 
     if (deps.isCurrentAutoSolveResult && !deps.isCurrentAutoSolveResult(options.currentBlock, parsed)) return staleResult();
     const fillResult = await deps.fillParsedAnswerInPage(options.currentBlock, parsed);
+    if (fillResult.stopAutomation || fillResult.code === "USER_STATE_CHANGED" || fillResult.code === "STALE_MUTATION_AUTHORITY" || fillResult.code === "STALE_ACTION_PLAN") {
+      return { filledDelta: 0, progressMessage: fillResult.message, questionCompleted: false, stopAutomation: true };
+    }
     const isChoiceParsedResult = deps.isChoiceLikeQuestionType(parsed.questionType);
     const verifyResult = isChoiceParsedResult
       ? deps.verifyParsedAnswerInPage(options.currentBlock, parsed)
       : { ok: true, message: fillResult.message };
-    const fillAccepted = isChoiceParsedResult ? verifyResult.ok : fillResult.ok;
+    const fillAccepted = fillResult.ok && (!isChoiceParsedResult || verifyResult.ok);
 
     if (fillAccepted) {
       filledDelta = fillResult.filledCount;
@@ -138,10 +142,12 @@ export async function resolveAutoSolveQuestion(
       return { filledDelta, progressMessage, questionCompleted };
     }
 
+    if (fillResult.ok && isChoiceParsedResult && !verifyResult.ok) {
+      return { filledDelta: 0, progressMessage: `PARTIAL_MUTATION_UNPROVABLE: ${verifyResult.message}`, questionCompleted: false, stopAutomation: true };
+    }
+
     if (options.needsQuickAnsweredChoiceReview) {
-      progressMessage = fillResult.ok
-        ? `Quick review verification failed: ${verifyResult.message}. Keeping the current answer and continuing.`
-        : `Quick review could not overwrite the answer: ${fillResult.message}. Keeping the current answer and continuing.`;
+      progressMessage = `Quick review could not safely fill this question: ${fillResult.message}`;
       questionCompleted = true;
       return { filledDelta, progressMessage, questionCompleted };
     }

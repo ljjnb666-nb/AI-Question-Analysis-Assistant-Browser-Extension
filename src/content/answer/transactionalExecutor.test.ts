@@ -12,6 +12,12 @@ function blockFor(owner: Element): QuestionBlock {
 }
 function identity(block: QuestionBlock) { return { questionId: block.identity?.stableId ?? block.id, contentFingerprint: block.identity?.contentFingerprint ?? block.id }; }
 function plan(key: string, block: QuestionBlock): AnswerPlan { return { schemaVersion: 1, kind: "single-choice", ...identity(block), questionType: "single_choice", confidence: 1, source: "parse-result", answerSemanticHash: key, optionKeys: [key] }; }
+function resolver(block: QuestionBlock, owner: Element) {
+  return () => {
+    const current = buildControlMapping(block, owner);
+    return current.ok ? { ok: true as const, mapping: current } : { ok: false as const, code: "CONTROL_MAPPING_AMBIGUOUS" as const };
+  };
+}
 
 describe("Phase 5 stale control validation", () => {
   it("REV-C1 rejects a connected option moved into Q13 without clicking", async () => {
@@ -20,7 +26,7 @@ describe("Phase 5 stale control validation", () => {
     const mapping = buildControlMapping(block, owner); if (!mapping.ok) throw new Error(mapping.message);
     let clicks = 0; document.getElementById("c")!.addEventListener("click", () => clicks++);
     document.getElementById("q13")!.append(document.getElementById("c")!);
-    expect((await executeTransaction(plan("C", block), buildActionPlan(plan("C", block), mapping), mapping)).outcome).toBe("STALE_ACTION_PLAN");
+    expect((await executeTransaction(plan("C", block), buildActionPlan(plan("C", block), mapping), mapping, undefined, resolver(block, owner))).outcome).toBe("STALE_ACTION_PLAN");
     expect(clicks).toBe(0);
   });
 
@@ -29,7 +35,7 @@ describe("Phase 5 stale control validation", () => {
     const owner = document.getElementById("q12")!; const block = blockFor(owner);
     const mapping = buildControlMapping(block, owner); if (!mapping.ok) throw new Error(mapping.message);
     let clicks = 0; const button = document.getElementById("b") as HTMLButtonElement; button.addEventListener("click", () => clicks++); button.disabled = true;
-    expect((await executeTransaction(plan("B", block), buildActionPlan(plan("B", block), mapping), mapping)).outcome).toBe("STALE_ACTION_PLAN");
+    expect((await executeTransaction(plan("B", block), buildActionPlan(plan("B", block), mapping), mapping, undefined, resolver(block, owner))).outcome).toBe("STALE_ACTION_PLAN");
     expect(clicks).toBe(0);
   });
 
@@ -38,15 +44,15 @@ describe("Phase 5 stale control validation", () => {
     const owner = document.getElementById("q12")!; const block = blockFor(owner);
     const mapping = buildControlMapping(block, owner); if (!mapping.ok) throw new Error(mapping.message);
     const button = document.getElementById("b")!; button.textContent = "C. c";
-    expect((await executeTransaction(plan("B", block), buildActionPlan(plan("B", block), mapping), mapping)).outcome).toBe("STALE_ACTION_PLAN");
+    expect((await executeTransaction(plan("B", block), buildActionPlan(plan("B", block), mapping), mapping, undefined, resolver(block, owner))).outcome).toBe("STALE_ACTION_PLAN");
   });
 
   it("TX-RADIO1 restores the originally selected native radio after verification failure", async () => {
     document.body.innerHTML = '<section class="question-item" id="q12">12. <label><input id="a" type="radio" name="q">A. a</label><label><input id="b" type="radio" name="q" checked>B. b</label><label><input id="c" type="radio" name="q">C. c</label></section>';
     const owner = document.getElementById("q12")!; const block = blockFor(owner);
     const mapping = buildControlMapping(block, owner); if (!mapping.ok) throw new Error(mapping.message);
-    const action: ActionPlan = { schemaVersion: 1, ...identity(block), answerSemanticHash: "C", steps: [{ type: "select-option", controlId: mapping.options.get("A")!.controlId, optionKey: "A", desiredSelected: true }] };
-    expect((await executeTransaction(plan("C", block), action, mapping)).outcome).toBe("FILL_VERIFICATION_FAILED");
+    const action: ActionPlan = { schemaVersion: 1, ...identity(block), answerSemanticHash: "C", steps: [{ type: "select-option", optionKey: "A", desiredSelected: true }] };
+    expect((await executeTransaction(plan("C", block), action, mapping, undefined, resolver(block, owner))).outcome).toBe("FILL_VERIFICATION_FAILED");
     expect((document.getElementById("b") as HTMLInputElement).checked).toBe(true); expect((document.getElementById("a") as HTMLInputElement).checked).toBe(false);
   });
 
@@ -55,7 +61,7 @@ describe("Phase 5 stale control validation", () => {
     const owner = document.getElementById("q12")!; const block = blockFor(owner);
     const mapping = buildControlMapping(block, owner); if (!mapping.ok) throw new Error(mapping.message);
     (document.getElementById("b") as HTMLInputElement).addEventListener("click", (event) => event.preventDefault());
-    const action: ActionPlan = { schemaVersion: 1, ...identity(block), answerSemanticHash: "C", steps: [{ type: "select-option", controlId: mapping.options.get("A")!.controlId, optionKey: "A", desiredSelected: true }] };
-    expect((await executeTransaction(plan("C", block), action, mapping)).outcome).toBe("ROLLBACK_FAILED");
+    const action: ActionPlan = { schemaVersion: 1, ...identity(block), answerSemanticHash: "C", steps: [{ type: "select-option", optionKey: "A", desiredSelected: true }] };
+    expect((await executeTransaction(plan("C", block), action, mapping, undefined, resolver(block, owner))).outcome).toBe("ROLLBACK_FAILED");
   });
 });

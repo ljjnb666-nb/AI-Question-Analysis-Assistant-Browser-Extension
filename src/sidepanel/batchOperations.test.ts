@@ -321,4 +321,19 @@ describe("Side Panel result commit authority", () => {
     expect(result).toEqual({ totalFilled: 1, totalQuestions: 1 });
     expect(store.getState()[0].result).toBeUndefined();
   });
+
+  it("stops the batch at a transaction failure without counting or sending the next candidate", async () => {
+    const first = makeCandidate("fill-stop-a", { selected: true });
+    const second = makeCandidate("fill-stop-b", { selected: true });
+    const store = createSetCandidates([first, second]);
+    const sendFillMessageWithVerify = vi.fn(async () => ({ ok: false, filledCount: 0, code: "PARTIAL_MUTATION_UNPROVABLE", stopAutomation: true, message: "PARTIAL_MUTATION_UNPROVABLE" }));
+    const result = await runBatchFill([first, second], {
+      isCandidateCurrent: vi.fn(async () => true),
+      setCandidates: store.setCandidates,
+      sendFillMessageWithVerify,
+    });
+
+    expect(sendFillMessageWithVerify).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ totalFilled: 0, totalQuestions: 0, stopCode: "PARTIAL_MUTATION_UNPROVABLE", stopMessage: "PARTIAL_MUTATION_UNPROVABLE" });
+  });
 });

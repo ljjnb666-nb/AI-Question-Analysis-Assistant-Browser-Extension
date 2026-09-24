@@ -353,11 +353,11 @@ export function resolveFillRootContext(registry: AccessibleRootRegistry, block: 
     };
   }
   const context = registry.get(attachment.rootKey);
-  if (!context || !context.connected || context.rootGeneration !== attachment.rootGeneration) {
+  if (!context || !isCurrentRootContext(registry, attachment.rootKey, attachment.rootGeneration)) {
     return { ok: false, reason: "STALE_ROOT_CONTEXT" };
   }
   if (runtime) {
-    if (!owner || !rootOwnsElement(context, owner)) return { ok: false, reason: "STALE_RUNTIME_QUESTION_HANDLE" };
+    if (!owner || !rootContextOwnsElement(context, owner)) return { ok: false, reason: "STALE_RUNTIME_QUESTION_HANDLE" };
   }
 
   const nearestFrame = (() => {
@@ -403,7 +403,7 @@ export function resolveFillRootContext(registry: AccessibleRootRegistry, block: 
   return { ok: true, context, doc, shadowRoot, owner, localBBox };
 }
 
-function rootOwnsElement(context: RootContext, owner: Element): boolean {
+export function rootContextOwnsElement(context: RootContext, owner: Element): boolean {
   if (!owner.isConnected || owner.ownerDocument !== context.ownerDocument) return false;
   if (context.root.contains(owner)) return true;
   if (context.kind !== "open-shadow-root") return false;
@@ -416,6 +416,23 @@ function rootOwnsElement(context: RootContext, owner: Element): boolean {
     current = current.parentElement;
   }
   return false;
+}
+
+/** Prove that a registered root still belongs to its live frame/shadow anchor and generation. */
+export function isCurrentRootContext(registry: AccessibleRootRegistry, rootKey: string, rootGeneration: number): boolean {
+  const context = registry.get(rootKey);
+  if (!context || !context.connected || context.rootGeneration !== rootGeneration) return false;
+  if (context.kind === "top-document") return context.rootGeneration === TOP_ROOT_GENERATION;
+  if (context.kind === "same-origin-frame") {
+    if (!context.frameElement?.isConnected || getAccessibleFrameDocument(context.frameElement) !== context.root) return false;
+  } else if (!context.shadowHost?.isConnected || context.shadowHost.shadowRoot !== context.root) {
+    return false;
+  }
+  if (context.parentRootKey) {
+    const parent = registry.get(context.parentRootKey);
+    if (!parent || !isCurrentRootContext(registry, parent.rootKey, parent.rootGeneration)) return false;
+  }
+  return true;
 }
 
 /** Re-read geometry from the same runtime owner after scrolling; preserve canonical question data. */

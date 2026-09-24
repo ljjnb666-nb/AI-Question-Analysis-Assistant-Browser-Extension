@@ -116,9 +116,7 @@ export function attachRuntimeRoot(block: QuestionBlock, attachment: RuntimeRootA
           attachment: { ...attachment },
           stableId,
           contentFingerprint,
-          // Modern Chromium provides WeakRef. The bounded fallback keeps this
-          // compatibility path from growing beyond the explicit handle cap.
-          owner: WeakRefApi ? new WeakRefApi(owner) : { deref: () => owner },
+          owner: ownerReference(owner),
         });
       }
       block.runtimeQuestionHandle = handle;
@@ -134,8 +132,12 @@ export function attachRuntimeRoot(block: QuestionBlock, attachment: RuntimeRootA
   return attached as QuestionBlock;
 }
 
-/** Resolve and bind only a live locator whose serialized semantic identity is exact. */
-export function bindRuntimeQuestionHandle(block: QuestionBlock): RuntimeQuestionHandleRecord | null {
+/**
+ * Read the sealed root/identity binding even when its current owner detached.
+ * Keeping that binding lets a transaction prove a same-root semantic rebind;
+ * root removal still invalidates the handle through invalidateRuntimeQuestionHandlesForRoot.
+ */
+export function runtimeQuestionHandleRecord(block: QuestionBlock): (Omit<RuntimeQuestionHandleRecord, "owner"> & { owner?: Element }) | null {
   const handle = block.runtimeQuestionHandle;
   if (typeof handle !== "string" || !/^rqh_[0-9a-f]{32}$/.test(handle)) return null;
   const stored = runtimeQuestionHandles.get(handle);
@@ -145,20 +147,50 @@ export function bindRuntimeQuestionHandle(block: QuestionBlock): RuntimeQuestion
     || stableId !== stored.stableId
     || contentFingerprint !== stored.contentFingerprint) return null;
   const owner = stored.owner.deref();
-  if (!owner?.isConnected) {
-    runtimeQuestionHandles.delete(handle);
-    return null;
-  }
-  const attached = block as { [RUNTIME_ROOT]?: RuntimeRootAttachment; [RUNTIME_OWNER]?: Element | undefined };
-  attached[RUNTIME_ROOT] = stored.attachment;
-  attached[RUNTIME_OWNER] = owner;
+  (block as { [RUNTIME_ROOT]?: RuntimeRootAttachment })[RUNTIME_ROOT] = { ...stored.attachment };
   return { attachment: { ...stored.attachment }, stableId, contentFingerprint, owner };
+}
+
+/** Update a detached handle only after its caller proves one exact live owner in the same root generation. */
+export function rebindRuntimeQuestionHandleOwner(block: QuestionBlock, owner: Element, attachment: RuntimeRootAttachment): boolean {
+  const record = runtimeQuestionHandleRecord(block);
+  const handle = block.runtimeQuestionHandle;
+  if (!record || typeof handle !== "string" || !owner.isConnected
+    || record.attachment.rootKey !== attachment.rootKey
+    || record.attachment.rootGeneration !== attachment.rootGeneration
+    || record.attachment.kind !== attachment.kind
+    || record.owner?.isConnected) return false;
+  const stored = runtimeQuestionHandles.get(handle);
+  if (!stored) return false;
+  stored.owner = ownerReference(owner);
+  const attached = block as { [RUNTIME_ROOT]?: RuntimeRootAttachment; [RUNTIME_OWNER]?: Element | undefined };
+  attached[RUNTIME_ROOT] = { ...attachment };
+  attached[RUNTIME_OWNER] = owner;
+  return true;
+}
+
+/** Resolve and bind only a live locator whose serialized semantic identity is exact. */
+export function bindRuntimeQuestionHandle(block: QuestionBlock): RuntimeQuestionHandleRecord | null {
+  const record = runtimeQuestionHandleRecord(block);
+  const owner = record?.owner;
+  if (!record || !owner?.isConnected) return null;
+  const { attachment, stableId, contentFingerprint } = record;
+  const attached = block as { [RUNTIME_ROOT]?: RuntimeRootAttachment; [RUNTIME_OWNER]?: Element | undefined };
+  attached[RUNTIME_ROOT] = attachment;
+  attached[RUNTIME_OWNER] = owner;
+  return { attachment, stableId, contentFingerprint, owner };
 }
 
 export function invalidateRuntimeQuestionHandlesForRoot(rootKey: string): void {
   for (const [handle, stored] of runtimeQuestionHandles) {
     if (stored.attachment.rootKey === rootKey) runtimeQuestionHandles.delete(handle);
   }
+}
+
+function ownerReference(owner: Element): RuntimeOwnerReference {
+  // Modern Chromium provides WeakRef. The bounded fallback keeps this
+  // compatibility path from growing beyond the explicit handle cap.
+  return WeakRefApi ? new WeakRefApi(owner) : { deref: () => owner };
 }
 
 function createRuntimeQuestionHandle(): string | null {
