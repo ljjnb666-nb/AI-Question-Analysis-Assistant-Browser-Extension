@@ -7,6 +7,7 @@ import {
   hasAutoSolveQuestionAttempt,
 } from "./answerFiller";
 import { observeLiveQuestion } from "./liveQuestionObservation";
+import { attachRuntimeRoot, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
 
 function makeBlock(overrides: Partial<QuestionBlock> = {}): QuestionBlock {
   return {
@@ -51,7 +52,8 @@ function prepareChoiceQuestion() {
   const owner = document.getElementById("q-12")!;
   document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
   document.getElementById("c")!.addEventListener("click", () => document.getElementById("c")!.setAttribute("aria-checked", "true"));
-  return observeLiveQuestion(makeBlock({ id: "q-12", previewText: "12. prompt A. a B. b C. c" }), owner);
+  const observed = observeLiveQuestion(makeBlock({ id: "q-12", previewText: "12. prompt A. a B. b C. c" }), owner);
+  return attachRuntimeRoot(observed, { rootKey: TOP_ROOT_KEY, rootGeneration: TOP_ROOT_GENERATION, kind: "top-document" }, owner);
 }
 
 function resolveDeps(parse: (block: QuestionBlock) => Promise<ParseResult>) {

@@ -1,3 +1,4 @@
+import { isHtmlElementNode } from "./detector/domDetectorShared";
 import type { ParseResult } from "@/shared/types";
 
 const JUDGE_TRUE_KEYS = ["\u5bf9", "\u6b63\u786e", "true", "t", "yes", "y"];
@@ -173,7 +174,7 @@ export function inferTypeFromAnswer(
   }
 
   const optionLikeRows = Array.from(scope.querySelectorAll(optionRowSelector))
-    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .filter((node): node is HTMLElement =>isHtmlElementNode( node))
     .map((node) => normalizeText(node.innerText || node.textContent || ""))
     .filter(Boolean);
   const judgeRows = optionLikeRows.filter((text) => /^(?:对|错|正确|错误|true|false)$/i.test(text));

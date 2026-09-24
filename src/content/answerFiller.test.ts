@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BoundingBox, ParseResult } from "@/shared/types";
 import { captureSolveStartControlState, fillAnswerIntoScope, fillParsedAnswerInPage, finishAutoSolveQuestionAttempt, hasAutoSolveQuestionAttempt, normalizeChoiceAnswerKeys, splitAnswerParts, verifyAnswerInScope } from "./answerFiller";
 import { observeLiveQuestion } from "./liveQuestionObservation";
+import { attachRuntimeRoot, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
 
 function setRect(el: Element, rect: { left: number; top: number; width: number; height: number }) {
   Object.defineProperty(el, "getBoundingClientRect", {
@@ -22,7 +23,8 @@ describe("answerFiller", () => {
     document.body.innerHTML = '<section class="question-item" id="q-mode">1. prompt <button>A. a</button><button id="b">B. b</button></section>';
     const owner = document.getElementById("q-mode")!;
     document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
-    const block = observeLiveQuestion({ id: "q-mode", bbox: { x: 0, y: 0, width: 500, height: 240 }, previewText: "1. prompt A. a B. b", questionTypeGuess: "single_choice", hasImage: false, confidence: 1, source: "auto_dom" }, owner);
+    const observed = observeLiveQuestion({ id: "q-mode", bbox: { x: 0, y: 0, width: 500, height: 240 }, previewText: "1. prompt A. a B. b", questionTypeGuess: "single_choice", hasImage: false, confidence: 1, source: "auto_dom" }, owner);
+    const block = attachRuntimeRoot(observed, { rootKey: TOP_ROOT_KEY, rootGeneration: TOP_ROOT_GENERATION, kind: "top-document" }, owner);
     const result: ParseResult = { blockId: block.id, questionType: "single_choice", answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
     let clicks = 0;
     document.getElementById("b")!.addEventListener("click", () => clicks++);
@@ -210,7 +212,7 @@ describe("answerFiller", () => {
       questionTypeGuess: "single_choice",
       hasImage: false,
       confidence: 0.95,
-      source: "auto_dom",
+      source: "manual_capture",
     }, result);
 
     expect(filled.ok).toBe(true);
@@ -324,7 +326,7 @@ describe("answerFiller", () => {
       questionTypeGuess: "multi_choice",
       hasImage: false,
       confidence: 0.98,
-      source: "auto_dom",
+      source: "manual_capture",
     }, result);
     expect(filled.ok).toBe(true);
     expect(document.getElementById("opt-a")?.className.includes("is-choose")).toBe(false);

@@ -1,3 +1,4 @@
+import { isHtmlElementNode } from "./detector/domDetectorShared";
 import type { BoundingBox, ParseResult } from "@/shared/types";
 import {
   extractChoiceKeysFromExplanations as extractChoiceKeysFromExplanationsCore,
@@ -6,6 +7,7 @@ import {
   normalizeChoiceAnswerKeys as normalizeChoiceAnswerKeysCore,
 } from "./answerText";
 import type { ChoiceHelperDeps, FillAnswerResult, VerifyAnswerResult } from "./answerTypes";
+import { isHTMLInputInOwnerRealm } from "./domRealm";
 
 export interface ChoiceCandidate {
   key: string;
@@ -125,7 +127,7 @@ function collectChoiceCandidates(
   const candidates: ChoiceCandidate[] = [];
 
   for (const row of rows) {
-    if (!(row instanceof HTMLElement)) continue;
+if (!isHtmlElementNode(row)) continue;
     if (!deps.isVisible(row)) continue;
 
     const rect = row.getBoundingClientRect();
@@ -159,7 +161,7 @@ function applyFallbackChoiceMapping(
   deps: ChoiceHelperDeps,
 ) {
   const inputs = Array.from(scope.querySelectorAll(CHOICE_INPUT_SELECTOR))
-    .filter((node): node is HTMLInputElement => node instanceof HTMLInputElement)
+    .filter((node): node is HTMLInputElement => isHTMLInputInOwnerRealm(node))
     .filter((input) => deps.rectIntersectsExpandedBBox(input.getBoundingClientRect(), bbox, 28, 260))
     .sort((a, b) => deps.compareRectPosition(a.getBoundingClientRect(), b.getBoundingClientRect()));
 
@@ -202,20 +204,20 @@ function resolveDesiredChoiceKeys(
 
 function findChoiceInput(row: Element): HTMLInputElement | null {
   const direct = row.querySelector(CHOICE_INPUT_SELECTOR);
-  if (direct instanceof HTMLInputElement) return direct;
+  if (isHTMLInputInOwnerRealm(direct)) return direct;
 
   const siblingInput = row.closest("label")?.querySelector(CHOICE_INPUT_SELECTOR);
-  return siblingInput instanceof HTMLInputElement ? siblingInput : null;
+  return isHTMLInputInOwnerRealm(siblingInput) ? siblingInput : null;
 }
 
 function findChoiceTarget(row: Element): HTMLElement | null {
   const ownClickable = row.closest("label,.el-radio,.el-checkbox,.ivu-radio-wrapper,.ivu-checkbox-wrapper,.option-item");
-  if (ownClickable instanceof HTMLElement) return ownClickable;
+if (isHtmlElementNode(ownClickable)) return ownClickable;
 
   const descendantClickable = row.querySelector("label,.el-radio,.el-checkbox,.ivu-radio-wrapper,.ivu-checkbox-wrapper,.option-item");
-  if (descendantClickable instanceof HTMLElement) return descendantClickable;
+if (isHtmlElementNode(descendantClickable)) return descendantClickable;
 
-  return row instanceof HTMLElement ? row : null;
+return isHtmlElementNode(row) ? row : null;
 }
 
 async function applyChoiceSelection(
@@ -296,7 +298,7 @@ async function clearCustomChoiceSelection(candidate: ChoiceCandidate, deps: Choi
 function collectChoiceClickTargets(candidate: ChoiceCandidate): HTMLElement[] {
   const targets: HTMLElement[] = [];
   const push = (el: Element | null | undefined) => {
-    if (!(el instanceof HTMLElement)) return;
+if (!isHtmlElementNode(el)) return;
     if (!targets.includes(el)) targets.push(el);
   };
 

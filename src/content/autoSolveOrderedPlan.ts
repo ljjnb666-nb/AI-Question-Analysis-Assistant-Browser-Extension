@@ -2,10 +2,13 @@ import type { QuestionBlock } from "@/shared/types";
 import type { ScanScrollRoot } from "./detector/fullPageDetector";
 
 type OrderedPlanState = {
-  orderedPlan: QuestionBlock[] | null;
+  orderedPlan: OrderedPlanEntry[] | null;
   orderedPlanSize: number;
   orderedPlanCursor: number;
 };
+
+type OrderedPlanCoordinateSpace = "TOP_VIEWPORT" | "SCROLL_ROOT_ABSOLUTE" | "ROOT_LOCAL";
+type OrderedPlanEntry = { block: QuestionBlock; coordinateSpace: OrderedPlanCoordinateSpace };
 
 type ViewportRefinement = {
   finalViewportBBox: QuestionBlock["bbox"];
@@ -19,10 +22,14 @@ type ViewportRefinement = {
 type OrderedPlanDeps = {
   activeDetectMode: "viewport" | "fullpage" | null;
   detectCandidatesFullPage: () => Promise<QuestionBlock[]>;
+  /** Cross-root detection fallback for pages whose questions live outside the top document. */
+  detectRootCandidates?: () => QuestionBlock[];
   detectTotalQuestionCount: () => number;
   extractAutoSolveQuestionOrder: (text: string) => number | null;
   getActiveCandidates: () => QuestionBlock[];
   getScrollLeft: (scrollRoot: ScanScrollRoot) => number;
+  projectViewportBboxToAbsolute: (bbox: QuestionBlock["bbox"], scrollRoot: ScanScrollRoot) => QuestionBlock["bbox"];
+  refreshRuntimeQuestionBlock: (candidate: QuestionBlock) => QuestionBlock | null;
   mergeOrderedPlanWithDetectedCandidates: (domPlan: QuestionBlock[], refined: QuestionBlock[]) => QuestionBlock[];
   pauseMs: (ms: number) => Promise<void>;
   refineFullPageCandidatesViaManualPipeline: (candidates: QuestionBlock[]) => Promise<QuestionBlock[]>;
@@ -45,7 +52,7 @@ export function createOrderedPlanState(): OrderedPlanState {
 export async function ensureOrderedPlan(
   state: OrderedPlanState,
   deps: OrderedPlanDeps,
-): Promise<QuestionBlock[]> {
+): Promise<OrderedPlanEntry[]> {
   if (state.orderedPlan?.length) return state.orderedPlan;
 
   const shouldForceFullPagePlan =
@@ -59,11 +66,26 @@ export async function ensureOrderedPlan(
   const roughCandidates = shouldForceFullPagePlan
     ? await deps.detectCandidatesFullPage()
     : deps.getActiveCandidates();
-  const refined = await deps.refineFullPageCandidatesViaManualPipeline(roughCandidates);
+  let refined = await deps.refineFullPageCandidatesViaManualPipeline(roughCandidates);
+  let rootFallback: QuestionBlock[] | null = null;
+  if (roughCandidates.length === 0 && refined.length === 0 && deps.detectRootCandidates) {
+    // The top document has no questions; try every accessible root. Root
+    // blocks are already canonical, so they skip the manual refinement.
+    rootFallback = deps.detectRootCandidates();
+    refined = rootFallback;
+  }
 
-  state.orderedPlan = domPlan.length > 0
-    ? deps.mergeOrderedPlanWithDetectedCandidates(domPlan, refined)
-    : deps.sortAutoSolveCandidates(refined);
+  if (rootFallback) {
+    state.orderedPlan = deps.sortAutoSolveCandidates(rootFallback).map((block) => ({
+      block: { ...block, bbox: deps.projectViewportBboxToAbsolute(block.bbox, deps.scrollRoot) },
+      coordinateSpace: "SCROLL_ROOT_ABSOLUTE",
+    }));
+  } else {
+    const blocks = domPlan.length > 0
+      ? deps.mergeOrderedPlanWithDetectedCandidates(domPlan, refined)
+      : deps.sortAutoSolveCandidates(refined);
+    state.orderedPlan = blocks.map((block) => ({ block, coordinateSpace: "SCROLL_ROOT_ABSOLUTE" }));
+  }
   state.orderedPlanSize = state.orderedPlan.length;
   return state.orderedPlan;
 }
@@ -78,15 +100,19 @@ export async function jumpToNextCandidateInFullPage(
   if (!plan.length) return false;
 
   const currentOrder = deps.extractAutoSolveQuestionOrder(currentBlock.previewText || "");
-  const currentY = currentBlock.bbox.y;
-  const nextCandidate = plan.find((candidate) => {
+  const currentY = deps.projectViewportBboxToAbsolute(currentBlock.bbox, deps.scrollRoot).y;
+  const nextCandidate = plan.find(({ block: candidate }) => {
     const candidateOrder = deps.extractAutoSolveQuestionOrder(candidate.previewText || "");
     if (currentOrder !== null && candidateOrder !== null) return candidateOrder > currentOrder;
     return candidate.bbox.y > currentY + 24;
   });
   if (!nextCandidate) return false;
 
-  const targetTop = Math.max(0, nextCandidate.bbox.y - Math.max(96, Math.floor(window.innerHeight * 0.16)));
+  const targetBlock = nextCandidate.block;
+  const absoluteBox = nextCandidate.coordinateSpace === "TOP_VIEWPORT"
+    ? deps.projectViewportBboxToAbsolute(targetBlock.bbox, deps.scrollRoot)
+    : targetBlock.bbox;
+  const targetTop = Math.max(0, absoluteBox.y - Math.max(96, Math.floor(window.innerHeight * 0.16)));
   deps.setScrollPosition(deps.scrollRoot, targetTop, deps.getScrollLeft(deps.scrollRoot));
   await deps.pauseMs(550);
   return true;
@@ -99,10 +125,21 @@ export async function resolveOrderedPlanViewportBlock(
   const plan = await ensureOrderedPlan(state, deps);
   if (state.orderedPlanCursor >= plan.length) return null;
 
-  const candidate = plan[state.orderedPlanCursor];
-  const targetTop = Math.max(0, candidate.bbox.y - Math.max(96, Math.floor(window.innerHeight * 0.16)));
+  const entry = plan[state.orderedPlanCursor];
+  if (!entry || entry.coordinateSpace === "ROOT_LOCAL") return null;
+  const candidate = entry.block;
+  const absoluteBox = entry.coordinateSpace === "TOP_VIEWPORT"
+    ? deps.projectViewportBboxToAbsolute(candidate.bbox, deps.scrollRoot)
+    : candidate.bbox;
+  const targetTop = Math.max(0, absoluteBox.y - Math.max(96, Math.floor(window.innerHeight * 0.16)));
   deps.setScrollPosition(deps.scrollRoot, targetTop, deps.getScrollLeft(deps.scrollRoot));
   await deps.pauseMs(550);
+
+  if (candidate.runtimeQuestionHandle) {
+    const refreshed = deps.refreshRuntimeQuestionBlock(candidate);
+    if (!refreshed) return null;
+    return refreshed;
+  }
 
   const refined = deps.refineViewportCandidate(candidate, deps.scrollRoot);
   return {

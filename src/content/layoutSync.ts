@@ -1,3 +1,4 @@
+import { isHtmlElementNode } from "./detector/domDetectorShared";
 import type { BoundingBox, ExtMessage, QuestionBlock, QuestionType } from "@/shared/types";
 import type { ScanScrollRoot } from "./detector/fullPageDetector";
 
@@ -124,7 +125,7 @@ export function refreshFullPageHighlightsAfterLayoutChange(
 }
 
 export function getFullPageLayoutKey(scrollRoot: ScanScrollRoot): string {
-  if (!(scrollRoot instanceof HTMLElement)) {
+if (!isHtmlElementNode(scrollRoot)) {
     return `window:${window.innerWidth}x${window.innerHeight}`;
   }
 

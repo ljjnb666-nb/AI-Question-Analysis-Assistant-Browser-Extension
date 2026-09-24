@@ -56,6 +56,7 @@ type CreateContentMainWorkflowsOptions = {
   screenshotWithRetry: () => Promise<string | null>;
   clickNextQuestionButton: () => boolean;
   detectCandidatesFullPage: () => Promise<QuestionBlock[]>;
+  detectCandidatesAcrossRoots?: () => QuestionBlock[];
   detectCandidatesInViewport: () => QuestionBlock[];
   detectTotalQuestionCount: () => number;
   extractAutoSolveQuestionOrder: (text: string) => number | null;
@@ -270,6 +271,7 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         activeDetectMode: options.runtimeState.getActiveDetectMode(),
         clickNextQuestionButton: options.clickNextQuestionButton,
         detectCandidatesFullPage: options.detectCandidatesFullPage,
+        detectCandidatesAcrossRoots: options.detectCandidatesAcrossRoots,
         detectCandidatesInViewport: options.detectCandidatesInViewport,
         detectTotalQuestionCount: options.detectTotalQuestionCount,
         extractAutoSolveQuestionOrder: options.extractAutoSolveQuestionOrder,

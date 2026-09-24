@@ -1,3 +1,4 @@
+import { isElementInOwnerRealm, isHTMLElementInOwnerRealm } from "../domRealm";
 import type { BoundingBox } from "@/shared/types";
 import { normalizeText } from "./domText";
 
@@ -35,4 +36,17 @@ export function isLikelyActionText(text: string): boolean {
   const t = normalizeText(text);
   if (!t) return false;
   return /提交作业|上一题|下一题|返回|标记此题|查看解析|收藏|试题篮|组卷预览|登录|注册|首页/.test(t);
+}
+
+/**
+ * Realm-safe element checks. A same-origin iframe's elements are NOT
+ * instanceof the top window's HTMLElement/Element constructors, so plain
+ * instanceof silently drops every frame-owned node in Chrome.
+ */
+export function isElementNode(node: unknown): node is Element {
+  return isElementInOwnerRealm(node);
+}
+
+export function isHtmlElementNode(node: unknown): node is HTMLElement {
+  return isHTMLElementInOwnerRealm(node);
 }

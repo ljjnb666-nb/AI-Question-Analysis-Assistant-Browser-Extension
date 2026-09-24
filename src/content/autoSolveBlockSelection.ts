@@ -1,4 +1,6 @@
+import { isHtmlElementNode } from "./detector/domDetectorShared";
 import type { BoundingBox, QuestionBlock, QuestionType } from "@/shared/types";
+import { bindDomQuestionBlockToOwner } from "./domQuestionBinding";
 
 type ResolvedQuestionBlock = {
   refinedBBox: BoundingBox;
@@ -57,23 +59,23 @@ export function detectZhihuishuCurrentQuestionBlock(
   if (!/zhihuishu\.com$/i.test(location.hostname)) return null;
 
   const questionBoxes = Array.from(document.querySelectorAll(".questionBox"))
-    .filter((el): el is HTMLElement => el instanceof HTMLElement)
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el))
     .filter((el) => !deps.isExtensionUiElement(el))
     .filter((el) => deps.isElementVisible(el));
 
   const fallbackBoxes = questionBoxes.length > 0
     ? questionBoxes
     : Array.from(document.querySelectorAll(".Classificationquestionall-div"))
-      .filter((el): el is HTMLElement => el instanceof HTMLElement)
+      .filter((el): el is HTMLElement =>isHtmlElementNode( el))
       .filter((el) => !deps.isExtensionUiElement(el))
       .filter((el) => deps.isElementVisible(el))
       .map((el) => {
         const innerQuestionBox = el.querySelector(".questionBox");
-        return innerQuestionBox instanceof HTMLElement ? innerQuestionBox : el;
+        return isHtmlElementNode(innerQuestionBox) ? innerQuestionBox : el;
       });
 
   const boxes = fallbackBoxes
-    .filter((el): el is HTMLElement => el instanceof HTMLElement)
+    .filter((el): el is HTMLElement =>isHtmlElementNode( el))
     .map((el) => {
       const rect = el.getBoundingClientRect();
       const text = deps.extractRichQuestionPreviewFromElement(el);
@@ -100,10 +102,11 @@ export function detectZhihuishuCurrentQuestionBlock(
   const imageUrl = matchedCandidate?.questionImageUrl ?? deps.extractQuestionImageUrlFromBBox(finalBBox) ?? undefined;
   const hasMedia = deps.hasVisibleAutoSolveMedia(chosen.el) || Boolean(matchedCandidate?.hasImage) || Boolean(imageUrl);
 
-  return {
+  const draft: QuestionBlock = {
     id: `live-zhihuishu-${deps.extractAutoSolveQuestionOrder(previewText) ?? deps.extractAutoSolveQuestionOrder(chosen.text) ?? "x"}`,
     bbox: finalBBox,
     previewText: previewText.slice(0, 1200),
+    identitySourceText: chosen.text,
     displaySegments: matchedCandidate?.displaySegments,
     hasImage: hasMedia,
     questionImageUrl: imageUrl,
@@ -111,4 +114,8 @@ export function detectZhihuishuCurrentQuestionBlock(
     confidence: Math.max(0.9, matchedCandidate?.confidence ?? 0.98),
     source: "auto_dom",
   };
+  return bindDomQuestionBlockToOwner(draft, chosen.el, {
+    identityText: chosen.text,
+    matchedCandidate,
+  });
 }

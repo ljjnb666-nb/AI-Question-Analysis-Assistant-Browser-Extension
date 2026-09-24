@@ -1,5 +1,7 @@
 import type { QuestionBlock } from "@/shared/types";
 import type { ScanScrollRoot } from "./detector/fullPageDetector";
+import { CandidateRootAggregation } from "./candidateRootAggregation";
+import { sanitizeQuestionBlockForRuntimeMessage } from "@/shared/utils/mediaSerialization";
 
 type CandidateStatus = { status: string; selected: boolean };
 
@@ -47,7 +49,7 @@ type ViewportDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], st
   createHighlightLayer: (options: {
     onSelect: (blockId: string, selected: boolean) => void;
   }) => TLayer;
-  watchForPageChanges: (onChange: (blocks: QuestionBlock[]) => void) => () => void;
+  watchForPageChanges: (onChange: (blocks: QuestionBlock[], rootKey?: string) => void) => () => void;
 };
 
 export function notifySidePanel(
@@ -55,7 +57,7 @@ export function notifySidePanel(
   deps: NotifySidePanelDeps,
 ): void {
   const enriched = candidates.map((block) => ({
-    block,
+    block: sanitizeQuestionBlockForRuntimeMessage(block),
     selected: deps.candidateStatusMap.get(block.id)?.selected ?? false,
     status: (deps.candidateStatusMap.get(block.id)?.status ?? "idle") as "idle" | "loading" | "success" | "error",
   }));
@@ -209,12 +211,24 @@ export function handleAutoDetect<TLayer extends { setBlocks: (blocks: QuestionBl
   });
   highlightLayer.setBlocks(state.activeHighlightBlocks, deps.candidateStatusMap);
 
-  const unwatchSPA = deps.watchForPageChanges((newBlocks) => {
-    if (Math.abs(newBlocks.length - candidates.length) > 2) {
-      state.activeCandidates = newBlocks;
-      state.activeHighlightBlocks = newBlocks;
-      deps.notifySidePanel(newBlocks);
+  let aggregate = new CandidateRootAggregation(candidates);
+  const unwatchSPA = deps.watchForPageChanges((newBlocks, rootKey) => {
+    let nextBlocks: QuestionBlock[];
+    if (rootKey) {
+      nextBlocks = newBlocks.length === 0
+        ? aggregate.removeRoot(rootKey)
+        : aggregate.replaceRoot(rootKey, newBlocks);
+    } else {
+      aggregate = new CandidateRootAggregation(newBlocks);
+      nextBlocks = aggregate.snapshot();
     }
+    for (const block of nextBlocks) {
+      if (!deps.candidateStatusMap.has(block.id)) deps.candidateStatusMap.set(block.id, { status: "pending", selected: false });
+    }
+    state.activeCandidates = nextBlocks;
+    state.activeHighlightBlocks = nextBlocks;
+    if (highlightLayer) highlightLayer.setBlocks(nextBlocks, deps.candidateStatusMap);
+    deps.notifySidePanel(nextBlocks);
   });
 
   return { ...state, highlightLayer, unwatchSPA };

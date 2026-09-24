@@ -1,5 +1,6 @@
 import type { AppSettings, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
+import { sanitizeQuestionBlockForSerialization } from "@/shared/utils/mediaSerialization";
 import {
   buildAutoSolveReviewSettings,
   pickAutoSolveReviewModel,
@@ -203,7 +204,7 @@ export async function recordAutoSolveHistory(
   const entry: HistoryEntry = {
     id: historyId,
     timestamp: Date.now(),
-    block: { ...block, imageDataUrl: undefined },
+    block: sanitizeQuestionBlockForSerialization({ ...block, imageDataUrl: undefined }),
     result,
     host: location.hostname,
   };

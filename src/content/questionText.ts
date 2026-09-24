@@ -1,3 +1,5 @@
+import { isElementNode, isHtmlElementNode } from "./detector/domDetectorShared";
+import { isOpenShadowRootNode } from "./domRealm";
 import type { BoundingBox } from "@/shared/types";
 import {
   decodeFormulaLikeText,
@@ -55,7 +57,7 @@ export function extractMixedReadableQuestionText(
       continue;
     }
 
-    if (!(child instanceof Element) || deps.isExtensionUiElement(child)) continue;
+if (!isElementNode(child) || deps.isExtensionUiElement(child)) continue;
     if (child.hasAttribute(FORMULA_HIDDEN_ATTR)) continue;
 
     const tag = child.tagName.toLowerCase();
@@ -214,7 +216,7 @@ export function isElementVisible(el: HTMLElement): boolean {
 export function isExtensionUiElement(el: Element): boolean {
   if ((el.id && el.id.startsWith("qs-")) || !!el.closest("[id^='qs-']")) return true;
   const root = el.getRootNode();
-  if (root instanceof ShadowRoot) {
+  if (isOpenShadowRootNode(root)) {
     const hostId = root.host?.id ?? "";
     if (hostId.startsWith("qs-")) return true;
   }
@@ -310,7 +312,7 @@ export function collectTextFromContainer(
   for (const node of nodes) {
     if (deps.isExtensionUiElement(node)) continue;
     if (shouldSkipNestedSemanticNode(node, container)) continue;
-    if (node instanceof HTMLElement && !deps.isElementVisible(node)) continue;
+if (isHtmlElementNode(node) && !deps.isElementVisible(node)) continue;
     const rect = node.getBoundingClientRect();
     const interArea = deps.intersectionArea(rect, bbox);
     if (interArea < 8) continue;
@@ -382,7 +384,7 @@ export function collectTextFromRegion(
 
   for (const node of nodes) {
     if (deps.isExtensionUiElement(node)) continue;
-    if (node instanceof HTMLElement) {
+if (isHtmlElementNode(node)) {
       if (node.offsetParent === null) continue;
       const style = getComputedStyle(node);
       if (style.visibility === "hidden" || style.display === "none") continue;

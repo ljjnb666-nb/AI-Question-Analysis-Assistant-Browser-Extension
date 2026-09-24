@@ -1,3 +1,4 @@
+import { isElementNode, isHtmlElementNode } from "./domDetectorShared";
 import type { BoundingBox, QuestionType } from "@/shared/types";
 import { CIRCLED_RE, OPTION_RE, QUESTION_RE, normalizeText } from "./domText";
 
@@ -70,7 +71,7 @@ function refineJudgeCandidateRect(
   const nodes = el.querySelectorAll("div,p,li,label,span,input");
 
   for (const node of nodes) {
-    if (!(node instanceof HTMLElement)) continue;
+if (!isHtmlElementNode(node)) continue;
     if (deps.isExtensionUiElement(node)) continue;
     if (node === el) continue;
 
@@ -241,7 +242,7 @@ function collectChoiceControls(el: Element, baseRect: DOMRect, vw: number, vh: n
   const out: DOMRect[] = [];
   const controls = el.querySelectorAll("input[type='radio'],input[type='checkbox']");
   for (const c of controls) {
-    if (!(c instanceof HTMLElement)) continue;
+if (!isHtmlElementNode(c)) continue;
     const r = c.getBoundingClientRect();
     if (r.width < 4 || r.height < 4) continue;
     if (!deps.inViewport(r, vw, vh)) continue;
@@ -255,7 +256,7 @@ function collectBlankControls(el: Element, baseRect: DOMRect, vw: number, vh: nu
   const out: DOMRect[] = [];
   const controls = el.querySelectorAll("input:not([type='radio']):not([type='checkbox']):not([type='hidden']):not([type='button']):not([type='submit']),textarea,[contenteditable='true']");
   for (const c of controls) {
-    if (!(c instanceof HTMLElement)) continue;
+if (!isHtmlElementNode(c)) continue;
     const r = c.getBoundingClientRect();
     if (r.width < 20 || r.height < 12) continue;
     if (!deps.inViewport(r, vw, vh)) continue;
@@ -291,7 +292,7 @@ function collectMediaRects(el: Element, baseRect: DOMRect, vw: number, vh: numbe
   const out: DOMRect[] = [];
   const mediaNodes = el.querySelectorAll("img,canvas,svg,math,figure,mjx-container,.MathJax,.katex,embed,table");
   for (const node of mediaNodes) {
-    if (!(node instanceof Element)) continue;
+if (!isElementNode(node)) continue;
     const r = (node as HTMLElement).getBoundingClientRect();
     if (r.width < 24 || r.height < 24) continue;
     if (!deps.inViewport(r, vw, vh)) continue;

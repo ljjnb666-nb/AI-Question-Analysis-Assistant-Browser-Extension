@@ -26,6 +26,8 @@ export interface QuestionBlock {
   identitySourceText?: string;
   /** Scan-local semantic owner; not persisted identity or history key. */
   runtimeOwnerKey?: string;
+  /** Opaque content-runtime locator; transient across extension messages only. */
+  runtimeQuestionHandle?: string;
   /** Optional so persisted Phase 0/1 records remain readable. */
   boundary?: QuestionBoundaryInfo;
   /** Optional so manual capture preserves legacy behavior. */

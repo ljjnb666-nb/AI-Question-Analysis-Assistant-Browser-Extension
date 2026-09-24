@@ -1,13 +1,13 @@
+import { bboxIntersectsRect, isExtensionUiElement, isHtmlElementNode, isLikelyActionText, isLikelyControlPanelText } from "./domDetectorShared";;
 import type { BoundingBox } from "@/shared/types";
 import {
   extractReadableNodeText,
 } from "./domStructuredText";
 import { normalizeText, sanitizePreviewText } from "./domText";
-import { bboxIntersectsRect, isExtensionUiElement, isLikelyActionText, isLikelyControlPanelText } from "./domDetectorShared";
 
 export function getElementReadableText(el: Element): string {
   if (
-    el instanceof HTMLElement &&
+isHtmlElementNode(    el) &&
     (
       el.matches(".question-item,.questionBox,.base-question-component,.questionContent,.qeustion-content,.markdown-latex-container,.ml-p,.option-item,.option-content") ||
       !!el.querySelector("math,svg,mjx-container,.MathJax,.katex,embed,img")
@@ -16,7 +16,7 @@ export function getElementReadableText(el: Element): string {
     return extractReadableNodeText(el);
   }
 
-  const raw = el instanceof HTMLElement
+  const raw =isHtmlElementNode( el)
     ? (el.innerText || el.textContent || "")
     : (el.textContent || "");
   return normalizeText(raw);
@@ -65,7 +65,7 @@ export function buildPreviewTextForBbox(el: Element, bbox: BoundingBox, fallback
     if (!text) continue;
     if (text.length > 320) continue;
     if (isLikelyActionText(text) || isLikelyControlPanelText(text)) continue;
-    if (node instanceof HTMLElement && node.children.length > 10 && text.length > 180) continue;
+    if (isHtmlElementNode(node) && node.children.length > 10 && text.length > 180) continue;
 
     entries.push({ top: rect.top, left: rect.left, text });
   }
@@ -73,7 +73,7 @@ export function buildPreviewTextForBbox(el: Element, bbox: BoundingBox, fallback
   const merged = mergePreviewEntries(entries);
   const compact = sanitizePreviewText(merged);
   if (compact.length >= 20) return compact.slice(0, 420);
-  if (sourceNode instanceof HTMLElement) {
+if (isHtmlElementNode(sourceNode)) {
     const sourceRect = sourceNode.getBoundingClientRect();
     if (sourceRect.width >= 2 && sourceRect.height >= 2 && bboxIntersectsRect(bbox, sourceRect)) {
       const sourceText = sanitizePreviewText(extractReadableNodeText(sourceNode));

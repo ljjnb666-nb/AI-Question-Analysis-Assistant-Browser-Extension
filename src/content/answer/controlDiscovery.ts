@@ -1,3 +1,5 @@
+import { isHtmlElementNode } from "../detector/domDetectorShared";
+import { isHTMLInputInOwnerRealm, isHTMLTextAreaInOwnerRealm } from "../domRealm";
 import { isVisible, normalizeText } from "../answerDomUtils";
 import type { ControlType } from "./controlRegistry";
 
@@ -6,7 +8,7 @@ const SELECTOR = "input[type=radio],input[type=checkbox],input:not([type]),input
 
 /** O(N) in the supplied question owner subtree; it deliberately never scans document. */
 export function discoverControls(owner: Element): DiscoveredControl[] {
-  return Array.from(owner.querySelectorAll(SELECTOR)).filter((node): node is HTMLElement => node instanceof HTMLElement).map((element) => ({
+  return Array.from(owner.querySelectorAll(SELECTOR)).filter((node): node is HTMLElement =>isHtmlElementNode( node)).map((element) => ({
     element,
     controlType: getControlType(element),
     visible: isVisible(element) && !element.hidden && element.getAttribute("aria-hidden") !== "true",
@@ -16,8 +18,8 @@ export function discoverControls(owner: Element): DiscoveredControl[] {
 }
 
 function getControlType(el: HTMLElement): ControlType {
-  if (el instanceof HTMLInputElement) return el.type === "radio" ? "radio" : el.type === "checkbox" ? "checkbox" : "text";
-  if (el instanceof HTMLTextAreaElement) return "textarea";
+  if (isHTMLInputInOwnerRealm(el)) return el.type === "radio" ? "radio" : el.type === "checkbox" ? "checkbox" : "text";
+  if (isHTMLTextAreaInOwnerRealm(el)) return "textarea";
   if (el.isContentEditable) return "contenteditable";
   return "custom-choice";
 }

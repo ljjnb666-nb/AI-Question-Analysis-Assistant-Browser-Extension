@@ -37,7 +37,7 @@ type DetectSessionDeps = {
   setLastFullPageLayoutKey: (layoutKey: string) => void;
   setUnwatchSPA: (unwatch: (() => void) | null) => void;
   stopSpaWatch: () => void;
-  watchForPageChanges: (onChange: (blocks: QuestionBlock[]) => void) => () => void;
+  watchForPageChanges: (onChange: (blocks: QuestionBlock[], rootKey?: string) => void) => () => void;
 };
 
 export function notifyDetectedCandidates(

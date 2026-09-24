@@ -1,3 +1,4 @@
+import { isHtmlElementNode } from "./detector/domDetectorShared";
 import type { BoundingBox, QuestionBlock } from "@/shared/types";
 
 type ResolutionDeps = {
@@ -162,7 +163,7 @@ export function findLikelyQuestionBBoxNear(
 
   const questionLikeNodes = Array.from(document.querySelectorAll("div,p,li"))
     .filter((el) => {
-      if (!(el instanceof HTMLElement)) return false;
+if (!isHtmlElementNode(el)) return false;
       if (!deps.isElementVisible(el) || deps.isExtensionUiElement(el)) return false;
       const txt = deps.extractRichQuestionPreviewFromElement(el);
       if (txt.length < 40 || txt.length > 5000) return false;

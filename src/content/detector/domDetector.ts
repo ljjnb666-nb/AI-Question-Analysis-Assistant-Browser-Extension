@@ -1,4 +1,5 @@
-﻿/**
+import { bboxIntersectsRect, isExtensionUiElement, isHtmlElementNode, isLikelyActionText as _isLikelyActionText, isLikelyControlPanelText } from "./domDetectorShared";;
+/**
  * DOM Detector (rebuilt)
  * - Detects question candidates in viewport
  * - Watches SPA mutations
@@ -33,7 +34,6 @@ import {
   sanitizePreviewTextByType,
   stripSvgCssNoise as _stripSvgCssNoise,
 } from "./domText";
-import { bboxIntersectsRect, isExtensionUiElement, isLikelyActionText as _isLikelyActionText, isLikelyControlPanelText } from "./domDetectorShared";
 import {
   completenessScore,
   deduplicateBlocks,
@@ -44,22 +44,54 @@ import {
 } from "./domDetectorPostprocess";
 import { buildPreviewText, buildPreviewTextForBbox, getElementReadableText } from "./domDetectorPreview";
 import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "./domDetectorVisual";
-import { attachQuestionIdentity } from "../questionIdentity";
-import { collectMediaAssets, projectLegacyMedia } from "../media/mediaDiscovery";
 import { classifyViewportBoundary } from "./questionBoundary";
 import { startQuestionRevisionWatch } from "../revision/questionRevisionWatch";
+import { MAX_SHADOW_HOST_PROBES, type RootContext } from "../roots/rootContext";
+import { isOpenShadowRootNode } from "../domRealm";
+import { createTopViewportProjector, sharedRootRegistry } from "../roots/rootRegistry";
+import type { TraversableRoot } from "../roots/rootDom";
+import { bindDomQuestionBlockToOwner as attachDetectedQuestionIdentity } from "../domQuestionBinding";
 
+let rootCandidateObservationSequence = 0;
 
-function attachDetectedQuestionIdentity(block: QuestionBlock, owner: Element, options?: { identityText?: string; nativeQuestionId?: string }): QuestionBlock & { identity: NonNullable<QuestionBlock["identity"]> } {
-  const withMedia = projectLegacyMedia(block, collectMediaAssets(owner), owner);
-  return attachQuestionIdentity(withMedia, owner, options);
+function nextRootCandidateObservationId(): string {
+  return `auto-root-${Date.now()}-${++rootCandidateObservationSequence}`;
 }
 
-export function watchForPageChanges(callback: (blocks: QuestionBlock[]) => void): () => void {
+export function watchForPageChanges(callback: (blocks: QuestionBlock[], rootKey?: string) => void): () => void {
   return startQuestionRevisionWatch({
     detectCandidates: detectCandidatesInViewport,
     onCandidates: callback,
+    detectRootCandidates: detectCandidatesInRoot,
   });
+}
+
+/**
+ * Detection across every accessible root: reconciles the registry, scans the
+ * top document plus all registered same-origin frames and open shadow roots,
+ * and dedupes runtime instances by root-scoped identity.
+ */
+export function detectCandidatesAcrossRoots(): QuestionBlock[] {
+  const registry = sharedRootRegistry();
+  registry.reconcile(document);
+  const merged: QuestionBlock[] = [...detectCandidatesInViewport()];
+  const seen = new Set(merged.map((block) => `${block.identity?.stableId ?? block.id}`));
+  for (const root of registry.list()) {
+    if (root.kind === "top-document") continue;
+    let blocks: QuestionBlock[] = [];
+    try {
+      blocks = detectCandidatesInRoot(root.root, root);
+    } catch (err) {
+      logWarn("Root detection failed", "detectCandidatesAcrossRoots", { error: String(err) });
+    }
+    for (const block of blocks) {
+      const instanceKey = `${root.rootKey} ${block.identity?.stableId ?? block.id}`;
+      if (seen.has(instanceKey)) continue;
+      seen.add(instanceKey);
+      merged.push(block);
+    }
+  }
+  return merged.sort((a, b) => a.bbox.y - b.bbox.y);
 }
 
 export function detectCandidatesInViewport(): QuestionBlock[] {
@@ -96,7 +128,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
   for (const [directIndex, el] of directCardBodies.entries()) {
     if (isExtensionUiElement(el)) continue;
     const structuredHost = el.querySelector(".question-item, .questionBox, .base-question-component");
-    const rectSource = (structuredHost instanceof HTMLElement ? structuredHost : el) as HTMLElement;
+    const rectSource =(isHtmlElementNode(structuredHost) ? structuredHost : el) as HTMLElement;
     const rawRect = rectSource.getBoundingClientRect();
     const rect = applyRightCutToRect(rawRect, hostRightCutX);
     if (!rect) continue;
@@ -218,12 +250,6 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
     return blocks.sort((a, b) => a.bbox.y - b.bbox.y).map(withQuestionCompleteness);
   }
 
-  try {
-    blocks.push(...scanIframes(vw, vh));
-  } catch (err) {
-    logWarn("Failed to scan iframes", "detectCandidatesInViewport", { error: String(err) });
-  }
-
   const merged = mergeAdjacentQuestionBlocks(deduplicateBlocks(blocks).sort((a, b) => a.bbox.y - b.bbox.y));
   return filterFragmentBlocks(merged).map(withQuestionCompleteness);
 }
@@ -239,7 +265,7 @@ function buildStableStructuredContainerCandidates(
   let index = 0;
   for (const el of containers) {
     const hostContainer = el as Element;
-    if (!(hostContainer instanceof HTMLElement)) continue;
+if (!isHtmlElementNode(hostContainer)) continue;
     if (!hostContainer.matches(".question-item, .questionBox, .base-question-component")) continue;
     if (isExtensionUiElement(hostContainer)) continue;
     if (seen.has(hostContainer)) continue;
@@ -289,7 +315,7 @@ function buildPintiaCodeProblemCandidates(
 
   for (const selector of selectors) {
     for (const node of document.querySelectorAll(selector)) {
-      if (!(node instanceof HTMLElement)) continue;
+if (!isHtmlElementNode(node)) continue;
       if (seen.has(node) || isExtensionUiElement(node)) continue;
       if (!isLikelyPintiaCodeProblemContainer(node, vw)) continue;
       seen.add(node);
@@ -345,7 +371,7 @@ function buildPintiaQuestionListCandidates(
   vh: number,
 ): QuestionBlock[] {
   const roots = Array.from(document.querySelectorAll("div[id]"))
-    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .filter((node): node is HTMLElement =>isHtmlElementNode( node))
     .filter((el) => isLikelyPintiaQuestionListItem(el));
   const out: QuestionBlock[] = [];
 
@@ -417,7 +443,7 @@ function isTopClippedQuestionTail(container: HTMLElement, rect: DOMRect, vh: num
   if (rect.top >= -24) return false;
 
   const titleNode = container.querySelector(".title-box,.questionTit,.question-title");
-  if (titleNode instanceof HTMLElement) {
+if (isHtmlElementNode(titleNode)) {
     const titleRect = titleNode.getBoundingClientRect();
     if (titleRect.height >= 8 && titleRect.width >= 20) {
       // Current-screen detection should not keep the previous question
@@ -430,7 +456,7 @@ function isTopClippedQuestionTail(container: HTMLElement, rect: DOMRect, vh: num
   const stemNode = container.querySelector(
     ".qeustion-content,.questionContent,.question-content,.stem,.question-body,.content",
   );
-  if (stemNode instanceof HTMLElement) {
+if (isHtmlElementNode(stemNode)) {
     const stemRect = stemNode.getBoundingClientRect();
     if (stemRect.height >= 8 && stemRect.width >= 20) {
       if (stemRect.bottom <= 24) return true;
@@ -441,7 +467,110 @@ function isTopClippedQuestionTail(container: HTMLElement, rect: DOMRect, vh: num
   return rect.top < -48;
 }
 
-function getStableQuestionCardContainers(): Element[] {
+/** Provable slotted light-DOM containers: light children assigned to a slot of THIS shadow root. */
+function collectSlottedLightContainers(shadowRoot: ShadowRoot): Element[] {
+  const host = shadowRoot.host;
+  if (!host) return [];
+  const slots = Array.from(shadowRoot.querySelectorAll("slot"));
+  if (!slots.length) return [];
+  const out: Element[] = [];
+  for (const child of Array.from(host.children)) {
+if (!isHtmlElementNode(child)) continue;
+    const slotName = child.getAttribute("slot") ?? "";
+    const assigned = slots.some((slot) => (slot.getAttribute("name") ?? "") === slotName);
+    if (!assigned) continue;
+    out.push(child);
+  }
+  return out;
+}
+
+/**
+ * Root-scoped detection pass: same structured-container pipeline as the top
+ * document, bounded generic fallback, coordinates projected into top-tab
+ * viewport space, and runtime root attachment on every candidate.
+ */
+export function detectCandidatesInRoot(root: TraversableRoot, context: RootContext): QuestionBlock[] {
+  const vh = window.innerHeight;
+  const registry = sharedRootRegistry();
+  const projector = createTopViewportProjector(registry, context);
+  const blocks: QuestionBlock[] = [];
+
+  const containers = new Set<Element>(getStableQuestionCardContainers(root));
+  if (isOpenShadowRootNode(root)) {
+    for (const slotted of collectSlottedLightContainers(root)) {
+      const rect = slotted.getBoundingClientRect();
+      if (rect.width < 240 || rect.height < 120) continue;
+      containers.add(slotted);
+    }
+  }
+
+  let structuredIndex = 0;
+  for (const hostContainer of containers) {
+if (!isHtmlElementNode(hostContainer)) continue;
+    const rawRect = hostContainer.getBoundingClientRect();
+    const projected = projector({ left: rawRect.left, top: rawRect.top, width: rawRect.width, height: rawRect.height });
+    if (!projected) continue;
+    if (projected.width < 240 || projected.height < 120) continue;
+    if (getVisibleVerticalRatio(rawRect, vh) < 0.55) continue;
+
+    const readableText = extractStructuredQuestionText(hostContainer);
+    if (!readableText || readableText.length < 10 || isLikelyControlPanelText(readableText)) continue;
+    const previewText = sanitizePreviewTextByType(readableText, inferQuestionType(readableText));
+    const candidateType = inferQuestionType(previewText);
+    if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
+
+    const candidate = attachDetectedQuestionIdentity({
+      id: nextRootCandidateObservationId(),
+      bbox: { x: projected.left, y: projected.top, width: projected.width, height: projected.height },
+      previewText: previewText.slice(0, 420),
+      hasImage: hasMeaningfulVisualContent(hostContainer) || !!hostContainer.querySelector("table"),
+      questionImageUrl: pickQuestionImageFromElement(hostContainer) ?? undefined,
+      questionTypeGuess: candidateType,
+      confidence: 0.94,
+      source: "auto_dom",
+      identitySourceText: readableText,
+      runtimeOwnerKey: `root-${context.rootKey}-${structuredIndex++}`,
+      boundary: boundaryFromRawRect({ top: rawRect.top, height: rawRect.height }, vh),
+    }, hostContainer, { identityText: readableText, rootContext: context });
+    blocks.push(candidate);
+  }
+
+  // Bounded generic fallback for roots without stable structured containers.
+  if (blocks.length === 0) {
+    const elements = Array.from(root.querySelectorAll("p,div,li,section,article")).slice(0, MAX_SHADOW_HOST_PROBES);
+    let fallbackIndex = 0;
+    for (const el of elements) {
+      if (isExtensionUiElement(el)) continue;
+      if ((el as HTMLElement).assignedSlot) continue;
+      const text = normalizeText(el.textContent ?? "");
+      if (!text || text.length < 12 || isLikelyControlPanelText(text)) continue;
+      const score = scoreElement(el, text);
+      if (score.confidence < 0.45) continue;
+      const rawRect = (el as HTMLElement).getBoundingClientRect();
+      const projected = projector({ left: rawRect.left, top: rawRect.top, width: rawRect.width, height: rawRect.height });
+      if (!projected || projected.width < 80 || projected.height < 16) continue;
+      const candidateType = score.type !== "unknown" ? score.type : inferQuestionType(text);
+      const candidate = attachDetectedQuestionIdentity({
+        id: nextRootCandidateObservationId(),
+        bbox: { x: projected.left, y: projected.top, width: projected.width, height: projected.height },
+        previewText: buildPreviewText(el, text).slice(0, 420),
+        hasImage: score.hasImage,
+        questionImageUrl: pickQuestionImageFromElement(el) ?? undefined,
+        questionTypeGuess: candidateType,
+        confidence: score.confidence * 0.9,
+        source: "auto_dom",
+        identitySourceText: text,
+        runtimeOwnerKey: `root-fallback-${context.rootKey}-${fallbackIndex++}`,
+        boundary: boundaryFromRawRect({ top: rawRect.top, height: rawRect.height }, vh),
+      }, el, { identityText: text, rootContext: context });
+      blocks.push(candidate);
+    }
+  }
+
+  return filterFragmentBlocks(deduplicateBlocks(blocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
+}
+
+function getStableQuestionCardContainers(searchRoot: Document | ShadowRoot = document): Element[] {
   const preferredSelectors = [
     ".question-item",
     ".questionBox",
@@ -451,10 +580,13 @@ function getStableQuestionCardContainers(): Element[] {
   const out: Element[] = [];
 
   for (const selector of preferredSelectors) {
-    const nodes = Array.from(document.querySelectorAll(selector));
+    const nodes = Array.from(searchRoot.querySelectorAll(selector));
     for (const node of nodes) {
-      if (!(node instanceof HTMLElement)) continue;
+if (!isHtmlElementNode(node)) continue;
       if (seen.has(node) || isExtensionUiElement(node)) continue;
+      // Light content slotted into a component's shadow tree belongs to that
+      // composed component, never to the top document's candidate list.
+      if (node.assignedSlot) continue;
       if (!isElementVisible(node)) continue;
       const rect = node.getBoundingClientRect();
       if (rect.width < 240 || rect.height < 120) continue;
@@ -470,61 +602,6 @@ function getStableQuestionCardContainers(): Element[] {
   });
 }
 
-function scanIframes(vw: number, vh: number): QuestionBlock[] {
-  const blocks: QuestionBlock[] = [];
-  const iframes = document.querySelectorAll("iframe");
-  for (const [frameIndex, iframe] of Array.from(iframes).entries()) {
-    try {
-      const doc = iframe.contentDocument;
-      if (!doc) continue;
-      const frameRect = iframe.getBoundingClientRect();
-      if (!inViewport(frameRect, vw, vh)) continue;
-
-      const els = doc.querySelectorAll("p,div,li,section,article");
-      const frameOwnerKeys = new WeakMap<Element, string>();
-      let frameOwnerCounter = 0;
-      for (const el of els) {
-        const text = normalizeText(el.textContent ?? "");
-        if (!text || text.length < 12 || isLikelyControlPanelText(text)) continue;
-
-        const score = scoreElement(el, text);
-        if (score.confidence < 0.45) continue;
-
-        const r = (el as HTMLElement).getBoundingClientRect();
-        blocks.push(attachDetectedQuestionIdentity({
-          id: `iframe-auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          bbox: {
-            x: Math.max(0, frameRect.left + r.left),
-            y: Math.max(0, frameRect.top + r.top),
-            width: Math.min(r.width, vw),
-            height: Math.min(r.height, vh),
-          },
-          previewText: buildPreviewText(el, text).slice(0, 420),
-          hasImage: score.hasImage,
-          questionImageUrl: pickQuestionImageFromElement(el) ?? undefined,
-          questionTypeGuess: score.type,
-          confidence: score.confidence * 0.9,
-          source: "auto_dom",
-          identitySourceText: text,
-          runtimeOwnerKey: getIframeRuntimeOwnerKey(el, frameIndex, frameOwnerKeys, () => ++frameOwnerCounter),
-          boundary: boundaryFromRawRect({ top: frameRect.top + r.top, height: r.height } as DOMRect, vh),
-        }, el, { identityText: text }));
-      }
-    } catch (err) {
-      logWarn("Failed to scan iframe content", "scanIframes", { error: String(err) });
-    }
-  }
-  return blocks;
-}
-
-function getIframeRuntimeOwnerKey(el: Element, frameIndex: number, keys: WeakMap<Element, string>, next: () => number): string {
-  const owner = el.closest(".question-item,.questionBox,.base-question-component,article,section") ?? el;
-  const existing = keys.get(owner);
-  if (existing) return existing;
-  const key = `iframe-${frameIndex}-owner-${next()}`;
-  keys.set(owner, key);
-  return key;
-}
 
 function boundaryFromRawRect(rect: Pick<DOMRect, "top" | "height">, viewportHeight: number) {
   const evidence = classifyViewportBoundary({ y: rect.top, height: rect.height }, { innerHeight: viewportHeight } as Window);
@@ -680,12 +757,12 @@ function buildPintiaCodeProblemDisplaySegments(container: HTMLElement) {
   };
 
   const titleNode = pickBestPintiaTitleNode(container);
-  if (titleNode instanceof HTMLElement) {
+if (isHtmlElementNode(titleNode)) {
     pushSegment({ type: "text", text: titleNode.innerText || titleNode.textContent || "", role: "title" });
   }
 
   const metaNode = pickBestPintiaMetaNode(container);
-  if (metaNode instanceof HTMLElement) {
+if (isHtmlElementNode(metaNode)) {
     pushSegment({ type: "text", text: metaNode.innerText || metaNode.textContent || "", role: "meta" });
   }
 
@@ -702,7 +779,7 @@ function buildPintiaCodeProblemDisplaySegments(container: HTMLElement) {
     };
 
     for (const node of Array.from(markdownRoot.children)) {
-      if (!(node instanceof HTMLElement)) continue;
+if (!isHtmlElementNode(node)) continue;
       if (node.matches("h1,h2,h3,h4,h5,h6")) {
         currentLabel = normalizePintiaSectionLabel(node.innerText || node.textContent || "") || currentLabel;
         continue;
@@ -759,7 +836,7 @@ function normalizePintiaDisplayText(text: string): string {
 }
 
 function formatPintiaTableText(tableLike: Element | null): string {
-  if (!(tableLike instanceof HTMLElement)) return "";
+if (!isHtmlElementNode(tableLike)) return "";
   const table = tableLike.matches("table") ? tableLike : tableLike.querySelector("table");
   if (!(table instanceof HTMLTableElement)) return normalizeText(extractReadableNodeText(tableLike));
 
@@ -779,7 +856,7 @@ function formatPintiaTableText(tableLike: Element | null): string {
 
 function getPintiaRenderedMarkdownRoot(container: HTMLElement): HTMLElement | null {
   const direct = container.querySelector(".rendered-markdown");
-  return direct instanceof HTMLElement ? direct : null;
+return isHtmlElementNode(direct) ? direct : null;
 }
 
 function normalizePintiaSectionLabel(text: string): string {
@@ -805,7 +882,7 @@ function extractPintiaCodeBlockText(node: Element, options?: { preserveNumericOn
   }
 
   const pre = node.querySelector("pre");
-  if (pre instanceof HTMLElement) {
+if (isHtmlElementNode(pre)) {
     return String(pre.textContent || "")
       .replace(/\r\n?/g, "\n")
       .trim();
@@ -832,7 +909,7 @@ function normalizePintiaCodeLine(text: string, options?: { preserveNumericOnlyLi
 function pickBestPintiaTitleNode(container: HTMLElement): HTMLElement | null {
   const candidates = Array.from(container.querySelectorAll(
     ".text-darkest.font-bold.text-lg,h1,h2,h3,[id='title'],[id$='-title'],[id*='question-title']",
-  )).filter((node): node is HTMLElement => node instanceof HTMLElement);
+  )).filter((node): node is HTMLElement =>isHtmlElementNode( node));
   if (candidates.length === 0) return null;
   const scored = candidates
     .map((node) => {
@@ -852,7 +929,7 @@ function pickBestPintiaTitleNode(container: HTMLElement): HTMLElement | null {
 
 function pickBestPintiaMetaNode(container: HTMLElement): HTMLElement | null {
   const candidates = Array.from(container.querySelectorAll("div,span"))
-    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .filter((node): node is HTMLElement =>isHtmlElementNode( node))
     .map((node) => ({ node, text: normalizeText(node.innerText || node.textContent || "") }))
     .filter((entry) => entry.text.includes("作者") && entry.text.includes("单位"))
     .filter((entry) => entry.text.length <= 80);
@@ -1124,7 +1201,7 @@ function getHostRightSidebarCutX(vw: number, vh: number): number | null {
   let cutX = Number.POSITIVE_INFINITY;
 
   for (const n of nodes) {
-    if (!(n instanceof HTMLElement)) continue;
+if (!isHtmlElementNode(n)) continue;
     if (isExtensionUiElement(n)) continue;
     const rect = n.getBoundingClientRect();
     if (!inViewport(rect, vw, vh)) continue;
