@@ -47,7 +47,7 @@ type AutoSolveDeps = {
   extractQuestionImageUrlFromBBox: (bbox: QuestionBlock["bbox"]) => string | null;
   extractRichQuestionPreviewFromElement: (node: Element) => string;
   extractTextFromBBox: (bbox: QuestionBlock["bbox"]) => string;
-  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options?: { mode?: "auto" | "manual" }) => Promise<{ ok: boolean; filledCount: number; message: string }>;
+  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options?: { mode?: "auto" | "manual" }) => Promise<{ ok: boolean; filledCount: number; message: string; stopAutomation?: boolean }>;
   findBestDetectedCandidateForBBox: (bbox: QuestionBlock["bbox"]) => QuestionBlock | null;
   findMatchingFullPageCandidate: (
     candidates: QuestionBlock[],
@@ -288,6 +288,11 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
       );
       solved = answeredPhase.solved;
       filled = answeredPhase.filled;
+      if (answeredPhase.stopAutomation) {
+        controller.requestStop(true);
+        deps.sendAutoSolveDone({ ok: false, stopped: true, solved, filled, total, message: "Answer transaction could not be safely completed; Auto Solve stopped." });
+        return;
+      }
       if (answeredPhase.done) return;
       if (answeredPhase.handled) continue;
 
@@ -331,6 +336,11 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
         },
       );
       if (resolution.stale) continue;
+      if (resolution.stopAutomation) {
+        controller.requestStop(true);
+        deps.sendAutoSolveDone({ ok: false, stopped: true, solved, filled, total, message: resolution.progressMessage });
+        return;
+      }
       const questionCompleted = resolution.questionCompleted;
       filled += resolution.filledDelta;
       if (questionCompleted) solved += 1;

@@ -219,14 +219,16 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
 
   const handleBatchFill = useCallback(async () => {
     options.setIsBatchFilling(true);
-    const { totalFilled, totalQuestions } = await runBatchFill(options.candidates, {
+    const batchResult = await runBatchFill(options.candidates, {
       isCandidateCurrent,
       setCandidates: options.setCandidates,
       sendFillMessageWithVerify: (tabId, block, result) =>
         sendFillMessageWithVerify(tabId, block, result, isChoiceLikeResult),
     });
     options.setIsBatchFilling(false);
-    options.setFillFeedback(getBatchFillFeedback(options.uiLang, totalFilled, totalQuestions));
+    options.setFillFeedback(batchResult.stopMessage
+      ? `${batchResult.stopCode ?? "Fill stopped"}: ${batchResult.stopMessage}`
+      : getBatchFillFeedback(options.uiLang, batchResult.totalFilled, batchResult.totalQuestions));
     window.setTimeout(() => options.setFillFeedback(""), 2600);
   }, [options, isCandidateCurrent]);
 

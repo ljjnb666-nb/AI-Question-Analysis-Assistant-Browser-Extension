@@ -48,7 +48,13 @@ export function buildControlMapping(block: QuestionBlock, owner: Element): Contr
       if (!key) continue;
       if (options.has(key)) return { ok: false, code: "CONTROL_MAPPING_AMBIGUOUS", message: `Multiple active controls map to ${key}` };
       options.set(key, ref);
-    } else { blanks[blankIndex] = ref; textControls.push(ref); }
+    } else {
+      if (!Number.isInteger(blankIndex) || blankIndex < 0 || blanks[blankIndex]) {
+        return { ok: false, code: "CONTROL_MAPPING_AMBIGUOUS", message: "Multiple text controls map to the same semantic blank" };
+      }
+      blanks[blankIndex] = ref;
+      textControls.push(ref);
+    }
   }
   const text = textControls.length === 1 ? textControls[0] : null;
   const expectedBlanks = countExpectedBlankParts(block.previewText);

@@ -526,6 +526,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       const extensionId = await resolveExtensionId(context);
       const spaPage = await context.newPage();
       await spaPage.goto(`${server.origin}/host`);
+      await spaPage.waitForFunction(() => Boolean((document.getElementById("q-frame") as HTMLIFrameElement | null)?.contentDocument?.querySelector(".question-item")));
       await spaPage.evaluate(() => {
         const topQuestion = document.createElement("section");
         topQuestion.className = "question-item";
@@ -787,6 +788,130 @@ test.describe("Phase 7 accessible roots E2E", () => {
         return host.shadowRoot!.querySelectorAll('[aria-checked="true"]').length;
       });
       expect(checked).toBe(0);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
+  test("RERENDER-E2E-1: production fill resolves the next option after an equivalent owner rerender", async () => {
+    test.setTimeout(90_000);
+    const server = await startRootsServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const spaPage = await context.newPage();
+      await spaPage.goto(`${server.origin}/host`);
+      await spaPage.waitForFunction(() => Boolean((document.getElementById("q-frame") as HTMLIFrameElement | null)?.contentDocument?.querySelector(".question-item")));
+      await spaPage.evaluate(() => {
+        const frame = document.getElementById("q-frame") as HTMLIFrameElement;
+        const owner = frame.contentDocument!.querySelector<HTMLElement>(".question-item")!;
+        (window as unknown as { __rerenderClicks: Array<{ key: string; generation: number }> }).__rerenderClicks = [];
+        const arm = (current: HTMLElement, generation: number) => {
+          current.querySelectorAll<HTMLButtonElement>("button.option").forEach((button) => {
+            button.addEventListener("click", () => {
+              const key = button.textContent?.trim().charAt(0) ?? "";
+              const clickLog = (window as unknown as { __rerenderClicks: Array<{ key: string; generation: number }> }).__rerenderClicks;
+              clickLog.push({ key, generation });
+              current.querySelectorAll<HTMLButtonElement>("button.option").forEach((item) => {
+                if (item.textContent?.trim().charAt(0) === key) item.setAttribute("aria-checked", "true");
+              });
+              if (key === "B" && generation === 0) {
+                const replacement = current.cloneNode(true) as HTMLElement;
+                current.replaceWith(replacement);
+                arm(replacement, 1);
+              }
+            });
+          });
+        };
+        arm(owner, 0);
+      });
+
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, "/host", false);
+      await driver.waitForFunction(
+        () => (window as DriverWindow).__candidateBlocks?.length > 0,
+        undefined,
+        { timeout: 20_000 },
+      ).catch(async (err) => { await dumpDiagnostics(driver, "phase8b-rerender-e2e-candidates"); throw err; });
+
+      const response = await driver.evaluate(async (baseOrigin: string) => {
+        const blocks = (window as DriverWindow).__candidateBlocks as Array<{ id: string; bbox: { y: number }; previewText?: string; identity?: unknown; source?: string; runtimeQuestionHandle?: string }>;
+        const block = [...blocks].sort((left, right) => left.bbox.y - right.bbox.y)[0];
+        if (!block) throw new Error("phase8b rerender question candidate not found");
+        const [tab] = await chrome.tabs.query({ url: `${baseOrigin}/*` });
+        if (!tab?.id) throw new Error("root e2e tab not found");
+        const validation = await chrome.tabs.sendMessage(tab.id, {
+          type: "VALIDATE_QUESTION_RESULT_AUTHORITY",
+          block,
+          expectedUrl: `${baseOrigin}/host`,
+        });
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: "FILL_PARSED_ANSWER",
+          block,
+          result: { blockId: block.id, questionType: "multi_choice", answer: "B,C", confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" },
+        });
+        return { validation, response };
+      }, server.origin);
+
+      expect((response as { validation?: { ok?: boolean } }).validation?.ok).toBe(true);
+      expect((response as { response?: { ok?: boolean } }).response?.ok, JSON.stringify(response)).toBe(true);
+      const state = await spaPage.evaluate(() => {
+        const frameDocument = (document.getElementById("q-frame") as HTMLIFrameElement).contentDocument!;
+        return {
+          selected: Array.from(frameDocument.querySelectorAll<HTMLElement>(".question-item button[aria-checked='true']"), (button) => button.textContent?.trim().charAt(0) ?? "").sort(),
+        clicks: (window as unknown as { __rerenderClicks: Array<{ key: string; generation: number }> }).__rerenderClicks,
+        ownerCount: frameDocument.querySelectorAll(".question-item").length,
+      };
+      });
+      expect(state.selected).toEqual(["B", "C"]);
+      expect(state.clicks).toEqual([{ key: "B", generation: 0 }, { key: "C", generation: 1 }]);
+      expect(state.ownerCount).toBe(1);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
+  test("RERENDER-E2E-2: production Auto Solve stops when a mutation changes the question fingerprint", async () => {
+    test.setTimeout(90_000);
+    const server = await startRootsServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const spaPage = await context.newPage();
+      await spaPage.goto(`${server.origin}/host`);
+      await spaPage.waitForFunction(() => Boolean((document.getElementById("q-frame") as HTMLIFrameElement | null)?.contentDocument?.querySelector(".question-item")));
+      await spaPage.evaluate(() => {
+        const frame = document.getElementById("q-frame") as HTMLIFrameElement;
+        const owner = frame.contentDocument!.querySelector<HTMLElement>(".question-item")!;
+        (window as unknown as { __semanticChangeClicks: string[] }).__semanticChangeClicks = [];
+        owner.querySelectorAll<HTMLButtonElement>("button.option").forEach((button) => {
+          button.addEventListener("click", () => {
+            const key = button.textContent?.trim().charAt(0) ?? "";
+            (window as unknown as { __semanticChangeClicks: string[] }).__semanticChangeClicks.push(key);
+            button.setAttribute("aria-checked", "true");
+            if (key === "B") owner.querySelector(".stem")!.textContent = "13. A different question replaced the current question.";
+          });
+        });
+      });
+
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, "/host");
+      await expect.poll(() => server.held.length, { timeout: 30_000 }).toBe(1).catch(async (err) => { await dumpDiagnostics(driver, "phase8b-semantic-change-provider"); throw err; });
+      await server.held[0].respond("B,C");
+      server.held[0].settled = true;
+      await waitForEvent(driver, "AUTO_SOLVE_DONE");
+
+      const state = await spaPage.evaluate(() => {
+        const frameDocument = (document.getElementById("q-frame") as HTMLIFrameElement).contentDocument!;
+        return {
+          selected: Array.from(frameDocument.querySelectorAll<HTMLElement>(".question-item button[aria-checked='true']"), (button) => button.textContent?.trim().charAt(0) ?? ""),
+          clicks: (window as unknown as { __semanticChangeClicks: string[] }).__semanticChangeClicks,
+          ownerCount: frameDocument.querySelectorAll(".question-item").length,
+        };
+      });
+      expect(state.clicks).toEqual(["B"]);
+      expect(state.selected).toEqual(["B"]);
+      expect(state.ownerCount).toBe(1);
     } finally {
       await context.close();
       await server.close();

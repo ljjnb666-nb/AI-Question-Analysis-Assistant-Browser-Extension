@@ -122,6 +122,33 @@ describe("runAutoSolveAll attempt ownership", () => {
     expect(running).toBe(false);
   });
 
+  it("RUN-TX-STOP stops Auto Solve before question advance after a failed transaction", async () => {
+    const block = question();
+    let running = false;
+    let stopped = false;
+    const controller = {
+      isRunning: () => running,
+      setRunning: (value: boolean) => { running = value; },
+      isStopRequested: () => stopped,
+      requestStop: (value: boolean) => { stopped = value; },
+    };
+    const fillParsedAnswerInPage = vi.fn(async () => ({ ok: false, filledCount: 0, message: "PARTIAL_MUTATION_UNPROVABLE", stopAutomation: true }));
+    const sendAutoSolveDone = vi.fn();
+    const resolveQuestionAdvance = vi.fn(async () => false);
+
+    await runAutoSolveAll(controller, {
+      ...orchestrationDeps(block, async () => parsed(block)),
+      fillParsedAnswerInPage,
+      sendAutoSolveDone,
+      resolveQuestionAdvance,
+    } as never);
+
+    expect(fillParsedAnswerInPage).toHaveBeenCalledTimes(1);
+    expect(sendAutoSolveDone).toHaveBeenCalledWith(expect.objectContaining({ ok: false, stopped: true, message: "PARTIAL_MUTATION_UNPROVABLE" }));
+    expect(resolveQuestionAdvance).not.toHaveBeenCalled();
+    expect(running).toBe(false);
+  });
+
   it("SPA-RACE1 production orchestration rejects a late stale provider result with zero DOM mutation", async () => {
     const current = question();
     const pending = deferred<ParseResult>();

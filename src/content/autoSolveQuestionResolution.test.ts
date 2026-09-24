@@ -285,6 +285,23 @@ describe("resolveAutoSolveQuestion", () => {
     expect(sendProgress).not.toHaveBeenCalled();
   });
 
+  it("stops question resolution after a failed transaction without another fill attempt", async () => {
+    const block = makeBlock();
+    const parse = vi.fn(async () => makeResult({ confidence: 0.95 }));
+    const fill = vi.fn(async () => ({ ok: false, filledCount: 0, message: "PARTIAL_MUTATION_UNPROVABLE", stopAutomation: true }));
+    const verify = vi.fn(() => ({ ok: false, message: "not verified" }));
+
+    const outcome = await resolveAutoSolveQuestion(
+      { answerStateComplete: false, currentBlock: block, filled: 0, history: [], historyEntry: null, needsHistoryReview: false, needsQuickAnsweredChoiceReview: false, solved: 0, total: 1 },
+      { ...resolveDeps(parse), fillParsedAnswerInPage: fill, verifyParsedAnswerInPage: verify },
+    );
+
+    expect(outcome).toMatchObject({ filledDelta: 0, questionCompleted: false, stopAutomation: true, progressMessage: "PARTIAL_MUTATION_UNPROVABLE" });
+    expect(parse).toHaveBeenCalledTimes(1);
+    expect(fill).toHaveBeenCalledTimes(1);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
   it("AUTO-SNAP1 keeps the original empty baseline across a real deferred retry", async () => {
     const block = prepareChoiceQuestion();
     const first = deferred<ParseResult>();

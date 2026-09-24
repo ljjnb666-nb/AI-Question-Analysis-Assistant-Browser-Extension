@@ -4,7 +4,7 @@ import { attachQuestionIdentity, extractOrdinalHint } from "./questionIdentity";
 import { extractStructuredQuestionText } from "./detector/domStructuredText";
 import { resolveFillRootContext, sharedRootRegistry } from "./roots/rootRegistry";
 
-const QUESTION_OWNER_SELECTOR = ".question-item,.questionBox,.base-question-component,[data-question-id],[data-questionid],[data-problem-id],[data-problemid],[data-item-id]";
+export const QUESTION_OWNER_SELECTOR = ".question-item,.questionBox,.base-question-component,[data-question-id],[data-questionid],[data-problem-id],[data-problemid],[data-item-id]";
 
 /**
  * A deliberately one-shot reconstruction of the canonical Phase 1-4 identity.
@@ -56,4 +56,21 @@ export function isCurrentRuntimeQuestionBlock(block: QuestionBlock): boolean {
   const live = observeLiveQuestion(block, context.owner).identity;
   return live.stableId === block.identity.stableId
     && live.contentFingerprint === block.identity.contentFingerprint;
+}
+
+/**
+ * Find only exact semantic-owner matches inside one caller-authorized root.
+ * The caller must also prove that root's live anchor and generation. Multiple
+ * matches are preserved so callers can fail closed instead of guessing.
+ */
+export function equivalentQuestionOwnersInRoot(block: QuestionBlock, root: Document | ShadowRoot): Element[] {
+  const expectedId = block.identity?.stableId;
+  const expectedFingerprint = block.identity?.contentFingerprint;
+  if (!expectedId || !expectedFingerprint) return [];
+  const candidates = Array.from(root.querySelectorAll(QUESTION_OWNER_SELECTOR));
+  const exact = candidates.filter((candidate) => {
+    const identity = observeLiveQuestion(block, candidate).identity;
+    return identity.stableId === expectedId && identity.contentFingerprint === expectedFingerprint;
+  });
+  return exact.filter((candidate) => !exact.some((other) => other !== candidate && other.contains(candidate)));
 }
