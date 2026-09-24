@@ -4,6 +4,7 @@ import { handleAnsweredQuestionPhase } from "./autoSolveAnsweredQuestion";
 import { findReusableHistoryEntry } from "./autoSolveHeuristics";
 import { captureSolveStartControlState, fillParsedAnswerInPage, finishAutoSolveQuestionAttempt, hasAutoSolveQuestionAttempt } from "./answerFiller";
 import { observeLiveQuestion } from "./liveQuestionObservation";
+import { attachRuntimeRoot, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
 import { resolveAutoSolveQuestion } from "./autoSolveQuestionResolution";
 
 function makeBlock(overrides: Partial<QuestionBlock> = {}): QuestionBlock {
@@ -33,6 +34,11 @@ function makeResult(overrides: Partial<ParseResult> = {}): ParseResult {
   };
 }
 
+function bindTopRuntimeCandidate(block: QuestionBlock, owner: Element): QuestionBlock {
+  const observed = observeLiveQuestion(block, owner);
+  return attachRuntimeRoot(observed, { rootKey: TOP_ROOT_KEY, rootGeneration: TOP_ROOT_GENERATION, kind: "top-document" }, owner);
+}
+
 function makeHistoryEntry(result: ParseResult): HistoryEntry {
   return {
     id: "hist-1",
@@ -48,18 +54,17 @@ describe("handleAnsweredQuestionPhase", () => {
     const historyResult = makeResult({ questionType: "single_choice", answer: "B" });
     const historyEntry = makeHistoryEntry(historyResult);
     const run = async (unavailable: boolean) => {
-      document.body.innerHTML = '<section class="question-item" id="q-hist">12. prompt <button>A. a</button><button id="b">B. b</button><button id="c">C. c</button></section>';
+      document.body.innerHTML = unavailable
+        ? '<div id="q-hist">12. prompt <section class="question-item" data-question-id="11">11. unrelated A. x</section><section class="question-item" data-question-id="13">13. unrelated B. y</section></div><button id="b">B. b decoy</button><button id="c">C. c decoy</button>'
+        : '<section class="question-item" id="q-hist">12. prompt <button>A. a</button><button id="b">B. b</button><button id="c">C. c</button></section>';
       const owner = document.getElementById("q-hist")!;
       document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
-      const block = observeLiveQuestion(makeBlock({ id: "q-hist", previewText: "12. prompt A. a B. b C. c" }), owner);
+      const block = bindTopRuntimeCandidate(makeBlock({ id: "q-hist", previewText: "12. prompt A. a B. b C. c" }), owner);
       document.getElementById("c")!.addEventListener("click", () => document.getElementById("c")!.setAttribute("aria-checked", "true"));
       if (!unavailable) { captureSolveStartControlState(block); document.getElementById("c")!.click(); }
-      const original = document.elementsFromPoint;
-      if (unavailable) Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: undefined });
       const fill = vi.fn((target: QuestionBlock, parsed: ParseResult) => {
-        // Capture is deliberately unavailable, but the subsequent fill still
-        // needs normal DOM scope resolution to prove it fails closed.
-        if (unavailable) Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: original });
+        // The no-control candidate cannot produce a solve-start snapshot; its
+        // exact runtime owner still resolves, then fill fails closed.
         return fillParsedAnswerInPage(target, parsed, { mode: "auto" });
       });
       try {
@@ -74,7 +79,6 @@ describe("handleAnsweredQuestionPhase", () => {
         if (!unavailable) expect(document.getElementById("c")!.getAttribute("aria-checked")).toBe("true");
         expect(hasAutoSolveQuestionAttempt(block)).toBe(true);
       } finally {
-        Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: original });
         finishAutoSolveQuestionAttempt(block);
       }
     };
@@ -86,7 +90,7 @@ describe("handleAnsweredQuestionPhase", () => {
     document.body.innerHTML = '<section class="question-item" id="q-fallback">12. prompt <button>A. a</button><button id="b">B. b</button><button id="c">C. c</button></section>';
     const owner = document.getElementById("q-fallback")!;
     document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
-    const block = observeLiveQuestion(makeBlock({ id: "q-fallback", previewText: "12. prompt A. a B. b C. c" }), owner);
+    const block = bindTopRuntimeCandidate(makeBlock({ id: "q-fallback", previewText: "12. prompt A. a B. b C. c" }), owner);
     document.getElementById("c")!.addEventListener("click", () => document.getElementById("c")!.setAttribute("aria-checked", "true"));
     const historyResult = makeResult({ blockId: block.id, questionType: "single_choice", answer: "B" });
     const historyEntry = makeHistoryEntry(historyResult);
@@ -117,7 +121,7 @@ describe("handleAnsweredQuestionPhase", () => {
     document.body.innerHTML = '<section class="question-item" id="q-legacy">根据下图选择正确答案。 <button>A. 甲</button><button id="b">B. 乙</button><button>C. 丙</button><button>D. 丁</button></section>';
     const owner = document.getElementById("q-legacy")!;
     document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
-    const current = observeLiveQuestion(
+    const current = bindTopRuntimeCandidate(
       makeBlock({ id: "q-legacy", previewText: "根据下图选择正确答案。 A. 甲 B. 乙 C. 丙 D. 丁", hasImage: true, questionImageUrl: "http://img.test/diagram-b.png" }),
       owner,
     );

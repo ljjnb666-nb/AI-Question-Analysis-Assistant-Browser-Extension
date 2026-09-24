@@ -269,7 +269,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
     }
   });
 
-  test("Scenario B: a semantic-equivalent rerender fills the new controls only", async () => {
+  test("Scenario B: a semantic-equivalent owner replacement fails closed, then fresh detection remains available", async () => {
     test.setTimeout(60_000);
     const server = await startSpaServer();
     const context = await launchExtensionContext();
@@ -296,7 +296,9 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       await waitForEvent(driver, "AUTO_SOLVE_DONE");
 
       const clicks = await spaPage.evaluate(() => (window as SpaPageWindow).__clicks);
-      expect(clicks).toEqual([{ generation: 1, label: "B" }]);
+      // Phase 7 binds an automatic candidate to its exact runtime owner. A
+      // replacement owner is stale even when its semantic fingerprint matches.
+      expect(clicks).toEqual([]);
 
       // The extension remains operational: a fresh detect round-trips.
       await driver.evaluate(async (baseOrigin: string) => {

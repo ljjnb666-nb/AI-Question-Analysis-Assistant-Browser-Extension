@@ -1,3 +1,4 @@
+import { isElementInOwnerRealm, isHTMLElementInOwnerRealm } from "../domRealm";
 import type { BoundingBox } from "@/shared/types";
 import { normalizeText } from "./domText";
 
@@ -42,10 +43,10 @@ export function isLikelyActionText(text: string): boolean {
  * instanceof the top window's HTMLElement/Element constructors, so plain
  * instanceof silently drops every frame-owned node in Chrome.
  */
-export function isElementNode(node: unknown): node is HTMLElement {
-  return Boolean(node) && (node as Node).nodeType === 1 && typeof (node as HTMLElement).getBoundingClientRect === "function";
+export function isElementNode(node: unknown): node is Element {
+  return isElementInOwnerRealm(node);
 }
 
 export function isHtmlElementNode(node: unknown): node is HTMLElement {
-  return isElementNode(node);
+  return isHTMLElementInOwnerRealm(node);
 }

@@ -1,6 +1,7 @@
 import { isHtmlElementNode } from "./detector/domDetectorShared";
 import type { ExtMessage, ParseResult, QuestionBlock } from "@/shared/types";
 import { detectCandidatesAcrossRoots } from "./detector/domDetector";
+import { sanitizeQuestionBlockForSerialization } from "@/shared/utils/mediaSerialization";
 
 export function isExtensionContextInvalidatedError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err || "");
@@ -129,6 +130,9 @@ export function sendAutoSolveProgress(
   safeRuntimeSendMessage({
     type: "AUTO_SOLVE_PROGRESS",
     ...payload,
+    currentBlock: payload.currentBlock
+      ? sanitizeQuestionBlockForSerialization(payload.currentBlock)
+      : undefined,
   });
 }
 

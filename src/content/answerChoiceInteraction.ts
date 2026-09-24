@@ -7,6 +7,7 @@ import {
   normalizeChoiceAnswerKeys as normalizeChoiceAnswerKeysCore,
 } from "./answerText";
 import type { ChoiceHelperDeps, FillAnswerResult, VerifyAnswerResult } from "./answerTypes";
+import { isHTMLInputInOwnerRealm } from "./domRealm";
 
 export interface ChoiceCandidate {
   key: string;
@@ -160,7 +161,7 @@ function applyFallbackChoiceMapping(
   deps: ChoiceHelperDeps,
 ) {
   const inputs = Array.from(scope.querySelectorAll(CHOICE_INPUT_SELECTOR))
-    .filter((node): node is HTMLInputElement => node instanceof HTMLInputElement)
+    .filter((node): node is HTMLInputElement => isHTMLInputInOwnerRealm(node))
     .filter((input) => deps.rectIntersectsExpandedBBox(input.getBoundingClientRect(), bbox, 28, 260))
     .sort((a, b) => deps.compareRectPosition(a.getBoundingClientRect(), b.getBoundingClientRect()));
 
@@ -203,10 +204,10 @@ function resolveDesiredChoiceKeys(
 
 function findChoiceInput(row: Element): HTMLInputElement | null {
   const direct = row.querySelector(CHOICE_INPUT_SELECTOR);
-  if (direct instanceof HTMLInputElement) return direct;
+  if (isHTMLInputInOwnerRealm(direct)) return direct;
 
   const siblingInput = row.closest("label")?.querySelector(CHOICE_INPUT_SELECTOR);
-  return siblingInput instanceof HTMLInputElement ? siblingInput : null;
+  return isHTMLInputInOwnerRealm(siblingInput) ? siblingInput : null;
 }
 
 function findChoiceTarget(row: Element): HTMLElement | null {

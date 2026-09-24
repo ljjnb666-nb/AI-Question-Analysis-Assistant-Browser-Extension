@@ -26,6 +26,7 @@ import {
   jumpToNextCandidateInFullPage,
   resolveOrderedPlanViewportBlock,
 } from "./autoSolveOrderedPlan";
+import { refreshRuntimeQuestionBlock } from "./roots/rootRegistry";
 
 type AutoSolveController = {
   isRunning: () => boolean;
@@ -156,6 +157,8 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
     detectTotalQuestionCount: deps.detectTotalQuestionCount,
     extractAutoSolveQuestionOrder: deps.extractAutoSolveQuestionOrder,
     getScrollLeft: deps.getScrollLeft,
+    projectViewportBboxToAbsolute: deps.projectViewportBboxToAbsolute,
+    refreshRuntimeQuestionBlock,
     mergeOrderedPlanWithDetectedCandidates: (domPlan: QuestionBlock[], refined: QuestionBlock[]) =>
       mergeOrderedPlanWithDetectedCandidates(domPlan, refined, createMergeOrderedPlanDeps({
         sortAutoSolveCandidates: deps.sortAutoSolveCandidates,

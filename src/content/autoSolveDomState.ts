@@ -1,4 +1,5 @@
 import { isHtmlElementNode } from "./detector/domDetectorShared";
+import { isHTMLInputInOwnerRealm, isHTMLTextAreaInOwnerRealm } from "./domRealm";
 import type { BoundingBox, QuestionBlock } from "@/shared/types";
 
 type AnswerState = {
@@ -45,7 +46,7 @@ export function inspectAutoSolveAnswerState(
     .filter((el) => rectIntersectsExpandedBBox(el.getBoundingClientRect(), block.bbox, 40, 320));
   if (textControls.length > 0) {
     const answeredCount = textControls.filter((el) => {
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return Boolean(String(el.value || "").trim());
+      if (isHTMLInputInOwnerRealm(el) || isHTMLTextAreaInOwnerRealm(el)) return Boolean(String(el.value || "").trim());
       if (el.isContentEditable) return Boolean(String(el.textContent || "").trim());
       return false;
     }).length;
@@ -58,7 +59,7 @@ export function inspectAutoSolveAnswerState(
   }
 
   const choiceInputs = Array.from(scope.querySelectorAll("input[type='radio'], input[type='checkbox']"))
-    .filter((el): el is HTMLInputElement => el instanceof HTMLInputElement)
+    .filter((el): el is HTMLInputElement => isHTMLInputInOwnerRealm(el))
     .filter((el) => rectIntersectsExpandedBBox(el.getBoundingClientRect(), block.bbox, 28, 260));
   if (choiceInputs.length > 0) {
     const answeredCount = choiceInputs.filter((el) => el.checked).length;
@@ -122,7 +123,7 @@ export function extractSelectedChoiceAnswer(
   }
 
   const checkedInputs = Array.from(scope.querySelectorAll("input[type='radio'], input[type='checkbox']"))
-    .filter((el): el is HTMLInputElement => el instanceof HTMLInputElement)
+    .filter((el): el is HTMLInputElement => isHTMLInputInOwnerRealm(el))
     .filter((el) => rectIntersectsExpandedBBox(el.getBoundingClientRect(), block.bbox, 28, 260))
     .filter((el) => el.checked)
     .map((el) => {

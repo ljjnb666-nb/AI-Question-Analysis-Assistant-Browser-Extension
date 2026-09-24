@@ -56,14 +56,14 @@ export function captureSolveStartControlState(block: QuestionBlock): void {
   // replace it after a user has interacted with the question.
   if (autoSnapshotStatus.has(key)) return;
   autoSnapshotStatus.set(key, "unavailable");
-  if (typeof document.elementsFromPoint !== "function") return;
   const rootContext = resolveFillRootContext(sharedRootRegistry(), block);
   if (!rootContext.ok) return;
   let scope: Element;
   try {
-    scope = rootContext.shadowRoot
+    scope = rootContext.owner
+      ?? (rootContext.shadowRoot
       ? resolveShadowQuestionScope(rootContext.shadowRoot, rootContext.localBBox, block) ?? rootContext.shadowRoot.host
-      : resolveQuestionScope(normalizeBBoxToViewport(rootContext.localBBox), scopeSelectors, rootContext.doc);
+      : resolveQuestionScope(normalizeBBoxToViewport(rootContext.localBBox), scopeSelectors, rootContext.doc));
   } catch {
     // Scope resolution unavailable in this root (e.g. no elementsFromPoint):
     // the snapshot stays "unavailable" and every fill fails closed.
@@ -121,7 +121,7 @@ const scopeSelectors = {
   choiceInputSelector: CHOICE_INPUT_SELECTOR,
 };
 
-type ResolvedFillScope = { ok: true; doc: Document; localBBox: BoundingBox; shadowRoot: ShadowRoot | null } | { ok: false; message: string };
+type ResolvedFillScope = { ok: true; doc: Document; localBBox: BoundingBox; shadowRoot: ShadowRoot | null; owner: Element | null } | { ok: false; message: string };
 
 /**
  * Locate a question scope inside an open shadow root. Identity match wins:
@@ -162,9 +162,9 @@ function resolveShadowQuestionScope(shadowRoot: ShadowRoot, bbox: BoundingBox, b
  */
 function resolveFillScopeForBlock(block: QuestionBlock): ResolvedFillScope {
   const rootContext = resolveFillRootContext(sharedRootRegistry(), block);
-  if (!rootContext.ok) return { ok: false, message: STALE_ROOT_CONTEXT };
+  if (!rootContext.ok) return { ok: false, message: rootContext.reason };
   const { doc, shadowRoot, localBBox } = rootContext;
-  return { ok: true, doc, localBBox, shadowRoot };
+  return { ok: true, doc, localBBox, shadowRoot, owner: rootContext.owner };
 }
 
 export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult, options: { mode?: "auto" | "manual" } = {}): Promise<FillAnswerResult> {
@@ -172,12 +172,11 @@ export async function fillParsedAnswerInPage(block: QuestionBlock, result: Parse
   if (!resolved.ok) {
     return { ok: false, filledCount: 0, message: resolved.message };
   }
-  const { doc, localBBox, shadowRoot } = resolved;
+  const { doc, localBBox, shadowRoot, owner } = resolved;
 
-  const directScope = await resolveDirectQuestionScope(block, result, doc).catch(() => null);
-  if (directScope) {
-    return fillVerifiedAnswerIntoScope(directScope.scope, block, result, options.mode ?? "manual");
-  }
+  // Runtime candidates are bound to the exact owner resolved from the opaque
+  // content-side handle. This also keeps shadow candidates inside their root.
+  if (owner) return fillVerifiedAnswerIntoScope(owner, block, result, options.mode ?? "manual");
 
   if (shadowRoot) {
     const shadowScope = resolveShadowQuestionScope(shadowRoot, localBBox, block) ?? shadowRoot.host;
@@ -185,6 +184,11 @@ export async function fillParsedAnswerInPage(block: QuestionBlock, result: Parse
       return fillVerifiedAnswerIntoScope(shadowScope, block, result, options.mode ?? "manual");
     }
     return { ok: false, filledCount: 0, message: STALE_ROOT_CONTEXT };
+  }
+
+  const directScope = await resolveDirectQuestionScope(block, result, doc).catch(() => null);
+  if (directScope) {
+    return fillVerifiedAnswerIntoScope(directScope.scope, block, result, options.mode ?? "manual");
   }
 
   ensureQuestionRegionVisible(localBBox);
@@ -204,20 +208,20 @@ export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResu
   // Verification must run in the question's own root: a shadow/frame question
   // verified against the top document always fails closed with a bogus scope.
   const rootContext = resolveFillRootContext(sharedRootRegistry(), block);
-  if (!rootContext.ok) return { ok: false, expectedKeys: [], actualKeys: [], message: STALE_ROOT_CONTEXT };
-  const { doc, shadowRoot, localBBox } = rootContext;
+  if (!rootContext.ok) return { ok: false, expectedKeys: [], actualKeys: [], message: rootContext.reason };
+  const { doc, shadowRoot, localBBox, owner } = rootContext;
+
+  if (owner) return verifyVerifiedAnswerInScope(owner, block, result);
+
+  if (shadowRoot) {
+    const shadowScope = resolveShadowQuestionScope(shadowRoot, localBBox, block) ?? shadowRoot.host;
+    if (shadowScope) return verifyVerifiedAnswerInScope(shadowScope, block, result);
+    return { ok: false, expectedKeys: [], actualKeys: [], message: STALE_ROOT_CONTEXT };
+  }
 
   const directScope = resolveDirectQuestionScopeSync(block, result, doc);
   if (directScope) {
     return verifyVerifiedAnswerInScope(directScope.scope, block, result);
-  }
-
-  if (shadowRoot) {
-    const shadowScope = resolveShadowQuestionScope(shadowRoot, localBBox, block) ?? shadowRoot.host;
-    if (shadowScope) {
-      return verifyVerifiedAnswerInScope(shadowScope, block, result);
-    }
-    return { ok: false, expectedKeys: [], actualKeys: [], message: STALE_ROOT_CONTEXT };
   }
 
   let scope = resolveQuestionScope(normalizeBBoxToViewport(localBBox), scopeSelectors, doc);
@@ -232,14 +236,14 @@ export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResu
 }
 
 async function fillVerifiedAnswerIntoScope(scope: Element, block: QuestionBlock, result: ParseResult, mode: "auto" | "manual"): Promise<FillAnswerResult> {
-  const mapping = buildControlMapping(block, scope);
-  if (!mapping.ok) return { ok: false, filledCount: 0, message: mapping.code };
-  const validated = buildValidatedAnswerPlan(block, result, mapping);
-  if (!validated.ok) return { ok: false, filledCount: 0, message: validated.code };
   const key = snapshotKey(block); const autoStatus = autoSnapshotStatus.get(key);
   const solveStart = solveStartSnapshots.get(key);
   if (mode === "auto" && (autoStatus !== "captured" || !solveStart)) return { ok: false, filledCount: 0, message: "USER_STATE_SNAPSHOT_UNAVAILABLE" };
   if (mode === "auto" && hasQuestionRevisionAttempt() && !isCurrentQuestionRevisionBlock(block)) return { ok: false, filledCount: 0, message: "STALE_QUESTION_REVISION" };
+  const mapping = buildControlMapping(block, scope);
+  if (!mapping.ok) return { ok: false, filledCount: 0, message: mapping.code };
+  const validated = buildValidatedAnswerPlan(block, result, mapping);
+  if (!validated.ok) return { ok: false, filledCount: 0, message: validated.code };
   const live = observeLiveQuestion(block, mapping.owner).identity;
   if ((block.identity && (live.stableId !== block.identity.stableId || live.contentFingerprint !== block.identity.contentFingerprint)) || (solveStart && (solveStart.stableId !== live.stableId || solveStart.contentFingerprint !== live.contentFingerprint))) {
     return { ok: false, filledCount: 0, message: "STALE_ACTION_PLAN" };

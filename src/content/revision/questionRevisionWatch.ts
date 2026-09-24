@@ -1,7 +1,8 @@
-import { isElementNode, isExtensionUiElement, isHtmlElementNode } from "../detector/domDetectorShared";
+import { isElementNode, isExtensionUiElement } from "../detector/domDetectorShared";
 import type { QuestionBlock } from "@/shared/types";
-import { TOP_ROOT_KEY, ownerOf, type RootContext, type TraversableRoot } from "../roots/rootContext";
+import { invalidateRuntimeQuestionHandlesForRoot, TOP_ROOT_KEY, ownerOf, type RootContext, type TraversableRoot } from "../roots/rootContext";
 import { sharedRootRegistry, type RootRegistryEvents } from "../roots/rootRegistry";
+import { getAccessibleFrameDocument } from "../roots/rootDom";
 import {
   abortQuestionRevisionAttempt,
   abortQuestionRevisionAttemptForRoot,
@@ -31,6 +32,7 @@ function isRelevantMutation(record: MutationRecord): boolean {
 }
 
 type RootAttachment = { observer: MutationObserver; onLoad?: () => void };
+type PendingFrameLoad = { parentRootKey: string; listener: () => void };
 
 /**
  * The single SPA semantic-watch owner. It owns one lifecycle for every
@@ -47,9 +49,10 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
 
   const dirtyRoots = new Set<string>();
   const attached = new Map<string, RootAttachment>();
-  const pendingFrameListeners = new WeakSet<HTMLIFrameElement>();
+  const pendingFrameListeners = new Map<HTMLIFrameElement, PendingFrameLoad>();
 
   const schedule = () => {
+    if (stopped) return;
     if (!timer) timer = setTimeout(flush, 50);
   };
 
@@ -89,11 +92,14 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
       detachRoot(rootKey);
       revisions.removeRoot(rootKey);
       abortQuestionRevisionAttemptForRoot(rootKey);
+      invalidateRuntimeQuestionHandlesForRoot(rootKey);
+      options.onCandidates([], rootKey);
       options.onEvent?.("ROOT_REPLACED", rootKey);
     }
     for (const rootKey of events.replacedRootKeys) {
       // Same anchor, replaced document/generation: previous bindings are stale.
       abortQuestionRevisionAttemptForRoot(rootKey);
+      invalidateRuntimeQuestionHandlesForRoot(rootKey);
       options.onEvent?.("ROOT_REPLACED", rootKey);
       const context = roots.get(rootKey);
       if (context) {
@@ -123,6 +129,7 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
 
     const events = roots.reconcile(document, dirty);
     handleRootLifecycle(events);
+    for (const rootKey of [...events.addedRootKeys, ...events.replacedRootKeys]) dirty.add(rootKey);
     // Observer attachment is idempotent with registry state: roots registered
     // by any reconcile (detection, watcher) must all be observed, and pruned
     // roots must lose their observers.
@@ -196,16 +203,36 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
   // listener so same-origin frames register as soon as their document exists.
   // Cross-origin frames never fire an accessible root and stay out of scope.
   const watchPendingFrames = () => {
-    for (const iframe of Array.from(document.querySelectorAll("iframe"))) {
-      if (pendingFrameListeners.has(iframe)) continue;
-      pendingFrameListeners.add(iframe);
-      const onFrameLoad = () => {
-        iframe.removeEventListener("load", onFrameLoad);
-        pendingFrameListeners.delete(iframe);
-        dirtyRoots.add(TOP_ROOT_KEY);
-        schedule();
-      };
-      iframe.addEventListener("load", onFrameLoad, { once: true });
+    const needed = new Set<HTMLIFrameElement>();
+    for (const parent of roots.list()) {
+      let iframes: HTMLIFrameElement[];
+      try {
+        iframes = Array.from(parent.root.querySelectorAll("iframe"));
+      } catch {
+        continue;
+      }
+      for (const iframe of iframes) {
+        if (!iframe.isConnected || getAccessibleFrameDocument(iframe)) continue;
+        needed.add(iframe);
+        const current = pendingFrameListeners.get(iframe);
+        if (current?.parentRootKey === parent.rootKey) continue;
+        if (current) iframe.removeEventListener("load", current.listener);
+        if (!current && pendingFrameListeners.size >= 32) continue;
+        const onFrameLoad = () => {
+          iframe.removeEventListener("load", onFrameLoad);
+          pendingFrameListeners.delete(iframe);
+          if (stopped || !roots.get(parent.rootKey)) return;
+          dirtyRoots.add(parent.rootKey);
+          schedule();
+        };
+        pendingFrameListeners.set(iframe, { parentRootKey: parent.rootKey, listener: onFrameLoad });
+        iframe.addEventListener("load", onFrameLoad, { once: true });
+      }
+    }
+    for (const [iframe, pending] of pendingFrameListeners) {
+      if (needed.has(iframe)) continue;
+      iframe.removeEventListener("load", pending.listener);
+      pendingFrameListeners.delete(iframe);
     }
   };
   watchPendingFrames();
@@ -214,9 +241,12 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
   addEventListener("popstate", onRoute);
   addEventListener("hashchange", onRoute);
   // Initial lifecycle pass so roots present before the watch starts are owned.
-  handleRootLifecycle(roots.reconcile(document));
-  const topRoot = roots.get(TOP_ROOT_KEY);
-  if (topRoot) observeRoot(topRoot);
+  const initialEvents = roots.reconcile(document);
+  handleRootLifecycle(initialEvents);
+  for (const root of roots.list()) {
+    observeRoot(root);
+  }
+  watchPendingFrames();
 
   return () => {
     stopped = true;
@@ -228,7 +258,12 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
       }
     }
     attached.clear();
+    for (const [iframe, pending] of pendingFrameListeners) {
+      iframe.removeEventListener("load", pending.listener);
+      pendingFrameListeners.delete(iframe);
+    }
     dirtyRoots.clear();
+    for (const root of roots.list()) invalidateRuntimeQuestionHandlesForRoot(root.rootKey);
     roots.reset();
     removeEventListener("popstate", onRoute);
     removeEventListener("hashchange", onRoute);

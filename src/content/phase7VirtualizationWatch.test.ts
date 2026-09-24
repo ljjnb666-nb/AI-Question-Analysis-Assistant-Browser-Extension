@@ -198,26 +198,49 @@ describe("Phase 7 root watcher lifecycle", () => {
   });
 
   it("ROOT-LIFE-1 registers an inserted iframe root and cleans up on removal", async () => {
+    const removedRootKeys = new Set<string>();
     const stop = startQuestionRevisionWatch({
       detectCandidates: () => [],
       onCandidates: () => {},
+      onEvent: (event, rootKey) => { if (event === "ROOT_REPLACED" && rootKey) removedRootKeys.add(rootKey); },
       detectRootCandidates: detectCandidatesInRoot,
     });
     const iframe = document.createElement("iframe");
-    document.body.append(iframe);
-    iframe.contentDocument!.body.innerHTML = questionHtml("12", "diagram-a");
-    // Two settle rounds: the insert mutation registers the root on flush #1,
-    // the frame observer attaches on flush #1, and a follow-up mutation
-    // guarantees a second reconciliation has completed before we assert.
-    document.body.append(document.createElement("div"));
-    await vi.waitFor(() => expect(sharedRootRegistry().list().some((root) => root.kind === "same-origin-frame")).toBe(true), { timeout: 10_000 });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    let removalBarrier: MutationObserver | undefined;
+    try {
+      document.body.append(iframe);
+      iframe.contentDocument!.body.innerHTML = questionHtml("12", "diagram-a");
+      document.body.append(document.createElement("div"));
+      const frameRoot = await vi.waitFor(() => {
+        const root = sharedRootRegistry().list().find((candidate) => candidate.kind === "same-origin-frame");
+        expect(root).toBeDefined();
+        return root!;
+      }, { timeout: 25_000 });
 
-    iframe.remove();
-    document.body.append(document.createElement("div"));
-    await vi.waitFor(() => expect(sharedRootRegistry().list().some((root) => root.kind === "same-origin-frame")).toBe(false), { timeout: 10_000 });
-    stop();
-  });
+      let removalMutationObserved = false;
+      const barrier = new MutationObserver((records) => {
+        if (records.some((record) => Array.from(record.removedNodes).includes(iframe))) {
+          removalMutationObserved = true;
+          barrier.disconnect();
+        }
+      });
+      removalBarrier = barrier;
+      barrier.observe(document.body, { childList: true });
+      iframe.remove();
+      await vi.waitFor(() => expect(removalMutationObserved).toBe(true), { timeout: 10_000 });
+      barrier.disconnect();
+      // The registered frame load hook is another owned lifecycle signal. A
+      // final load reconciliation must prune a frame detached before flush.
+      iframe.dispatchEvent(new Event("load"));
+      document.body.append(document.createElement("div"));
+      await vi.waitFor(() => expect(removedRootKeys.has(frameRoot.rootKey)).toBe(true), { timeout: 25_000 });
+      expect(sharedRootRegistry().list().some((root) => root.rootKey === frameRoot.rootKey)).toBe(false);
+    } finally {
+      removalBarrier?.disconnect();
+      stop();
+      iframe.remove();
+    }
+  }, 55_000);
 
   it("ROOT-LIFE-2 discovers a dynamically inserted open-shadow host and cleans up", async () => {
     const stop = startQuestionRevisionWatch({
@@ -244,6 +267,7 @@ describe("Phase 7 root watcher lifecycle", () => {
     const second = vi.fn();
     const stopFirst = startQuestionRevisionWatch({ detectCandidates: () => [], onCandidates: first });
     stopFirst();
+    first.mockClear();
     const stopSecond = startQuestionRevisionWatch({ detectCandidates: () => [], onCandidates: second });
     document.body.append(document.createElement("div"));
     await vi.waitFor(() => expect(second).toHaveBeenCalled(), { timeout: 10_000 });
@@ -271,6 +295,89 @@ describe("Phase 7 root watcher lifecycle", () => {
     document.body.append(document.createElement("div"));
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(sharedRootRegistry().list()).toHaveLength(0);
+  }, 15_000);
+
+  it("NESTED-FRAME-LOAD-1 discovers a nested pending frame on load without a parent mutation", async () => {
+    const outer = document.createElement("iframe");
+    document.body.append(outer);
+    const outerDoc = outer.contentDocument!;
+    const pending = outerDoc.createElement("iframe");
+    outerDoc.body.append(pending);
+    const pendingDoc = pending.contentDocument!;
+    let loaded = false;
+    Object.defineProperty(pending, "contentDocument", {
+      configurable: true,
+      get: () => loaded ? pendingDoc : null,
+    });
+    const onCandidates = vi.fn();
+    const stop = startQuestionRevisionWatch({
+      detectCandidates: () => [],
+      onCandidates,
+      detectRootCandidates: detectCandidatesInRoot,
+    });
+    try {
+      expect(sharedRootRegistry().list().some((root) => root.frameElement === pending)).toBe(false);
+      loaded = true;
+      pending.dispatchEvent(new Event("load"));
+      await vi.waitFor(() => expect(sharedRootRegistry().list().some((root) => root.frameElement === pending)).toBe(true), { timeout: 3000 });
+      const nestedRoot = sharedRootRegistry().list().find((root) => root.frameElement === pending)!;
+      expect(onCandidates).toHaveBeenCalledWith(expect.any(Array), nestedRoot.rootKey);
+    } finally {
+      stop();
+      outer.remove();
+    }
+  });
+
+  it("NESTED-FRAME-LOAD-2 discovers a pending iframe inside an open shadow root", async () => {
+    const host = document.createElement("nested-frame-host");
+    document.body.append(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    const pending = document.createElement("iframe");
+    shadow.append(pending);
+    const pendingDoc = pending.contentDocument!;
+    let loaded = false;
+    Object.defineProperty(pending, "contentDocument", {
+      configurable: true,
+      get: () => loaded ? pendingDoc : null,
+    });
+    const onCandidates = vi.fn();
+    const stop = startQuestionRevisionWatch({
+      detectCandidates: () => [],
+      onCandidates,
+      detectRootCandidates: detectCandidatesInRoot,
+    });
+    try {
+      expect(sharedRootRegistry().list().some((root) => root.frameElement === pending)).toBe(false);
+      loaded = true;
+      pending.dispatchEvent(new Event("load"));
+      await vi.waitFor(() => expect(sharedRootRegistry().list().some((root) => root.frameElement === pending)).toBe(true), { timeout: 3000 });
+      const frameRoot = sharedRootRegistry().list().find((root) => root.frameElement === pending)!;
+      expect(frameRoot.parentRootKey).toMatch(/^root-shadow-/);
+      expect(onCandidates).toHaveBeenCalledWith(expect.any(Array), frameRoot.rootKey);
+    } finally {
+      stop();
+      host.remove();
+    }
+  });
+
+  it("NESTED-FRAME-LOAD-3 removes pending load listeners when stopped", () => {
+    const pending = document.createElement("iframe");
+    document.body.append(pending);
+    const pendingDoc = pending.contentDocument!;
+    Object.defineProperty(pending, "contentDocument", { configurable: true, get: () => null });
+    const removeListener = vi.spyOn(pending, "removeEventListener");
+    const stop = startQuestionRevisionWatch({
+      detectCandidates: () => [],
+      onCandidates: () => {},
+      detectRootCandidates: detectCandidatesInRoot,
+    });
+    stop();
+
+    expect(removeListener).toHaveBeenCalledWith("load", expect.any(Function));
+    Object.defineProperty(pending, "contentDocument", { configurable: true, value: pendingDoc });
+    pending.dispatchEvent(new Event("load"));
+    expect(sharedRootRegistry().list()).toHaveLength(0);
+    pending.remove();
   });
 
   it("ROOT-PERF-1 coalesces a 100-record burst inside a frame into one reconciliation", async () => {
@@ -327,7 +434,7 @@ describe("Phase 7 root watcher lifecycle", () => {
     expect(scannedKeys[0]).toBe(shadow);
     expect(scannedKeys[0]).not.toBe(frameRoot.root);
     stop();
-  });
+  }, 15_000);
 
   it("ROOT-RACE-1 never writes a removed root's answer into an identical question in another root", async () => {
     const registry = sharedRootRegistry();

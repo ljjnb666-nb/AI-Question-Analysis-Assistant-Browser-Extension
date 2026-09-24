@@ -41,7 +41,7 @@ describe("rootDom helpers", () => {
     }
   });
 
-  it("FRAME-9 transforms nested same-origin frame points to top viewport coordinates", () => {
+  it("FRAME-COORD-2 transforms nested same-origin frame points to top viewport coordinates", () => {
     const outer = document.createElement("iframe");
     document.body.append(outer);
     const outerDoc = outer.contentDocument!;
@@ -80,7 +80,7 @@ describe("rootDom helpers", () => {
     }
   });
 
-  it("FRAME-10 applies a provable uniform scale and abstains on ambiguity", () => {
+  it("FRAME-COORD-3 accepts a finite positive uniform scale", () => {
     const iframe = document.createElement("iframe");
     document.body.append(iframe);
     try {
@@ -96,15 +96,88 @@ describe("rootDom helpers", () => {
       const scaled = framePointToParentViewport(iframe, { x: 10, y: 10 });
       expect(scaled).toMatchObject({ ok: true, scale: 2, point: { x: 60, y: 60 } });
 
-      // Non-uniform stretch is ambiguous → fail closed.
-      Object.defineProperty(iframe, "offsetHeight", { configurable: true, value: 400 });
-      expect(framePointToParentViewport(iframe, { x: 10, y: 10 })).toMatchObject({ ok: false, reason: "AMBIGUOUS_FRAME_TRANSFORM" });
-
-      // Detached frames never transform.
-      iframe.remove();
-      expect(framePointToParentViewport(iframe, { x: 1, y: 1 })).toMatchObject({ ok: false, reason: "DETACHED_FRAME" });
     } finally {
       iframe.remove();
+    }
+  });
+
+  it("FRAME-COORD-4 rejects non-uniform transforms in both directions", () => {
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    try {
+      stubRect(iframe, { left: 40, top: 40, width: 600, height: 400 });
+      Object.defineProperty(iframe, "clientWidth", { configurable: true, value: 300 });
+      Object.defineProperty(iframe, "clientHeight", { configurable: true, value: 200 });
+      Object.defineProperty(iframe, "offsetWidth", { configurable: true, value: 300 });
+      Object.defineProperty(iframe, "offsetHeight", { configurable: true, value: 400 });
+      Object.defineProperty(iframe, "clientLeft", { configurable: true, value: 0 });
+      Object.defineProperty(iframe, "clientTop", { configurable: true, value: 0 });
+
+      expect(framePointToTopViewport(iframe, { x: 10, y: 10 })).toMatchObject({ ok: false, reason: "AMBIGUOUS_FRAME_TRANSFORM" });
+      expect(topViewportPointToFrame(iframe, { x: 60, y: 60 })).toMatchObject({ ok: false, reason: "AMBIGUOUS_FRAME_TRANSFORM" });
+    } finally {
+      iframe.remove();
+    }
+  });
+
+  it("FRAME-COORD-5 rejects detached frames in both directions", () => {
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    iframe.remove();
+
+    expect(framePointToTopViewport(iframe, { x: 1, y: 1 })).toMatchObject({ ok: false, reason: "DETACHED_FRAME" });
+    expect(topViewportPointToFrame(iframe, { x: 1, y: 1 })).toMatchObject({ ok: false, reason: "DETACHED_FRAME" });
+  });
+
+  it("FRAME-COORD-1 transforms a single frame offset in the forward direction", () => {
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    try {
+      stubRect(iframe, { left: 100, top: 50, width: 300, height: 200 });
+      Object.defineProperty(iframe, "clientWidth", { configurable: true, value: 300 });
+      Object.defineProperty(iframe, "clientHeight", { configurable: true, value: 200 });
+      Object.defineProperty(iframe, "offsetWidth", { configurable: true, value: 300 });
+      Object.defineProperty(iframe, "offsetHeight", { configurable: true, value: 200 });
+      Object.defineProperty(iframe, "clientLeft", { configurable: true, value: 0 });
+      Object.defineProperty(iframe, "clientTop", { configurable: true, value: 0 });
+
+      expect(framePointToTopViewport(iframe, { x: 12, y: 24 })).toMatchObject({ ok: true, point: { x: 112, y: 74 } });
+    } finally {
+      iframe.remove();
+    }
+  });
+
+  it("FRAME-COORD-6 round-trips nested coordinates within floating-point tolerance", () => {
+    const outer = document.createElement("iframe");
+    document.body.append(outer);
+    const outerDoc = outer.contentDocument!;
+    const inner = outerDoc.createElement("iframe");
+    outerDoc.body.append(inner);
+    try {
+      stubRect(outer, { left: 100, top: 50, width: 600, height: 400 });
+      stubRect(inner, { left: 10, top: 20, width: 300, height: 200 });
+      for (const [frame, width, height] of [[outer, 600, 400], [inner, 300, 200]] as const) {
+        Object.defineProperty(frame, "clientWidth", { configurable: true, value: width });
+        Object.defineProperty(frame, "clientHeight", { configurable: true, value: height });
+        Object.defineProperty(frame, "offsetWidth", { configurable: true, value: width });
+        Object.defineProperty(frame, "offsetHeight", { configurable: true, value: height });
+        Object.defineProperty(frame, "clientLeft", { configurable: true, value: 0 });
+        Object.defineProperty(frame, "clientTop", { configurable: true, value: 0 });
+      }
+      const parentResolver = (doc: Document): HTMLIFrameElement | null =>
+        doc === document ? null : doc === outerDoc ? outer : inner.ownerDocument === doc ? inner : null;
+      const local = { x: 13.25, y: 27.75 };
+      const top = framePointToTopViewport(inner, local, parentResolver);
+      expect(top.ok).toBe(true);
+      if (!top.ok) return;
+      const back = topViewportPointToFrame(inner, top.point, parentResolver);
+      expect(back.ok).toBe(true);
+      if (!back.ok) return;
+      expect(Math.abs(back.point.x - local.x)).toBeLessThan(0.01);
+      expect(Math.abs(back.point.y - local.y)).toBeLessThan(0.01);
+    } finally {
+      inner.remove();
+      outer.remove();
     }
   });
 });

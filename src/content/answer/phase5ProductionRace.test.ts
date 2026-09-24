@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { ParseResult, QuestionBlock } from "@/shared/types";
 import { captureSolveStartControlState, fillParsedAnswerInPage } from "../answerFiller";
 import { observeLiveQuestion } from "../liveQuestionObservation";
+import { attachRuntimeRoot, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "../roots/rootContext";
 
 const result: ParseResult = { blockId: "q1", questionType: "single_choice", answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
 function base(): QuestionBlock { return { id: "q1", bbox: { x: 0, y: 0, width: 800, height: 300 }, previewText: "1. diagram A. a B. b", questionTypeGuess: "single_choice", hasImage: true, confidence: 1, source: "auto_dom" }; }
-function preparedBlock(owner: Element) { return observeLiveQuestion(base(), owner); }
+function preparedBlock(owner: Element) {
+  const block = observeLiveQuestion(base(), owner);
+  return attachRuntimeRoot(block, { rootKey: TOP_ROOT_KEY, rootGeneration: TOP_ROOT_GENERATION, kind: "top-document" }, owner);
+}
 
 describe("Phase 5 production-path races", () => {
   it("PROD-REV1 uses canonical media identity after a pending provider result", async () => {
@@ -49,12 +53,11 @@ describe("Phase 5 production-path races", () => {
   });
 
   it("PROD-USR2 fails closed when solve-start snapshot cannot be captured", async () => {
-    document.body.innerHTML = '<section class="question-item" id="q1">1. diagram <button>A. a</button><button id="b">B. b</button></section>';
+    document.body.innerHTML = '<div id="q1">1. diagram <section class="question-item" data-question-id="11">11. unrelated A. x</section><section class="question-item" data-question-id="13">13. unrelated B. y</section></div><button id="b">B. b decoy</button>';
     const owner = document.getElementById("q1")!; const block = preparedBlock(owner); let clicks = 0;
     document.getElementById("b")!.addEventListener("click", () => clicks++);
-    const original = document.elementsFromPoint;
-    Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: undefined });
-    try { captureSolveStartControlState(block); expect((await fillParsedAnswerInPage(block, result, { mode: "auto" })).message).toBe("USER_STATE_SNAPSHOT_UNAVAILABLE"); expect(clicks).toBe(0); }
-    finally { Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: original }); }
+    captureSolveStartControlState(block);
+    expect((await fillParsedAnswerInPage(block, result, { mode: "auto" })).message).toBe("USER_STATE_SNAPSHOT_UNAVAILABLE");
+    expect(clicks).toBe(0);
   });
 });

@@ -11,12 +11,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const extensionPath = path.resolve(__dirname, "..", "dist");
 const playwrightCacheDir = path.join(os.homedir(), ".cache", "ms-playwright");
 
-type DriverWindow = Window & typeof globalThis & { __events: string[] };
+type DriverWindow = Window & typeof globalThis & { __events: string[]; __candidateBlocks: unknown[] };
 
 declare const chrome: {
   tabs: {
     query: (info: { url: string }) => Promise<Array<{ id: number } | undefined>>;
-    sendMessage: (tabId: number, message: { type: string }) => Promise<unknown>;
+    sendMessage: (tabId: number, message: { type: string; [key: string]: unknown }) => Promise<unknown>;
   };
   scripting: { executeScript: (injection: { target: { tabId: number }; files: string[] }) => Promise<unknown> };
   runtime: { onMessage: { addListener: (listener: (message: unknown) => void) => void } };
@@ -171,6 +171,70 @@ const SHADOW_PAGE_HTML = `<!doctype html>
 </body>
 </html>`;
 
+const NATIVE_FRAME_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>native frame</title></head>
+<body style="margin:0">
+  <section class="question-item" data-question-id="21" style="width:600px;min-height:220px;padding:12px;background:#fff;color:#000;font-size:18px">
+    <p class="stem">21. Which value equals 2 + 2? Choose the correct option.</p>
+    <label><input type="radio" name="frame-answer" value="A"> A. 3</label>
+    <label><input type="radio" name="frame-answer" value="B"> B. 4</label>
+    <label><input type="radio" name="frame-answer" value="C"> C. 5</label>
+    <label><input type="radio" name="frame-answer" value="D"> D. 6</label>
+  </section>
+  <script>
+    document.querySelectorAll('input[type="radio"]').forEach((input) => input.addEventListener("change", () => {
+      if (input.checked) parent.postMessage({ type: "native-frame-choice", value: input.value }, location.origin);
+    }));
+  </script>
+</body></html>`;
+
+const NATIVE_HOST_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>native iframe host</title></head>
+<body style="margin:0">
+  <div style="height:24px">Top document decoy controls</div>
+  <label><input type="radio" name="top-answer" value="A"> A. 3</label>
+  <label><input type="radio" name="top-answer" value="B"> B. 4</label>
+  <label><input type="radio" name="top-answer" value="C"> C. 5</label>
+  <label><input type="radio" name="top-answer" value="D"> D. 6</label>
+  <iframe id="native-frame" src="/native-frame" style="width:660px;height:260px;border:0"></iframe>
+  <script>window.__frameChoices = []; window.addEventListener("message", (event) => { if (event.data?.type === "native-frame-choice") window.__frameChoices.push(event.data.value); });</script>
+</body></html>`;
+
+const NATIVE_SHADOW_FRAME_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>native shadow frame</title></head>
+<body style="margin:0"><native-question-host id="native-host"></native-question-host>
+  <script>
+    const host = document.getElementById("native-host");
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = '<section class="question-item" data-question-id="22" style="width:600px;min-height:220px;padding:12px;background:#fff;color:#000;font-size:18px">'
+      + '<p class="stem">22. Which value equals 2 + 2? Choose the correct option.</p>'
+      + '<label><input type="radio" name="shadow-frame-answer" value="A"> A. 3</label>'
+      + '<label><input type="radio" name="shadow-frame-answer" value="B"> B. 4</label>'
+      + '<label><input type="radio" name="shadow-frame-answer" value="C"> C. 5</label>'
+      + '<label><input type="radio" name="shadow-frame-answer" value="D"> D. 6</label></section>';
+    shadow.querySelectorAll('input[type="radio"]').forEach((input) => input.addEventListener("change", () => {
+      if (input.checked) parent.postMessage({ type: "nested-native-choice", value: input.value }, location.origin);
+    }));
+  </script>
+</body></html>`;
+
+const NATIVE_SHADOW_HOST_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>native shadow host</title></head>
+<body style="margin:0">
+  <label><input type="radio" name="top-answer" value="B"> Top document decoy B. 4</label>
+  <iframe id="native-frame" src="/native-shadow-frame" style="width:660px;height:260px;border:0"></iframe>
+  <script>window.__nestedChoices = []; window.addEventListener("message", (event) => { if (event.data?.type === "nested-native-choice") window.__nestedChoices.push(event.data.value); });</script>
+</body></html>`;
+
+const SCROLLED_FRAME_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>scrolled frame host</title></head>
+<body style="margin:0">
+  <div style="height:1100px">scroll spacer</div>
+  <iframe id="q-frame" src="/frame" style="width:660px;height:320px;border:0"></iframe>
+  <div style="height:900px"></div>
+  <script>window.scrollTo(0, 850);</script>
+</body></html>`;
+
 type HeldProviderRequest = {
   respond: (answerLabel: string) => Promise<void>;
   reject: () => Promise<void>;
@@ -195,6 +259,31 @@ async function startRootsServer(): Promise<{ origin: string; held: HeldProviderR
     if (req.method === "GET" && url.pathname === "/shadow") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(SHADOW_PAGE_HTML);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/native-host") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(NATIVE_HOST_PAGE_HTML);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/scrolled-frame") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(SCROLLED_FRAME_PAGE_HTML);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/native-frame") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(NATIVE_FRAME_PAGE_HTML);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/native-shadow-host") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(NATIVE_SHADOW_HOST_PAGE_HTML);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/native-shadow-frame") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(NATIVE_SHADOW_FRAME_PAGE_HTML);
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/v1/chat/completions") {
@@ -283,7 +372,7 @@ async function resolveExtensionId(context: BrowserContext) {
   return new URL(serviceWorker.url()).host;
 }
 
-async function startProductionAutoSolve(context: BrowserContext, extensionId: string, origin: string, _pagePath: string): Promise<Page> {
+async function startProductionAutoSolve(context: BrowserContext, extensionId: string, origin: string, _pagePath: string, startSolve = true): Promise<Page> {
   const driver = await context.newPage();
   await driver.goto(`chrome-extension://${extensionId}/popup/popup.html`);
 
@@ -291,10 +380,16 @@ async function startProductionAutoSolve(context: BrowserContext, extensionId: st
     const w = window as DriverWindow & { __payloads: string[] };
     w.__events = [];
     w.__payloads = [];
+    w.__candidateBlocks = [];
     chrome.runtime.onMessage.addListener((message: unknown) => {
       const typed = message as { type?: string; statusText?: string; message?: string; candidates?: unknown[] } | null;
       if (typed?.type) w.__events.push(typed.type);
-      if (typed?.candidates) w.__payloads.push(`candidates:${typed.candidates.length}`);
+      if (typed?.candidates) {
+        w.__payloads.push(`candidates:${typed.candidates.length}`);
+        if (typed.type === "AUTO_DETECT_RESULT_READY") {
+          w.__candidateBlocks = typed.candidates.map((candidate) => (candidate as { block?: unknown } | null)?.block).filter(Boolean);
+        }
+      }
       if (typed?.statusText || typed?.message) w.__payloads.push(typed.statusText || typed.message || "");
     });
   });
@@ -325,7 +420,9 @@ async function startProductionAutoSolve(context: BrowserContext, extensionId: st
   console.log("[roots-e2e] detect response", JSON.stringify(detectResponse));
   await driver.waitForFunction(() => (window as DriverWindow).__events?.includes("AUTO_DETECT_RESULT_READY"), undefined, { timeout: 20_000 });
 
-  await driver.evaluate(async (tab: number) => chrome.tabs.sendMessage(tab, { type: "START_AUTO_SOLVE_ALL" }), tabId);
+  if (startSolve) {
+    await driver.evaluate(async (tab: number) => chrome.tabs.sendMessage(tab, { type: "START_AUTO_SOLVE_ALL" }), tabId);
+  }
   return driver;
 }
 
@@ -339,7 +436,14 @@ declare global {
 async function dumpDiagnostics(driver: Page, label: string): Promise<void> {
   const events = await driver.evaluate(() => {
     const w = window as DriverWindow & { __payloads: string[] };
-    return { events: w.__events, payloads: w.__payloads };
+    const candidates = (w.__candidateBlocks as Array<{ id?: string; previewText?: string; questionTypeGuess?: string; completeness?: { state?: string; reasons?: string[] }; runtimeQuestionHandle?: string }>).map((block) => ({
+      id: block.id,
+      previewText: block.previewText,
+      questionTypeGuess: block.questionTypeGuess,
+      completeness: block.completeness,
+      hasRuntimeHandle: Boolean(block.runtimeQuestionHandle),
+    }));
+    return { events: w.__events, payloads: w.__payloads, candidates };
   });
   console.log(`[${label}]`, JSON.stringify(events));
 }
@@ -353,6 +457,201 @@ async function waitForEvent(driver: Page, eventType: string, timeout = 45_000): 
 }
 
 test.describe("Phase 7 accessible roots E2E", () => {
+  test("E2E-FRAME-NATIVE: auto solve selects only a native radio in the same-origin frame", async () => {
+    test.setTimeout(90_000);
+    const server = await startRootsServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const spaPage = await context.newPage();
+      await spaPage.goto(`${server.origin}/native-host`);
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, "/native-host");
+      await expect.poll(() => server.held.length, { timeout: 30_000 }).toBe(1).catch(async (err) => { await dumpDiagnostics(driver, "native-frame-provider"); throw err; });
+      await server.held[0].respond("B");
+      server.held[0].settled = true;
+      await waitForEvent(driver, "AUTO_SOLVE_DONE");
+
+      const state = await spaPage.evaluate(() => {
+        const frame = document.getElementById("native-frame") as HTMLIFrameElement;
+        return {
+          frameSelected: frame.contentDocument?.querySelector<HTMLInputElement>('input[value="B"]')?.checked,
+          frameChoices: (window as unknown as { __frameChoices: string[] }).__frameChoices,
+          topSelected: Array.from(document.querySelectorAll<HTMLInputElement>('input[name="top-answer"]')).some((input) => input.checked),
+        };
+      });
+      expect(state.frameSelected).toBe(true);
+      expect(state.frameChoices).toContain("B");
+      expect(state.topSelected).toBe(false);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
+  test("E2E-FRAME-SHADOW-NATIVE-1: auto solve selects only a native radio inside an open shadow root in a frame", async () => {
+    test.setTimeout(90_000);
+    const server = await startRootsServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const spaPage = await context.newPage();
+      await spaPage.goto(`${server.origin}/native-shadow-host`);
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, "/native-shadow-host");
+      await expect.poll(() => server.held.length, { timeout: 30_000 }).toBe(1).catch(async (err) => { await dumpDiagnostics(driver, "native-shadow-provider"); throw err; });
+      await server.held[0].respond("B");
+      server.held[0].settled = true;
+      await waitForEvent(driver, "AUTO_SOLVE_DONE");
+
+      const state = await spaPage.evaluate(() => {
+        const frame = document.getElementById("native-frame") as HTMLIFrameElement;
+        const shadow = frame.contentDocument?.querySelector("native-question-host")?.shadowRoot;
+        return {
+          shadowSelected: shadow?.querySelector<HTMLInputElement>('input[value="B"]')?.checked,
+          topSelected: Array.from(document.querySelectorAll<HTMLInputElement>('input[name="top-answer"]')).some((input) => input.checked),
+        };
+      });
+      expect(state.shadowSelected).toBe(true);
+      expect(state.topSelected).toBe(false);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
+  test("E2E-MESSAGE-ROUNDTRIP: panel candidate survives extension messaging and fills its exact frame", async () => {
+    test.setTimeout(90_000);
+    const server = await startRootsServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const spaPage = await context.newPage();
+      await spaPage.goto(`${server.origin}/host`);
+      await spaPage.evaluate(() => {
+        const topQuestion = document.createElement("section");
+        topQuestion.className = "question-item";
+        topQuestion.dataset.questionId = "12";
+        topQuestion.style.marginTop = "100px";
+        topQuestion.innerHTML = '<p class="stem">12. Which value equals 2 + 2? Choose the correct option.</p><img src="http://img.test/diagram-a.png" alt="figure">'
+          + '<ul><li><button class="option">A. 3</button></li><li><button class="option">B. 4</button></li><li><button class="option">C. 5</button></li><li><button class="option">D. 6</button></li></ul>';
+        document.body.append(topQuestion);
+      });
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, "/host", false);
+      await driver.waitForFunction(() => (window as DriverWindow).__candidateBlocks?.length >= 2, undefined, { timeout: 20_000 }).catch(async (err) => { await dumpDiagnostics(driver, "message-roundtrip-candidates"); throw err; });
+
+      const result = await driver.evaluate(async (baseOrigin: string) => {
+        const candidates = (window as DriverWindow).__candidateBlocks as Array<{ id: string; bbox: { y: number }; identity?: { stableId: string }; runtimeQuestionHandle?: string; runtimeOwnerKey?: string }>;
+        const frameCandidate = [...candidates].sort((left, right) => left.bbox.y - right.bbox.y)[0]!;
+        const [tab] = await chrome.tabs.query({ url: `${baseOrigin}/*` });
+        if (!tab?.id) throw new Error("root e2e tab not found");
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: "FILL_PARSED_ANSWER",
+          block: frameCandidate,
+          result: { blockId: frameCandidate.id, questionType: "single_choice", answer: "B", confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" },
+        });
+        return {
+          handle: frameCandidate.runtimeQuestionHandle,
+          ownerKey: frameCandidate.runtimeOwnerKey,
+          response,
+          stableIds: candidates.map((candidate) => candidate.identity?.stableId),
+          candidateIds: candidates.map((candidate) => candidate.id),
+          handles: candidates.map((candidate) => candidate.runtimeQuestionHandle),
+        };
+      }, server.origin);
+
+      expect(result.handle).toMatch(/^rqh_[0-9a-f]{32}$/);
+      expect(result.ownerKey).toBeUndefined();
+      expect(new Set(result.handles).size).toBe(2);
+      expect(new Set(result.candidateIds).size).toBe(2);
+      expect(result.stableIds[0]).toBe(result.stableIds[1]);
+      expect((result.response as { ok?: boolean }).ok).toBe(true);
+      const state = await spaPage.evaluate(() => {
+        const frame = document.getElementById("q-frame") as HTMLIFrameElement;
+        return {
+          frameSelected: frame.contentDocument?.querySelectorAll<HTMLButtonElement>(".option")[1]?.getAttribute("aria-checked"),
+          topSelected: document.querySelector('[aria-checked="true"]') !== null,
+        };
+      });
+      expect(state.frameSelected).toBe("true");
+      expect(state.topSelected).toBe(false);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
+  test("E2E-SHADOW-DUPLICATE: identical top and shadow questions fill only the selected shadow instance", async () => {
+    test.setTimeout(90_000);
+    const server = await startRootsServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const spaPage = await context.newPage();
+      await spaPage.goto(`${server.origin}/shadow`);
+      await spaPage.evaluate(() => {
+        const topQuestion = document.createElement("section");
+        topQuestion.className = "question-item";
+        topQuestion.dataset.questionId = "12";
+        topQuestion.style.marginTop = "100px";
+        topQuestion.innerHTML = '<p class="stem">12. Which value equals 2 + 2? Choose the correct option.</p><img src="http://img.test/diagram-a.png" alt="figure">'
+          + '<ul><li><button class="option">A. 3</button></li><li><button class="option">B. 4</button></li><li><button class="option">C. 5</button></li><li><button class="option">D. 6</button></li></ul>';
+        document.body.append(topQuestion);
+      });
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, "/shadow", false);
+      await driver.waitForFunction(() => (window as DriverWindow).__candidateBlocks?.length >= 2, undefined, { timeout: 20_000 }).catch(async (err) => { await dumpDiagnostics(driver, "shadow-duplicate-candidates"); throw err; });
+      const result = await driver.evaluate(async (baseOrigin: string) => {
+        const candidates = (window as DriverWindow).__candidateBlocks as Array<{ id: string; bbox: { y: number } }>;
+        const shadowCandidate = [...candidates].sort((left, right) => left.bbox.y - right.bbox.y)[0]!;
+        const [tab] = await chrome.tabs.query({ url: `${baseOrigin}/*` });
+        if (!tab?.id) throw new Error("root e2e tab not found");
+        return chrome.tabs.sendMessage(tab.id, {
+          type: "FILL_PARSED_ANSWER",
+          block: shadowCandidate,
+          result: { blockId: shadowCandidate.id, questionType: "single_choice", answer: "B", confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" },
+        });
+      }, server.origin);
+      expect((result as { ok?: boolean }).ok).toBe(true);
+      const state = await spaPage.evaluate(() => ({
+        topSelected: document.querySelector('[aria-checked="true"]') !== null,
+        shadowSelected: document.getElementById("q-host")!.shadowRoot!.querySelector('#opt-b')!.getAttribute("aria-checked"),
+      }));
+      expect(state.topSelected).toBe(false);
+      expect(state.shadowSelected).toBe("true");
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
+  test("E2E-SCROLLED-FRAME: nonzero outer scroll still locates and fills the frame question", async () => {
+    test.setTimeout(90_000);
+    const server = await startRootsServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const spaPage = await context.newPage();
+      await spaPage.goto(`${server.origin}/scrolled-frame`);
+      await expect.poll(() => spaPage.evaluate(() => window.scrollY), { timeout: 10_000 }).toBeGreaterThan(0);
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, "/scrolled-frame", false);
+      await driver.waitForFunction(() => (window as DriverWindow).__candidateBlocks?.length > 0, undefined, { timeout: 20_000 });
+      const result = await driver.evaluate(async (baseOrigin: string) => {
+        const candidate = (window as DriverWindow).__candidateBlocks[0] as { id: string };
+        const [tab] = await chrome.tabs.query({ url: `${baseOrigin}/*` });
+        if (!tab?.id) throw new Error("root e2e tab not found");
+        return chrome.tabs.sendMessage(tab.id, {
+          type: "FILL_PARSED_ANSWER",
+          block: candidate,
+          result: { blockId: candidate.id, questionType: "single_choice", answer: "B", confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" },
+        });
+      }, server.origin);
+      expect((result as { ok?: boolean }).ok).toBe(true);
+      expect(await spaPage.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+      expect(await spaPage.evaluate(() => (document.getElementById("q-frame") as HTMLIFrameElement).contentDocument?.querySelector('#opt-b')?.getAttribute("aria-checked"))).toBe("true");
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
   test("FRAME-A: an iframe document replaced while pending never receives the stale answer", async () => {
     test.setTimeout(90_000);
     const server = await startRootsServer();

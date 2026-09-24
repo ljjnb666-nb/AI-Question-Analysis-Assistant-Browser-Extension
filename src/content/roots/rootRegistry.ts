@@ -1,16 +1,20 @@
 import type { QuestionBlock } from "@/shared/types";
 import type { TraversableRoot } from "./rootDom";
 import {
+  framePointToTopViewport,
   frameRectToTopViewport,
   getAccessibleFrameDocument,
   getTraversalRoot,
   topViewportPointToFrame,
   type ParentFrameResolver,
 } from "./rootDom";
+import { isHTMLIFrameInOwnerRealm } from "../domRealm";
 import {
   MAX_ACCESSIBLE_ROOTS,
   MAX_ROOT_DEPTH,
   MAX_SHADOW_HOST_PROBES,
+  bindRuntimeQuestionHandle,
+  ownerOf,
   rootAttachmentOf,
   TOP_ROOT_GENERATION,
   TOP_ROOT_KEY,
@@ -54,7 +58,7 @@ export function createTopViewportProjector(registry: AccessibleRootRegistry, con
       key = registered.parentRootKey;
     }
     try {
-      return doc.defaultView && doc.defaultView.frameElement instanceof HTMLIFrameElement ? doc.defaultView.frameElement : null;
+      return doc.defaultView && isHTMLIFrameInOwnerRealm(doc.defaultView.frameElement) ? doc.defaultView.frameElement : null;
     } catch {
       return null;
     }
@@ -111,15 +115,25 @@ export class AccessibleRootRegistry {
     // Open shadow roots are discovered on dirty/new roots only — never as an
     // unbounded page-wide scan. Every root is probed once when first seen so
     // pre-existing hosts are not missed.
-    const probeRootKeys = new Set<string>(events.addedRootKeys);
+    const probeRootKeys = new Set<string>([...events.addedRootKeys, ...events.replacedRootKeys]);
     if (dirtyRootKeys) for (const key of dirtyRootKeys) probeRootKeys.add(key);
     for (const root of [...this.roots.values()]) {
       if (!this.probedRootKeys.has(root.rootKey)) probeRootKeys.add(root.rootKey);
     }
-    for (const root of [...this.roots.values()]) {
-      if (!probeRootKeys.has(root.rootKey)) continue;
+    const probedThisPass = new Set<string>();
+    while (true) {
+      const root = [...this.roots.values()].find((candidate) =>
+        probeRootKeys.has(candidate.rootKey) && !probedThisPass.has(candidate.rootKey));
+      if (!root) break;
+      probedThisPass.add(root.rootKey);
       this.probedRootKeys.add(root.rootKey);
+      // Shadow roots are independent traversable roots. A mutation or nested
+      // frame load there must reconcile its iframe descendants even when the
+      // shadow host itself was discovered in an earlier lifecycle pass.
+      if (root.kind === "open-shadow-root") this.reconcileFramesOf(root as RegisteredRoot, events, budget);
+      for (const addedRootKey of events.addedRootKeys) probeRootKeys.add(addedRootKey);
       this.discoverShadowHosts(root, events, budget, probeRootKeys);
+      for (const addedRootKey of events.addedRootKeys) probeRootKeys.add(addedRootKey);
     }
 
     this.pruneDisconnected(events);
@@ -191,6 +205,12 @@ export class AccessibleRootRegistry {
         }
         if (existing) {
           // Same iframe element, replaced document: same key, new generation.
+          // Descendants belong to the old frame document and cannot carry
+          // authority into the replacement, even if their old nodes remain
+          // reachable through a stale Document reference.
+          for (const child of [...this.roots.values()]) {
+            if (child.parentRootKey === existing.rootKey) this.removeRootByKey(child.rootKey, events);
+          }
           existing.root = doc;
           existing.ownerDocument = doc;
           existing.ownerWindow = doc.defaultView ?? existing.ownerWindow;
@@ -301,8 +321,8 @@ export class AccessibleRootRegistry {
 }
 
 export type FillRootContext =
-  | { ok: true; context: RootContext; doc: Document; shadowRoot: ShadowRoot | null; localBBox: { x: number; y: number; width: number; height: number } }
-  | { ok: false; reason: "STALE_ROOT_CONTEXT" };
+  | { ok: true; context: RootContext; doc: Document; shadowRoot: ShadowRoot | null; owner: Element | null; localBBox: { x: number; y: number; width: number; height: number } }
+  | { ok: false; reason: "STALE_RUNTIME_QUESTION_HANDLE" | "STALE_ROOT_CONTEXT" };
 
 /**
  * Resolves the runtime fill context for a detected block: the root must still
@@ -310,22 +330,34 @@ export type FillRootContext =
  * top-viewport bbox is converted into the root's local coordinate space.
  */
 export function resolveFillRootContext(registry: AccessibleRootRegistry, block: QuestionBlock): FillRootContext {
-  const attachment = rootAttachmentOf(block);
+  const runtime = block.source === "auto_dom" ? bindRuntimeQuestionHandle(block) : null;
+  if (block.source === "auto_dom" && !runtime) return { ok: false, reason: "STALE_RUNTIME_QUESTION_HANDLE" };
+  const attachment = runtime?.attachment ?? rootAttachmentOf(block);
+  const owner = runtime?.owner ?? ownerOf(block) ?? null;
   // Top-document blocks never depend on registry lifecycle state: a registry
   // that has not reconciled yet must not fail the classic top-document path.
   if (!attachment.rootKey || attachment.rootKey === TOP_ROOT_KEY) {
-    const topDocument = registry.get(TOP_ROOT_KEY)?.ownerDocument ?? document;
+    const topDocument = registry.get(TOP_ROOT_KEY)?.ownerDocument ?? owner?.ownerDocument ?? document;
+    if (runtime) {
+      if (!owner || owner.ownerDocument !== topDocument || !topDocument.contains(owner)) {
+        return { ok: false, reason: "STALE_RUNTIME_QUESTION_HANDLE" };
+      }
+    }
     return {
       ok: true,
       context: topRootContext(topDocument),
       doc: topDocument,
       shadowRoot: null,
+      owner,
       localBBox: { x: block.bbox.x, y: block.bbox.y, width: block.bbox.width, height: block.bbox.height },
     };
   }
   const context = registry.get(attachment.rootKey);
   if (!context || !context.connected || context.rootGeneration !== attachment.rootGeneration) {
     return { ok: false, reason: "STALE_ROOT_CONTEXT" };
+  }
+  if (runtime) {
+    if (!owner || !rootOwnsElement(context, owner)) return { ok: false, reason: "STALE_RUNTIME_QUESTION_HANDLE" };
   }
 
   const nearestFrame = (() => {
@@ -342,14 +374,12 @@ export function resolveFillRootContext(registry: AccessibleRootRegistry, block: 
 
   const topToLocal = (topPoint: { x: number; y: number }) => {
     if (!nearestFrame?.frameElement) return { ok: true as const, point: { ...topPoint } };
-    const resolver = createTopViewportProjector(registry, context);
-    void resolver;
     return topViewportPointToFrame(nearestFrame.frameElement, topPoint, (doc) => {
       // Walk the registered ancestor chain of this root's document.
       const ownerRoot = registry.list().find((root) => root.kind === "same-origin-frame" && root.root === doc);
       if (ownerRoot) return ownerRoot.frameElement ?? null;
       try {
-        return doc.defaultView && doc.defaultView.frameElement instanceof HTMLIFrameElement ? doc.defaultView.frameElement : null;
+        return doc.defaultView && isHTMLIFrameInOwnerRealm(doc.defaultView.frameElement) ? doc.defaultView.frameElement : null;
       } catch {
         return null;
       }
@@ -370,7 +400,38 @@ export function resolveFillRootContext(registry: AccessibleRootRegistry, block: 
 
   const shadowRoot = context.kind === "open-shadow-root" ? (context.root as ShadowRoot) : null;
   const doc = shadowRoot ? context.ownerDocument : (context.root as Document);
-  return { ok: true, context, doc, shadowRoot, localBBox };
+  return { ok: true, context, doc, shadowRoot, owner, localBBox };
+}
+
+function rootOwnsElement(context: RootContext, owner: Element): boolean {
+  if (!owner.isConnected || owner.ownerDocument !== context.ownerDocument) return false;
+  if (context.root.contains(owner)) return true;
+  if (context.kind !== "open-shadow-root") return false;
+  const shadowRoot = context.root as ShadowRoot;
+  if (!shadowRoot.host.contains(owner)) return false;
+  let current: Element | null = owner;
+  while (current && current !== shadowRoot.host) {
+    const slot = (current as HTMLElement).assignedSlot;
+    if (slot?.getRootNode() === shadowRoot) return true;
+    current = current.parentElement;
+  }
+  return false;
+}
+
+/** Re-read geometry from the same runtime owner after scrolling; preserve canonical question data. */
+export function refreshRuntimeQuestionBlock(block: QuestionBlock): QuestionBlock | null {
+  const registry = sharedRootRegistry();
+  const resolved = resolveFillRootContext(registry, block);
+  if (!resolved.ok || !resolved.owner) return null;
+  const rect = resolved.owner.getBoundingClientRect();
+  const project = createTopViewportProjector(registry, resolved.context);
+  const projected = project({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+  if (!projected || !Number.isFinite(projected.left) || !Number.isFinite(projected.top)
+    || projected.width <= 0 || projected.height <= 0) return null;
+  return {
+    ...block,
+    bbox: { x: projected.left, y: projected.top, width: projected.width, height: projected.height },
+  };
 }
 
 /**
@@ -409,12 +470,12 @@ export function topViewportPointForElement(registry: AccessibleRootRegistry, ele
       key = registered.parentRootKey;
     }
     try {
-      return doc.defaultView && doc.defaultView.frameElement instanceof HTMLIFrameElement ? doc.defaultView.frameElement : null;
+      return doc.defaultView && isHTMLIFrameInOwnerRealm(doc.defaultView.frameElement) ? doc.defaultView.frameElement : null;
     } catch {
       return null;
     }
   };
-  const result = topViewportPointToFrame(nearestFrame.frameElement, point, resolver);
+  const result = framePointToTopViewport(nearestFrame.frameElement, point, resolver);
   return result.ok ? result.point : null;
 }
 

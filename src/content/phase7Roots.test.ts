@@ -1,12 +1,20 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import type { ParseResult } from "@/shared/types";
+import type { ParseResult, QuestionBlock, QuestionType } from "@/shared/types";
 import { detectCandidatesInRoot, detectCandidatesAcrossRoots } from "./detector/domDetector";
 import type { AccessibleRootRegistry } from "./roots/rootRegistry";
 import { sharedRootRegistry } from "./roots/rootRegistry";
-import { rootAttachmentOf, TOP_ROOT_KEY } from "./roots/rootContext";
+import { attachRuntimeRoot, rootAttachmentOf, TOP_ROOT_KEY, type RootContext } from "./roots/rootContext";
 import { beginQuestionRevisionAttempt, clearQuestionRevisionAttempt } from "./revision/questionRevisionRuntime";
 import { startQuestionRevisionWatch } from "./revision/questionRevisionWatch";
 import { captureSolveStartControlState, fillParsedAnswerInPage } from "./answerFiller";
+import { finishAutoSolveQuestionAttempt, hasAutoSolveQuestionAttempt, verifyParsedAnswerInPage } from "./answerFiller";
+import { attachQuestionIdentity } from "./questionIdentity";
+import { discoverControls } from "./answer/controlDiscovery";
+import { buildControlMapping } from "./answer/controlMapping";
+import { extractStructuredQuestionText } from "./detector/domStructuredText";
+import { requestRealClick } from "./answerDomUtils";
+import { sanitizeQuestionBlockForRuntimeMessage, sanitizeQuestionBlockForSerialization } from "@/shared/utils/mediaSerialization";
+import { sendAutoSolveProgress } from "./contentRuntime";
 
 function stubRect(el: Element, rect: { left: number; top: number; width: number; height: number }) {
   Object.defineProperty(el, "getBoundingClientRect", {
@@ -63,6 +71,20 @@ function makeShadowHost(id: string, top: number, html = QUESTION_HTML): { host: 
   stubRect(container, { left: 8, top: top + 8, width: 620, height: 220 });
   armAriaReflection(container);
   return { host, shadow };
+}
+
+let nativeTestIndex = 0;
+function attachTestRuntimeBlock(owner: Element, root: RootContext, questionTypeGuess: QuestionType, previewText: string): QuestionBlock {
+  const block = attachQuestionIdentity({
+    id: `native-${++nativeTestIndex}`,
+    bbox: { x: 8, y: 8, width: 640, height: 220 },
+    previewText,
+    hasImage: false,
+    questionTypeGuess,
+    confidence: 1,
+    source: "auto_dom",
+  }, owner, { identityText: previewText });
+  return attachRuntimeRoot(block, { rootKey: root.rootKey, rootGeneration: root.rootGeneration, kind: root.kind }, owner);
 }
 
 function registryWithTop(): AccessibleRootRegistry {
@@ -153,6 +175,190 @@ describe("Phase 7 accessible roots", () => {
     expect(document.getElementById("top-b")!.getAttribute("aria-checked")).toBeNull();
   });
 
+  it("MSG-ROOT-1 restores the exact iframe owner after a JSON message round trip", async () => {
+    const registry = sharedRootRegistry();
+    const { doc } = makeFrame();
+    mountQuestion(doc.body);
+    document.body.insertAdjacentHTML("beforeend", '<button class="option" id="top-b">B. 4</button>');
+    registry.reconcile(document);
+    const frameRoot = registry.list().find((root) => root.kind === "same-origin-frame")!;
+    const [detected] = detectCandidatesInRoot(frameRoot.root, frameRoot);
+    const messageBlock = JSON.parse(JSON.stringify(detected)) as QuestionBlock;
+
+    expect(messageBlock.runtimeQuestionHandle).toMatch(/^rqh_[0-9a-f]{32}$/);
+    expect(rootAttachmentOf(messageBlock).rootKey).toBe(TOP_ROOT_KEY);
+    const messageSafe = sanitizeQuestionBlockForRuntimeMessage(detected!);
+    expect(messageSafe.runtimeQuestionHandle).toBe(detected!.runtimeQuestionHandle);
+    expect(messageSafe.runtimeOwnerKey).toBeUndefined();
+    expect(Object.getOwnPropertySymbols(messageSafe)).toHaveLength(0);
+    const persistent = sanitizeQuestionBlockForSerialization(detected!);
+    expect(persistent.runtimeQuestionHandle).toBeUndefined();
+    expect(persistent.runtimeOwnerKey).toBeUndefined();
+    const result = await fillParsedAnswerInPage(messageBlock, parseResult("B"), { mode: "manual" });
+
+    expect(result.ok).toBe(true);
+    expect(doc.getElementById("opt-b")!.getAttribute("aria-checked")).toBe("true");
+    expect(document.getElementById("top-b")!.getAttribute("aria-checked")).toBeNull();
+  });
+
+  it("REAL_CLICK sends frame-owned control coordinates in the top-tab viewport", async () => {
+    const sendMessage = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+    try {
+      const { iframe, doc } = makeFrame();
+      stubRect(iframe, { left: 100, top: 50, width: 800, height: 600 });
+      const button = doc.createElement("button");
+      doc.body.append(button);
+      stubRect(button, { left: 10, top: 20, width: 20, height: 10 });
+      sharedRootRegistry().reconcile(document);
+
+      expect(await requestRealClick(button)).toBe(true);
+      expect(sendMessage).toHaveBeenCalledWith({ type: "REAL_CLICK", x: 120, y: 75 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("SECURITY-PROGRESS-1 strips runtime root locators from progress messages", () => {
+    const sendMessage = vi.fn();
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+    try {
+      const { doc } = makeFrame();
+      mountQuestion(doc.body);
+      sharedRootRegistry().reconcile(document);
+      const frameRoot = sharedRootRegistry().list().find((root) => root.kind === "same-origin-frame")!;
+      const [block] = detectCandidatesInRoot(frameRoot.root, frameRoot);
+      sendAutoSolveProgress({
+        running: true,
+        solved: 0,
+        filled: 0,
+        total: 1,
+        current: 1,
+        statusText: "testing",
+        currentBlock: block!,
+      });
+
+      const serialized = JSON.stringify(sendMessage.mock.calls[0]?.[0]);
+      expect(serialized).not.toContain("rqh_");
+      expect(serialized).not.toContain(frameRoot.rootKey);
+      expect(serialized).not.toContain("runtimeOwnerKey");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("MSG-ROOT-2 restores the exact shadow owner after a JSON message round trip", async () => {
+    const registry = registryWithTop();
+    const { host, shadow } = makeShadowHost("message-roundtrip", 0);
+    registry.reconcile(document, new Set([TOP_ROOT_KEY]));
+    const shadowContext = registry.list().find((root) => root.shadowHost === host)!;
+    const [detected] = detectCandidatesInRoot(shadowContext.root, shadowContext);
+    const messageBlock = JSON.parse(JSON.stringify(detected)) as QuestionBlock;
+
+    const result = await fillParsedAnswerInPage(messageBlock, parseResult("B"), { mode: "manual" });
+
+    expect(result.ok).toBe(true);
+    expect(shadow.getElementById("opt-b")!.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("MSG-ROOT-3 rejects a runtime handle after its frame root is replaced", async () => {
+    const registry = sharedRootRegistry();
+    const { iframe, doc } = makeFrame();
+    mountQuestion(doc.body);
+    registry.reconcile(document);
+    const frameRoot = registry.list().find((root) => root.kind === "same-origin-frame")!;
+    const [detected] = detectCandidatesInRoot(frameRoot.root, frameRoot);
+    const messageBlock = JSON.parse(JSON.stringify(detected)) as QuestionBlock;
+
+    const replacement = document.implementation.createHTMLDocument("replacement");
+    Object.defineProperty(replacement, "defaultView", { configurable: true, value: iframe.contentWindow });
+    Object.defineProperty(iframe, "contentDocument", { configurable: true, value: replacement });
+    registry.reconcile(document);
+    const result = await fillParsedAnswerInPage(messageBlock, parseResult("B"), { mode: "manual" });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe("STALE_ROOT_CONTEXT");
+    expect(replacement.querySelector('[aria-checked="true"]')).toBeNull();
+  });
+
+  it("MSG-ROOT-6 rejects a shadow handle when its owning frame document is replaced", async () => {
+    const registry = sharedRootRegistry();
+    const { iframe, doc } = makeFrame();
+    const host = doc.createElement("nested-shadow-host");
+    doc.body.append(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    const owner = doc.createElement("section");
+    owner.className = "question-item";
+    owner.setAttribute("data-question-id", "18");
+    owner.innerHTML = '<p class="stem">18. Which value equals 2 + 2? Choose one.</p>'
+      + '<button class="option">A. 3</button><button class="option">B. 4</button>'
+      + '<button class="option">C. 5</button><button class="option">D. 6</button>';
+    shadow.append(owner);
+    registry.reconcile(document);
+    const frameRoot = registry.list().find((root) => root.kind === "same-origin-frame")!;
+    const shadowRoot = registry.list().find((root) => root.root === shadow)!;
+    const detected = attachTestRuntimeBlock(owner, shadowRoot, "single_choice", extractStructuredQuestionText(owner));
+    const messageBlock = JSON.parse(JSON.stringify(detected)) as QuestionBlock;
+
+    const replacement = document.implementation.createHTMLDocument("replacement");
+    Object.defineProperty(replacement, "defaultView", { configurable: true, value: iframe.contentWindow });
+    Object.defineProperty(iframe, "contentDocument", { configurable: true, value: replacement });
+    const events = registry.reconcile(document);
+    expect(events.replacedRootKeys).toContain(frameRoot.rootKey);
+    expect(events.removedRootKeys).toContain(shadowRoot.rootKey);
+
+    const result = await fillParsedAnswerInPage(messageBlock, parseResult("B"), { mode: "manual" });
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe("STALE_ROOT_CONTEXT");
+    expect(owner.querySelector('[aria-checked="true"]')).toBeNull();
+    expect(replacement.querySelector('[aria-checked="true"]')).toBeNull();
+  });
+
+  it("MSG-ROOT-4 rejects missing or malformed handles without falling back to top", async () => {
+    const registry = sharedRootRegistry();
+    const { doc } = makeFrame();
+    mountQuestion(doc.body);
+    const topHolder = document.createElement("div");
+    document.body.append(topHolder);
+    mountQuestion(topHolder, QUESTION_HTML.replace('id="opt-b"', 'id="top-b"'));
+    registry.reconcile(document);
+    const frameRoot = registry.list().find((root) => root.kind === "same-origin-frame")!;
+    const [detected] = detectCandidatesInRoot(frameRoot.root, frameRoot);
+    const serialized = JSON.parse(JSON.stringify(detected)) as QuestionBlock;
+    const malformed = { ...serialized, runtimeQuestionHandle: "not-a-runtime-handle" };
+    const missing = { ...serialized, runtimeQuestionHandle: undefined };
+
+    for (const block of [malformed, missing]) {
+      const result = await fillParsedAnswerInPage(block, parseResult("B"), { mode: "manual" });
+      expect(result.ok).toBe(false);
+      expect(result.message).toBe("STALE_RUNTIME_QUESTION_HANDLE");
+    }
+    expect(doc.querySelector('[aria-checked="true"]')).toBeNull();
+    expect(document.getElementById("top-b")!.getAttribute("aria-checked")).toBeNull();
+  });
+
+  it("MSG-ROOT-5 resolves the frame instance when the top page has the same question", async () => {
+    const registry = sharedRootRegistry();
+    const { doc } = makeFrame();
+    mountQuestion(doc.body);
+    const topHolder = document.createElement("div");
+    document.body.append(topHolder);
+    mountQuestion(topHolder);
+    registry.reconcile(document);
+    const frameRoot = registry.list().find((root) => root.kind === "same-origin-frame")!;
+    const [frameBlock] = detectCandidatesInRoot(frameRoot.root, frameRoot);
+    const [topBlock] = detectCandidatesInRoot(document, registry.get(TOP_ROOT_KEY)!);
+    expect(frameBlock!.identity!.stableId).toBe(topBlock!.identity!.stableId);
+    expect(frameBlock!.id).not.toBe(topBlock!.id);
+    const messageBlock = JSON.parse(JSON.stringify(frameBlock)) as QuestionBlock;
+
+    const result = await fillParsedAnswerInPage(messageBlock, parseResult("B"), { mode: "manual" });
+
+    expect(result.ok).toBe(true);
+    expect(doc.getElementById("opt-b")!.getAttribute("aria-checked")).toBe("true");
+    expect(document.querySelector('[aria-checked="true"]')).toBeNull();
+  });
+
   it("FRAME-5 keeps identical questions in top and frame as separate runtime instances", async () => {
     const registry = sharedRootRegistry();
     const { doc } = makeFrame();
@@ -178,6 +384,137 @@ describe("Phase 7 accessible roots", () => {
     } finally {
       clearQuestionRevisionAttempt(controller);
     }
+  });
+
+  it.each([
+    {
+      id: "FRAME-NATIVE-1",
+      html: '<p class="stem">12. Which value equals 2 + 2? Single choice.</p>'
+        + '<label><input type="radio" name="answer" value="A"> A. 3</label>'
+        + '<label><input type="radio" name="answer" value="B"> B. 4</label>'
+        + '<label><input type="radio" name="answer" value="C"> C. 5</label>'
+        + '<label><input type="radio" name="answer" value="D"> D. 6</label>',
+      questionType: "single_choice" as const,
+      expectedControl: "radio",
+      answer: "B",
+      verify: (owner: Element) => expect((owner.querySelector('input[value="B"]') as HTMLInputElement).checked).toBe(true),
+    },
+    {
+      id: "FRAME-NATIVE-2",
+      html: '<p class="stem">13. Select all correct values. Multiple choice.</p>'
+        + '<label><input type="checkbox" name="answer" value="A"> A. 2</label>'
+        + '<label><input type="checkbox" name="answer" value="B"> B. 4</label>'
+        + '<label><input type="checkbox" name="answer" value="C"> C. 6</label>'
+        + '<label><input type="checkbox" name="answer" value="D"> D. 8</label>',
+      questionType: "multi_choice" as const,
+      expectedControl: "checkbox",
+      answer: "A,B",
+      verify: (owner: Element) => {
+        expect((owner.querySelector('input[value="A"]') as HTMLInputElement).checked).toBe(true);
+        expect((owner.querySelector('input[value="B"]') as HTMLInputElement).checked).toBe(true);
+      },
+    },
+    {
+      id: "FRAME-NATIVE-3",
+      html: '<p class="stem">14. Fill in blank (1): ____</p><input type="text" data-blank-index="1" aria-label="blank 1">',
+      questionType: "fill_blank" as const,
+      expectedControl: "text",
+      answer: "alpha",
+      verify: (owner: Element) => expect((owner.querySelector("input") as HTMLInputElement).value).toBe("alpha"),
+    },
+    {
+      id: "FRAME-NATIVE-4",
+      html: '<p class="stem">15. Fill in blank (1): ____</p><textarea data-blank-index="1" aria-label="blank 1"></textarea>',
+      questionType: "fill_blank" as const,
+      expectedControl: "textarea",
+      answer: "beta",
+      verify: (owner: Element) => expect((owner.querySelector("textarea") as HTMLTextAreaElement).value).toBe("beta"),
+    },
+  ])("$id discovers, maps, snapshots, fills, reads back, and verifies frame-native controls", async (scenario) => {
+    const registry = sharedRootRegistry();
+    const { doc } = makeFrame();
+    const owner = doc.createElement("section");
+    owner.className = "question-item";
+    owner.setAttribute("data-question-id", scenario.id);
+    owner.innerHTML = scenario.html;
+    doc.body.append(owner);
+    stubRect(owner, { left: 8, top: 8, width: 640, height: 220 });
+    const topTwin = document.createElement("section");
+    topTwin.className = "question-item";
+    topTwin.innerHTML = scenario.html.replace(/name="answer"/g, 'name="top-answer"');
+    document.body.append(topTwin);
+    registry.reconcile(document);
+    const frameRoot = registry.list().find((root) => root.kind === "same-origin-frame")!;
+    const previewText = extractStructuredQuestionText(owner);
+    const block = attachTestRuntimeBlock(owner, frameRoot, scenario.questionType, previewText);
+
+    const controls = discoverControls(owner);
+    expect(controls.some((control) => control.controlType === scenario.expectedControl)).toBe(true);
+    const mapping = buildControlMapping(block, owner);
+    expect(mapping.ok).toBe(true);
+    if (mapping.ok) {
+      expect(mapping.confidence).toBeGreaterThanOrEqual(0.9);
+      if (scenario.expectedControl === "radio" || scenario.expectedControl === "checkbox") expect(mapping.options.size).toBe(4);
+      else expect(mapping.blanks).toHaveLength(1);
+    }
+
+    captureSolveStartControlState(block);
+    expect(hasAutoSolveQuestionAttempt(block)).toBe(true);
+    const result = await fillParsedAnswerInPage(block, {
+      ...parseResult(scenario.answer),
+      questionType: scenario.questionType,
+      ...(scenario.questionType === "multi_choice" ? { optionSelections: { A: true, B: true, C: false, D: false } } : {}),
+    }, { mode: "auto" });
+
+    expect(result.ok).toBe(true);
+    scenario.verify(owner);
+    const verification = verifyParsedAnswerInPage(block, {
+      ...parseResult(scenario.answer),
+      questionType: scenario.questionType,
+      ...(scenario.questionType === "multi_choice" ? { optionSelections: { A: true, B: true, C: false, D: false } } : {}),
+    });
+    expect(verification.ok).toBe(true);
+    expect(topTwin.querySelectorAll(":checked")).toHaveLength(0);
+    expect((topTwin.querySelector("input") as HTMLInputElement | null)?.value ?? "").not.toBe(scenario.answer);
+    finishAutoSolveQuestionAttempt(block);
+  });
+
+  it("FRAME-SHADOW-NATIVE-1 maps and fills a native radio in an iframe open shadow root", async () => {
+    const registry = sharedRootRegistry();
+    const { doc } = makeFrame();
+    const host = doc.createElement("native-choice-host");
+    doc.body.append(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    const owner = doc.createElement("section");
+    owner.className = "question-item";
+    owner.setAttribute("data-question-id", "16");
+    owner.innerHTML = '<p class="stem">16. Which value equals 2 + 2? Choose the correct value.</p>'
+      + '<label><input type="radio" name="shadow-answer" value="A"> A. 3</label>'
+      + '<label><input type="radio" name="shadow-answer" value="B"> B. 4</label>'
+      + '<label><input type="radio" name="shadow-answer" value="C"> C. 5</label>'
+      + '<label><input type="radio" name="shadow-answer" value="D"> D. 6</label>';
+    shadow.append(owner);
+    const topTwin = document.createElement("input");
+    topTwin.type = "radio";
+    topTwin.name = "shadow-answer";
+    topTwin.value = "B";
+    document.body.append(topTwin);
+    stubRect(owner, { left: 8, top: 8, width: 640, height: 220 });
+    registry.reconcile(document);
+    const shadowContext = registry.list().find((root) => root.root === shadow)!;
+    const block = attachTestRuntimeBlock(owner, shadowContext, "single_choice", extractStructuredQuestionText(owner));
+
+    const controls = discoverControls(owner);
+    expect(controls.some((control) => control.controlType === "radio")).toBe(true);
+    const mapping = buildControlMapping(block, owner);
+    expect(mapping.ok).toBe(true);
+    captureSolveStartControlState(block);
+    const result = await fillParsedAnswerInPage(block, parseResult("B"), { mode: "auto" });
+    expect(result.ok).toBe(true);
+    expect((owner.querySelector('input[value="B"]') as HTMLInputElement).checked).toBe(true);
+    expect(verifyParsedAnswerInPage(block, parseResult("B")).ok).toBe(true);
+    expect(topTwin.checked).toBe(false);
+    finishAutoSolveQuestionAttempt(block);
   });
 
   it("FRAME-6 invalidates a pending attempt when the frame document is replaced", async () => {
@@ -286,6 +623,58 @@ describe("Phase 7 accessible roots", () => {
     }));
     expect(shadowA.getElementById("opt-b")!.getAttribute("aria-checked")).toBe("true");
     expect(shadowB.getElementById("other-b")!.getAttribute("aria-checked")).toBeNull();
+  });
+
+  it("SHADOW-SCOPE-1 keeps Question 12 inside shadow when top Question 12 differs", async () => {
+    const registry = registryWithTop();
+    const topHolder = document.createElement("div");
+    document.body.append(topHolder);
+    mountQuestion(topHolder, QUESTION_HTML.replace("2 + 2", "9 + 9").replace("B. 4", "B. 18").replace('id="opt-b"', 'id="top-b"'));
+    const { host, shadow } = makeShadowHost("scope-different", 300);
+    registry.reconcile(document, new Set([TOP_ROOT_KEY]));
+    const root = registry.list().find((entry) => entry.shadowHost === host)!;
+    const [block] = detectCandidatesInRoot(root.root, root);
+
+    const result = await fillParsedAnswerInPage(block!, parseResult("B"), { mode: "manual" });
+
+    expect(result.ok).toBe(true);
+    expect(shadow.getElementById("opt-b")!.getAttribute("aria-checked")).toBe("true");
+    expect(document.getElementById("top-b")!.getAttribute("aria-checked")).toBeNull();
+  });
+
+  it("SHADOW-SCOPE-2 uses the exact shadow instance when top has identical semantics", async () => {
+    const registry = registryWithTop();
+    const topHolder = document.createElement("div");
+    document.body.append(topHolder);
+    mountQuestion(topHolder);
+    const { host, shadow } = makeShadowHost("scope-identical", 300);
+    registry.reconcile(document, new Set([TOP_ROOT_KEY]));
+    const root = registry.list().find((entry) => entry.shadowHost === host)!;
+    const [shadowBlock] = detectCandidatesInRoot(root.root, root);
+    const [topBlock] = detectCandidatesInRoot(document, registry.get(TOP_ROOT_KEY)!);
+    expect(shadowBlock!.identity!.stableId).toBe(topBlock!.identity!.stableId);
+
+    const result = await fillParsedAnswerInPage(shadowBlock!, parseResult("B"), { mode: "manual" });
+
+    expect(result.ok).toBe(true);
+    expect(shadow.getElementById("opt-b")!.getAttribute("aria-checked")).toBe("true");
+    expect(topHolder.querySelector('[aria-checked="true"]')).toBeNull();
+  });
+
+  it("SHADOW-SCOPE-3 abstains after the shadow owner disappears", async () => {
+    const registry = registryWithTop();
+    const { host, shadow } = makeShadowHost("scope-removed", 0);
+    registry.reconcile(document, new Set([TOP_ROOT_KEY]));
+    const root = registry.list().find((entry) => entry.shadowHost === host)!;
+    const [block] = detectCandidatesInRoot(root.root, root);
+    host.remove();
+    registry.reconcile(document, new Set([TOP_ROOT_KEY]));
+
+    const result = await fillParsedAnswerInPage(block!, parseResult("B"), { mode: "manual" });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe("STALE_RUNTIME_QUESTION_HANDLE");
+    expect(shadow.getElementById("opt-b")!.getAttribute("aria-checked")).toBeNull();
   });
 
   it("SHADOW-4 preserves media and formula evidence inside open shadow roots", () => {

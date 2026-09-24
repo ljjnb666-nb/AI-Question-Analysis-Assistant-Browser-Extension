@@ -1,9 +1,10 @@
 import { getTraversalRoot } from "./roots/rootDom";
 import { sharedRootRegistry, topViewportPointForElement } from "./roots/rootRegistry";
 import type { BoundingBox } from "@/shared/types";
+import { isHTMLInputInOwnerRealm, isHTMLTextAreaInOwnerRealm } from "./domRealm";
 
 export function applyTextValue(control: HTMLElement, value: string): boolean {
-  if (control instanceof HTMLInputElement) {
+  if (isHTMLInputInOwnerRealm(control)) {
     if (control.value === value) return false;
     control.focus();
     setNativeInputValue(control, value);
@@ -11,7 +12,7 @@ export function applyTextValue(control: HTMLElement, value: string): boolean {
     return true;
   }
 
-  if (control instanceof HTMLTextAreaElement) {
+  if (isHTMLTextAreaInOwnerRealm(control)) {
     if (control.value === value) return false;
     control.focus();
     setNativeTextareaValue(control, value);
@@ -34,13 +35,14 @@ export function applyTextValue(control: HTMLElement, value: string): boolean {
 }
 
 export function clickElement(target: HTMLElement) {
-  target.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
-  target.dispatchEvent(new PointerEvent("pointerenter", { bubbles: true }));
-  target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, isPrimary: true, button: 0, buttons: 1 }));
-  target.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-  target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-  target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  target.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, isPrimary: true, button: 0 }));
+  const view = target.ownerDocument.defaultView ?? window;
+  target.dispatchEvent(new view.PointerEvent("pointerover", { bubbles: true }));
+  target.dispatchEvent(new view.PointerEvent("pointerenter", { bubbles: true }));
+  target.dispatchEvent(new view.PointerEvent("pointerdown", { bubbles: true, pointerId: 1, isPrimary: true, button: 0, buttons: 1 }));
+  target.dispatchEvent(new view.MouseEvent("mouseover", { bubbles: true }));
+  target.dispatchEvent(new view.MouseEvent("mousedown", { bubbles: true }));
+  target.dispatchEvent(new view.MouseEvent("mouseup", { bubbles: true }));
+  target.dispatchEvent(new view.PointerEvent("pointerup", { bubbles: true, pointerId: 1, isPrimary: true, button: 0 }));
   if (typeof target.click === "function") {
     target.click();
   }
@@ -51,9 +53,10 @@ export function compareRectPosition(a: DOMRect, b: DOMRect): number {
 }
 
 export function dispatchChoiceEvents(target: HTMLInputElement) {
-  target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  target.dispatchEvent(new Event("input", { bubbles: true }));
-  target.dispatchEvent(new Event("change", { bubbles: true }));
+  const view = target.ownerDocument.defaultView ?? window;
+  target.dispatchEvent(new view.MouseEvent("click", { bubbles: true }));
+  target.dispatchEvent(new view.Event("input", { bubbles: true }));
+  target.dispatchEvent(new view.Event("change", { bubbles: true }));
 }
 
 export function intersectionArea(rect: DOMRect, bbox: BoundingBox): number {
@@ -132,7 +135,8 @@ export async function requestRealClick(target: HTMLElement): Promise<boolean> {
 }
 
 export function setNativeChecked(input: HTMLInputElement, checked: boolean) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked")?.set;
+  const constructor = input.ownerDocument.defaultView?.HTMLInputElement ?? HTMLInputElement;
+  const setter = Object.getOwnPropertyDescriptor(constructor.prototype, "checked")?.set;
   if (setter) {
     setter.call(input, checked);
   } else {
@@ -141,14 +145,16 @@ export function setNativeChecked(input: HTMLInputElement, checked: boolean) {
 }
 
 function dispatchTextEvents(target: HTMLElement) {
-  target.dispatchEvent(new Event("input", { bubbles: true }));
-  target.dispatchEvent(new Event("change", { bubbles: true }));
-  target.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
-  target.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+  const view = target.ownerDocument.defaultView ?? window;
+  target.dispatchEvent(new view.Event("input", { bubbles: true }));
+  target.dispatchEvent(new view.Event("change", { bubbles: true }));
+  target.dispatchEvent(new view.KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
+  target.dispatchEvent(new view.FocusEvent("blur", { bubbles: true }));
 }
 
 function setNativeInputValue(input: HTMLInputElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  const constructor = input.ownerDocument.defaultView?.HTMLInputElement ?? HTMLInputElement;
+  const setter = Object.getOwnPropertyDescriptor(constructor.prototype, "value")?.set;
   if (setter) {
     setter.call(input, value);
   } else {
@@ -157,7 +163,8 @@ function setNativeInputValue(input: HTMLInputElement, value: string) {
 }
 
 function setNativeTextareaValue(input: HTMLTextAreaElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+  const constructor = input.ownerDocument.defaultView?.HTMLTextAreaElement ?? HTMLTextAreaElement;
+  const setter = Object.getOwnPropertyDescriptor(constructor.prototype, "value")?.set;
   if (setter) {
     setter.call(input, value);
   } else {
@@ -166,17 +173,18 @@ function setNativeTextareaValue(input: HTMLTextAreaElement, value: string) {
 }
 
 function replaceContentEditableText(control: HTMLElement, value: string): boolean {
-  const selection = window.getSelection();
+  const ownerDocument = control.ownerDocument;
+  const selection = ownerDocument.defaultView?.getSelection();
   if (!selection) return false;
 
   try {
     selection.removeAllRanges();
-    const range = document.createRange();
+    const range = ownerDocument.createRange();
     range.selectNodeContents(control);
     selection.addRange(range);
 
-    if (typeof document.execCommand === "function") {
-      const ok = document.execCommand("insertText", false, value);
+    if (typeof ownerDocument.execCommand === "function") {
+      const ok = ownerDocument.execCommand("insertText", false, value);
       if (ok) return true;
     }
   } catch {

@@ -23,6 +23,10 @@ function rootContextStale(rootKey: string, rootGeneration: number): boolean {
 }
 
 export function beginQuestionRevisionAttempt(block: QuestionBlock, controller: AbortController): RevisionAttemptIdentity {
+  // A new attempt must bind to the URL that is current now, even when a
+  // previous watcher stopped before it could observe a programmatic route
+  // replacement (for example history.replaceState).
+  registry.refreshRoute();
   const route = registry.getRoute();
   const root = rootScopeForBlock(block);
   const identity: RevisionAttemptIdentity = {

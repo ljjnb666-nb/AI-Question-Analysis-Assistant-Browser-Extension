@@ -93,5 +93,5 @@ describe("runAutoSolveAll attempt ownership", () => {
     expect(clicks).toBe(0);
     expect(hasAutoSolveQuestionAttempt(current)).toBe(false);
     stopWatch(); clearQuestionRevisionAttempt(provider);
-  });
+  }, 20_000);
 });

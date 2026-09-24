@@ -48,14 +48,31 @@ import { attachQuestionIdentity } from "../questionIdentity";
 import { collectMediaAssets, projectLegacyMedia } from "../media/mediaDiscovery";
 import { classifyViewportBoundary } from "./questionBoundary";
 import { startQuestionRevisionWatch } from "../revision/questionRevisionWatch";
-import { attachRuntimeRoot, MAX_SHADOW_HOST_PROBES, type RootContext } from "../roots/rootContext";
+import { attachRuntimeRoot, MAX_SHADOW_HOST_PROBES, topRootContext, type RootContext } from "../roots/rootContext";
+import { isOpenShadowRootNode } from "../domRealm";
 import { createTopViewportProjector, sharedRootRegistry } from "../roots/rootRegistry";
 import type { TraversableRoot } from "../roots/rootDom";
 
+let rootCandidateObservationSequence = 0;
 
-function attachDetectedQuestionIdentity(block: QuestionBlock, owner: Element, options?: { identityText?: string; nativeQuestionId?: string }): QuestionBlock & { identity: NonNullable<QuestionBlock["identity"]> } {
+function nextRootCandidateObservationId(): string {
+  return `auto-root-${Date.now()}-${++rootCandidateObservationSequence}`;
+}
+
+function attachDetectedQuestionIdentity(
+  block: QuestionBlock,
+  owner: Element,
+  options?: { identityText?: string; nativeQuestionId?: string; rootContext?: RootContext },
+): QuestionBlock & { identity: NonNullable<QuestionBlock["identity"]> } {
+  const { rootContext, ...identityOptions } = options ?? {};
   const withMedia = projectLegacyMedia(block, collectMediaAssets(owner), owner);
-  return attachQuestionIdentity(withMedia, owner, options);
+  const identified = attachQuestionIdentity(withMedia, owner, identityOptions);
+  const context = rootContext ?? topRootContext(owner.ownerDocument);
+  return attachRuntimeRoot(identified, {
+    rootKey: context.rootKey,
+    rootGeneration: context.rootGeneration,
+    kind: context.kind,
+  }, owner) as QuestionBlock & { identity: NonNullable<QuestionBlock["identity"]> };
 }
 
 export function watchForPageChanges(callback: (blocks: QuestionBlock[], rootKey?: string) => void): () => void {
@@ -496,7 +513,7 @@ export function detectCandidatesInRoot(root: TraversableRoot, context: RootConte
   const blocks: QuestionBlock[] = [];
 
   const containers = new Set<Element>(getStableQuestionCardContainers(root));
-  if (typeof ShadowRoot !== "undefined" && root instanceof ShadowRoot) {
+  if (isOpenShadowRootNode(root)) {
     for (const slotted of collectSlottedLightContainers(root)) {
       const rect = slotted.getBoundingClientRect();
       if (rect.width < 240 || rect.height < 120) continue;
@@ -520,7 +537,7 @@ if (!isHtmlElementNode(hostContainer)) continue;
     if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
 
     const candidate = attachDetectedQuestionIdentity({
-      id: `auto-root-${Date.now()}-${structuredIndex++}`,
+      id: nextRootCandidateObservationId(),
       bbox: { x: projected.left, y: projected.top, width: projected.width, height: projected.height },
       previewText: previewText.slice(0, 420),
       hasImage: hasMeaningfulVisualContent(hostContainer) || !!hostContainer.querySelector("table"),
@@ -529,10 +546,10 @@ if (!isHtmlElementNode(hostContainer)) continue;
       confidence: 0.94,
       source: "auto_dom",
       identitySourceText: readableText,
-      runtimeOwnerKey: `root-${context.rootKey}-${structuredIndex}`,
+      runtimeOwnerKey: `root-${context.rootKey}-${structuredIndex++}`,
       boundary: boundaryFromRawRect({ top: rawRect.top, height: rawRect.height }, vh),
-    }, hostContainer, { identityText: readableText });
-    blocks.push(attachRuntimeRoot(candidate, { rootKey: context.rootKey, rootGeneration: context.rootGeneration, kind: context.kind }, hostContainer));
+    }, hostContainer, { identityText: readableText, rootContext: context });
+    blocks.push(candidate);
   }
 
   // Bounded generic fallback for roots without stable structured containers.
@@ -551,7 +568,7 @@ if (!isHtmlElementNode(hostContainer)) continue;
       if (!projected || projected.width < 80 || projected.height < 16) continue;
       const candidateType = score.type !== "unknown" ? score.type : inferQuestionType(text);
       const candidate = attachDetectedQuestionIdentity({
-        id: `auto-root-fallback-${Date.now()}-${fallbackIndex++}`,
+        id: nextRootCandidateObservationId(),
         bbox: { x: projected.left, y: projected.top, width: projected.width, height: projected.height },
         previewText: buildPreviewText(el, text).slice(0, 420),
         hasImage: score.hasImage,
@@ -560,10 +577,10 @@ if (!isHtmlElementNode(hostContainer)) continue;
         confidence: score.confidence * 0.9,
         source: "auto_dom",
         identitySourceText: text,
-        runtimeOwnerKey: `root-fallback-${context.rootKey}-${fallbackIndex}`,
+        runtimeOwnerKey: `root-fallback-${context.rootKey}-${fallbackIndex++}`,
         boundary: boundaryFromRawRect({ top: rawRect.top, height: rawRect.height }, vh),
-      }, el, { identityText: text });
-      blocks.push(attachRuntimeRoot(candidate, { rootKey: context.rootKey, rootGeneration: context.rootGeneration, kind: context.kind }, el));
+      }, el, { identityText: text, rootContext: context });
+      blocks.push(candidate);
     }
   }
 

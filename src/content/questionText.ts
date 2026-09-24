@@ -1,4 +1,5 @@
 import { isElementNode, isHtmlElementNode } from "./detector/domDetectorShared";
+import { isOpenShadowRootNode } from "./domRealm";
 import type { BoundingBox } from "@/shared/types";
 import {
   decodeFormulaLikeText,
@@ -215,7 +216,7 @@ export function isElementVisible(el: HTMLElement): boolean {
 export function isExtensionUiElement(el: Element): boolean {
   if ((el.id && el.id.startsWith("qs-")) || !!el.closest("[id^='qs-']")) return true;
   const root = el.getRootNode();
-  if (root instanceof ShadowRoot) {
+  if (isOpenShadowRootNode(root)) {
     const hostId = root.host?.id ?? "";
     if (hostId.startsWith("qs-")) return true;
   }

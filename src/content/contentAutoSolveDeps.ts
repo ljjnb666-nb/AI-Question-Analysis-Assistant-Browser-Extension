@@ -57,6 +57,8 @@ export function createOrderedPlanDeps(options: {
   detectRootCandidates?: () => QuestionBlock[];
   detectTotalQuestionCount: () => number;
   getScrollLeft: (scrollRoot: ScanScrollRoot) => number;
+  projectViewportBboxToAbsolute: (bbox: BoundingBox, scrollRoot: ScanScrollRoot) => BoundingBox;
+  refreshRuntimeQuestionBlock: (candidate: QuestionBlock) => QuestionBlock | null;
   mergeOrderedPlanWithDetectedCandidates: (domPlan: QuestionBlock[], refined: QuestionBlock[]) => QuestionBlock[];
   pauseMs: (ms: number) => Promise<void>;
   refineFullPageCandidatesViaManualPipeline: (candidates: QuestionBlock[]) => Promise<QuestionBlock[]>;
@@ -86,6 +88,8 @@ export function createOrderedPlanDeps(options: {
     extractAutoSolveQuestionOrder: options.extractAutoSolveQuestionOrder,
     getActiveCandidates: () => options.activeCandidates,
     getScrollLeft: options.getScrollLeft,
+    projectViewportBboxToAbsolute: options.projectViewportBboxToAbsolute,
+    refreshRuntimeQuestionBlock: options.refreshRuntimeQuestionBlock,
     mergeOrderedPlanWithDetectedCandidates: options.mergeOrderedPlanWithDetectedCandidates,
     pauseMs: options.pauseMs,
     refineFullPageCandidatesViaManualPipeline: options.refineFullPageCandidatesViaManualPipeline,

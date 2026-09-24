@@ -1,4 +1,5 @@
 import type { ActionPlan, AnswerPlan } from "@/shared/types";
+import { isHTMLInputInOwnerRealm, isHTMLTextAreaInOwnerRealm } from "../domRealm";
 import { applyTextValue, clickElement } from "../answerDomUtils";
 import { controlRegistry, type ControlRef } from "./controlRegistry";
 import { controlIsVisibleAndEnabled, semanticFingerprintForControl, type ControlMappingResult } from "./controlMapping";
@@ -56,8 +57,8 @@ function rollback(snapshot: Snapshot, mapping: Extract<ControlMappingResult, { o
 export function verifyAnswerPlan(plan: AnswerPlan, mapping: Extract<ControlMappingResult, { ok: true }>) { if (plan.kind === "single-choice" || plan.kind === "multiple-choice" || plan.kind === "boolean") { const expected = new Set(plan.kind === "boolean" ? [plan.optionKey!] : plan.optionKeys); const actual = new Set([...mapping.options].filter(([, ref]) => isSelected(ref)).map(([key]) => key)); return expected.size === actual.size && [...expected].every((key) => actual.has(key)); } if (plan.kind === "fill-blank") return plan.blanks.every((blank) => normalize(readValue(mapping.blanks[blank.index])) === normalize(blank.value)); return Boolean(mapping.text) && normalize(readValue(mapping.text!)) === normalize(plan.value); }
 export function readSelectedOptionKeys(mapping: Extract<ControlMappingResult, { ok: true }>) { return [...mapping.options].filter(([, ref]) => isSelected(ref)).map(([key]) => key).sort(); }
 function findRef(mapping: Extract<ControlMappingResult, { ok: true }>, id: string) { return [...mapping.options.values(), ...mapping.blanks].find((ref) => ref.controlId === id) ?? null; }
-function isSelected(ref: ControlRef) { const el = controlRegistry.get(ref.controlId); return el instanceof HTMLInputElement ? el.checked : el?.getAttribute("aria-checked") === "true" || Boolean(el?.classList.contains("is-choose") || el?.classList.contains("selected") || el?.classList.contains("active")); }
+function isSelected(ref: ControlRef) { const el = controlRegistry.get(ref.controlId); return isHTMLInputInOwnerRealm(el) ? el.checked : el?.getAttribute("aria-checked") === "true" || Boolean(el?.classList.contains("is-choose") || el?.classList.contains("selected") || el?.classList.contains("active")); }
 function readRaw(ref: ControlRef): string | boolean { return ref.role === "option" ? isSelected(ref) : readValue(ref); }
-function readValue(ref: ControlRef) { const el = controlRegistry.get(ref.controlId); return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : el?.textContent ?? ""; }
+function readValue(ref: ControlRef) { const el = controlRegistry.get(ref.controlId); return isHTMLInputInOwnerRealm(el) || isHTMLTextAreaInOwnerRealm(el) ? el.value : el?.textContent ?? ""; }
 function normalize(value: string) { return String(value).normalize("NFC").replace(/\r\n?/g, "\n").trim(); }
 function sameSnapshot(a: Snapshot, b: Snapshot) { return a.size === b.size && [...a].every(([key, value]) => b.get(key) === value); }
