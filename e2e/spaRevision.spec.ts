@@ -21,12 +21,16 @@ type DriverWindow = Window & typeof globalThis & { __events: string[] };
 
 declare const chrome: {
   tabs: {
-    query: (info: { url: string }) => Promise<Array<{ id: number } | undefined>>;
+    query: (info: { url?: string; active?: boolean; currentWindow?: boolean }) => Promise<Array<{ id: number; title?: string; url?: string }>>;
     sendMessage: (tabId: number, message: { type: string }) => Promise<unknown>;
+    update: (tabId: number, properties: { active?: boolean }) => Promise<unknown>;
   };
   scripting: { executeScript: (injection: { target: { tabId: number }; files: string[] }) => Promise<unknown> };
   runtime: { onMessage: { addListener: (listener: (message: unknown) => void) => void } };
-  storage: { local: { set: (items: Record<string, unknown>) => Promise<void> } };
+  storage: { local: {
+    get: (keys: string | string[]) => Promise<Record<string, unknown>>;
+    set: (items: Record<string, unknown>) => Promise<void>;
+  } };
 };
 
 const SPA_PAGE_HTML = `<!doctype html>
@@ -184,6 +188,8 @@ async function startProductionAutoSolve(context: BrowserContext, extensionId: st
   });
 
   await driver.evaluate((baseOrigin: string) => chrome.storage.local.set({
+    parseHistory: [],
+    analyticsLog: [],
     appSettings: {
       providerId: "custom",
       apiKey: "e2e-key",
@@ -216,6 +222,81 @@ async function waitForEvent(driver: Page, eventType: string, timeout = 30_000): 
     eventType,
     { timeout },
   );
+}
+
+async function installControlledProvider(context: BrowserContext) {
+  type Gate = { started: Promise<void>; release: () => void; markStarted: () => void; released: Promise<void> };
+  const queued: Gate[] = [];
+  await context.route("**/chat/completions", async (route) => {
+    const gate = queued.shift();
+    if (!gate) {
+      await route.abort();
+      return;
+    }
+    gate.markStarted();
+    await gate.released;
+    const modelJson = JSON.stringify({
+      questionType: "single_choice",
+      answer: "B",
+      confidence: 0.99,
+      briefExplanation: "mocked",
+      detailedExplanation: "mocked explanation",
+      recognizedText: "12. Which value is equal to 2 + 2? Choose the correct option. A. 3 B. 4 C. 5 D. 6",
+      optionSelections: { B: true },
+      warning: null,
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ choices: [{ message: { content: modelJson } }] }),
+    });
+  });
+
+  return {
+    holdNext(): Gate {
+      let release!: () => void;
+      let markStarted!: () => void;
+      const started = new Promise<void>((resolve) => { markStarted = resolve; });
+      const released = new Promise<void>((resolve) => { release = resolve; });
+      const gate: Gate = { started, release, markStarted: () => markStarted(), released };
+      queued.push(gate);
+      return gate;
+    },
+  };
+}
+
+async function getPageTabId(driver: Page, origin: string, title: string): Promise<number> {
+  const tabId = await driver.evaluate(async ({ baseOrigin, expectedTitle }) => {
+    const tabs = await chrome.tabs.query({ url: `${baseOrigin}/*` });
+    return tabs.find((tab) => tab?.title === expectedTitle)?.id ?? null;
+  }, { baseOrigin: origin, expectedTitle: title });
+  if (tabId === null) throw new Error(`Tab not found: ${title}`);
+  return tabId;
+}
+
+async function seedAuthenticatedSidePanel(driver: Page) {
+  await driver.evaluate(async () => chrome.storage.local.set({
+    parseHistory: [],
+    analyticsLog: [],
+    appSettings: {
+      userId: "phase8a-e2e-user",
+      userEmail: "phase8a@example.test",
+      authToken: "phase8a-e2e-token",
+      providerId: "deepseek",
+      apiKey: "phase8a-e2e-key",
+      apiModel: "deepseek-v4-flash",
+      preferredRoute: "text",
+      language: "en",
+      enableAnalytics: false,
+    },
+  }));
+}
+
+async function sendDetectToTab(driver: Page, tabId: number) {
+  await driver.evaluate(async (id) => {
+    await chrome.scripting.executeScript({ target: { tabId: id }, files: ["content/content-main.js"] });
+    await chrome.tabs.sendMessage(id, { type: "START_AUTO_DETECT" });
+  }, tabId);
 }
 
 test.describe("Phase 6 synthetic SPA revision scenarios", () => {
@@ -263,6 +344,135 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       expect(clicks).toEqual([]);
       expect(await spaPage.textContent("#stem")).toBe("12. Which value is equal to 3 + 3? Choose the correct option.");
       expect(await spaPage.textContent("#opt-a")).toBe("A. 6");
+      const history = await driver.evaluate(async () => (await chrome.storage.local.get("parseHistory")).parseHistory as Array<{ id?: string }>);
+      expect(history.filter((entry) => entry.id?.startsWith("auto-solve-")).map((entry) => entry.id)).toEqual([]);
+      await expect.poll(async () => driver.evaluate(async () => {
+        const entries = (await chrome.storage.local.get("analyticsLog")).analyticsLog as Array<{ event?: string }>;
+        return entries.map((entry) => entry.event);
+      }), { timeout: 10_000 }).toContain("provider_result_discarded_stale");
+      const analyticsEvents = await driver.evaluate(async () => {
+        const entries = (await chrome.storage.local.get("analyticsLog")).analyticsLog as Array<{ event?: string }>;
+        return entries.map((entry) => entry.event);
+      });
+      expect(analyticsEvents).not.toContain("parse_success");
+      expect(analyticsEvents).not.toContain("manual_parse_attempt_succeeded");
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
+  test("Phase 8A RC-D: a sidepanel result stays bound to its origin tab after switching tabs", async () => {
+    test.setTimeout(60_000);
+    const server = await startSpaServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const originPage = await context.newPage();
+      await originPage.goto(`${server.origin}/q?source=origin`);
+      await originPage.evaluate(() => { document.title = "Phase 8A Origin"; });
+      const otherPage = await context.newPage();
+      await otherPage.goto(`${server.origin}/q?source=other`);
+      await otherPage.evaluate(() => { document.title = "Phase 8A Other"; });
+
+      const driver = await context.newPage();
+      await driver.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+      await seedAuthenticatedSidePanel(driver);
+      const originTabId = await getPageTabId(driver, server.origin, "Phase 8A Origin");
+      const otherTabId = await getPageTabId(driver, server.origin, "Phase 8A Other");
+
+      const sidePanel = await context.newPage();
+      await sidePanel.goto(`chrome-extension://${extensionId}/sidepanel/sidepanel.html`);
+      await expect(sidePanel.getByText("Workspace")).toBeVisible();
+      await sendDetectToTab(driver, originTabId);
+      await expect(sidePanel.getByText(/Which value is equal to 2 \+ 2/)).toBeVisible();
+      await sidePanel.getByText(/Which value is equal to 2 \+ 2/).click();
+      const solveButton = sidePanel.getByRole("button", { name: "Solve 1" });
+      await expect(solveButton).toBeVisible();
+
+      const provider = await installControlledProvider(context);
+      const held = provider.holdNext();
+      await solveButton.click();
+      await held.started;
+      await driver.evaluate(async (id) => chrome.tabs.update(id, { active: true }), otherTabId);
+      const activeTabId = await driver.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id ?? null);
+      expect(activeTabId).toBe(otherTabId);
+      held.release();
+
+      await expect(sidePanel.getByText(/Answer: B/)).toBeVisible();
+      const historyAfterParse = await driver.evaluate(async () => (await chrome.storage.local.get("parseHistory")).parseHistory as Array<{ host?: string }>);
+      expect(historyAfterParse).toHaveLength(1);
+      expect(historyAfterParse[0].host).toBe("127.0.0.1");
+      await expect.poll(async () => driver.evaluate(async () => {
+        const entries = (await chrome.storage.local.get("analyticsLog")).analyticsLog as Array<{ event?: string }>;
+        return entries.filter((entry) => entry.event === "parse_success").length;
+      }), { timeout: 10_000 }).toBe(1);
+
+      await sidePanel.getByRole("button", { name: "Fill answer" }).click();
+      await expect.poll(() => originPage.evaluate(() => (window as SpaPageWindow).__clicks)).toEqual([{ generation: 0, label: "B" }]);
+      expect(await otherPage.evaluate(() => (window as SpaPageWindow).__clicks)).toEqual([]);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
+  test("Phase 8A RC-E: a sidepanel result from a changed origin revision commits neither candidate nor history", async () => {
+    test.setTimeout(60_000);
+    const server = await startSpaServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const originPage = await context.newPage();
+      await originPage.goto(`${server.origin}/q?source=origin`);
+      await originPage.evaluate(() => { document.title = "Phase 8A Stale Origin"; });
+      const otherPage = await context.newPage();
+      await otherPage.goto(`${server.origin}/q?source=other`);
+      await otherPage.evaluate(() => { document.title = "Phase 8A Stale Other"; });
+
+      const driver = await context.newPage();
+      await driver.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+      await seedAuthenticatedSidePanel(driver);
+      const originTabId = await getPageTabId(driver, server.origin, "Phase 8A Stale Origin");
+      const otherTabId = await getPageTabId(driver, server.origin, "Phase 8A Stale Other");
+      const sidePanel = await context.newPage();
+      await sidePanel.goto(`chrome-extension://${extensionId}/sidepanel/sidepanel.html`);
+      await expect(sidePanel.getByText("Workspace")).toBeVisible();
+      await sendDetectToTab(driver, originTabId);
+      await expect(sidePanel.getByText(/Which value is equal to 2 \+ 2/)).toBeVisible();
+      await sidePanel.getByText(/Which value is equal to 2 \+ 2/).click();
+
+      const provider = await installControlledProvider(context);
+      const held = provider.holdNext();
+      await sidePanel.getByRole("button", { name: "Solve 1" }).click();
+      await held.started;
+      await driver.evaluate(async (id) => chrome.tabs.update(id, { active: true }), otherTabId);
+      await originPage.evaluate(() => {
+        document.getElementById("stem")!.textContent = "12. Which value is equal to 5 + 5? Choose the correct option.";
+        document.getElementById("opt-a")!.textContent = "A. 8";
+        document.getElementById("opt-b")!.textContent = "B. 10";
+        document.getElementById("opt-c")!.textContent = "C. 12";
+        document.getElementById("opt-d")!.textContent = "D. 14";
+      });
+      await expect(sidePanel.getByText(/Which value is equal to 5 \+ 5/)).toBeVisible();
+      held.release();
+
+      await expect(sidePanel.getByRole("button", { name: "Done 0" })).toBeVisible();
+      expect(await sidePanel.getByText(/Answer:/).count()).toBe(0);
+      const history = await driver.evaluate(async () => (await chrome.storage.local.get("parseHistory")).parseHistory as unknown[]);
+      expect(history).toEqual([]);
+      await expect.poll(async () => driver.evaluate(async () => {
+        const entries = (await chrome.storage.local.get("analyticsLog")).analyticsLog as Array<{ event?: string }>;
+        return entries.map((entry) => entry.event);
+      }), { timeout: 10_000 }).toContain("provider_result_discarded_stale");
+      const analyticsEvents = await driver.evaluate(async () => {
+        const entries = (await chrome.storage.local.get("analyticsLog")).analyticsLog as Array<{ event?: string }>;
+        return entries.map((entry) => entry.event);
+      });
+      expect(analyticsEvents).not.toContain("parse_success");
+      expect(analyticsEvents).not.toContain("manual_parse_attempt_succeeded");
+      expect(await originPage.evaluate(() => (window as SpaPageWindow).__clicks)).toEqual([]);
+      expect(await otherPage.evaluate(() => (window as SpaPageWindow).__clicks)).toEqual([]);
     } finally {
       await context.close();
       await server.close();

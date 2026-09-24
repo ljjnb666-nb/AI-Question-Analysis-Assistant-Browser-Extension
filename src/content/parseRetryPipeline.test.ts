@@ -16,4 +16,14 @@ describe("parseWithTieredRetries", () => {
     await expect(parseWithTieredRetries(block, DEFAULT_SETTINGS, true, () => {}, [1, 1, 1], deps(parseQuestion))).resolves.toMatchObject({ answer: "A" });
     expect(parseQuestion).toHaveBeenCalledTimes(2);
   });
+
+  it("defers manual parse success telemetry to the owning result commit fence", async () => {
+    const parseQuestion = vi.fn(async () => result);
+    const retryDeps = deps(parseQuestion);
+
+    await parseWithTieredRetries(block, DEFAULT_SETTINGS, true, () => {}, [1], retryDeps, { deferSuccessTelemetry: true });
+
+    expect(retryDeps.logEvent).toHaveBeenCalledWith("manual_parse_attempt_started", expect.any(Object));
+    expect(retryDeps.logEvent).not.toHaveBeenCalledWith("manual_parse_attempt_succeeded", expect.any(Object));
+  });
 });

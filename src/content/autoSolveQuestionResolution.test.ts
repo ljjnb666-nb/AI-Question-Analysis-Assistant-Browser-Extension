@@ -8,6 +8,7 @@ import {
 } from "./answerFiller";
 import { observeLiveQuestion } from "./liveQuestionObservation";
 import { attachRuntimeRoot, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
+import { StaleQuestionRevisionError } from "@/shared/utils/parseAttemptErrors";
 
 function makeBlock(overrides: Partial<QuestionBlock> = {}): QuestionBlock {
   return {
@@ -116,6 +117,128 @@ describe("resolveAutoSolveQuestion", () => {
     expect(parseBlockForAutoSolve).toHaveBeenCalledTimes(2);
     expect(result.questionCompleted).toBe(true);
     expect(result.progressMessage).toContain("2 attempts");
+  });
+
+  it("RC-A commits a current result once before filling", async () => {
+    const block = makeBlock();
+    const result = makeResult({ confidence: 0.95 });
+    const parse = vi.fn(async () => result);
+    const recordAutoSolveHistory = vi.fn(async () => true);
+    const fillParsedAnswerInPage = vi.fn(async () => ({ ok: true, filledCount: 1, message: "filled" }));
+    const sendProgress = vi.fn();
+
+    const outcome = await resolveAutoSolveQuestion(
+      { answerStateComplete: false, currentBlock: block, filled: 0, history: [], historyEntry: null, needsHistoryReview: false, needsQuickAnsweredChoiceReview: false, solved: 0, total: 1 },
+      {
+        ...resolveDeps(parse),
+        fillParsedAnswerInPage,
+        isChoiceLikeQuestionType: () => true,
+        isCurrentAutoSolveResult: () => true,
+        recordAutoSolveHistory,
+        sendProgress,
+        shouldRetryUnstableChoiceParse: () => false,
+        verifyParsedAnswerInPage: () => ({ ok: true, message: "verified" }),
+      },
+    );
+
+    expect(outcome.stale).toBeUndefined();
+    expect(recordAutoSolveHistory).toHaveBeenCalledTimes(1);
+    expect(fillParsedAnswerInPage).toHaveBeenCalledTimes(1);
+    expect(sendProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it("RC-B discards a provider result that became stale while pending", async () => {
+    const block = makeBlock();
+    const pending = deferred<ParseResult>();
+    let current = true;
+    const parse = vi.fn(() => pending.promise);
+    const recordAutoSolveHistory = vi.fn(async () => true);
+    const fillParsedAnswerInPage = vi.fn(async () => ({ ok: true, filledCount: 1, message: "filled" }));
+    const sendProgress = vi.fn();
+    const workflow = resolveAutoSolveQuestion(
+      { answerStateComplete: false, currentBlock: block, filled: 0, history: [], historyEntry: null, needsHistoryReview: false, needsQuickAnsweredChoiceReview: false, solved: 0, total: 1 },
+      {
+        ...resolveDeps(parse),
+        fillParsedAnswerInPage,
+        isCurrentAutoSolveResult: () => current,
+        recordAutoSolveHistory,
+        sendProgress,
+      },
+    );
+
+    current = false;
+    pending.resolve(makeResult({ confidence: 0.95 }));
+    const outcome = await workflow;
+
+    expect(outcome).toMatchObject({ stale: true, filledDelta: 0, questionCompleted: false });
+    expect(recordAutoSolveHistory).not.toHaveBeenCalled();
+    expect(fillParsedAnswerInPage).not.toHaveBeenCalled();
+    expect(sendProgress).not.toHaveBeenCalled();
+  });
+
+  it("RC-C lets only the latest overlapping parse resolve, persist, and fill", async () => {
+    const block = makeBlock();
+    const first = deferred<ParseResult>();
+    const second = deferred<ParseResult>();
+    let latestAnswer = "older";
+    const parse = vi.fn()
+      .mockImplementationOnce(() => {
+        latestAnswer = "older";
+        return first.promise;
+      })
+      .mockImplementationOnce(() => {
+        latestAnswer = "newer";
+        return second.promise;
+      });
+    const recordAutoSolveHistory = vi.fn(async () => true);
+    const fillParsedAnswerInPage = vi.fn(async () => ({ ok: true, filledCount: 1, message: "filled" }));
+    const deps = {
+      ...resolveDeps(parse),
+      fillParsedAnswerInPage,
+      isCurrentAutoSolveResult: (_block: QuestionBlock, result: ParseResult) => result.answer === latestAnswer,
+      recordAutoSolveHistory,
+      shouldRetryUnstableChoiceParse: () => false,
+      verifyParsedAnswerInPage: () => ({ ok: true, message: "verified" }),
+    };
+    const options = { answerStateComplete: false, currentBlock: block, filled: 0, history: [], historyEntry: null, needsHistoryReview: false, needsQuickAnsweredChoiceReview: false, solved: 0, total: 1 };
+    const olderWorkflow = resolveAutoSolveQuestion(options, deps);
+    await vi.waitFor(() => expect(parse).toHaveBeenCalledTimes(1));
+    const newerWorkflow = resolveAutoSolveQuestion(options, deps);
+    await vi.waitFor(() => expect(parse).toHaveBeenCalledTimes(2));
+
+    second.resolve(makeResult({ answer: "newer", confidence: 0.95 }));
+    const newer = await newerWorkflow;
+    first.resolve(makeResult({ answer: "older", confidence: 0.95 }));
+    const older = await olderWorkflow;
+
+    expect(newer.stale).toBeUndefined();
+    expect(older.stale).toBe(true);
+    expect(recordAutoSolveHistory).toHaveBeenCalledTimes(1);
+    expect(recordAutoSolveHistory).toHaveBeenCalledWith(expect.any(Array), block, expect.objectContaining({ answer: "newer" }));
+    expect(fillParsedAnswerInPage).toHaveBeenCalledTimes(1);
+    expect(fillParsedAnswerInPage).toHaveBeenCalledWith(block, expect.objectContaining({ answer: "newer" }));
+  });
+
+  it("returns a stale outcome for typed revision invalidation without reporting parse failure", async () => {
+    const block = makeBlock();
+    const recordAutoSolveHistory = vi.fn(async () => true);
+    const fillParsedAnswerInPage = vi.fn(async () => ({ ok: true, filledCount: 1, message: "filled" }));
+    const sendProgress = vi.fn();
+
+    const outcome = await resolveAutoSolveQuestion(
+      { answerStateComplete: false, currentBlock: block, filled: 0, history: [], historyEntry: null, needsHistoryReview: false, needsQuickAnsweredChoiceReview: false, solved: 0, total: 1 },
+      {
+        ...resolveDeps(vi.fn(async () => { throw new StaleQuestionRevisionError(); })),
+        fillParsedAnswerInPage,
+        recordAutoSolveHistory,
+        sendProgress,
+      },
+    );
+
+    expect(outcome).toMatchObject({ stale: true, filledDelta: 0, questionCompleted: false });
+    expect(recordAutoSolveHistory).not.toHaveBeenCalled();
+    expect(fillParsedAnswerInPage).not.toHaveBeenCalled();
+    expect(sendProgress).not.toHaveBeenCalled();
   });
 
   it("AUTO-SNAP1 keeps the original empty baseline across a real deferred retry", async () => {

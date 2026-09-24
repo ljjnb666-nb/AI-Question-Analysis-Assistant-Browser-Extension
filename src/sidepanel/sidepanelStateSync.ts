@@ -1,5 +1,6 @@
-import type { CandidateSnapshot, DetectedCandidate, QuestionBlock } from "@/shared/types";
+import type { CandidateOrigin, CandidateSnapshot, DetectedCandidate, QuestionBlock } from "@/shared/types";
 import type { UILang } from "./displayUtils";
+import { sameCandidateResultContext } from "./candidateAuthority";
 
 export type ScanProgressState = { progress: number; found: number; step: number; total: number } | null;
 
@@ -16,23 +17,26 @@ export type AutoSolveProgressState = {
 export function mergeCandidateSnapshots(
   prev: DetectedCandidate[],
   snapshots: CandidateSnapshot[],
+  origin?: CandidateOrigin,
 ): DetectedCandidate[] {
   const prevById = new Map(prev.map((candidate) => [candidate.block.id, candidate] as const));
   return snapshots.map((snapshot) => {
     const old = prevById.get(snapshot.block.id);
+    const contextMatches = old ? sameCandidateResultContext(old, { block: snapshot.block, origin }) : false;
     return {
       block: snapshot.block,
+      origin,
       selected: snapshot.selected,
-      status: snapshot.status ?? old?.status ?? "idle",
-      result: old?.result,
-      error: old?.error,
-      debugInfo: old?.debugInfo,
+      status: contextMatches ? snapshot.status ?? old?.status ?? "idle" : snapshot.status === "loading" ? "loading" : "idle",
+      result: contextMatches ? old?.result : undefined,
+      error: contextMatches ? old?.error : undefined,
+      debugInfo: contextMatches ? old?.debugInfo : undefined,
     };
   });
 }
 
-export function mapFullPageDoneCandidates(blocks: QuestionBlock[]): DetectedCandidate[] {
-  return blocks.map((block) => ({ block, selected: false, status: "idle" as const }));
+export function mapFullPageDoneCandidates(blocks: QuestionBlock[], origin?: CandidateOrigin): DetectedCandidate[] {
+  return blocks.map((block) => ({ block, origin, selected: false, status: "idle" as const }));
 }
 
 export function mapFullPageProgressMessage(msg: Record<string, unknown>) {

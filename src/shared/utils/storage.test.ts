@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetStorageCacheForTests,
   addHistoryEntry,
+  addHistoryEntryIfCurrent,
   clearHistory,
   getOrCreateDeviceId,
   loadHistory,
@@ -229,6 +230,37 @@ describe("storage", () => {
       expect(savedHistory[0].id).toBe("new-1");
       expect(savedHistory.length).toBeLessThan(50);
       expect(savedHistory.length).toBeGreaterThanOrEqual(10);
+    });
+  });
+
+  describe("addHistoryEntryIfCurrent", () => {
+    const entry: HistoryEntry = {
+      id: "attempt-current",
+      timestamp: Date.now(),
+      block: mockBlock,
+      result: mockResult,
+      host: "example.com",
+    };
+
+    it("writes a current entry exactly once", async () => {
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({ parseHistory: [] } as never);
+      const isCurrent = vi.fn(async () => true);
+
+      await expect(addHistoryEntryIfCurrent(entry, isCurrent)).resolves.toBe(true);
+
+      expect(isCurrent).toHaveBeenCalledTimes(2);
+      expect(chrome.storage.local.set).toHaveBeenCalledTimes(1);
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({ parseHistory: [expect.objectContaining({ id: "attempt-current" })] });
+    });
+
+    it("does not write when the attempt becomes stale after the storage read", async () => {
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({ parseHistory: [] } as never);
+      const isCurrent = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+      await expect(addHistoryEntryIfCurrent(entry, isCurrent)).resolves.toBe(false);
+
+      expect(chrome.storage.local.get).toHaveBeenCalledWith("parseHistory");
+      expect(chrome.storage.local.set).not.toHaveBeenCalled();
     });
   });
 

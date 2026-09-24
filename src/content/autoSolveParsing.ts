@@ -25,7 +25,7 @@ type AutoSolveParsingDeps = {
   ) => Promise<ParseResult>;
   withTimeout: <T>(promise: Promise<T>, timeoutMs: number, timeoutReason: string) => Promise<T>;
   parseQuestion: (block: QuestionBlock, settings: AppSettings, onStream?: (partial: string) => void, runtimeContext?: ParseQuestionRuntimeContext) => Promise<ParseResult>;
-  addHistoryEntry: (entry: HistoryEntry) => Promise<void>;
+  addHistoryEntryIfCurrent: (entry: HistoryEntry, isCurrent: () => boolean) => Promise<boolean>;
 };
 
 type AutoSolveTimeouts = {
@@ -198,8 +198,10 @@ export async function recordAutoSolveHistory(
   history: HistoryEntry[],
   block: QuestionBlock,
   result: ParseResult,
-  deps: Pick<AutoSolveParsingDeps, "addHistoryEntry">,
-): Promise<void> {
+  deps: Pick<AutoSolveParsingDeps, "addHistoryEntryIfCurrent">,
+  isCurrent: () => boolean = () => true,
+): Promise<boolean> {
+  if (!isCurrent()) return false;
   const historyId = `auto-solve-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const entry: HistoryEntry = {
     id: historyId,
@@ -208,6 +210,8 @@ export async function recordAutoSolveHistory(
     result,
     host: location.hostname,
   };
-  await deps.addHistoryEntry(entry);
+  const committed = await deps.addHistoryEntryIfCurrent(entry, isCurrent);
+  if (!committed) return false;
   history.unshift(entry);
+  return true;
 }

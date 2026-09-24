@@ -3,6 +3,7 @@ import type { HighlightLayer } from "./highlight/HighlightLayer";
 import type { CandidateStatusMap } from "./contentRuntimeState";
 import { applySelectionUpdate as applySelectionUpdateCore } from "./layoutSync";
 import { handleContentMessage } from "./contentMessageRouter";
+import { isCurrentRuntimeQuestionBlock } from "./liveQuestionObservation";
 
 type RegisterContentRuntimeMessageHandlersOptions = {
   cancelFullPageScan: () => void;
@@ -62,6 +63,7 @@ export function createContentRuntimeMessageListener(options: RegisterContentRunt
           notifySidePanel: options.notifySidePanel,
         });
       },
+      validateQuestionResultAuthority: (block) => isCurrentRuntimeQuestionBlock(block),
       verifyParsedAnswerInPage: options.verifyParsedAnswerInPage,
     });
   };

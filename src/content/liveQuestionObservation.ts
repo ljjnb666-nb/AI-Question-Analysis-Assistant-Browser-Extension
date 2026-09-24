@@ -2,6 +2,7 @@ import type { QuestionBlock } from "@/shared/types";
 import { collectMediaAssets, projectLegacyMedia } from "./media/mediaDiscovery";
 import { attachQuestionIdentity, extractOrdinalHint } from "./questionIdentity";
 import { extractStructuredQuestionText } from "./detector/domStructuredText";
+import { resolveFillRootContext, sharedRootRegistry } from "./roots/rootRegistry";
 
 const QUESTION_OWNER_SELECTOR = ".question-item,.questionBox,.base-question-component,[data-question-id],[data-questionid],[data-problem-id],[data-problemid],[data-item-id]";
 
@@ -45,4 +46,14 @@ export function resolveCanonicalQuestionOwner(block: QuestionBlock, suppliedOwne
     if (byOrdinal.length === 1) return byOrdinal[0];
   }
   return null;
+}
+
+/** Validate a serialized result against its originating content runtime and live owner. */
+export function isCurrentRuntimeQuestionBlock(block: QuestionBlock): boolean {
+  if (block.source !== "auto_dom" || !block.runtimeQuestionHandle || !block.identity?.stableId || !block.identity.contentFingerprint) return false;
+  const context = resolveFillRootContext(sharedRootRegistry(), block);
+  if (!context.ok || !context.owner) return false;
+  const live = observeLiveQuestion(block, context.owner).identity;
+  return live.stableId === block.identity.stableId
+    && live.contentFingerprint === block.identity.contentFingerprint;
 }

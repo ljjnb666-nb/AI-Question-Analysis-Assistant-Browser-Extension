@@ -1,7 +1,8 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { DetectedCandidate } from "@/shared/types";
-import { addHistoryEntry, loadSettings } from "@/shared/utils/storage";
+import { addHistoryEntryIfCurrent, loadSettings } from "@/shared/utils/storage";
 import { getProvider, hasSufficientPreviewText, parseQuestion } from "@/shared/utils/parseRouter";
+import { logEvent } from "@/shared/utils/analytics";
 import {
   isChoiceLikeResult,
   isRiskyCandidate,
@@ -24,8 +25,10 @@ import {
 import { getBatchFillFeedback, getSingleFillFeedback } from "./sidepanelActionMessages";
 import { buildAutoSolveStartingState, resetDetectState, startFullPageDetectState, type AutoSolveProgressState, type ScanProgressState } from "./sidepanelStateSync";
 import { clearCandidateSelection, selectAllCandidates, toggleCandidateSelection } from "./sidepanelSelectionSync";
+import { createCandidateAttemptRegistry } from "./candidateAuthority";
 import {
   getBestActionTab,
+  isCandidateResultAuthorityCurrent,
   requestBlockImage,
   sendFillMessageWithVerify,
   sendTabMessageWithBootstrap,
@@ -50,6 +53,11 @@ type UseSidePanelActionsOptions = {
 };
 
 export function useSidePanelActions(options: UseSidePanelActionsOptions) {
+  const candidateAttempts = useRef(createCandidateAttemptRegistry()).current;
+  const isCandidateCurrent = useCallback(
+    (candidate: DetectedCandidate) => isCandidateResultAuthorityCurrent(candidate.origin, candidate.block),
+    [],
+  );
   const syncSelection = useCallback(
     async (payload: { blockId?: string; selected?: boolean; selectAll?: boolean }) => {
       const activeTab = await getBestActionTab();
@@ -62,13 +70,14 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
 
   const applyDetectState = useCallback(
     (next: ReturnType<typeof resetDetectState> | ReturnType<typeof startFullPageDetectState>) => {
+      candidateAttempts.invalidateAll();
       options.setIsDetecting(next.isDetecting);
       options.setIsFullPageScan("isFullPageScan" in next ? next.isFullPageScan : true);
       options.setScanProgress(next.scanProgress);
       options.setCandidates(next.candidates);
       options.setExpandedIds(next.expandedIds);
     },
-    [options],
+    [options, candidateAttempts],
   );
 
   const handleDetect = useCallback(async () => {
@@ -122,13 +131,16 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   const handleBatchParse = useCallback(async () => {
     if (!options.candidates.some((candidate) => candidate.selected)) return;
     options.setIsBatchParsing(true);
-    const activeTab = await getBestActionTab();
-    await runBatchParse(options.candidates, activeTab, {
+    await runBatchParse(options.candidates, {
       loadSettings,
       getProvider,
-      parseQuestion,
+      parseQuestion: (block, settings) => parseQuestion(block, settings, undefined, { deferSuccessTelemetry: true }),
       requestBlockImage,
-      addHistoryEntry,
+      addHistoryEntryIfCurrent,
+      logCommittedResult: (candidate, result) => logEvent("parse_success", { blockId: candidate.block.id, route: result.routeUsed, source: "sidepanel_commit" }),
+      logDiscardedStaleResult: (candidate, result) => logEvent("provider_result_discarded_stale", { blockId: candidate.block.id, route: result.routeUsed, source: "sidepanel_commit" }),
+      attempts: candidateAttempts,
+      isCandidateCurrent,
       pickBatchReviewModel,
       shouldRetryBatchParseAfterError,
       shouldRetryWithVision,
@@ -140,23 +152,26 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       setCandidates: options.setCandidates,
     });
     options.setIsBatchParsing(false);
-  }, [options]);
+  }, [options, candidateAttempts, isCandidateCurrent]);
 
   const handleRetryVision = useCallback(async (candidate: DetectedCandidate) => {
-    const activeTab = await getBestActionTab();
-    await runRetryVision(candidate, activeTab, {
+    await runRetryVision(candidate, {
       loadSettings,
       getProvider,
       requestBlockImage,
-      parseQuestion,
-      addHistoryEntry,
+      parseQuestion: (block, settings) => parseQuestion(block, settings, undefined, { deferSuccessTelemetry: true }),
+      addHistoryEntryIfCurrent,
+      logCommittedResult: (candidate, result) => logEvent("parse_success", { blockId: candidate.block.id, route: result.routeUsed, source: "sidepanel_commit" }),
+      logDiscardedStaleResult: (candidate, result) => logEvent("provider_result_discarded_stale", { blockId: candidate.block.id, route: result.routeUsed, source: "sidepanel_commit" }),
+      attempts: candidateAttempts,
+      isCandidateCurrent,
       setCandidates: options.setCandidates,
       langSafe,
       pickBatchReviewModel,
       shouldRetryBatchParseForIncompleteResult,
       preferBatchRetryResult,
     });
-  }, [options.setCandidates]);
+  }, [options.setCandidates, candidateAttempts, isCandidateCurrent]);
 
   const handleSelectRisky = useCallback(() => {
     options.setCandidates((prev) => {
@@ -169,16 +184,19 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   }, [options, syncSelection]);
 
   const handleRetryRisky = useCallback(async () => {
-    const activeTab = await getBestActionTab();
     if (!options.candidates.some(isRiskyCandidate)) return;
 
     options.setIsRetryingRisky(true);
-    await runRetryRisky(options.candidates, activeTab, isRiskyCandidate, {
+    await runRetryRisky(options.candidates, isRiskyCandidate, {
       loadSettings,
       getProvider,
       requestBlockImage,
-      parseQuestion,
-      addHistoryEntry,
+      parseQuestion: (block, settings) => parseQuestion(block, settings, undefined, { deferSuccessTelemetry: true }),
+      addHistoryEntryIfCurrent,
+      logCommittedResult: (candidate, result) => logEvent("parse_success", { blockId: candidate.block.id, route: result.routeUsed, source: "sidepanel_commit" }),
+      logDiscardedStaleResult: (candidate, result) => logEvent("provider_result_discarded_stale", { blockId: candidate.block.id, route: result.routeUsed, source: "sidepanel_commit" }),
+      attempts: candidateAttempts,
+      isCandidateCurrent,
       setCandidates: options.setCandidates,
       langSafe,
       pickBatchReviewModel,
@@ -186,29 +204,31 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       preferBatchRetryResult,
     });
     options.setIsRetryingRisky(false);
-  }, [options]);
+  }, [options, candidateAttempts, isCandidateCurrent]);
 
   const handleFillCandidate = useCallback(async (candidate: DetectedCandidate) => {
     const response = await runFillCandidate(candidate, {
-      getBestActionTab,
+      isCandidateCurrent,
+      setCandidates: options.setCandidates,
       sendFillMessageWithVerify: (tabId, block, result) =>
         sendFillMessageWithVerify(tabId, block, result, isChoiceLikeResult),
     });
     options.setFillFeedback(getSingleFillFeedback(options.uiLang, !!response?.ok, response?.message));
     window.setTimeout(() => options.setFillFeedback(""), 2200);
-  }, [options]);
+  }, [options, isCandidateCurrent]);
 
   const handleBatchFill = useCallback(async () => {
     options.setIsBatchFilling(true);
     const { totalFilled, totalQuestions } = await runBatchFill(options.candidates, {
-      getBestActionTab,
+      isCandidateCurrent,
+      setCandidates: options.setCandidates,
       sendFillMessageWithVerify: (tabId, block, result) =>
         sendFillMessageWithVerify(tabId, block, result, isChoiceLikeResult),
     });
     options.setIsBatchFilling(false);
     options.setFillFeedback(getBatchFillFeedback(options.uiLang, totalFilled, totalQuestions));
     window.setTimeout(() => options.setFillFeedback(""), 2600);
-  }, [options]);
+  }, [options, isCandidateCurrent]);
 
   const handleStartAutoSolve = useCallback(async () => {
     const activeTab = await getBestActionTab();

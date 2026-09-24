@@ -16,6 +16,7 @@ type ContentMessageRouterDeps = {
   startManualCapture: (forceVisionMode: boolean) => void;
   stopAutoSolveAll: () => void;
   updateCandidateSelection: (message: UpdateCandidateSelectionMsg) => void;
+  validateQuestionResultAuthority: (block: QuestionBlock, expectedUrl: string) => boolean;
   verifyParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => unknown;
 };
 
@@ -84,6 +85,17 @@ export function handleContentMessage(
         }
       })();
       return true;
+
+    case "VALIDATE_QUESTION_RESULT_AUTHORITY":
+      sendResponse({
+        ok: "block" in message
+          && Boolean(message.block)
+          && typeof message.expectedUrl === "string"
+          && message.expectedUrl === location.href
+          && deps.validateQuestionResultAuthority(message.block, message.expectedUrl),
+        currentUrl: location.href,
+      });
+      return false;
 
     case "FILL_PARSED_ANSWER":
       if (!("block" in message) || !("result" in message) || !message.block || !message.result) {

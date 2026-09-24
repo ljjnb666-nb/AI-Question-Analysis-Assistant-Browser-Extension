@@ -74,11 +74,12 @@ type AutoSolveDeps = {
   parseBlockForAutoSolve: (block: QuestionBlock) => Promise<ParseResult>;
   parseBlockForAutoSolveQuickReview: (block: QuestionBlock) => Promise<ParseResult>;
   parseBlockForAutoSolveReview: (block: QuestionBlock, previousResult: ParseResult | null) => Promise<ParseResult>;
+  isCurrentAutoSolveResult: (block: QuestionBlock, result: ParseResult) => boolean;
   pauseMs: (ms: number) => Promise<void>;
   pickBestAutoSolvePreviewText: (rawPreviewText: string, richPreviewText: string, typeGuess: QuestionBlock["questionTypeGuess"]) => string;
   pickLiveAutoSolveBlock: () => QuestionBlock | null;
   projectViewportBboxToAbsolute: (bbox: QuestionBlock["bbox"], scrollRoot: ScanScrollRoot) => QuestionBlock["bbox"];
-  recordAutoSolveHistory: (history: HistoryEntry[], block: QuestionBlock, result: ParseResult) => Promise<void>;
+  recordAutoSolveHistory: (history: HistoryEntry[], block: QuestionBlock, result: ParseResult) => Promise<boolean | void>;
   normalizeQuestionText: (text: string) => string;
   refineFullPageCandidatesViaManualPipeline: (candidates: QuestionBlock[]) => Promise<QuestionBlock[]>;
   refineViewportCandidate: ReturnType<typeof createOrderedPlanDeps>["refineViewportCandidate"];
@@ -308,6 +309,7 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
           parseBlockForAutoSolve: deps.parseBlockForAutoSolve,
           parseBlockForAutoSolveQuickReview: deps.parseBlockForAutoSolveQuickReview,
           parseBlockForAutoSolveReview: deps.parseBlockForAutoSolveReview,
+          isCurrentAutoSolveResult: deps.isCurrentAutoSolveResult,
           recordAutoSolveHistory: deps.recordAutoSolveHistory,
           sendProgress: ({ currentBlock: progressBlock, filled: progressFilled, solved: progressSolved, statusText, total: progressTotal }) => {
             deps.sendAutoSolveProgress({
@@ -328,6 +330,7 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
           verifyParsedAnswerInPage: deps.verifyParsedAnswerInPage,
         },
       );
+      if (resolution.stale) continue;
       const questionCompleted = resolution.questionCompleted;
       filled += resolution.filledDelta;
       if (questionCompleted) solved += 1;

@@ -323,6 +323,7 @@ describe("mutation-capable auto_dom runtime binding", () => {
       startManualCapture: () => undefined,
       stopAutoSolveAll: () => undefined,
       updateCandidateSelection: () => undefined,
+      validateQuestionResultAuthority: () => true,
       verifyParsedAnswerInPage: () => ({ ok: false }),
     });
     await responseReceived;

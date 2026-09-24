@@ -69,3 +69,18 @@ question's semantic content while the provider is pending and proves the late
 stale result mutates nothing. Scenario B rerenders the same semantic question
 and proves the result fills only the new live controls, never the detached
 ones, with the extension remaining operational.
+
+## Phase 8A result commit authority
+
+Provider completion does not imply commit authority. Auto-solve results are
+bound to the solve attempt that produced them, revalidated after provider work,
+and checked again at the conditional history write, progress, and fill-input
+boundaries. A stale result is discarded as `STALE_QUESTION_REVISION`; it is not
+reported as provider failure or persisted to history.
+
+Side Panel candidates retain their originating tab and URL. Parse, vision
+retry, risky retry, and Fill use that origin and revalidate the live question's
+stable identity, semantic fingerprint, and runtime owner. A per-candidate
+attempt lease prevents older asynchronous retries from replacing newer state.
+Screenshot capture is skipped when the origin is not the active tab because
+the browser screenshot API captures the active tab in a window.

@@ -271,23 +271,50 @@ export async function getOrCreateDeviceId(): Promise<string> {
 }
 
 export async function addHistoryEntry(entry: HistoryEntry): Promise<void> {
-  await pruneIfNeeded();
+  await writeHistoryEntry(entry);
+}
+
+/**
+ * Persists a history result only while its originating attempt still owns the
+ * commit. The final async authority check runs after the storage read and
+ * immediately before the storage write is issued.
+ */
+export async function addHistoryEntryIfCurrent(
+  entry: HistoryEntry,
+  isCurrent: () => boolean | Promise<boolean>,
+): Promise<boolean> {
+  return writeHistoryEntry(entry, isCurrent);
+}
+
+async function writeHistoryEntry(
+  entry: HistoryEntry,
+  isCurrent?: () => boolean | Promise<boolean>,
+): Promise<boolean> {
+  if (isCurrent) {
+    if (!(await isCurrent())) return false;
+  } else {
+    await pruneIfNeeded();
+  }
   const history = await loadHistory();
   const updated = trimHistoryEntries(
     [sanitizeHistoryEntry(entry), ...history.map(sanitizeHistoryEntry)],
     MAX_HISTORY,
     HISTORY_SOFT_LIMIT_BYTES,
   );
+  if (isCurrent && !(await isCurrent())) return false;
   try {
     await chrome.storage.local.set({ [KEYS.history]: updated });
+    return true;
   } catch (err) {
-    if (isExtensionContextInvalidatedError(err)) return;
+    if (isExtensionContextInvalidatedError(err)) return false;
     logError("Failed to save parse history", err, "addHistoryEntry", { count: updated.length });
     const compact = trimHistoryEntries(updated, updated.length, HISTORY_RETRY_LIMIT_BYTES);
+    if (isCurrent && !(await isCurrent())) return false;
     try {
       await chrome.storage.local.set({ [KEYS.history]: compact });
+      return true;
     } catch (compactErr) {
-      if (isExtensionContextInvalidatedError(compactErr)) return;
+      if (isExtensionContextInvalidatedError(compactErr)) return false;
       throw compactErr;
     }
   }

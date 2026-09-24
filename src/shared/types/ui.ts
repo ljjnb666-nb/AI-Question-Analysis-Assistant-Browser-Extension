@@ -3,6 +3,8 @@ import type { QuestionBlock } from "./question";
 
 export interface DetectedCandidate {
   block: QuestionBlock;
+  /** The tab and page URL that produced this candidate. Results stay on this origin. */
+  origin?: CandidateOrigin;
   selected: boolean;
   status: ParseStatus;
   result?: ParseResult;
@@ -10,7 +12,13 @@ export interface DetectedCandidate {
   debugInfo?: {
     imageAttached?: boolean;
     routeUsed?: RouteUsed;
+    retryError?: string;
   };
+}
+
+export interface CandidateOrigin {
+  tabId: number;
+  url: string;
 }
 
 export interface CandidateSnapshot {
