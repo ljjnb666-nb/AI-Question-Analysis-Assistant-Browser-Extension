@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, type AppSettings, type ParseResult, type QuestionBlock } from "@/shared/types";
+import { DEFAULT_SETTINGS, type AppSettings, type HistoryEntry, type ParseResult, type QuestionBlock } from "@/shared/types";
 import {
   parseBlockForAutoSolve,
   parseBlockForAutoSolveQuickReview,
   parseBlockForAutoSolveReview,
+  recordAutoSolveHistory,
 } from "./autoSolveParsing";
+import { attachRuntimeRoot } from "./roots/rootContext";
 
 // Assembled at runtime so security scanners do not mistake this synthetic
 // test fixture for a committed credential.
@@ -120,5 +122,38 @@ describe("autoSolveParsing", () => {
     const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AppSettings];
     expect(usedBlock).not.toHaveProperty("imageDataUrl");
     expect(usedSettings).toMatchObject({ preferredRoute: "auto" });
+  });
+
+  it("drops transient runtime ownership before history enters memory or storage", async () => {
+    const owner = document.createElement("div");
+    document.body.append(owner);
+    const block = makeBlock({
+      identity: {
+        stableId: "question-q-1",
+        contentFingerprint: "fingerprint-q-1",
+        identityVersion: 1,
+        strategy: "content-only",
+        signals: { nativeId: false, content: true, options: true, media: false, structure: true },
+      },
+      runtimeOwnerKey: "owner-q-1",
+    });
+    const bound = attachRuntimeRoot(block, {
+      rootKey: "root-top",
+      rootGeneration: 0,
+      kind: "top-document",
+    }, owner);
+    bound.runtimeQuestionHandle = "rqh_0123456789abcdef0123456789abcdef";
+    const history: HistoryEntry[] = [];
+    const deps = createDeps();
+
+    await recordAutoSolveHistory(history, bound, makeResult(), deps);
+
+    expect(history[0]?.block.runtimeQuestionHandle).toBeUndefined();
+    expect(history[0]?.block.runtimeOwnerKey).toBeUndefined();
+    expect(Object.getOwnPropertySymbols(history[0]!.block)).toHaveLength(0);
+    expect(deps.addHistoryEntry).toHaveBeenCalledWith(expect.objectContaining({
+      block: expect.objectContaining({ runtimeQuestionHandle: undefined, runtimeOwnerKey: undefined }),
+    }));
+    owner.remove();
   });
 });

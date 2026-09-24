@@ -1,5 +1,6 @@
 import { isHtmlElementNode } from "./detector/domDetectorShared";
 import type { BoundingBox, QuestionBlock, QuestionType } from "@/shared/types";
+import { bindDomQuestionBlockToOwner } from "./domQuestionBinding";
 
 type ResolvedQuestionBlock = {
   refinedBBox: BoundingBox;
@@ -101,10 +102,11 @@ export function detectZhihuishuCurrentQuestionBlock(
   const imageUrl = matchedCandidate?.questionImageUrl ?? deps.extractQuestionImageUrlFromBBox(finalBBox) ?? undefined;
   const hasMedia = deps.hasVisibleAutoSolveMedia(chosen.el) || Boolean(matchedCandidate?.hasImage) || Boolean(imageUrl);
 
-  return {
+  const draft: QuestionBlock = {
     id: `live-zhihuishu-${deps.extractAutoSolveQuestionOrder(previewText) ?? deps.extractAutoSolveQuestionOrder(chosen.text) ?? "x"}`,
     bbox: finalBBox,
     previewText: previewText.slice(0, 1200),
+    identitySourceText: chosen.text,
     displaySegments: matchedCandidate?.displaySegments,
     hasImage: hasMedia,
     questionImageUrl: imageUrl,
@@ -112,4 +114,8 @@ export function detectZhihuishuCurrentQuestionBlock(
     confidence: Math.max(0.9, matchedCandidate?.confidence ?? 0.98),
     source: "auto_dom",
   };
+  return bindDomQuestionBlockToOwner(draft, chosen.el, {
+    identityText: chosen.text,
+    matchedCandidate,
+  });
 }

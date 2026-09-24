@@ -1,5 +1,6 @@
 import type { BoundingBox, QuestionBlock, QuestionType } from "@/shared/types";
 import type { ScanScrollRoot } from "./detector/fullPageDetector";
+import { bindDomQuestionBlockToOwner } from "./domQuestionBinding";
 
 type BuildOrderedPlanDeps = {
   projectViewportBboxToAbsolute: (bbox: BoundingBox, scrollRoot: ScanScrollRoot) => BoundingBox;
@@ -127,18 +128,21 @@ export function buildOrderedPlanFromDomQuestionCards(
         height: Math.max(1, rect.height),
       };
       const bbox = deps.projectViewportBboxToAbsolute(viewportBox, scrollRoot);
-      const previewText = deps.extractRichQuestionPreviewFromElement(el).slice(0, 1200);
+      const identitySourceText = deps.extractRichQuestionPreviewFromElement(el);
+      const previewText = identitySourceText.slice(0, 1200);
       const imageUrl = deps.extractQuestionImageUrlFromBBox(viewportBox) ?? undefined;
-      return {
+      const draft: QuestionBlock = {
         id: `dom-plan-${index}`,
         bbox,
         previewText,
+        identitySourceText,
         questionTypeGuess: deps.inferAutoSolveQuestionType(previewText),
         questionImageUrl: imageUrl,
         hasImage: Boolean(imageUrl) || deps.hasVisibleAutoSolveMedia(el),
         confidence: 0.98,
         source: "auto_dom" as const,
-      } satisfies QuestionBlock;
+      };
+      return bindDomQuestionBlockToOwner(draft, el, { identityText: identitySourceText });
     })
     .filter((block) => {
       const text = deps.normalizeQuestionText(block.previewText || "");

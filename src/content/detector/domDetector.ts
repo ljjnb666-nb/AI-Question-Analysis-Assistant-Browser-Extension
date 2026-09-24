@@ -44,35 +44,18 @@ import {
 } from "./domDetectorPostprocess";
 import { buildPreviewText, buildPreviewTextForBbox, getElementReadableText } from "./domDetectorPreview";
 import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "./domDetectorVisual";
-import { attachQuestionIdentity } from "../questionIdentity";
-import { collectMediaAssets, projectLegacyMedia } from "../media/mediaDiscovery";
 import { classifyViewportBoundary } from "./questionBoundary";
 import { startQuestionRevisionWatch } from "../revision/questionRevisionWatch";
-import { attachRuntimeRoot, MAX_SHADOW_HOST_PROBES, topRootContext, type RootContext } from "../roots/rootContext";
+import { MAX_SHADOW_HOST_PROBES, type RootContext } from "../roots/rootContext";
 import { isOpenShadowRootNode } from "../domRealm";
 import { createTopViewportProjector, sharedRootRegistry } from "../roots/rootRegistry";
 import type { TraversableRoot } from "../roots/rootDom";
+import { bindDomQuestionBlockToOwner as attachDetectedQuestionIdentity } from "../domQuestionBinding";
 
 let rootCandidateObservationSequence = 0;
 
 function nextRootCandidateObservationId(): string {
   return `auto-root-${Date.now()}-${++rootCandidateObservationSequence}`;
-}
-
-function attachDetectedQuestionIdentity(
-  block: QuestionBlock,
-  owner: Element,
-  options?: { identityText?: string; nativeQuestionId?: string; rootContext?: RootContext },
-): QuestionBlock & { identity: NonNullable<QuestionBlock["identity"]> } {
-  const { rootContext, ...identityOptions } = options ?? {};
-  const withMedia = projectLegacyMedia(block, collectMediaAssets(owner), owner);
-  const identified = attachQuestionIdentity(withMedia, owner, identityOptions);
-  const context = rootContext ?? topRootContext(owner.ownerDocument);
-  return attachRuntimeRoot(identified, {
-    rootKey: context.rootKey,
-    rootGeneration: context.rootGeneration,
-    kind: context.kind,
-  }, owner) as QuestionBlock & { identity: NonNullable<QuestionBlock["identity"]> };
 }
 
 export function watchForPageChanges(callback: (blocks: QuestionBlock[], rootKey?: string) => void): () => void {

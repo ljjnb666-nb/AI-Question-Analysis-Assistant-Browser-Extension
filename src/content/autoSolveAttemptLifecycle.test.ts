@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ParseResult, QuestionBlock } from "@/shared/types";
 import { fillParsedAnswerInPage, hasAutoSolveQuestionAttempt } from "./answerFiller";
 import { observeLiveQuestion } from "./liveQuestionObservation";
+import { attachRuntimeRoot, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
 import { runAutoSolveAll } from "./autoSolveOrchestration";
 import { beginQuestionRevisionAttempt, clearQuestionRevisionAttempt } from "./revision/questionRevisionRuntime";
 import { startQuestionRevisionWatch } from "./revision/questionRevisionWatch";
@@ -17,7 +18,8 @@ function question(): QuestionBlock {
   document.body.innerHTML = '<section class="question-item" id="q-run">12. prompt <button>A. a</button><button id="b">B. b</button><button id="c">C. c</button></section>';
   const owner = document.getElementById("q-run")!;
   document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
-  return observeLiveQuestion({ id: "q-run", bbox: { x: 0, y: 0, width: 500, height: 240 }, previewText: "12. prompt A. a B. b C. c", questionTypeGuess: "single_choice", hasImage: false, confidence: 1, source: "auto_dom" }, owner);
+  const observed = observeLiveQuestion({ id: "q-run", bbox: { x: 0, y: 0, width: 500, height: 240 }, previewText: "12. prompt A. a B. b C. c", questionTypeGuess: "single_choice", hasImage: false, confidence: 1, source: "auto_dom" }, owner);
+  return attachRuntimeRoot(observed, { rootKey: TOP_ROOT_KEY, rootGeneration: TOP_ROOT_GENERATION, kind: "top-document" }, owner);
 }
 
 function parsed(block: QuestionBlock): ParseResult {
