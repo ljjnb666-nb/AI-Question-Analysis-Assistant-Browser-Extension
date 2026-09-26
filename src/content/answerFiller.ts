@@ -34,13 +34,14 @@ import {
   splitAnswerParts as splitAnswerPartsCore,
 } from "./answerText";
 import type { FillAnswerCode, FillAnswerResult, VerifyAnswerResult } from "./answerTypes";
+import { controlRegistry } from "./answer/controlRegistry";
 import { buildValidatedAnswerPlan } from "./answer/answerPlanValidator";
 import { buildControlMapping } from "./answer/controlMapping";
 import { buildActionPlan, executeTransaction, readSelectedOptionKeys, snapshotControls, verifyAnswerPlan, type CurrentTransactionAuthority } from "./answer/transactionalExecutor";
 import { observeLiveQuestion } from "./liveQuestionObservation";
 import { clearQuestionRevisionAttemptForBlock, hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock, STALE_QUESTION_REVISION, STALE_ROOT_CONTEXT } from "./revision/questionRevisionRuntime";
 import { routeFingerprintForLocation } from "./revision/questionRevisionRegistry";
-import { rootAttachmentOf } from "./roots/rootContext";
+import { rootAttachmentOf, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
 import { resolveFillRootContext, sharedRootRegistry } from "./roots/rootRegistry";
 import { getTraversalRoot } from "./roots/rootDom";
 
@@ -49,6 +50,18 @@ const autoSnapshotStatus = new Map<string, "captured" | "unavailable">();
 // Runtime solve-start state is root-scoped: identical semantic questions in
 // different accessible roots must never share a baseline (or a snapshot key).
 const snapshotKey = (block: QuestionBlock) => `${rootAttachmentOf(block).rootKey ?? "root-top"}:${block.identity?.stableId ?? block.id}:${block.identity?.contentFingerprint ?? block.id}`;
+const controlScope = (block: QuestionBlock) => {
+  const attachment = rootAttachmentOf(block);
+  return {
+    questionId: block.identity?.stableId ?? block.id,
+    rootKey: attachment.rootKey ?? TOP_ROOT_KEY,
+    rootGeneration: attachment.rootGeneration ?? TOP_ROOT_GENERATION,
+  };
+};
+const clearControlQuestion = (block: QuestionBlock) => {
+  const scope = controlScope(block);
+  controlRegistry.clearQuestion(scope.questionId, scope.rootKey, scope.rootGeneration);
+};
 
 /** Called by the auto-solve parser before the provider request; runtime only. */
 export function captureSolveStartControlState(block: QuestionBlock): void {
@@ -72,12 +85,16 @@ export function captureSolveStartControlState(block: QuestionBlock): void {
     return;
   }
   const mapping = buildControlMapping(block, scope);
-  if (mapping.ok) {
-    // The sealed runtime owner is the question identity authority. A semantic
-    // descendant may own the controls without replacing that identity owner.
-    const live = observeLiveQuestion(block, rootContext.owner ?? mapping.owner).identity;
-    solveStartSnapshots.set(key, { controls: snapshotControls(mapping), stableId: live.stableId, contentFingerprint: live.contentFingerprint });
-    autoSnapshotStatus.set(key, "captured");
+  try {
+    if (mapping.ok) {
+      // The sealed runtime owner is the question identity authority. A semantic
+      // descendant may own the controls without replacing that identity owner.
+      const live = observeLiveQuestion(block, rootContext.owner ?? mapping.owner).identity;
+      solveStartSnapshots.set(key, { controls: snapshotControls(mapping), stableId: live.stableId, contentFingerprint: live.contentFingerprint });
+      autoSnapshotStatus.set(key, "captured");
+    }
+  } finally {
+    clearControlQuestion(block);
   }
 }
 
@@ -85,6 +102,7 @@ export function finishAutoSolveQuestionAttempt(block: QuestionBlock): void {
   const key = snapshotKey(block);
   solveStartSnapshots.delete(key);
   autoSnapshotStatus.delete(key);
+  clearControlQuestion(block);
   clearQuestionRevisionAttemptForBlock(block);
 }
 
@@ -306,8 +324,8 @@ async function fillVerifiedAnswerIntoScope(
   };
 
   const resolved = resolveAuthority();
-  if (!resolved.ok) return { ok: false, filledCount: 0, code: resolved.code, message: resolved.code };
   try {
+    if (!resolved.ok) return { ok: false, filledCount: 0, code: resolved.code, message: resolved.code };
     const validated = buildValidatedAnswerPlan(block, result, resolved.mapping);
     if (!validated.ok) return { ok: false, filledCount: 0, code: validated.code, message: validated.message };
     const outcome = await executeTransaction(validated.plan, buildActionPlan(validated.plan, resolved.mapping), resolved.mapping, solveStart?.controls, resolveAuthority);
@@ -320,15 +338,21 @@ async function fillVerifiedAnswerIntoScope(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, filledCount: 0, code: "PARTIAL_MUTATION_UNPROVABLE", message: `Transaction failed without a provable final state: ${message}` };
+  } finally {
+    clearControlQuestion(block);
   }
 }
 
 function verifyVerifiedAnswerInScope(scope: Element, block: QuestionBlock, result: ParseResult): VerifyAnswerResult {
-  const mapping = buildControlMapping(block, scope);
-  if (!mapping.ok) return { ok: false, expectedKeys: [], actualKeys: [], message: mapping.code };
-  const validated = buildValidatedAnswerPlan(block, result, mapping);
-  if (!validated.ok) return { ok: false, expectedKeys: [], actualKeys: [], message: validated.code };
-  return { ok: verifyAnswerPlan(validated.plan, mapping), expectedKeys: validated.plan.kind === "boolean" ? [validated.plan.optionKey ?? ""] : "optionKeys" in validated.plan ? validated.plan.optionKeys : [], actualKeys: readSelectedOptionKeys(mapping), message: "DOM readback verification" };
+  try {
+    const mapping = buildControlMapping(block, scope);
+    if (!mapping.ok) return { ok: false, expectedKeys: [], actualKeys: [], message: mapping.code };
+    const validated = buildValidatedAnswerPlan(block, result, mapping);
+    if (!validated.ok) return { ok: false, expectedKeys: [], actualKeys: [], message: validated.code };
+    return { ok: verifyAnswerPlan(validated.plan, mapping), expectedKeys: validated.plan.kind === "boolean" ? [validated.plan.optionKey ?? ""] : "optionKeys" in validated.plan ? validated.plan.optionKeys : [], actualKeys: readSelectedOptionKeys(mapping), message: "DOM readback verification" };
+  } finally {
+    clearControlQuestion(block);
+  }
 }
 
 export async function fillAnswerIntoScope(scope: Element, bbox: BoundingBox, result: ParseResult): Promise<FillAnswerResult> {
