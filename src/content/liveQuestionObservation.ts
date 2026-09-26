@@ -2,6 +2,7 @@ import type { QuestionBlock } from "@/shared/types";
 import { collectMediaAssets, projectLegacyMedia } from "./media/mediaDiscovery";
 import { attachQuestionIdentity, extractOrdinalHint } from "./questionIdentity";
 import { extractStructuredQuestionText } from "./detector/domStructuredText";
+import { normalizeText } from "./detector/domText";
 import { resolveFillRootContext, sharedRootRegistry } from "./roots/rootRegistry";
 
 const QUESTION_OWNER_SELECTOR = ".question-item,.questionBox,.base-question-component,[data-question-id],[data-questionid],[data-problem-id],[data-problemid],[data-item-id]";
@@ -11,15 +12,20 @@ const QUESTION_OWNER_SELECTOR = ".question-item,.questionBox,.base-question-comp
  * It is used only immediately before a mutation; it does not watch or heal DOM.
  */
 export function observeLiveQuestion(block: QuestionBlock, owner: Element) {
-  // Detection attaches identity from the structured stem/options extraction,
-  // so the live reconstruction must read the same source. Real browsers insert
-  // layout line breaks into innerText for block-level option markup, which
-  // would otherwise change the canonical text and fail every fill closed.
+  const structuredText = extractStructuredQuestionText(owner);
+  const detectedIdentityText = normalizeText(block.identitySourceText ?? "");
+  // Use the structured projection when it matches the detector's source. If
+  // detection had to use the owner's rendered text because its stem is not in
+  // a recognized semantic node, keep reading that live rendered text here.
+  // The stored source selects the projection only; identity is always rebuilt
+  // from current DOM content so edits still invalidate the transaction.
+  const structuredMatchesDetectedSource = Boolean(detectedIdentityText)
+    && normalizeText(structuredText) === detectedIdentityText;
+  const rawText = normalizeText(String((owner as HTMLElement).innerText || owner.textContent || ""));
   const text = String(
-    extractStructuredQuestionText(owner)
-    || (owner as HTMLElement).innerText
-    || owner.textContent
-    || "",
+    structuredMatchesDetectedSource || !detectedIdentityText
+      ? structuredText || rawText
+      : rawText || structuredText,
   ).trim();
   const withMedia = projectLegacyMedia({ ...block, previewText: text || block.previewText }, collectMediaAssets(owner), owner);
   return attachQuestionIdentity(withMedia, owner, { identityText: text || block.previewText });

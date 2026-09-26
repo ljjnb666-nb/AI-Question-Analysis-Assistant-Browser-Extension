@@ -368,7 +368,8 @@ describe("Phase 9A deterministic compatibility corpus", () => {
   });
 
   for (const fixture of COMPATIBILITY_FIXTURES) {
-    it(`${fixture.fixtureId} ${fixture.scenario}`, async () => {
+    const testId = fixture.fixtureId === "COMPAT-08" ? "P9B-PINTIA-01 COMPAT-08" : fixture.fixtureId;
+    it(`${testId} ${fixture.scenario}`, async () => {
       const mounted = mountFixture(fixture);
       const blocks = detectCandidatesAcrossRoots();
       expect(blocks).toHaveLength(fixture.expectedQuestionCount);
