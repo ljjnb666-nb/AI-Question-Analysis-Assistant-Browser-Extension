@@ -3,11 +3,13 @@ import type { ParseResult, QuestionBlock } from "@/shared/types";
 import { captureSolveStartControlState, fillParsedAnswerInPage, finishAutoSolveQuestionAttempt, verifyParsedAnswerInPage } from "../answerFiller";
 import { buildControlMapping } from "./controlMapping";
 import { bindDomQuestionBlockToOwner } from "../domQuestionBinding";
+import { extractStructuredQuestionText } from "../detector/domStructuredText";
 import { normalizeText } from "../detector/domText";
 import { observeLiveQuestion } from "../liveQuestionObservation";
 import { ownerOf, topRootContext } from "../roots/rootContext";
 import { controlRegistry } from "./controlRegistry";
 import { sharedRootRegistry } from "../roots/rootRegistry";
+import { sanitizeQuestionBlockForRuntimeMessage } from "@/shared/utils/mediaSerialization";
 
 function setRect(element: Element, top: number): void {
   Object.defineProperty(element, "getBoundingClientRect", {
@@ -27,8 +29,8 @@ function addChoiceBehavior(owner: Element): HTMLElement[] {
   return controls;
 }
 
-function makeRuntimeBlock(owner: Element, id: string): QuestionBlock {
-  const identitySourceText = normalizeText(String((owner as HTMLElement).innerText || owner.textContent || ""));
+function makeRuntimeBlock(owner: Element, id: string, identityText?: string): QuestionBlock {
+  const identitySourceText = normalizeText(identityText ?? String((owner as HTMLElement).innerText || owner.textContent || ""));
   const draft: QuestionBlock = {
     id,
     bbox: { x: 40, y: 80, width: 600, height: 300 },
@@ -92,6 +94,9 @@ describe("Phase 9B question identity authority", () => {
     const mapping = buildControlMapping(block, outer);
 
     expect(ownerOf(block)).toBe(outer);
+    expect(block.identityObservationSource).toBe("rendered");
+    const messageBlock = JSON.parse(JSON.stringify(sanitizeQuestionBlockForRuntimeMessage(block))) as QuestionBlock;
+    expect(messageBlock.identityObservationSource).toBe("rendered");
     expect(mapping.ok).toBe(true);
     if (!mapping.ok) throw new Error(mapping.message);
     expect(mapping.owner).toBe(outer.querySelector(".question-item"));
@@ -149,5 +154,109 @@ describe("Phase 9B question identity authority", () => {
     expect(filled).toMatchObject({ ok: false, filledCount: 0, code: "STALE_ACTION_PLAN" });
     expect(controls.every((control) => control.getAttribute("aria-checked") !== "true")).toBe(true);
     expect(clicks).toBe(0);
+  });
+
+  it("P9B-PROJECTION-MODE-NEG-01 keeps rendered provenance through a restructuring that would hide new content", async () => {
+    const { outer } = mountGenericNestedCard("projection-mode-owner");
+    const block = makeRuntimeBlock(outer, "projection-mode-negative");
+    const result = parseResult(block);
+    const originalFingerprint = block.identity?.contentFingerprint;
+    const originalIdentityText = normalizeText(block.identitySourceText ?? "");
+    expect(block.identityObservationSource).toBe("rendered");
+    captureSolveStartControlState(block);
+
+    outer.innerHTML = `<section class="question-item"><div class="stem">Which neutral color follows amber?</div><ul>
+      <li><button role="radio" aria-checked="false">A. Blue</button></li>
+      <li><button role="radio" aria-checked="false">B. Green</button></li>
+      <li><button role="radio" aria-checked="false">C. Gray</button></li>
+      <li><button role="radio" aria-checked="false">D. Violet</button></li>
+    </ul></section><div class="new-condition">Additional condition changes this question.</div>`;
+    const inner = outer.querySelector(".question-item")!;
+    setRect(inner, 90);
+    const controls = addChoiceBehavior(inner);
+    let clicks = 0;
+    controls.forEach((control) => control.addEventListener("click", () => clicks++));
+    let submissions = 0;
+    const form = document.createElement("form");
+    form.addEventListener("submit", (event) => { event.preventDefault(); submissions++; });
+    document.body.append(form);
+    const advance = document.createElement("button");
+    advance.addEventListener("click", () => clicks++);
+    document.body.append(advance);
+
+    const structuredAfter = normalizeText(extractStructuredQuestionText(outer));
+    const renderedAfter = normalizeText(String((outer as HTMLElement).innerText || outer.textContent || ""));
+    expect(structuredAfter).toBe(originalIdentityText);
+    expect(renderedAfter).not.toBe(originalIdentityText);
+    expect(observeLiveQuestion(block, outer).identity.contentFingerprint).not.toBe(originalFingerprint);
+
+    const filled = await fillParsedAnswerInPage(block, result, { mode: "auto" });
+
+    expect(filled).toMatchObject({ ok: false, filledCount: 0, code: "STALE_ACTION_PLAN" });
+    expect(controls.every((control) => control.getAttribute("aria-checked") !== "true")).toBe(true);
+    expect(clicks).toBe(0);
+    expect(submissions).toBe(0);
+    finishAutoSolveQuestionAttempt(block);
+  });
+
+  it("P9B-PROJECTION-STRUCTURED-01 keeps a structured question current when irrelevant rendered decoration changes", async () => {
+    document.body.innerHTML = `<article id="structured-owner"><section class="question-item">
+      <div class="stem">Which neutral color follows amber?</div><ul>
+        <li><button role="radio" aria-checked="false">A. Blue</button></li>
+        <li><button role="radio" aria-checked="false">B. Green</button></li>
+        <li><button role="radio" aria-checked="false">C. Gray</button></li>
+        <li><button role="radio" aria-checked="false">D. Violet</button></li>
+      </ul><div class="rendered-decoration">Decoration version one</div>
+    </section></article>`;
+    const outer = document.getElementById("structured-owner")!;
+    setRect(outer, 80);
+    const inner = outer.querySelector(".question-item")!;
+    setRect(inner, 90);
+    const controls = addChoiceBehavior(inner);
+    const identityText = extractStructuredQuestionText(outer);
+    const block = makeRuntimeBlock(outer, "structured-projection-positive", identityText);
+    const result = parseResult(block);
+    const originalFingerprint = block.identity?.contentFingerprint;
+    expect(block.identityObservationSource).toBe("structured");
+    captureSolveStartControlState(block);
+
+    outer.querySelector(".rendered-decoration")!.textContent = "Decoration version two";
+    expect(normalizeText(String((outer as HTMLElement).innerText || outer.textContent || ""))).not.toBe(identityText);
+    expect(observeLiveQuestion(block, outer).identity.contentFingerprint).toBe(originalFingerprint);
+
+    const filled = await fillParsedAnswerInPage(block, result, { mode: "auto" });
+
+    expect(filled).toMatchObject({ ok: true, filledCount: 1 });
+    expect(controls.filter((control) => control.getAttribute("aria-checked") === "true").map((control) => control.textContent?.trim())).toEqual(["B. Green"]);
+    expect(verifyParsedAnswerInPage(block, result).ok).toBe(true);
+    finishAutoSolveQuestionAttempt(block);
+  });
+
+  it("P9B-PROJECTION-RENDERED-01 fills after an equivalent rerender with the same rendered semantic text", async () => {
+    const { outer } = mountGenericNestedCard("rendered-projection-owner");
+    const block = makeRuntimeBlock(outer, "rendered-projection-positive");
+    const result = parseResult(block);
+    const originalFingerprint = block.identity?.contentFingerprint;
+    expect(block.identityObservationSource).toBe("rendered");
+    captureSolveStartControlState(block);
+
+    outer.innerHTML = `<section class="question-item"><span>Which neutral color follows amber?</span><ul>
+      <li><button role="radio" aria-checked="false">A. Blue</button></li>
+      <li><button role="radio" aria-checked="false">B. Green</button></li>
+      <li><button role="radio" aria-checked="false">C. Gray</button></li>
+      <li><button role="radio" aria-checked="false">D. Violet</button></li>
+    </ul></section>`;
+    const inner = outer.querySelector(".question-item")!;
+    setRect(inner, 90);
+    const controls = addChoiceBehavior(inner);
+    expect(normalizeText(String((outer as HTMLElement).innerText || outer.textContent || ""))).toBe(block.identitySourceText);
+    expect(observeLiveQuestion(block, outer).identity.contentFingerprint).toBe(originalFingerprint);
+
+    const filled = await fillParsedAnswerInPage(block, result, { mode: "auto" });
+
+    expect(filled).toMatchObject({ ok: true, filledCount: 1 });
+    expect(controls.filter((control) => control.getAttribute("aria-checked") === "true").map((control) => control.textContent?.trim())).toEqual(["B. Green"]);
+    expect(verifyParsedAnswerInPage(block, result).ok).toBe(true);
+    finishAutoSolveQuestionAttempt(block);
   });
 });

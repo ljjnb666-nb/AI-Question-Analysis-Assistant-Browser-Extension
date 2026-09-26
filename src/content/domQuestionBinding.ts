@@ -4,6 +4,8 @@ import { collectMediaAssets, projectLegacyMedia } from "./media/mediaDiscovery";
 import { attachRuntimeRoot, bindRuntimeQuestionHandle, rootAttachmentOf, topRootContext, type RootContext } from "./roots/rootContext";
 import { getTraversalRoot } from "./roots/rootDom";
 import { sharedRootRegistry } from "./roots/rootRegistry";
+import { extractStructuredQuestionText } from "./detector/domStructuredText";
+import { normalizeText } from "./detector/domText";
 
 export type RuntimeBoundDomQuestionBlock = QuestionBlock & {
   identity: QuestionIdentity;
@@ -44,8 +46,10 @@ export function bindDomQuestionBlockToOwner(
   }
 
   const withMedia = projectLegacyMedia(draft, collectMediaAssets(owner), owner);
-  const identified = attachQuestionIdentity(withMedia, owner, {
-    identityText: options.identityText ?? draft.identitySourceText ?? draft.previewText,
+  const identityText = options.identityText ?? draft.identitySourceText ?? draft.previewText;
+  const identityObservationSource = identifyObservationSource(owner, identityText);
+  const identified = attachQuestionIdentity({ ...withMedia, identityObservationSource }, owner, {
+    identityText,
     nativeQuestionId: options.nativeQuestionId,
   });
 
@@ -60,6 +64,7 @@ export function bindDomQuestionBlockToOwner(
       && matchedRuntime?.owner === owner
       && matchedAttachment?.rootKey === context.rootKey
       && matchedAttachment.rootGeneration === context.rootGeneration
+      && matched.identityObservationSource === identified.identityObservationSource
       && matched.identity?.stableId === identified.identity.stableId
       && matched.identity.contentFingerprint === identified.identity.contentFingerprint,
   );
@@ -90,4 +95,15 @@ export function bindDomQuestionBlockToOwner(
   }, owner);
   if (!bound.runtimeQuestionHandle) throw new Error("DOM runtime binding could not create an opaque runtime handle");
   return bound as RuntimeBoundDomQuestionBlock;
+}
+
+function identifyObservationSource(owner: Element, identityText: string): "structured" | "rendered" | undefined {
+  const canonicalIdentityText = normalizeText(identityText);
+  if (!canonicalIdentityText) return undefined;
+  const structuredText = normalizeText(extractStructuredQuestionText(owner));
+  const renderedText = normalizeText(String((owner as HTMLElement).innerText || owner.textContent || ""));
+  // If both sources currently agree, retain the curated semantic projection.
+  if (structuredText === canonicalIdentityText) return "structured";
+  if (renderedText === canonicalIdentityText) return "rendered";
+  return undefined;
 }

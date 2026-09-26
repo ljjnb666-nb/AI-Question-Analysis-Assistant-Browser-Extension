@@ -79,6 +79,7 @@ function attachTestRuntimeBlock(owner: Element, root: RootContext, questionTypeG
     id: `native-${++nativeTestIndex}`,
     bbox: { x: 8, y: 8, width: 640, height: 220 },
     previewText,
+    identityObservationSource: "structured",
     hasImage: false,
     questionTypeGuess,
     confidence: 1,

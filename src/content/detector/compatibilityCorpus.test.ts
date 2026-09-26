@@ -6,6 +6,7 @@ import { buildControlMapping } from "../answer/controlMapping";
 import { detectCandidatesAcrossRoots } from "./domDetector";
 import { withQuestionCompleteness } from "./domDetectorPostprocess";
 import { ownerOf, rootAttachmentOf } from "../roots/rootContext";
+import { isCurrentRuntimeQuestionBlock } from "../liveQuestionObservation";
 import { sharedRootRegistry } from "../roots/rootRegistry";
 import { COMPATIBILITY_FIXTURES, COMPATIBILITY_LIMITATIONS, type CompatibilityFixture, type CompatibilityFixtureQuestion } from "./testFixtures/compatibilityFixtures";
 
@@ -169,6 +170,13 @@ function assertQuestionExpectation(
 ): void {
   const owner = ownerOf(block);
   expect(owner, `runtime owner for ${expected.ownerId}`).toBeTruthy();
+  if (block.identityObservationSource) {
+    expect(block.identityObservationSource, `frozen identity projection for ${expected.ownerId}`).toMatch(/^(structured|rendered)$/);
+  } else {
+    expect(expected.fillSupport.capability, `unclassified projection remains non-fillable for ${expected.ownerId}`).toBe("not-applicable");
+    expect(expected.controlMapping.capability, `unclassified projection has no fill mapping for ${expected.ownerId}`).toBe("not-applicable");
+    expect(isCurrentRuntimeQuestionBlock(block), `unclassified projection has no runtime authority for ${expected.ownerId}`).toBe(false);
+  }
   expect(block.identity?.stableId).toBeTruthy();
   expect(block.identity?.contentFingerprint).toBeTruthy();
   expect(block.questionTypeGuess).toBe(expected.type);

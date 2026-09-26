@@ -57,6 +57,7 @@ export function captureSolveStartControlState(block: QuestionBlock): void {
   // replace it after a user has interacted with the question.
   if (autoSnapshotStatus.has(key)) return;
   autoSnapshotStatus.set(key, "unavailable");
+  if (block.source === "auto_dom" && !block.identityObservationSource) return;
   const rootContext = resolveFillRootContext(sharedRootRegistry(), block);
   if (!rootContext.ok) return;
   let scope: Element;
@@ -264,6 +265,9 @@ async function fillVerifiedAnswerIntoScope(
       }
       if (mode === "auto" && hasQuestionRevisionAttempt() && !isCurrentQuestionRevisionBlock(block)) {
         return { ok: false, code: "STALE_QUESTION_REVISION", message: "STALE_QUESTION_REVISION" };
+      }
+      if (block.source === "auto_dom" && !block.identityObservationSource) {
+        return { ok: false, code: "STALE_ACTION_PLAN", message: "Question identity observation source is unavailable" };
       }
       const root = resolveFillRootContext(sharedRootRegistry(), block);
       if (!root.ok) return { ok: false, code: root.reason, message: root.reason };

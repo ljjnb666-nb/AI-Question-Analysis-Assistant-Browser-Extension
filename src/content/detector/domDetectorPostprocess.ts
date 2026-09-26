@@ -153,6 +153,7 @@ function mergeTwoBlocks(a: QuestionBlock, b: QuestionBlock): QuestionBlock {
     bbox: { x: left, y: top, width: Math.max(20, right - left), height: Math.max(20, bottom - top) },
     previewText: combinedText.slice(0, 900),
     identitySourceText: identityText,
+    identityObservationSource: undefined,
     ...media,
     questionTypeGuess: mergedType,
     confidence: Math.min(1, Math.max(a.confidence, b.confidence) + 0.05),
