@@ -43,6 +43,7 @@ export function buildControlMapping(block: QuestionBlock, owner: Element): Contr
     const blankEvidence = role === "blank" ? blankIndexEvidence(found.element, found.text) : null;
     const blankIndex = blankEvidence?.index ?? blanks.length;
     const ref: ControlRef = { controlId: `control_v1_${stableHash(`${questionId}\u001f${controlRootKey}\u001f${role}\u001f${key ?? blankIndex}\u001f${found.text}`)}`, questionId, role, optionKey: key ?? undefined, blankIndex: role === "blank" ? blankIndex : undefined, controlType: found.controlType, semanticFingerprint: semanticFingerprintForControl(found.element, { controlType: found.controlType, role, optionKey: key ?? undefined, blankIndex, semanticText: found.text }), semanticText: found.text, enabled: found.enabled, visible: found.visible, confidence: key ? 1 : blankEvidence ? .95 : .75, reasons: blankEvidence ? ["SEMANTIC_CONTAINER"] : reason };
+    if (role === "blank" && blanks[blankIndex]) return { ok: false, code: "CONTROL_MAPPING_AMBIGUOUS", message: `Multiple active controls map to blank ${blankIndex + 1}` };
     controlRegistry.put(ref, found.element, semanticOwner);
     if (role === "option") {
       if (!key) continue;

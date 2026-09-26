@@ -321,4 +321,21 @@ describe("Side Panel result commit authority", () => {
     expect(result).toEqual({ totalFilled: 1, totalQuestions: 1 });
     expect(store.getState()[0].result).toBeUndefined();
   });
+
+  it("stops batch fill after a failed transaction and does not send the next candidate", async () => {
+    const first = makeCandidate("failed-fill-a", { selected: true });
+    const second = makeCandidate("failed-fill-b", { selected: true });
+    const store = createSetCandidates([first, second]);
+    const sendFillMessageWithVerify = vi.fn(async () => ({ ok: false, filledCount: 0, code: "PARTIAL_MUTATION_UNPROVABLE" as const, message: "uncertain transaction" }));
+
+    const result = await runBatchFill([first, second], {
+      isCandidateCurrent: async () => true,
+      setCandidates: store.setCandidates,
+      sendFillMessageWithVerify,
+    });
+
+    expect(sendFillMessageWithVerify).toHaveBeenCalledOnce();
+    expect(sendFillMessageWithVerify).toHaveBeenCalledWith(origin.tabId, first.block, first.result);
+    expect(result).toEqual({ totalFilled: 0, totalQuestions: 1 });
+  });
 });

@@ -1,6 +1,7 @@
 import type { CandidateOrigin, ExtMessage, ParseResult, QuestionBlock } from "@/shared/types";
+import type { FillAnswerCode } from "@/content/answerTypes";
 
-type FillResponse = { ok?: boolean; filledCount?: number; message?: string } | null;
+type FillResponse = { ok?: boolean; filledCount?: number; message?: string; code?: FillAnswerCode } | null;
 type VerifyResponse = { ok?: boolean; expectedKeys?: string[]; actualKeys?: string[]; message?: string } | null;
 
 export function shouldBootstrapContentScript(error: unknown): boolean {
@@ -107,7 +108,7 @@ export async function sendFillMessage(
   block: QuestionBlock,
   result: ParseResult,
 ): Promise<FillResponse> {
-  const resp = await sendTabMessageWithBootstrap<{ ok?: boolean; filledCount?: number; message?: string }>(
+  const resp = await sendTabMessageWithBootstrap<{ ok?: boolean; filledCount?: number; message?: string; code?: FillAnswerCode }>(
     tabId,
     { type: "FILL_PARSED_ANSWER", block, result },
   );
@@ -163,30 +164,15 @@ export async function sendFillMessageWithVerify(
 ): Promise<FillResponse> {
   const firstFill = await sendFillMessage(tabId, block, result);
   if (!isChoiceLikeResult(block, result)) return firstFill;
-  if (!firstFill?.ok) return firstFill;
+  if (!firstFill?.ok) return firstFill ? { ...firstFill, filledCount: 0 } : firstFill;
 
   const firstVerify = await sendVerifyMessage(tabId, block, result);
-  if (firstVerify?.ok) {
-    return {
-      ok: true,
-      filledCount: firstFill.filledCount ?? 0,
-      message: firstFill.ok && (firstFill.filledCount ?? 0) > 0 ? firstFill.message : firstVerify.message,
-    };
-  }
-
-  const retryFill = await sendFillMessage(tabId, block, result);
-  const retryVerify = await sendVerifyMessage(tabId, block, result);
-  if (retryVerify?.ok) {
-    return {
-      ok: true,
-      filledCount: (firstFill?.filledCount ?? 0) + (retryFill?.filledCount ?? 0),
-      message: retryFill?.filledCount ? `重试后已纠正：${retryFill.message}` : `重试后已纠正：${retryVerify?.message || "校验通过"}`,
-    };
-  }
+  if (firstVerify?.ok) return firstFill;
 
   return {
     ok: false,
-    filledCount: (firstFill?.filledCount ?? 0) + (retryFill?.filledCount ?? 0),
-    message: retryVerify?.message || firstVerify?.message || retryFill?.message || firstFill?.message || "填写后校验失败",
+    filledCount: 0,
+    code: "PARTIAL_MUTATION_UNPROVABLE",
+    message: firstVerify?.message || "Fill completed but a fresh Side Panel verification could not prove the answer state",
   };
 }

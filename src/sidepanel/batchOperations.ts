@@ -1,4 +1,5 @@
 import type { AppSettings, CandidateOrigin, DetectedCandidate, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
+import type { FillAnswerCode } from "@/content/answerTypes";
 import type { CandidateAttemptLease, CandidateAttemptRegistry } from "./candidateAuthority";
 import { candidateMatchesBlockAndOrigin } from "./candidateAuthority";
 
@@ -48,7 +49,7 @@ type FillDeps = {
     tabId: number,
     block: QuestionBlock,
     result: ParseResult,
-  ) => Promise<{ ok?: boolean; filledCount?: number; message?: string } | null>;
+  ) => Promise<{ ok?: boolean; filledCount?: number; message?: string; code?: FillAnswerCode } | null>;
 };
 
 const STALE_CANDIDATE_RESULT = "STALE_QUESTION_REVISION";
@@ -253,7 +254,7 @@ async function runVisionRetryForCandidate(candidate: DetectedCandidate, deps: Vi
 export async function runFillCandidate(
   candidate: DetectedCandidate,
   deps: FillDeps,
-): Promise<{ ok?: boolean; filledCount?: number; message?: string } | null> {
+): Promise<{ ok?: boolean; filledCount?: number; message?: string; code?: FillAnswerCode } | null> {
   if (!candidate.result) return null;
   if (!candidate.origin?.tabId || !await deps.isCandidateCurrent(candidate)) {
     clearFilledCandidateResult(candidate, deps.setCandidates);
@@ -277,11 +278,15 @@ export async function runBatchFill(
       continue;
     }
     const response = await deps.sendFillMessageWithVerify(candidate.origin.tabId, candidate.block, candidate.result!);
-    totalFilled += response?.filledCount ?? 0;
     totalQuestions += 1;
-    if (response?.message === STALE_CANDIDATE_RESULT || !await deps.isCandidateCurrent(candidate)) {
+    if (response?.ok) totalFilled += response.filledCount ?? 0;
+    const stillCurrent = await deps.isCandidateCurrent(candidate);
+    if (response?.message === STALE_CANDIDATE_RESULT || !stillCurrent) {
       clearFilledCandidateResult(candidate, deps.setCandidates);
     }
+    // A failed transaction or a lost origin fence ends this batch path. Never
+    // repeat or advance to another candidate after an uncertain fill result.
+    if (!response?.ok || !stillCurrent) break;
   }
   return { totalFilled, totalQuestions };
 }

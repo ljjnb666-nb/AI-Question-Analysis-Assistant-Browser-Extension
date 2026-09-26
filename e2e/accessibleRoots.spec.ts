@@ -235,8 +235,66 @@ const SCROLLED_FRAME_PAGE_HTML = `<!doctype html>
   <script>window.scrollTo(0, 850);</script>
 </body></html>`;
 
+const RERENDER_HOST_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>rerender host</title></head>
+<body style="margin:0"><iframe id="rerender-frame" src="/rerender-frame" style="width:760px;height:380px;border:0"></iframe></body></html>`;
+const RERENDER_STOP_HOST_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>rerender stop host</title></head>
+<body style="margin:0"><iframe id="rerender-frame" src="/rerender-frame?change-question=1" style="width:760px;height:380px;border:0"></iframe>
+  <button id="next-question">Next question</button><script>window.__advanceClicks = 0; document.getElementById("next-question").addEventListener("click", () => window.__advanceClicks++);</script>
+</body></html>`;
+
+const RERENDER_FRAME_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>rerender-safe transaction</title></head>
+<body style="margin:0">
+  <section class="question-item" data-question-id="21" style="width:700px;min-height:260px;padding:16px;background:#fff;color:#000;font-size:18px">
+    <p class="stem">21. Select all that apply: Which values are correct?</p>
+    <ul id="options" style="list-style:none;margin:0;padding:0"></ul>
+  </section>
+  <script>
+    window.__mutationEvents = [];
+    window.__detachedMutations = [];
+    const selected = new Set();
+    let generation = -1;
+    const options = document.getElementById("options");
+    const stem = document.querySelector(".stem");
+    const changeQuestionAfterFirst = new URLSearchParams(location.search).has("change-question");
+    const render = () => {
+      generation += 1;
+      options.replaceChildren(...["A", "B", "C", "D"].map((key) => {
+        const item = document.createElement("li");
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = key;
+        input.checked = selected.has(key);
+        input.dataset.generation = String(generation);
+        input.addEventListener("click", () => {
+          if (!input.isConnected) window.__detachedMutations.push({ key, generation: Number(input.dataset.generation) });
+        });
+        input.addEventListener("change", () => {
+          if (input.checked) selected.add(key);
+          else selected.delete(key);
+          window.__mutationEvents.push({ key, generation: Number(input.dataset.generation) });
+          if (changeQuestionAfterFirst && key === "A") {
+            stem.textContent = "22. A different question has replaced the original question.";
+            selected.clear();
+            render();
+            return;
+          }
+          render();
+        });
+        label.append(input, document.createTextNode(" " + key + ". " + ({ A: "Alpha", B: "Beta", C: "Gamma", D: "Delta" })[key]));
+        item.append(label);
+        return item;
+      }));
+    };
+    render();
+  </script>
+</body></html>`;
+
 type HeldProviderRequest = {
-  respond: (answerLabel: string) => Promise<void>;
+  respond: (answerLabel: string, questionType?: "single_choice" | "multi_choice") => Promise<void>;
   reject: () => Promise<void>;
   settled: boolean;
 };
@@ -271,6 +329,21 @@ async function startRootsServer(): Promise<{ origin: string; held: HeldProviderR
       res.end(SCROLLED_FRAME_PAGE_HTML);
       return;
     }
+    if (req.method === "GET" && url.pathname === "/rerender") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(RERENDER_HOST_PAGE_HTML);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/rerender-stop") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(RERENDER_STOP_HOST_PAGE_HTML);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/rerender-frame") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(RERENDER_FRAME_PAGE_HTML);
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/native-frame") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(NATIVE_FRAME_PAGE_HTML);
@@ -291,18 +364,19 @@ async function startRootsServer(): Promise<{ origin: string; held: HeldProviderR
         const chunks: Buffer[] = [];
         for await (const chunk of req) chunks.push(chunk as Buffer);
         void chunks;
-        let respond: (answerLabel: string) => Promise<void> = async () => {};
+        let respond: (answerLabel: string, questionType?: "single_choice" | "multi_choice") => Promise<void> = async () => {};
         let reject: () => Promise<void> = async () => {};
         const settledPromise = new Promise<void>((resolveRelease) => {
-          respond = async (answerLabel: string) => {
+          respond = async (answerLabel: string, questionType: "single_choice" | "multi_choice" = "single_choice") => {
+            const answerKeys = answerLabel.split(",").map((key) => key.trim()).filter(Boolean);
             const modelJson = JSON.stringify({
-              questionType: "single_choice",
+              questionType,
               answer: answerLabel,
               confidence: 0.99,
               briefExplanation: "mocked",
               detailedExplanation: "mocked explanation",
               recognizedText: "",
-              optionSelections: { [answerLabel]: true },
+              optionSelections: Object.fromEntries(answerKeys.map((key) => [key, true])),
               warning: null,
             });
             res.writeHead(200, { "Content-Type": "application/json" });
@@ -457,6 +531,88 @@ async function waitForEvent(driver: Page, eventType: string, timeout = 45_000): 
 }
 
 test.describe("Phase 7 accessible roots E2E", () => {
+  test("E2E-RERENDER-1: multi-choice fill reacquires controls after a synchronous framework rerender", async () => {
+    test.setTimeout(90_000);
+    const server = await startRootsServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const quizPage = await context.newPage();
+      await quizPage.goto(`${server.origin}/rerender`);
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, "/rerender");
+
+      await expect.poll(() => server.held.length, { timeout: 30_000 }).toBe(1).catch(async (err) => { await dumpDiagnostics(driver, "rerender-held-provider"); throw err; });
+      await server.held[0].respond("A,B", "multi_choice");
+      server.held[0].settled = true;
+      await waitForEvent(driver, "AUTO_SOLVE_DONE").catch(async (err) => { await dumpDiagnostics(driver, "rerender-done"); throw err; });
+
+      const state = await quizPage.evaluate(() => {
+        const frame = document.getElementById("rerender-frame") as HTMLIFrameElement;
+        const frameDocument = frame.contentDocument!;
+        const current = Array.from(frameDocument.querySelectorAll<HTMLInputElement>('#options input[type="checkbox"]'))
+          .filter((input) => input.checked)
+          .map((input) => input.value)
+          .sort();
+        const debug = frame.contentWindow as unknown as {
+          __mutationEvents: Array<{ key: string; generation: number }>;
+          __detachedMutations: Array<{ key: string; generation: number }>;
+        };
+        return { current, mutations: debug.__mutationEvents, detached: debug.__detachedMutations };
+      });
+
+      expect(state.current).toEqual(["A", "B"]);
+      expect(state.mutations).toEqual([{ key: "A", generation: 0 }, { key: "B", generation: 1 }]);
+      expect(state.detached).toEqual([]);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
+  test("E2E-RERENDER-2: semantic replacement stops before the next mutation or question advance", async () => {
+    test.setTimeout(90_000);
+    const server = await startRootsServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const quizPage = await context.newPage();
+      await quizPage.goto(`${server.origin}/rerender-stop`);
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, "/rerender-stop");
+
+      await expect.poll(() => server.held.length, { timeout: 30_000 }).toBe(1).catch(async (err) => { await dumpDiagnostics(driver, "rerender-stop-held-provider"); throw err; });
+      await server.held[0].respond("A,B", "multi_choice");
+      server.held[0].settled = true;
+      await waitForEvent(driver, "AUTO_SOLVE_DONE").catch(async (err) => { await dumpDiagnostics(driver, "rerender-stop-done"); throw err; });
+
+      const state = await quizPage.evaluate(() => {
+        const frame = document.getElementById("rerender-frame") as HTMLIFrameElement;
+        const frameDocument = frame.contentDocument!;
+        const debug = frame.contentWindow as unknown as {
+          __mutationEvents: Array<{ key: string; generation: number }>;
+          __detachedMutations: Array<{ key: string; generation: number }>;
+        };
+        return {
+          mutations: debug.__mutationEvents,
+          detached: debug.__detachedMutations,
+          selected: Array.from(frameDocument.querySelectorAll<HTMLInputElement>('#options input[type="checkbox"]'))
+            .filter((input) => input.checked)
+            .map((input) => input.value),
+          advanceClicks: (window as unknown as { __advanceClicks: number }).__advanceClicks,
+        };
+      });
+      const messages = await driver.evaluate(() => (window as DriverWindow & { __payloads: string[] }).__payloads);
+
+      expect(state.mutations).toEqual([{ key: "A", generation: 0 }]);
+      expect(state.detached).toEqual([]);
+      expect(state.selected).toEqual([]);
+      expect(state.advanceClicks).toBe(0);
+      expect(messages.some((message) => message.includes("PARTIAL_MUTATION_UNPROVABLE"))).toBe(true);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
   test("E2E-FRAME-NATIVE: auto solve selects only a native radio in the same-origin frame", async () => {
     test.setTimeout(90_000);
     const server = await startRootsServer();

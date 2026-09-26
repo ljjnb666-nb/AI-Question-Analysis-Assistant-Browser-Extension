@@ -4,7 +4,33 @@ export interface FillAnswerResult {
   ok: boolean;
   filledCount: number;
   message: string;
+  code?: FillAnswerCode;
 }
+
+/** Stable machine-readable result codes shared by page, Auto Solve, and Side Panel fills. */
+export type FillAnswerCode =
+  | "FILLED_VERIFIED"
+  | "NO_CHANGE_NEEDED"
+  | "CONTROL_MAPPING_AMBIGUOUS"
+  | "CONTROL_MAPPING_CHANGED"
+  | "CONTROL_NOT_FOUND"
+  | "CONTROL_COUNT_MISMATCH"
+  | "STALE_ACTION_PLAN"
+  | "STALE_QUESTION_REVISION"
+  | "STALE_ROOT_CONTEXT"
+  | "STALE_RUNTIME_QUESTION_HANDLE"
+  | "USER_STATE_SNAPSHOT_UNAVAILABLE"
+  | "USER_STATE_CHANGED"
+  | "FILL_VERIFICATION_FAILED"
+  | "ROLLBACK_FAILED"
+  | "ROLLBACK_AUTHORITY_LOST"
+  | "PARTIAL_MUTATION_UNPROVABLE"
+  | "UNSUPPORTED_CONTROL"
+  | "INVALID_ANSWER"
+  | "INVALID_ANSWER_OPTION"
+  | "INVALID_SINGLE_CHOICE_CARDINALITY"
+  | "ANSWER_BLANK_COUNT_MISMATCH"
+  | "UNSUPPORTED_QUESTION_TYPE";
 
 export interface VerifyAnswerResult {
   ok: boolean;

@@ -1,5 +1,6 @@
 import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import { captureSolveStartControlState } from "./answerFiller";
+import type { FillAnswerCode } from "./answerTypes";
 import { isStaleQuestionRevisionError } from "@/shared/utils/parseAttemptErrors";
 
 type AutoSolveProgressPayload = {
@@ -23,7 +24,7 @@ type ResolveQuestionOptions = {
 };
 
 type ResolveQuestionDeps = {
-  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => Promise<{ ok: boolean; filledCount: number; message: string }>;
+  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => Promise<{ ok: boolean; filledCount: number; message: string; code?: FillAnswerCode }>;
   isChoiceLikeQuestionType: (questionType: ParseResult["questionType"]) => boolean;
   parseBlockForAutoSolve: (block: QuestionBlock) => Promise<ParseResult>;
   parseBlockForAutoSolveQuickReview: (block: QuestionBlock) => Promise<ParseResult>;
@@ -42,6 +43,8 @@ type ResolveQuestionResult = {
   progressMessage: string;
   questionCompleted: boolean;
   stale?: boolean;
+  stopAutomation?: true;
+  stopReason?: string;
 };
 
 const MAX_AUTO_SOLVE_PARSE_RETRIES = 1;
@@ -124,12 +127,20 @@ export async function resolveAutoSolveQuestion(
     }
 
     if (deps.isCurrentAutoSolveResult && !deps.isCurrentAutoSolveResult(options.currentBlock, parsed)) return staleResult();
-    const fillResult = await deps.fillParsedAnswerInPage(options.currentBlock, parsed);
-    const isChoiceParsedResult = deps.isChoiceLikeQuestionType(parsed.questionType);
-    const verifyResult = isChoiceParsedResult
-      ? deps.verifyParsedAnswerInPage(options.currentBlock, parsed)
-      : { ok: true, message: fillResult.message };
-    const fillAccepted = isChoiceParsedResult ? verifyResult.ok : fillResult.ok;
+    let fillResult: Awaited<ReturnType<typeof deps.fillParsedAnswerInPage>>;
+    let verifyResult: { ok: boolean; message: string };
+    try {
+      fillResult = await deps.fillParsedAnswerInPage(options.currentBlock, parsed);
+      const isChoiceParsedResult = deps.isChoiceLikeQuestionType(parsed.questionType);
+      verifyResult = fillResult.ok && isChoiceParsedResult
+        ? deps.verifyParsedAnswerInPage(options.currentBlock, parsed)
+        : { ok: fillResult.ok, message: fillResult.message };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      fillResult = { ok: false, filledCount: 0, code: "PARTIAL_MUTATION_UNPROVABLE", message: `Transaction or final verification threw: ${message}` };
+      verifyResult = { ok: false, message: fillResult.message };
+    }
+    const fillAccepted = fillResult.ok && verifyResult.ok;
 
     if (fillAccepted) {
       filledDelta = fillResult.filledCount;
@@ -138,17 +149,11 @@ export async function resolveAutoSolveQuestion(
       return { filledDelta, progressMessage, questionCompleted };
     }
 
-    if (options.needsQuickAnsweredChoiceReview) {
-      progressMessage = fillResult.ok
-        ? `Quick review verification failed: ${verifyResult.message}. Keeping the current answer and continuing.`
-        : `Quick review could not overwrite the answer: ${fillResult.message}. Keeping the current answer and continuing.`;
-      questionCompleted = true;
-      return { filledDelta, progressMessage, questionCompleted };
-    }
-
+    const stopReason = fillResult.ok ? "FILL_VERIFICATION_FAILED" : fillResult.code ?? "FILL_VERIFICATION_FAILED";
     progressMessage = fillResult.ok
-      ? `Verification failed after fill: ${verifyResult.message}`
-      : `Fill failed: ${fillResult.message}`;
+      ? `Fill stopped after fresh verification failed: ${verifyResult.message}`
+      : `Fill stopped for safety: ${stopReason}`;
+    return { filledDelta: 0, progressMessage, questionCompleted: false, stopAutomation: true, stopReason };
   } catch (err) {
     if (isStaleQuestionRevisionError(err)) return staleResult();
     const errMsg = err instanceof Error ? err.message : String(err);

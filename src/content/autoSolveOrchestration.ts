@@ -288,6 +288,10 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
       );
       solved = answeredPhase.solved;
       filled = answeredPhase.filled;
+      if (answeredPhase.stopAutomation) {
+        deps.sendAutoSolveDone({ ok: false, solved, filled, total: Math.max(total, solved), message: answeredPhase.stopReason ?? "Fill stopped for safety" });
+        return;
+      }
       if (answeredPhase.done) return;
       if (answeredPhase.handled) continue;
 
@@ -330,6 +334,10 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
           verifyParsedAnswerInPage: deps.verifyParsedAnswerInPage,
         },
       );
+      if (resolution.stopAutomation) {
+        deps.sendAutoSolveDone({ ok: false, solved, filled, total: Math.max(total, solved), message: resolution.stopReason ?? resolution.progressMessage });
+        return;
+      }
       if (resolution.stale) continue;
       const questionCompleted = resolution.questionCompleted;
       filled += resolution.filledDelta;
