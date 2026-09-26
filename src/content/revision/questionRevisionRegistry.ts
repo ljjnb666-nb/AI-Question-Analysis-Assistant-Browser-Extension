@@ -22,6 +22,8 @@ export function compareQuestionRuntimeRevision(
 
 export type RootScope = { rootKey?: string; rootGeneration?: number };
 
+export const MAX_QUESTION_REVISION_ENTRIES = 512;
+
 export function instanceKeyFor(rootKey: string | undefined, stableId: string): string {
   return `${rootKey ?? TOP_ROOT_KEY} ${stableId}`;
 }
@@ -32,8 +34,18 @@ type OwnerBinding = { instanceKey: string; version: QuestionRuntimeVersion };
 export class QuestionRevisionRegistry {
   private readonly versions = new Map<string, QuestionRuntimeVersion>();
   private readonly owners = new WeakMap<Element, OwnerBinding>();
+  private protectedInstanceKey: string | null = null;
   private routeEpoch = 0;
   private routeFingerprint = routeFingerprintForLocation();
+
+  /** Read-only test/debug seam. */
+  get size(): number { return this.versions.size; }
+
+  protectInstance(instanceKey: string): void { this.protectedInstanceKey = instanceKey; }
+
+  unprotectInstance(instanceKey: string): void {
+    if (this.protectedInstanceKey === instanceKey) this.protectedInstanceKey = null;
+  }
 
   getRoute(): Pick<QuestionRuntimeVersion, "routeEpoch" | "routeFingerprint"> {
     return { routeEpoch: this.routeEpoch, routeFingerprint: this.routeFingerprint };
@@ -68,7 +80,11 @@ export class QuestionRevisionRegistry {
       event = "REPLACED";
     }
 
+    // Map insertion order is the deterministic LRU order. Refreshing an
+    // instance moves it to the newest position without changing its identity.
+    this.versions.delete(instanceKey);
     this.versions.set(instanceKey, version);
+    this.evictOldestVersions(instanceKey);
     if (owner) {
       this.owners.set(owner, { instanceKey, version });
     }
@@ -94,6 +110,15 @@ export class QuestionRevisionRegistry {
     const prefix = `${rootKey} `;
     for (const key of [...this.versions.keys()]) {
       if (key.startsWith(prefix)) this.versions.delete(key);
+    }
+  }
+
+  private evictOldestVersions(newestInstanceKey: string): void {
+    while (this.versions.size > MAX_QUESTION_REVISION_ENTRIES) {
+      const oldest = [...this.versions.keys()].find((key) =>
+        key !== newestInstanceKey && key !== this.protectedInstanceKey);
+      if (!oldest) return;
+      this.versions.delete(oldest);
     }
   }
 }

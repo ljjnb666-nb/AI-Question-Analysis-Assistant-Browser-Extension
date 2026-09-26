@@ -36,12 +36,18 @@ export function beginQuestionRevisionAttempt(block: QuestionBlock, controller: A
     rootKey: root.rootKey,
     rootGeneration: root.rootGeneration,
   };
-  activeAttempt = { ...identity, nativeQuestionId: block.identity?.nativeQuestionId, controller, instanceKey: instanceKeyFor(root.rootKey, identity.stableId) };
+  if (activeAttempt) registry.unprotectInstance(activeAttempt.instanceKey);
+  const instanceKey = instanceKeyFor(root.rootKey, identity.stableId);
+  registry.protectInstance(instanceKey);
+  activeAttempt = { ...identity, nativeQuestionId: block.identity?.nativeQuestionId, controller, instanceKey };
   return identity;
 }
 
 export function clearQuestionRevisionAttempt(controller?: AbortController): void {
-  if (!controller || activeAttempt?.controller === controller) activeAttempt = null;
+  if (!controller || activeAttempt?.controller === controller) {
+    if (activeAttempt) registry.unprotectInstance(activeAttempt.instanceKey);
+    activeAttempt = null;
+  }
 }
 
 /** Mirrors the Phase 5 question-attempt finally cleanup without touching a newer question. */
@@ -50,6 +56,7 @@ export function clearQuestionRevisionAttemptForBlock(block: QuestionBlock): void
   const stableId = block.identity?.stableId ?? block.id;
   const contentFingerprint = block.identity?.contentFingerprint ?? block.id;
   if (activeAttempt?.stableId === stableId && activeAttempt.contentFingerprint === contentFingerprint && activeAttempt.rootKey === root.rootKey) {
+    registry.unprotectInstance(activeAttempt.instanceKey);
     activeAttempt = null;
   }
 }

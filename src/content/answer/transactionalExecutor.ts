@@ -53,13 +53,26 @@ export function snapshotControls(mapping: Mapping): SemanticControlSnapshot {
 }
 
 /** One current authority resolution per semantic mutation and after each event boundary. */
-export async function executeTransaction(
+export function executeTransaction(
   plan: AnswerPlan,
   action: ActionPlan,
   initialMapping: Mapping,
   solveSnapshot: SemanticControlSnapshot | undefined,
   resolveAuthority: ResolveCurrentTransactionAuthority,
 ): Promise<TransactionResult> {
+  const controlIds = [...initialMapping.options.values(), ...initialMapping.blanks].map((ref) => ref.controlId);
+  const outcome = controlRegistry.withPinnedMapping(initialMapping.lifecycleToken, controlIds, () =>
+    executeTransactionCore(plan, action, initialMapping, solveSnapshot, resolveAuthority));
+  return Promise.resolve(outcome);
+}
+
+function executeTransactionCore(
+  plan: AnswerPlan,
+  action: ActionPlan,
+  initialMapping: Mapping,
+  solveSnapshot: SemanticControlSnapshot | undefined,
+  resolveAuthority: ResolveCurrentTransactionAuthority,
+): TransactionResult {
   if (action.questionId !== plan.questionId || action.contentFingerprint !== plan.contentFingerprint
     || action.answerSemanticHash !== plan.answerSemanticHash || initialMapping.questionId !== plan.questionId) {
     return result("STALE_ACTION_PLAN", "Action plan no longer matches the answer plan");
@@ -142,8 +155,12 @@ function validateResolution(
   expectedKeys: string[],
 ): { ok: true; mapping: Mapping } | { ok: false; code: FillAnswerCode; message: string } {
   const { mapping } = resolution;
+  if (!controlRegistry.isCurrentTransactionToken(mapping.lifecycleToken)) {
+    return { ok: false, code: "STALE_ACTION_PLAN", message: "Control mapping lifecycle ended before transaction verification" };
+  }
   if (resolution.stableId !== plan.questionId || resolution.contentFingerprint !== plan.contentFingerprint
     || resolution.rootKey !== rootKey || resolution.rootGeneration !== rootGeneration
+    || mapping.rootKey !== rootKey || mapping.rootGeneration !== rootGeneration
     || mapping.questionId !== plan.questionId || !mapping.owner.isConnected) {
     return { ok: false, code: "STALE_ACTION_PLAN", message: "Question, runtime owner, or root authority changed" };
   }
@@ -161,6 +178,8 @@ function mappingIsCurrent(mapping: Mapping): boolean {
     if (!element) return false;
     const owner = element.closest(".question-item,.questionBox,.base-question-component,[data-question-id],[data-questionid],[data-problem-id],[data-problemid],[data-item-id]");
     return entry.questionId === mapping.questionId && entry.owner === mapping.owner
+      && entry.rootKey === mapping.rootKey && entry.rootGeneration === mapping.rootGeneration
+      && entry.lifecycleToken === mapping.lifecycleToken
       && element.isConnected && mapping.owner.contains(element) && owner === mapping.owner
       && controlIsVisibleAndEnabled(element) && semanticFingerprintForControl(element, ref) === ref.semanticFingerprint;
   });

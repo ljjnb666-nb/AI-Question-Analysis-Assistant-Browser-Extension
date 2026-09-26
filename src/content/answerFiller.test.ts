@@ -3,6 +3,8 @@ import type { BoundingBox, ParseResult } from "@/shared/types";
 import { captureSolveStartControlState, fillAnswerIntoScope, fillParsedAnswerInPage, finishAutoSolveQuestionAttempt, hasAutoSolveQuestionAttempt, normalizeChoiceAnswerKeys, splitAnswerParts, verifyAnswerInScope } from "./answerFiller";
 import { observeLiveQuestion } from "./liveQuestionObservation";
 import { attachRuntimeRoot, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
+import { controlRegistry } from "./answer/controlRegistry";
+import { buildControlMapping } from "./answer/controlMapping";
 
 function setRect(el: Element, rect: { left: number; top: number; width: number; height: number }) {
   Object.defineProperty(el, "getBoundingClientRect", {
@@ -20,6 +22,7 @@ function setRect(el: Element, rect: { left: number; top: number; width: number; 
 
 describe("answerFiller", () => {
   it("enforces the explicit auto/manual snapshot contract and has idempotent finish", async () => {
+    controlRegistry.clear();
     document.body.innerHTML = '<section class="question-item" id="q-mode">1. prompt <button>A. a</button><button id="b">B. b</button></section>';
     const owner = document.getElementById("q-mode")!;
     document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
@@ -33,10 +36,15 @@ describe("answerFiller", () => {
     expect(clicks).toBe(0);
     const manual = await fillParsedAnswerInPage(block, result, { mode: "manual" });
     expect(manual.message).not.toBe("USER_STATE_SNAPSHOT_UNAVAILABLE");
+    expect(controlRegistry.size).toBe(0);
 
     captureSolveStartControlState(block);
     expect(hasAutoSolveQuestionAttempt(block)).toBe(true);
+    expect(controlRegistry.size).toBe(0);
+    expect(buildControlMapping(block, owner).ok).toBe(true);
+    expect(controlRegistry.size).toBeGreaterThan(0);
     finishAutoSolveQuestionAttempt(block);
+    expect(controlRegistry.size).toBe(0);
     finishAutoSolveQuestionAttempt(block);
     expect(hasAutoSolveQuestionAttempt(block)).toBe(false);
   });
