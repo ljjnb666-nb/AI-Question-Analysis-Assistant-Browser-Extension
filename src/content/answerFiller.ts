@@ -38,7 +38,8 @@ import { buildValidatedAnswerPlan } from "./answer/answerPlanValidator";
 import { buildControlMapping } from "./answer/controlMapping";
 import { buildActionPlan, executeTransaction, readSelectedOptionKeys, snapshotControls, verifyAnswerPlan, type CurrentTransactionAuthority } from "./answer/transactionalExecutor";
 import { observeLiveQuestion } from "./liveQuestionObservation";
-import { clearQuestionRevisionAttemptForBlock, hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock, STALE_ROOT_CONTEXT } from "./revision/questionRevisionRuntime";
+import { clearQuestionRevisionAttemptForBlock, hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock, STALE_QUESTION_REVISION, STALE_ROOT_CONTEXT } from "./revision/questionRevisionRuntime";
+import { routeFingerprintForLocation } from "./revision/questionRevisionRegistry";
 import { rootAttachmentOf } from "./roots/rootContext";
 import { resolveFillRootContext, sharedRootRegistry } from "./roots/rootRegistry";
 import { getTraversalRoot } from "./roots/rootDom";
@@ -167,7 +168,12 @@ function resolveFillScopeForBlock(block: QuestionBlock): ResolvedFillScope {
   return { ok: true, doc, localBBox, shadowRoot, owner: rootContext.owner };
 }
 
-export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult, options: { mode?: "auto" | "manual" } = {}): Promise<FillAnswerResult> {
+export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult, options: { mode?: "auto" | "manual"; expectedUrl?: string } = {}): Promise<FillAnswerResult> {
+  const startUrl = location.href;
+  if (options.expectedUrl !== undefined && options.expectedUrl !== startUrl) {
+    return { ok: false, filledCount: 0, code: STALE_QUESTION_REVISION, message: STALE_QUESTION_REVISION };
+  }
+  const transactionRouteFingerprint = routeFingerprintForLocation(options.expectedUrl ?? startUrl);
   const resolved = resolveFillScopeForBlock(block);
   if (!resolved.ok) {
     return { ok: false, filledCount: 0, code: resolved.code, message: resolved.message };
@@ -176,19 +182,19 @@ export async function fillParsedAnswerInPage(block: QuestionBlock, result: Parse
 
   // Runtime candidates are bound to the exact owner resolved from the opaque
   // content-side handle. This also keeps shadow candidates inside their root.
-  if (owner) return fillVerifiedAnswerIntoScope(owner, block, result, options.mode ?? "manual");
+  if (owner) return fillVerifiedAnswerIntoScope(owner, block, result, options.mode ?? "manual", transactionRouteFingerprint);
 
   if (shadowRoot) {
     const shadowScope = resolveShadowQuestionScope(shadowRoot, localBBox, block) ?? shadowRoot.host;
     if (shadowScope) {
-      return fillVerifiedAnswerIntoScope(shadowScope, block, result, options.mode ?? "manual");
+      return fillVerifiedAnswerIntoScope(shadowScope, block, result, options.mode ?? "manual", transactionRouteFingerprint);
     }
     return { ok: false, filledCount: 0, message: STALE_ROOT_CONTEXT };
   }
 
   const directScope = await resolveDirectQuestionScope(block, result, doc).catch(() => null);
   if (directScope) {
-    return fillVerifiedAnswerIntoScope(directScope.scope, block, result, options.mode ?? "manual");
+    return fillVerifiedAnswerIntoScope(directScope.scope, block, result, options.mode ?? "manual", transactionRouteFingerprint);
   }
 
   ensureQuestionRegionVisible(localBBox);
@@ -201,10 +207,13 @@ export async function fillParsedAnswerInPage(block: QuestionBlock, result: Parse
     }
   }
 
-  return fillVerifiedAnswerIntoScope(scope, block, result, options.mode ?? "manual");
+  return fillVerifiedAnswerIntoScope(scope, block, result, options.mode ?? "manual", transactionRouteFingerprint);
 }
 
-export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResult): VerifyAnswerResult {
+export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResult, expectedUrl?: string): VerifyAnswerResult {
+  if (expectedUrl !== undefined && expectedUrl !== location.href) {
+    return { ok: false, expectedKeys: [], actualKeys: [], message: STALE_QUESTION_REVISION };
+  }
   // Verification must run in the question's own root: a shadow/frame question
   // verified against the top document always fails closed with a bogus scope.
   const rootContext = resolveFillRootContext(sharedRootRegistry(), block);
@@ -235,13 +244,22 @@ export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResu
   return verifyVerifiedAnswerInScope(scope, block, result);
 }
 
-async function fillVerifiedAnswerIntoScope(scope: Element, block: QuestionBlock, result: ParseResult, mode: "auto" | "manual"): Promise<FillAnswerResult> {
+async function fillVerifiedAnswerIntoScope(
+  scope: Element,
+  block: QuestionBlock,
+  result: ParseResult,
+  mode: "auto" | "manual",
+  transactionRouteFingerprint: string,
+): Promise<FillAnswerResult> {
   const key = snapshotKey(block); const autoStatus = autoSnapshotStatus.get(key);
   const solveStart = solveStartSnapshots.get(key);
   if (mode === "auto" && (autoStatus !== "captured" || !solveStart)) return { ok: false, filledCount: 0, code: "USER_STATE_SNAPSHOT_UNAVAILABLE", message: "USER_STATE_SNAPSHOT_UNAVAILABLE" };
 
   const resolveAuthority = (): CurrentTransactionAuthority => {
     try {
+      if (routeFingerprintForLocation() !== transactionRouteFingerprint) {
+        return { ok: false, code: STALE_QUESTION_REVISION, message: STALE_QUESTION_REVISION };
+      }
       if (mode === "auto" && hasQuestionRevisionAttempt() && !isCurrentQuestionRevisionBlock(block)) {
         return { ok: false, code: "STALE_QUESTION_REVISION", message: "STALE_QUESTION_REVISION" };
       }

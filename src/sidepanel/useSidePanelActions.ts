@@ -210,8 +210,8 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     const response = await runFillCandidate(candidate, {
       isCandidateCurrent,
       setCandidates: options.setCandidates,
-      sendFillMessageWithVerify: (tabId, block, result) =>
-        sendFillMessageWithVerify(tabId, block, result, isChoiceLikeResult),
+      sendFillMessageWithVerify: (tabId, block, result, expectedUrl) =>
+        sendFillMessageWithVerify(tabId, block, result, expectedUrl, isChoiceLikeResult),
     });
     options.setFillFeedback(getSingleFillFeedback(options.uiLang, !!response?.ok, response?.message));
     window.setTimeout(() => options.setFillFeedback(""), 2200);
@@ -222,8 +222,8 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     const { totalFilled, totalQuestions } = await runBatchFill(options.candidates, {
       isCandidateCurrent,
       setCandidates: options.setCandidates,
-      sendFillMessageWithVerify: (tabId, block, result) =>
-        sendFillMessageWithVerify(tabId, block, result, isChoiceLikeResult),
+      sendFillMessageWithVerify: (tabId, block, result, expectedUrl) =>
+        sendFillMessageWithVerify(tabId, block, result, expectedUrl, isChoiceLikeResult),
     });
     options.setIsBatchFilling(false);
     options.setFillFeedback(getBatchFillFeedback(options.uiLang, totalFilled, totalQuestions));

@@ -49,6 +49,7 @@ type FillDeps = {
     tabId: number,
     block: QuestionBlock,
     result: ParseResult,
+    expectedUrl: string,
   ) => Promise<{ ok?: boolean; filledCount?: number; message?: string; code?: FillAnswerCode } | null>;
 };
 
@@ -256,11 +257,11 @@ export async function runFillCandidate(
   deps: FillDeps,
 ): Promise<{ ok?: boolean; filledCount?: number; message?: string; code?: FillAnswerCode } | null> {
   if (!candidate.result) return null;
-  if (!candidate.origin?.tabId || !await deps.isCandidateCurrent(candidate)) {
+  if (!candidate.origin?.tabId || !candidate.origin.url || !await deps.isCandidateCurrent(candidate)) {
     clearFilledCandidateResult(candidate, deps.setCandidates);
-    return { ok: false, filledCount: 0, message: STALE_CANDIDATE_RESULT };
+    return { ok: false, filledCount: 0, code: "STALE_QUESTION_REVISION", message: STALE_CANDIDATE_RESULT };
   }
-  const response = await deps.sendFillMessageWithVerify(candidate.origin.tabId, candidate.block, candidate.result);
+  const response = await deps.sendFillMessageWithVerify(candidate.origin.tabId, candidate.block, candidate.result, candidate.origin.url);
   if (!await deps.isCandidateCurrent(candidate)) clearFilledCandidateResult(candidate, deps.setCandidates);
   return response;
 }
@@ -273,11 +274,11 @@ export async function runBatchFill(
   let totalFilled = 0;
   let totalQuestions = 0;
   for (const candidate of targets) {
-    if (!candidate.origin?.tabId || !await deps.isCandidateCurrent(candidate)) {
+    if (!candidate.origin?.tabId || !candidate.origin.url || !await deps.isCandidateCurrent(candidate)) {
       clearFilledCandidateResult(candidate, deps.setCandidates);
-      continue;
+      break;
     }
-    const response = await deps.sendFillMessageWithVerify(candidate.origin.tabId, candidate.block, candidate.result!);
+    const response = await deps.sendFillMessageWithVerify(candidate.origin.tabId, candidate.block, candidate.result!, candidate.origin.url);
     totalQuestions += 1;
     if (response?.ok) totalFilled += response.filledCount ?? 0;
     const stillCurrent = await deps.isCandidateCurrent(candidate);

@@ -298,28 +298,47 @@ describe("Side Panel result commit authority", () => {
     const deps = { isCandidateCurrent, setCandidates: store.setCandidates, sendFillMessageWithVerify };
 
     await runFillCandidate(candidate, deps);
-    expect(sendFillMessageWithVerify).toHaveBeenCalledWith(origin.tabId, candidate.block, candidate.result);
+    expect(sendFillMessageWithVerify).toHaveBeenCalledWith(origin.tabId, candidate.block, candidate.result, origin.url);
 
     isCandidateCurrent.mockResolvedValue(false);
     const stale = await runFillCandidate(candidate, deps);
-    expect(stale).toMatchObject({ ok: false, filledCount: 0, message: "STALE_QUESTION_REVISION" });
+    expect(stale).toMatchObject({ ok: false, filledCount: 0, code: "STALE_QUESTION_REVISION", message: "STALE_QUESTION_REVISION" });
     expect(sendFillMessageWithVerify).toHaveBeenCalledTimes(1);
     expect(store.getState()[0].result).toBeUndefined();
   });
 
-  it("revalidates each batch-fill item against its own origin", async () => {
-    const first = makeCandidate("fill-a", { selected: true });
-    const second = makeCandidate("fill-b", { selected: true });
+  it("passes each batch-fill candidate's own origin URL", async () => {
+    const firstOrigin = { ...origin, url: "https://quiz.example.test/assignment/7?candidate=first" };
+    const secondOrigin = { ...origin, url: "https://quiz.example.test/assignment/7?candidate=second" };
+    const first = makeCandidate("fill-a", { selected: true, origin: firstOrigin });
+    const second = makeCandidate("fill-b", { selected: true, origin: secondOrigin });
     const store = createSetCandidates([first, second]);
     const sendFillMessageWithVerify = vi.fn(async () => ({ ok: true, filledCount: 1 }));
-    const isCandidateCurrent = vi.fn(async (candidate: DetectedCandidate) => candidate.block.id === "fill-b");
+    const isCandidateCurrent = vi.fn(async () => true);
 
     const result = await runBatchFill([first, second], { isCandidateCurrent, setCandidates: store.setCandidates, sendFillMessageWithVerify });
 
-    expect(sendFillMessageWithVerify).toHaveBeenCalledTimes(1);
-    expect(sendFillMessageWithVerify).toHaveBeenCalledWith(origin.tabId, second.block, second.result);
-    expect(result).toEqual({ totalFilled: 1, totalQuestions: 1 });
+    expect(sendFillMessageWithVerify).toHaveBeenNthCalledWith(1, firstOrigin.tabId, first.block, first.result, firstOrigin.url);
+    expect(sendFillMessageWithVerify).toHaveBeenNthCalledWith(2, secondOrigin.tabId, second.block, second.result, secondOrigin.url);
+    expect(result).toEqual({ totalFilled: 2, totalQuestions: 2 });
+  });
+
+  it("stops a batch when a candidate's origin is already stale", async () => {
+    const first = makeCandidate("stale-origin", { selected: true });
+    const second = makeCandidate("later-origin", { selected: true });
+    const store = createSetCandidates([first, second]);
+    const sendFillMessageWithVerify = vi.fn(async () => ({ ok: true, filledCount: 1 }));
+
+    const result = await runBatchFill([first, second], {
+      isCandidateCurrent: async (candidate) => candidate.block.id !== "stale-origin",
+      setCandidates: store.setCandidates,
+      sendFillMessageWithVerify,
+    });
+
+    expect(sendFillMessageWithVerify).not.toHaveBeenCalled();
+    expect(result).toEqual({ totalFilled: 0, totalQuestions: 0 });
     expect(store.getState()[0].result).toBeUndefined();
+    expect(store.getState()[1].result).toBeDefined();
   });
 
   it("stops batch fill after a failed transaction and does not send the next candidate", async () => {
@@ -335,7 +354,7 @@ describe("Side Panel result commit authority", () => {
     });
 
     expect(sendFillMessageWithVerify).toHaveBeenCalledOnce();
-    expect(sendFillMessageWithVerify).toHaveBeenCalledWith(origin.tabId, first.block, first.result);
+    expect(sendFillMessageWithVerify).toHaveBeenCalledWith(origin.tabId, first.block, first.result, origin.url);
     expect(result).toEqual({ totalFilled: 0, totalQuestions: 1 });
   });
 });

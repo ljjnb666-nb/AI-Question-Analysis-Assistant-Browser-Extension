@@ -22,14 +22,15 @@ describe("sidepanel source tab screenshot authority", () => {
       callback({ ok: false, filledCount: 0, code: "FILL_VERIFICATION_FAILED", message: "write did not verify" });
     });
 
-    const response = await sendFillMessageWithVerify(41, {} as QuestionBlock, {} as ParseResult, () => true);
+    const expectedUrl = "https://quiz.example.test/assignment/7";
+    const response = await sendFillMessageWithVerify(41, {} as QuestionBlock, {} as ParseResult, expectedUrl, () => true);
 
     expect(response).toMatchObject({ ok: false, filledCount: 0, code: "FILL_VERIFICATION_FAILED" });
     expect(sendMessage).toHaveBeenCalledOnce();
-    expect(sendMessage.mock.calls[0]?.[1]).toMatchObject({ type: "FILL_PARSED_ANSWER" });
+    expect(sendMessage.mock.calls[0]?.[1]).toMatchObject({ type: "FILL_PARSED_ANSWER", expectedUrl });
   });
 
-  it("performs only a read-only verification after a successful fill", async () => {
+  it("SIDEPANEL-EXPECTED-URL-1 sends the candidate origin on fill and read-only verification", async () => {
     const sendMessage = chrome.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>;
     const responses = [
       { ok: true, filledCount: 1 },
@@ -39,13 +40,18 @@ describe("sidepanel source tab screenshot authority", () => {
       callback(responses.shift());
     });
 
-    const response = await sendFillMessageWithVerify(41, {} as QuestionBlock, {} as ParseResult, () => true);
+    const expectedUrl = "https://quiz.example.test/assignment/7";
+    const response = await sendFillMessageWithVerify(41, {} as QuestionBlock, {} as ParseResult, expectedUrl, () => true);
 
     expect(response).toMatchObject({ ok: false, filledCount: 0, code: "PARTIAL_MUTATION_UNPROVABLE" });
     expect(sendMessage).toHaveBeenCalledTimes(2);
     expect(sendMessage.mock.calls.map((call: unknown[]) => (call[1] as { type: string }).type)).toEqual([
       "FILL_PARSED_ANSWER",
       "VERIFY_PARSED_ANSWER",
+    ]);
+    expect(sendMessage.mock.calls.map((call: unknown[]) => (call[1] as { expectedUrl?: string }).expectedUrl)).toEqual([
+      expectedUrl,
+      expectedUrl,
     ]);
   });
 });

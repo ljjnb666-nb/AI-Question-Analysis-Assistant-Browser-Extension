@@ -189,12 +189,15 @@ export interface FillParsedAnswerMsg extends BaseMessage {
   type: "FILL_PARSED_ANSWER";
   block: QuestionBlock;
   result: ParseResult;
+  /** Origin URL captured with the Side Panel candidate; optional for internal/manual callers. */
+  expectedUrl?: string;
 }
 
 export interface VerifyParsedAnswerMsg extends BaseMessage {
   type: "VERIFY_PARSED_ANSWER";
   block: QuestionBlock;
   result: ParseResult;
+  expectedUrl: string;
 }
 
 export interface RealClickMsg extends BaseMessage {

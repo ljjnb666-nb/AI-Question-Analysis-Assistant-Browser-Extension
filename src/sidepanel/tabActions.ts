@@ -107,10 +107,11 @@ export async function sendFillMessage(
   tabId: number,
   block: QuestionBlock,
   result: ParseResult,
+  expectedUrl: string,
 ): Promise<FillResponse> {
   const resp = await sendTabMessageWithBootstrap<{ ok?: boolean; filledCount?: number; message?: string; code?: FillAnswerCode }>(
     tabId,
-    { type: "FILL_PARSED_ANSWER", block, result },
+    { type: "FILL_PARSED_ANSWER", block, result, expectedUrl },
   );
   if (!resp.ok) {
     return {
@@ -130,6 +131,7 @@ export async function sendVerifyMessage(
   tabId: number,
   block: QuestionBlock,
   result: ParseResult,
+  expectedUrl: string,
 ): Promise<VerifyResponse> {
   const resp = await sendTabMessageWithBootstrap<{
     ok?: boolean;
@@ -138,7 +140,7 @@ export async function sendVerifyMessage(
     message?: string;
   }>(
     tabId,
-    { type: "VERIFY_PARSED_ANSWER", block, result },
+    { type: "VERIFY_PARSED_ANSWER", block, result, expectedUrl },
   );
   if (!resp.ok) {
     return {
@@ -160,13 +162,14 @@ export async function sendFillMessageWithVerify(
   tabId: number,
   block: QuestionBlock,
   result: ParseResult,
+  expectedUrl: string,
   isChoiceLikeResult: (block: QuestionBlock, result: ParseResult) => boolean,
 ): Promise<FillResponse> {
-  const firstFill = await sendFillMessage(tabId, block, result);
+  const firstFill = await sendFillMessage(tabId, block, result, expectedUrl);
   if (!isChoiceLikeResult(block, result)) return firstFill;
   if (!firstFill?.ok) return firstFill ? { ...firstFill, filledCount: 0 } : firstFill;
 
-  const firstVerify = await sendVerifyMessage(tabId, block, result);
+  const firstVerify = await sendVerifyMessage(tabId, block, result, expectedUrl);
   if (firstVerify?.ok) return firstFill;
 
   return {

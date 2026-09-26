@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ParseResult, QuestionBlock } from "@/shared/types";
 import { fillParsedAnswerInPage } from "../answerFiller";
 import { observeLiveQuestion } from "../liveQuestionObservation";
@@ -8,6 +8,7 @@ import { controlRegistry } from "./controlRegistry";
 const choiceEvents = ["pointerover", "pointerenter", "pointerdown", "mouseover", "mousedown", "mouseup", "pointerup", "click"];
 const staleChoiceEvents = ["mouseover", "mousedown", "mouseup", "pointerup", "click"];
 const textEvents = ["input", "change", "keyup", "blur"];
+let originalUrl = "";
 
 function createBlock(owner: Element, type: "single_choice" | "fill_blank", previewText: string): QuestionBlock {
   const draft: QuestionBlock = {
@@ -31,7 +32,7 @@ function blankResult(): ParseResult {
   return { blockId: "event-boundary-question", questionType: "fill_blank", answer: "(1) alpha", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
 }
 
-function installChoiceQuestion(rerenderAtPointerdown: boolean) {
+function installChoiceQuestion(rerenderAtPointerdown: boolean, routeChangeAtPointerdown = false) {
   document.body.innerHTML = '<section class="question-item" id="event-choice"><p class="stem">31. Choose one answer. A. Alpha B. Beta</p><div id="choices"></div></section>';
   const owner = document.getElementById("event-choice")!;
   const container = owner.querySelector("#choices")!;
@@ -58,6 +59,7 @@ function installChoiceQuestion(rerenderAtPointerdown: boolean) {
         });
       }
       input.addEventListener("pointerdown", () => {
+        if (routeChangeAtPointerdown && key === "B") window.history.pushState({}, "", "/assignment/2");
         if (!rerenderAtPointerdown || replaced || key !== "B") return;
         replaced = true;
         generation += 1;
@@ -81,7 +83,7 @@ function installChoiceQuestion(rerenderAtPointerdown: boolean) {
   return { owner, block: createBlock(owner, "single_choice", "31. Choose one answer. A. Alpha B. Beta"), events, selected, originalLaterEvents };
 }
 
-function installTextQuestion(rerenderAt: "focus" | "input") {
+function installTextQuestion(rerenderAt: "focus" | "input", routeChangeAtInput = false) {
   document.body.innerHTML = '<section class="question-item" id="event-text"><p class="stem">32. Complete blank (1).</p><div id="text-control"></div></section>';
   const owner = document.getElementById("event-text")!;
   const container = owner.querySelector("#text-control")!;
@@ -113,6 +115,7 @@ function installTextQuestion(rerenderAt: "focus" | "input") {
     });
     input.addEventListener("input", () => {
       value = input.value;
+      if (routeChangeAtInput) window.history.pushState({}, "", "/assignment/2");
       if (rerenderAt !== "input" || replaced) return;
       replaced = true;
       generation += 1;
@@ -131,7 +134,12 @@ function installTextQuestion(rerenderAt: "focus" | "input") {
   };
 }
 
+beforeEach(() => {
+  originalUrl = location.href;
+});
+
 afterEach(() => {
+  window.history.replaceState({}, "", originalUrl);
   controlRegistry.clear();
   document.body.innerHTML = "";
 });
@@ -161,6 +169,18 @@ describe("Phase 8B event-boundary authority", () => {
     expect([...fixture.selected]).toEqual(["B"]);
   });
 
+  it("ROUTE-EVENT-1 stops at pointerdown when the route changes without changing the question", async () => {
+    const fixture = installChoiceQuestion(false, true);
+
+    const fill = await fillParsedAnswerInPage(fixture.block, choiceResult());
+
+    expect(fill).toMatchObject({ ok: false, filledCount: 0, code: "PARTIAL_MUTATION_UNPROVABLE" });
+    expect(fixture.events.filter(({ key }) => key === "B").map(({ type }) => type)).toEqual([
+      "pointerover", "pointerenter", "pointerdown",
+    ]);
+    expect(fixture.selected).toEqual(new Set());
+  });
+
   it("EVENT-TEXT-FOCUS-RERENDER-1 reacquires the input before the native setter or later events", async () => {
     const fixture = installTextQuestion("focus");
 
@@ -183,5 +203,16 @@ describe("Phase 8B event-boundary authority", () => {
     expect(fixture.firstInputEvents).toEqual(["focus", "input"]);
     expect(fixture.value).toBe("alpha");
     expect(fixture.currentEvents.filter(({ generation }) => generation === 1).map(({ type }) => type)).toEqual(["change", "keyup", "blur"]);
+  });
+
+  it("ROUTE-TEXT-1 stops the text event sequence when input navigation rerenders an equivalent control", async () => {
+    const fixture = installTextQuestion("input", true);
+
+    const fill = await fillParsedAnswerInPage(fixture.block, blankResult());
+
+    expect(fill).toMatchObject({ ok: false, filledCount: 0, code: "PARTIAL_MUTATION_UNPROVABLE" });
+    expect(fixture.firstInputEvents).toEqual(["focus", "input"]);
+    expect(fixture.value).toBe("alpha");
+    expect(fixture.currentEvents.filter(({ generation }) => generation === 1)).toEqual([]);
   });
 });

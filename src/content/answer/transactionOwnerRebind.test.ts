@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ParseResult, QuestionBlock } from "@/shared/types";
 import { fillParsedAnswerInPage } from "../answerFiller";
 import { observeLiveQuestion } from "../liveQuestionObservation";
@@ -9,8 +9,9 @@ import { buildValidatedAnswerPlan } from "./answerPlanValidator";
 import { buildControlMapping } from "./controlMapping";
 import { buildActionPlan, executeTransaction } from "./transactionalExecutor";
 
-type OwnerMode = "unique" | "ambiguous" | "root-change";
+type OwnerMode = "unique" | "ambiguous" | "root-change" | "route-change";
 const trappedEvents = ["pointerover", "pointerenter", "pointerdown", "mouseover", "mousedown", "mouseup", "pointerup", "click"];
+let originalUrl = "";
 
 function multiChoiceResult(): ParseResult {
   return { blockId: "owner-rebind-question", questionType: "multi_choice", answer: "A,B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
@@ -65,6 +66,7 @@ function installOwnerReplacement(mode: OwnerMode) {
         else selected.delete(key);
         if (key !== "A" || replaced) return;
         replaced = true;
+        if (mode === "route-change") window.history.pushState({}, "", "/assignment/2");
         ownerGeneration += 1;
         const firstReplacement = buildOwner(ownerGeneration);
         owner.replaceWith(firstReplacement);
@@ -100,7 +102,12 @@ function customRootRegistry(context: RootContext): AccessibleRootRegistry {
   } as unknown as AccessibleRootRegistry;
 }
 
+beforeEach(() => {
+  originalUrl = location.href;
+});
+
 afterEach(() => {
+  window.history.replaceState({}, "", originalUrl);
   controlRegistry.clear();
   document.body.innerHTML = "";
 });
@@ -174,5 +181,17 @@ describe("Phase 8B semantic runtime-owner rebind", () => {
     expect(fixture.rootContext.rootGeneration).toBe(2);
     expect(readRuntimeQuestionHandle(fixture.block)).toBeNull();
     expect(fixture.selected).toEqual(new Set(["A"]));
+  });
+
+  it("ROUTE-MUTATION-1 blocks an equivalent owner rebind after route change", async () => {
+    const fixture = installOwnerReplacement("route-change");
+
+    const fill = await fillParsedAnswerInPage(fixture.block, multiChoiceResult());
+
+    expect(fill).toMatchObject({ ok: false, filledCount: 0, code: "PARTIAL_MUTATION_UNPROVABLE" });
+    expect([...fixture.selected].sort()).toEqual(["A"]);
+    expect(fixture.currentOwner).not.toBe(fixture.originalOwner);
+    expect(fixture.events.filter(({ key }) => key === "B")).toEqual([]);
+    expect(readRuntimeQuestionHandle(fixture.block)?.owner).toBe(fixture.originalOwner);
   });
 });

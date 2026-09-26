@@ -246,6 +246,11 @@ const RERENDER_STOP_HOST_PAGE_HTML = `<!doctype html>
 const RERENDER_OWNER_HOST_PAGE_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><title>owner rerender host</title></head>
 <body style="margin:0"><iframe id="rerender-owner-frame" src="/rerender-owner-frame" style="width:760px;height:380px;border:0"></iframe></body></html>`;
+const RERENDER_OWNER_ROUTE_HOST_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>owner route rerender host</title></head>
+<body style="margin:0"><iframe id="rerender-owner-frame" src="/rerender-owner-frame?change-route=1" style="width:760px;height:380px;border:0"></iframe>
+  <button id="next-question">Next question</button><script>window.__advanceClicks = 0; document.getElementById("next-question").addEventListener("click", () => window.__advanceClicks++);</script>
+</body></html>`;
 
 const RERENDER_FRAME_PAGE_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><title>rerender-safe transaction</title></head>
@@ -303,7 +308,9 @@ const RERENDER_OWNER_FRAME_PAGE_HTML = `<!doctype html>
     window.__ownerEvents = [];
     window.__detachedOldBOwnEvents = [];
     window.__detachedOwnerControlEvents = [];
+    window.__ownerMutations = [];
     const selected = new Set();
+    const changeRouteAfterFirst = new URLSearchParams(location.search).has("change-route");
     let currentOwner;
     let oldB;
     const gestureEvents = ["pointerover", "pointerenter", "pointerdown", "mouseover", "mousedown", "mouseup", "pointerup", "click"];
@@ -330,7 +337,9 @@ const RERENDER_OWNER_FRAME_PAGE_HTML = `<!doctype html>
         input.addEventListener("change", () => {
           if (input.checked) selected.add(key);
           else selected.delete(key);
+          window.__ownerMutations.push({ key, generation });
           if (generation === 0 && key === "A") {
+            if (changeRouteAfterFirst) window.top.history.pushState({}, "", "/assignment/2");
             const replacement = makeOwner(1);
             owner.replaceWith(replacement);
             currentOwner = replacement;
@@ -397,6 +406,11 @@ async function startRootsServer(): Promise<{ origin: string; held: HeldProviderR
     if (req.method === "GET" && url.pathname === "/rerender-owner") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(RERENDER_OWNER_HOST_PAGE_HTML);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/rerender-owner-route") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(RERENDER_OWNER_ROUTE_HOST_PAGE_HTML);
       return;
     }
     if (req.method === "GET" && url.pathname === "/rerender-owner-frame") {
@@ -635,6 +649,57 @@ test.describe("Phase 7 accessible roots E2E", () => {
       expect(state.events.filter(({ type }) => type === "click").map(({ key, generation }) => [key, generation])).toEqual([["A", 0], ["B", 1]]);
       expect(state.detachedOldB).toEqual([]);
       expect(state.detachedOwnerControls).toEqual([]);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
+  test("E2E-RERENDER-ROUTE-1: route change blocks equivalent owner rebind and later mutations", async () => {
+    test.setTimeout(90_000);
+    const server = await startRootsServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const quizPage = await context.newPage();
+      await quizPage.goto(`${server.origin}/rerender-owner-route`);
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, "/rerender-owner-route");
+
+      await expect.poll(() => server.held.length, { timeout: 30_000 }).toBe(1).catch(async (err) => { await dumpDiagnostics(driver, "rerender-route-held-provider"); throw err; });
+      await server.held[0].respond("A,B", "multi_choice");
+      server.held[0].settled = true;
+      await waitForEvent(driver, "AUTO_SOLVE_DONE").catch(async (err) => { await dumpDiagnostics(driver, "rerender-route-done"); throw err; });
+
+      const state = await quizPage.evaluate(() => {
+        const frame = document.getElementById("rerender-owner-frame") as HTMLIFrameElement;
+        const frameDocument = frame.contentDocument!;
+        const selected = Array.from(frameDocument.querySelectorAll<HTMLInputElement>('.question-item input[type="checkbox"]'))
+          .filter((input) => input.checked)
+          .map((input) => input.value)
+          .sort();
+        const debug = frame.contentWindow as unknown as {
+          __ownerEvents: Array<{ type: string; key: string; generation: number; connected: boolean }>;
+          __detachedOwnerControlEvents: Array<{ type: string; key: string }>;
+          __ownerMutations: Array<{ key: string; generation: number }>;
+        };
+        return {
+          selected,
+          events: debug.__ownerEvents,
+          detached: debug.__detachedOwnerControlEvents,
+          mutations: debug.__ownerMutations,
+          advanceClicks: (window as unknown as { __advanceClicks: number }).__advanceClicks,
+          path: location.pathname,
+        };
+      });
+      const messages = await driver.evaluate(() => (window as DriverWindow & { __payloads: string[] }).__payloads);
+
+      expect(state.path).toBe("/assignment/2");
+      expect(state.mutations).toEqual([{ key: "A", generation: 0 }]);
+      expect(state.selected).toEqual(["A"]);
+      expect(state.events.filter(({ type }) => type === "click").map(({ key, generation }) => [key, generation])).toEqual([["A", 0]]);
+      expect(state.detached).toEqual([]);
+      expect(state.advanceClicks).toBe(0);
+      expect(messages.some((message) => message.includes("PARTIAL_MUTATION_UNPROVABLE"))).toBe(true);
     } finally {
       await context.close();
       await server.close();
