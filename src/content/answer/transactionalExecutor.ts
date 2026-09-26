@@ -1,6 +1,14 @@
 import type { ActionPlan, AnswerPlan } from "@/shared/types";
 import { isHTMLInputInOwnerRealm, isHTMLTextAreaInOwnerRealm } from "../domRealm";
-import { applyTextValue, clickElement } from "../answerDomUtils";
+import {
+  activateChoiceControl,
+  dispatchChoiceGestureEvent,
+  dispatchTextControlEvent,
+  focusTextControl,
+  setTextControlValueOnly,
+  type ChoiceGestureEventName,
+  type TextControlEventName,
+} from "../answerDomUtils";
 import type { FillAnswerCode } from "../answerTypes";
 import { controlRegistry, type ControlRef } from "./controlRegistry";
 import { controlIsVisibleAndEnabled, semanticFingerprintForControl, type ControlMappingResult } from "./controlMapping";
@@ -80,30 +88,39 @@ export async function executeTransaction(
     const before = snapshotControls(current.mapping);
     if (!sameSnapshot(expected, before)) return result("USER_STATE_CHANGED", "Live answer state changed outside the authorized transaction");
 
-    const target = resolveStepTarget(step, plan, current.mapping);
-    const key = target && semanticKey(target);
-    if (!target || !key || !before.has(key)) return failAndRollback("CONTROL_MAPPING_CHANGED", "Semantic mutation target is no longer uniquely mapped", ledger, plan, rootKey, rootGeneration, targetSet, resolveAuthority);
+    const key = resolveStepKey(step, plan, current.mapping);
+    if (!key || !before.has(key)) return failAndRollback("CONTROL_MAPPING_CHANGED", "Semantic mutation target is no longer uniquely mapped", ledger, plan, rootKey, rootGeneration, targetSet, resolveAuthority);
 
-    let threw = false;
-    try { perform(step, target); } catch { threw = true; }
-
-    // Even a throwing event handler may have changed the page; old refs are
-    // discarded and the live question is resolved again before any decision.
-    const afterResolution = resolveSafely(resolveAuthority, true);
-    if (!afterResolution.ok) return result("PARTIAL_MUTATION_UNPROVABLE", `Post-mutation authority lost: ${afterResolution.code}`);
-    const afterAuthority = validateResolution(afterResolution, plan, rootKey, rootGeneration, targetSet);
-    if (!afterAuthority.ok) return result("PARTIAL_MUTATION_UNPROVABLE", `Post-mutation authority lost: ${afterAuthority.code}`);
-    const after = snapshotControls(afterAuthority.mapping);
+    const interaction = performWithFreshBoundaries({
+      plan,
+      step,
+      key,
+      rootKey,
+      rootGeneration,
+      targetSet,
+      resolveAuthority,
+      allowTextSetterState: (state) => stepChangesAreOwned(step, key, before, state, plan)
+        && state.get(key) === desiredValue(step),
+    }, before);
+    if (!interaction.ok) {
+      if (interaction.after && !sameSnapshot(before, interaction.after)
+        && interaction.after.get(key) === desiredValue(step)
+        && stepChangesAreOwned(step, key, before, interaction.after, plan)) {
+        ledger.push({ before, after: interaction.after });
+      }
+      return failAndRollback(interaction.code, interaction.message, ledger, plan, rootKey, rootGeneration, targetSet, resolveAuthority);
+    }
+    const after = interaction.after;
     if (after.get(key) !== desiredValue(step)) {
-      if (sameSnapshot(before, after)) return failAndRollback(threw ? "UNSUPPORTED_CONTROL" : "FILL_VERIFICATION_FAILED", "Mutation did not produce the requested semantic state", ledger, plan, rootKey, rootGeneration, targetSet, resolveAuthority);
+      if (sameSnapshot(before, after)) return failAndRollback(interaction.threw ? "UNSUPPORTED_CONTROL" : "FILL_VERIFICATION_FAILED", "Mutation did not produce the requested semantic state", ledger, plan, rootKey, rootGeneration, targetSet, resolveAuthority);
       return result("PARTIAL_MUTATION_UNPROVABLE", "Mutation changed live state without producing the requested semantic value");
     }
-    if (!stepChangesAreOwned(step, target, before, after, current.mapping, plan)) {
+    if (!stepChangesAreOwned(step, key, before, after, plan)) {
       return result("USER_STATE_CHANGED", "A control outside the current mutation changed during the event; live state was preserved");
     }
     if (!sameSnapshot(before, after)) ledger.push({ before, after });
     expected = after;
-    if (threw) return failAndRollback("UNSUPPORTED_CONTROL", "Page handler threw during a fill mutation", ledger, plan, rootKey, rootGeneration, targetSet, resolveAuthority);
+    if (interaction.threw) return failAndRollback("UNSUPPORTED_CONTROL", "A transaction event could not complete", ledger, plan, rootKey, rootGeneration, targetSet, resolveAuthority);
   }
 
   const finalResolution = resolveSafely(resolveAuthority, ledger.length > 0);
@@ -174,16 +191,165 @@ function resolveSafely(resolveAuthority: ResolveCurrentTransactionAuthority, aft
   }
 }
 
+type MutationBoundaryContext = {
+  plan: AnswerPlan;
+  step: ActionPlan["steps"][number];
+  key: string;
+  rootKey: string;
+  rootGeneration: number;
+  targetSet: string[];
+  resolveAuthority: ResolveCurrentTransactionAuthority;
+  allowTextSetterState: (state: SemanticControlSnapshot) => boolean;
+};
+
+type BoundaryResolution = { ok: true; mapping: Mapping; state: SemanticControlSnapshot } | { ok: false; code: FillAnswerCode; message: string };
+type InteractionResult =
+  | { ok: true; after: SemanticControlSnapshot; threw: boolean }
+  | { ok: false; code: FillAnswerCode; message: string; after?: SemanticControlSnapshot };
+
+const CHOICE_GESTURE_EVENTS: ChoiceGestureEventName[] = [
+  "pointerover", "pointerenter", "pointerdown", "mouseover", "mousedown", "mouseup", "pointerup",
+];
+const TEXT_CONTROL_EVENTS: TextControlEventName[] = ["input", "change", "keyup", "blur"];
+
+/** Execute the original Phase 5 interaction protocol with a fresh authority fence at every event boundary. */
+function performWithFreshBoundaries(context: MutationBoundaryContext, before: SemanticControlSnapshot): InteractionResult {
+  if (context.step.type === "select-option" || context.step.type === "clear-option") {
+    let expected = before;
+    for (const eventType of CHOICE_GESTURE_EVENTS) {
+      const event = dispatchChoiceEventAtBoundary(context, expected, eventType);
+      if (!event.ok) return event;
+      expected = event.state;
+    }
+
+    const activation = activateChoiceAtBoundary(context, expected);
+    if (!activation.ok) return activation;
+    return { ok: true, after: activation.state, threw: activation.threw };
+  }
+
+  const focus = focusTextAtBoundary(context, before);
+  if (!focus.ok) return focus;
+
+  const value = desiredValue(context.step);
+  if (typeof value !== "string") return { ok: false, code: "UNSUPPORTED_CONTROL", message: "Text action has a non-text value" };
+  const setter = setTextAtBoundary(context, before, value);
+  if (!setter.ok) return setter;
+  if (setter.threw) return { ok: true, after: setter.state, threw: true };
+
+  let expected = setter.state;
+  for (const eventType of TEXT_CONTROL_EVENTS) {
+    const event = dispatchTextEventAtBoundary(context, expected, eventType);
+    if (!event.ok) return event;
+    expected = event.state;
+    if (event.threw) return { ok: true, after: event.state, threw: true };
+  }
+  return { ok: true, after: expected, threw: false };
+}
+
+function dispatchChoiceEventAtBoundary(context: MutationBoundaryContext, expected: SemanticControlSnapshot, type: ChoiceGestureEventName): { ok: true; state: SemanticControlSnapshot } | { ok: false; code: FillAnswerCode; message: string; after?: SemanticControlSnapshot } {
+  const current = resolveTargetBoundary(context, expected);
+  if (!current.ok) return current;
+  let threw = false;
+  try { dispatchChoiceGestureEvent(current.element, type); } catch { threw = true; }
+  const after = resolveBoundaryState(context);
+  if (!after.ok) return after;
+  if (!sameSnapshot(expected, after.state)) return changedDuringNonActivationBoundary(context, expected, after.state);
+  return threw
+    ? { ok: false, code: "UNSUPPORTED_CONTROL", message: `Could not dispatch ${type}` }
+    : { ok: true, state: after.state };
+}
+
+function activateChoiceAtBoundary(context: MutationBoundaryContext, expected: SemanticControlSnapshot): { ok: true; state: SemanticControlSnapshot; threw: boolean } | { ok: false; code: FillAnswerCode; message: string; after?: SemanticControlSnapshot } {
+  const current = resolveTargetBoundary(context, expected);
+  if (!current.ok) return current;
+  let threw = false;
+  try { activateChoiceControl(current.element); } catch { threw = true; }
+  const after = resolveBoundaryState(context);
+  return after.ok ? { ok: true, state: after.state, threw } : after;
+}
+
+function focusTextAtBoundary(context: MutationBoundaryContext, expected: SemanticControlSnapshot): { ok: true } | { ok: false; code: FillAnswerCode; message: string; after?: SemanticControlSnapshot } {
+  const current = resolveTargetBoundary(context, expected);
+  if (!current.ok) return current;
+  let threw = false;
+  try { focusTextControl(current.element); } catch { threw = true; }
+  const after = resolveBoundaryState(context);
+  if (!after.ok) return after;
+  if (!sameSnapshot(expected, after.state)) return changedDuringNonActivationBoundary(context, expected, after.state);
+  return threw
+    ? { ok: false, code: "UNSUPPORTED_CONTROL", message: "Could not focus the current text control" }
+    : { ok: true };
+}
+
+function setTextAtBoundary(context: MutationBoundaryContext, expected: SemanticControlSnapshot, value: string): { ok: true; state: SemanticControlSnapshot; threw: boolean } | { ok: false; code: FillAnswerCode; message: string; after?: SemanticControlSnapshot } {
+  const current = resolveTargetBoundary(context, expected);
+  if (!current.ok) return current;
+  let changed = false;
+  let threw = false;
+  try { changed = setTextControlValueOnly(current.element, value); } catch { threw = true; }
+  const after = resolveBoundaryState(context);
+  if (!after.ok) return after;
+  if (!context.allowTextSetterState(after.state)) {
+    if (sameSnapshot(expected, after.state)) {
+      return { ok: false, code: threw ? "UNSUPPORTED_CONTROL" : "FILL_VERIFICATION_FAILED", message: "Text setter did not produce the requested value" };
+    }
+    if (stepChangesAreOwned(context.step, context.key, expected, after.state, context.plan)) {
+      return { ok: false, code: "PARTIAL_MUTATION_UNPROVABLE", message: "Text setter changed live state without proving the requested value", after: after.state };
+    }
+    return { ok: false, code: "USER_STATE_CHANGED", message: "Live answer state changed during text assignment" };
+  }
+  if (!changed && !threw) return { ok: false, code: "FILL_VERIFICATION_FAILED", message: "Text setter reported no mutation" };
+  return { ok: true, state: after.state, threw };
+}
+
+function dispatchTextEventAtBoundary(context: MutationBoundaryContext, expected: SemanticControlSnapshot, type: TextControlEventName): { ok: true; state: SemanticControlSnapshot; threw: boolean } | { ok: false; code: FillAnswerCode; message: string; after?: SemanticControlSnapshot } {
+  const current = resolveTargetBoundary(context, expected);
+  if (!current.ok) return current;
+  let threw = false;
+  try { dispatchTextControlEvent(current.element, type); } catch { threw = true; }
+  const after = resolveBoundaryState(context);
+  if (!after.ok) return after;
+  if (!sameSnapshot(expected, after.state)) return changedDuringNonActivationBoundary(context, expected, after.state);
+  return { ok: true, state: after.state, threw };
+}
+
+function resolveBoundaryState(context: MutationBoundaryContext): BoundaryResolution {
+  const resolution = resolveSafely(context.resolveAuthority, true);
+  if (!resolution.ok) return { ok: false, code: "PARTIAL_MUTATION_UNPROVABLE", message: `Authority lost at an interaction boundary: ${resolution.code}` };
+  const validated = validateResolution(resolution, context.plan, context.rootKey, context.rootGeneration, context.targetSet);
+  if (!validated.ok) return { ok: false, code: "PARTIAL_MUTATION_UNPROVABLE", message: `Mapping lost at an interaction boundary: ${validated.code}` };
+  return { ok: true, mapping: validated.mapping, state: snapshotControls(validated.mapping) };
+}
+
+function resolveTargetBoundary(context: MutationBoundaryContext, expected: SemanticControlSnapshot): { ok: true; mapping: Mapping; state: SemanticControlSnapshot; ref: ControlRef; element: HTMLElement } | { ok: false; code: FillAnswerCode; message: string } {
+  const current = resolveBoundaryState(context);
+  if (!current.ok) return current;
+  if (!sameSnapshot(expected, current.state)) {
+    return { ok: false, code: "USER_STATE_CHANGED", message: "Live answer state changed between interaction events" };
+  }
+  const ref = resolveSemanticKey(current.mapping, context.key);
+  const element = ref && controlRegistry.get(ref.controlId);
+  if (!ref || !element?.isConnected) {
+    return { ok: false, code: "PARTIAL_MUTATION_UNPROVABLE", message: "Current semantic target disappeared at an interaction boundary" };
+  }
+  return { ok: true, mapping: current.mapping, state: current.state, ref, element };
+}
+
+function changedDuringNonActivationBoundary(context: MutationBoundaryContext, before: SemanticControlSnapshot, after: SemanticControlSnapshot): { ok: false; code: FillAnswerCode; message: string; after?: SemanticControlSnapshot } {
+  if (after.get(context.key) === desiredValue(context.step)
+    && stepChangesAreOwned(context.step, context.key, before, after, context.plan)) {
+    return { ok: false, code: "PARTIAL_MUTATION_UNPROVABLE", message: "Answer state changed before the activation boundary", after };
+  }
+  return { ok: false, code: "USER_STATE_CHANGED", message: "A page or user state change occurred during an interaction event" };
+}
+
 function stepChangesAreOwned(
   step: ActionPlan["steps"][number],
-  target: ControlRef,
+  targetKey: string,
   before: SemanticControlSnapshot,
   after: SemanticControlSnapshot,
-  mapping: Mapping,
   plan: AnswerPlan,
 ): boolean {
-  const targetKey = semanticKey(target);
-  if (!targetKey) return false;
   const changed = [...before].filter(([key, value]) => after.get(key) !== value).map(([key]) => key);
   if (!changed.includes(targetKey)) return changed.length === 0;
 
@@ -226,26 +392,28 @@ function rollbackLedger(
         return !(candidate.startsWith("option:") && entry.before.get(candidate) === false && ref?.controlType === "radio");
       });
       if (!key) return false;
-      const ref = resolveSemanticKey(current.mapping, key);
-      if (!ref) return false;
       const desired = entry.before.get(key);
       if (desired === undefined) return false;
-      if (typeof desired === "boolean") {
-        if (!restoreOption(ref, desired)) return false;
-      } else {
-        const element = controlRegistry.get(ref.controlId);
-        if (!element || !applyTextValue(element, desired)) return false;
+      const inverseStep = inverseActionFor(key, desired);
+      if (!inverseStep) return false;
+      const interaction = performWithFreshBoundaries({
+        plan,
+        step: inverseStep,
+        key,
+        rootKey,
+        rootGeneration,
+        targetSet,
+        resolveAuthority,
+        allowTextSetterState: (after) => rollbackStateIsOwned(after, entry) && after.get(key) === desired,
+      }, state);
+      if (!interaction.ok) {
+        if (interaction.code === "USER_STATE_CHANGED") return "USER_STATE_CHANGED";
+        return false;
       }
-
-      // Rollback events may rerender too. Prove each inverse before resolving
-      // the next rollback target.
-      const afterResolution = resolveSafely(resolveAuthority, true);
-      if (!afterResolution.ok) return false;
-      const after = validateResolution(afterResolution, plan, rootKey, rootGeneration, targetSet);
-      if (!after.ok) return false;
-      const afterState = snapshotControls(after.mapping);
+      const afterState = interaction.after;
       if (!rollbackStateIsOwned(afterState, entry)) return "USER_STATE_CHANGED";
       if (sameSnapshot(state, afterState)) return false;
+      if (interaction.threw) return false;
     }
   }
   return true;
@@ -272,30 +440,29 @@ function resolveStepTarget(step: ActionPlan["steps"][number], plan: AnswerPlan, 
   return null;
 }
 
+function resolveStepKey(step: ActionPlan["steps"][number], plan: AnswerPlan, mapping: Mapping): string | null {
+  const ref = resolveStepTarget(step, plan, mapping);
+  return ref ? semanticKey(ref) : null;
+}
+
 function desiredValue(step: ActionPlan["steps"][number]): string | boolean {
   if (step.type === "select-option" || step.type === "clear-option") return step.desiredSelected;
   return step.type === "clear-text" ? "" : step.value;
 }
 
-function perform(step: ActionPlan["steps"][number], ref: ControlRef): boolean {
-  const element = controlRegistry.get(ref.controlId);
-  if (!element?.isConnected) return false;
-  if (step.type === "set-text") return applyTextValue(element, step.value);
-  if (step.type === "clear-text") return applyTextValue(element, "");
-  if (isSelected(ref) === step.desiredSelected) return false;
-  if (ref.controlType !== "radio" && ref.controlType !== "checkbox" && ref.controlType !== "custom-choice") return false;
-  clickElement(element);
-  return true;
-}
-
-function restoreOption(ref: ControlRef, desired: boolean): boolean {
-  const element = controlRegistry.get(ref.controlId);
-  if (!element?.isConnected) return false;
-  if (isSelected(ref) === desired) return true;
-  if (!desired && ref.controlType === "radio") return false;
-  if (ref.controlType !== "radio" && ref.controlType !== "checkbox" && ref.controlType !== "custom-choice") return false;
-  clickElement(element);
-  return true;
+function inverseActionFor(key: string, desired: string | boolean): ActionPlan["steps"][number] | null {
+  if (key.startsWith("option:") && typeof desired === "boolean") {
+    const optionKey = key.slice("option:".length);
+    return desired
+      ? { type: "select-option", controlId: "semantic-target", optionKey, desiredSelected: true }
+      : { type: "clear-option", controlId: "semantic-target", optionKey, desiredSelected: false };
+  }
+  if (key.startsWith("blank:") && typeof desired === "string") {
+    const blankIndex = Number(key.slice("blank:".length));
+    if (!Number.isInteger(blankIndex) || blankIndex < 0) return null;
+    return { type: "set-text", controlId: "semantic-target", value: desired, blankIndex };
+  }
+  return null;
 }
 
 export function verifyAnswerPlan(plan: AnswerPlan, mapping: Mapping): boolean {
