@@ -33,15 +33,16 @@ import {
   resolveTextAnswerSource as resolveTextAnswerSourceCore,
   splitAnswerParts as splitAnswerPartsCore,
 } from "./answerText";
-import type { FillAnswerResult, VerifyAnswerResult } from "./answerTypes";
+import type { FillAnswerCode, FillAnswerResult, VerifyAnswerResult } from "./answerTypes";
 import { buildValidatedAnswerPlan } from "./answer/answerPlanValidator";
 import { buildControlMapping } from "./answer/controlMapping";
-import { buildActionPlan, executeTransaction, readSelectedOptionKeys, verifyAnswerPlan } from "./answer/transactionalExecutor";
-import { snapshotControls } from "./answer/transactionalExecutor";
+import { buildActionPlan, executeTransaction, readSelectedOptionKeys, snapshotControls, verifyAnswerPlan, type CurrentTransactionAuthority } from "./answer/transactionalExecutor";
 import { observeLiveQuestion } from "./liveQuestionObservation";
-import { clearQuestionRevisionAttemptForBlock, hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock, STALE_ROOT_CONTEXT } from "./revision/questionRevisionRuntime";
+import { clearQuestionRevisionAttemptForBlock, hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock, STALE_QUESTION_REVISION, STALE_ROOT_CONTEXT } from "./revision/questionRevisionRuntime";
+import { routeFingerprintForLocation } from "./revision/questionRevisionRegistry";
 import { rootAttachmentOf } from "./roots/rootContext";
 import { resolveFillRootContext, sharedRootRegistry } from "./roots/rootRegistry";
+import { getTraversalRoot } from "./roots/rootDom";
 
 const solveStartSnapshots = new Map<string, { controls: ReturnType<typeof snapshotControls>; stableId: string; contentFingerprint: string }>();
 const autoSnapshotStatus = new Map<string, "captured" | "unavailable">();
@@ -121,7 +122,7 @@ const scopeSelectors = {
   choiceInputSelector: CHOICE_INPUT_SELECTOR,
 };
 
-type ResolvedFillScope = { ok: true; doc: Document; localBBox: BoundingBox; shadowRoot: ShadowRoot | null; owner: Element | null } | { ok: false; message: string };
+type ResolvedFillScope = { ok: true; doc: Document; localBBox: BoundingBox; shadowRoot: ShadowRoot | null; owner: Element | null } | { ok: false; code: FillAnswerCode; message: string };
 
 /**
  * Locate a question scope inside an open shadow root. Identity match wins:
@@ -162,33 +163,38 @@ function resolveShadowQuestionScope(shadowRoot: ShadowRoot, bbox: BoundingBox, b
  */
 function resolveFillScopeForBlock(block: QuestionBlock): ResolvedFillScope {
   const rootContext = resolveFillRootContext(sharedRootRegistry(), block);
-  if (!rootContext.ok) return { ok: false, message: rootContext.reason };
+  if (!rootContext.ok) return { ok: false, code: rootContext.reason, message: rootContext.reason };
   const { doc, shadowRoot, localBBox } = rootContext;
   return { ok: true, doc, localBBox, shadowRoot, owner: rootContext.owner };
 }
 
-export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult, options: { mode?: "auto" | "manual" } = {}): Promise<FillAnswerResult> {
+export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult, options: { mode?: "auto" | "manual"; expectedUrl?: string } = {}): Promise<FillAnswerResult> {
+  const startUrl = location.href;
+  if (options.expectedUrl !== undefined && options.expectedUrl !== startUrl) {
+    return { ok: false, filledCount: 0, code: STALE_QUESTION_REVISION, message: STALE_QUESTION_REVISION };
+  }
+  const transactionRouteFingerprint = routeFingerprintForLocation(options.expectedUrl ?? startUrl);
   const resolved = resolveFillScopeForBlock(block);
   if (!resolved.ok) {
-    return { ok: false, filledCount: 0, message: resolved.message };
+    return { ok: false, filledCount: 0, code: resolved.code, message: resolved.message };
   }
   const { doc, localBBox, shadowRoot, owner } = resolved;
 
   // Runtime candidates are bound to the exact owner resolved from the opaque
   // content-side handle. This also keeps shadow candidates inside their root.
-  if (owner) return fillVerifiedAnswerIntoScope(owner, block, result, options.mode ?? "manual");
+  if (owner) return fillVerifiedAnswerIntoScope(owner, block, result, options.mode ?? "manual", transactionRouteFingerprint);
 
   if (shadowRoot) {
     const shadowScope = resolveShadowQuestionScope(shadowRoot, localBBox, block) ?? shadowRoot.host;
     if (shadowScope) {
-      return fillVerifiedAnswerIntoScope(shadowScope, block, result, options.mode ?? "manual");
+      return fillVerifiedAnswerIntoScope(shadowScope, block, result, options.mode ?? "manual", transactionRouteFingerprint);
     }
     return { ok: false, filledCount: 0, message: STALE_ROOT_CONTEXT };
   }
 
   const directScope = await resolveDirectQuestionScope(block, result, doc).catch(() => null);
   if (directScope) {
-    return fillVerifiedAnswerIntoScope(directScope.scope, block, result, options.mode ?? "manual");
+    return fillVerifiedAnswerIntoScope(directScope.scope, block, result, options.mode ?? "manual", transactionRouteFingerprint);
   }
 
   ensureQuestionRegionVisible(localBBox);
@@ -201,10 +207,13 @@ export async function fillParsedAnswerInPage(block: QuestionBlock, result: Parse
     }
   }
 
-  return fillVerifiedAnswerIntoScope(scope, block, result, options.mode ?? "manual");
+  return fillVerifiedAnswerIntoScope(scope, block, result, options.mode ?? "manual", transactionRouteFingerprint);
 }
 
-export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResult): VerifyAnswerResult {
+export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResult, expectedUrl?: string): VerifyAnswerResult {
+  if (expectedUrl !== undefined && expectedUrl !== location.href) {
+    return { ok: false, expectedKeys: [], actualKeys: [], message: STALE_QUESTION_REVISION };
+  }
   // Verification must run in the question's own root: a shadow/frame question
   // verified against the top document always fails closed with a bogus scope.
   const rootContext = resolveFillRootContext(sharedRootRegistry(), block);
@@ -235,21 +244,75 @@ export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResu
   return verifyVerifiedAnswerInScope(scope, block, result);
 }
 
-async function fillVerifiedAnswerIntoScope(scope: Element, block: QuestionBlock, result: ParseResult, mode: "auto" | "manual"): Promise<FillAnswerResult> {
+async function fillVerifiedAnswerIntoScope(
+  scope: Element,
+  block: QuestionBlock,
+  result: ParseResult,
+  mode: "auto" | "manual",
+  transactionRouteFingerprint: string,
+): Promise<FillAnswerResult> {
   const key = snapshotKey(block); const autoStatus = autoSnapshotStatus.get(key);
   const solveStart = solveStartSnapshots.get(key);
-  if (mode === "auto" && (autoStatus !== "captured" || !solveStart)) return { ok: false, filledCount: 0, message: "USER_STATE_SNAPSHOT_UNAVAILABLE" };
-  if (mode === "auto" && hasQuestionRevisionAttempt() && !isCurrentQuestionRevisionBlock(block)) return { ok: false, filledCount: 0, message: "STALE_QUESTION_REVISION" };
-  const mapping = buildControlMapping(block, scope);
-  if (!mapping.ok) return { ok: false, filledCount: 0, message: mapping.code };
-  const validated = buildValidatedAnswerPlan(block, result, mapping);
-  if (!validated.ok) return { ok: false, filledCount: 0, message: validated.code };
-  const live = observeLiveQuestion(block, mapping.owner).identity;
-  if ((block.identity && (live.stableId !== block.identity.stableId || live.contentFingerprint !== block.identity.contentFingerprint)) || (solveStart && (solveStart.stableId !== live.stableId || solveStart.contentFingerprint !== live.contentFingerprint))) {
-    return { ok: false, filledCount: 0, message: "STALE_ACTION_PLAN" };
+  if (mode === "auto" && (autoStatus !== "captured" || !solveStart)) return { ok: false, filledCount: 0, code: "USER_STATE_SNAPSHOT_UNAVAILABLE", message: "USER_STATE_SNAPSHOT_UNAVAILABLE" };
+
+  const resolveAuthority = (): CurrentTransactionAuthority => {
+    try {
+      if (routeFingerprintForLocation() !== transactionRouteFingerprint) {
+        return { ok: false, code: STALE_QUESTION_REVISION, message: STALE_QUESTION_REVISION };
+      }
+      if (mode === "auto" && hasQuestionRevisionAttempt() && !isCurrentQuestionRevisionBlock(block)) {
+        return { ok: false, code: "STALE_QUESTION_REVISION", message: "STALE_QUESTION_REVISION" };
+      }
+      const root = resolveFillRootContext(sharedRootRegistry(), block);
+      if (!root.ok) return { ok: false, code: root.reason, message: root.reason };
+      const candidateOwner = root.owner ?? scope;
+      if (!candidateOwner.isConnected || candidateOwner.ownerDocument !== root.doc || getTraversalRoot(candidateOwner) !== root.context.root) {
+        return { ok: false, code: "STALE_ROOT_CONTEXT", message: STALE_ROOT_CONTEXT };
+      }
+      const mapping = buildControlMapping(block, candidateOwner);
+      if (!mapping.ok) return { ok: false, code: mapping.code, message: mapping.message };
+      if (root.owner && mapping.owner !== root.owner && !root.owner.contains(mapping.owner)) {
+        return { ok: false, code: "STALE_RUNTIME_QUESTION_HANDLE", message: "Fresh question mapping escaped its runtime owner" };
+      }
+      const identity = observeLiveQuestion(block, mapping.owner).identity;
+      const stableId = block.identity?.stableId ?? block.id;
+      const contentFingerprint = block.identity?.contentFingerprint ?? block.id;
+      if (block.identity && (identity.stableId !== stableId || identity.contentFingerprint !== contentFingerprint)) {
+        return { ok: false, code: "STALE_ACTION_PLAN", message: "Live question identity changed during fill" };
+      }
+      if (solveStart && (solveStart.stableId !== identity.stableId || solveStart.contentFingerprint !== identity.contentFingerprint)) {
+        return { ok: false, code: "STALE_ACTION_PLAN", message: "Solve-start question identity changed during fill" };
+      }
+      return {
+        ok: true,
+        mapping,
+        stableId,
+        contentFingerprint,
+        rootKey: root.context.rootKey,
+        rootGeneration: root.context.rootGeneration,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, code: "CONTROL_MAPPING_CHANGED", message: `Fresh question mapping failed: ${message}` };
+    }
+  };
+
+  const resolved = resolveAuthority();
+  if (!resolved.ok) return { ok: false, filledCount: 0, code: resolved.code, message: resolved.code };
+  try {
+    const validated = buildValidatedAnswerPlan(block, result, resolved.mapping);
+    if (!validated.ok) return { ok: false, filledCount: 0, code: validated.code, message: validated.message };
+    const outcome = await executeTransaction(validated.plan, buildActionPlan(validated.plan, resolved.mapping), resolved.mapping, solveStart?.controls, resolveAuthority);
+    return {
+      ok: outcome.outcome === "FILLED_VERIFIED" || outcome.outcome === "NO_CHANGE_NEEDED",
+      filledCount: outcome.filledCount,
+      code: outcome.outcome,
+      message: outcome.outcome,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, filledCount: 0, code: "PARTIAL_MUTATION_UNPROVABLE", message: `Transaction failed without a provable final state: ${message}` };
   }
-  const outcome = await executeTransaction(validated.plan, buildActionPlan(validated.plan, mapping), mapping, solveStart?.controls);
-  return { ok: outcome.outcome === "FILLED_VERIFIED" || outcome.outcome === "NO_CHANGE_NEEDED", filledCount: outcome.filledCount, message: outcome.outcome };
 }
 
 function verifyVerifiedAnswerInScope(scope: Element, block: QuestionBlock, result: ParseResult): VerifyAnswerResult {

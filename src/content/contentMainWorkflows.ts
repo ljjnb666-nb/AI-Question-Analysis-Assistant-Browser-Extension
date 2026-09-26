@@ -66,6 +66,7 @@ type CreateContentMainWorkflowsOptions = {
   fillParsedAnswerInPage: (
     block: QuestionBlock,
     result: ParseResult,
+    options?: { mode?: "auto" | "manual"; expectedUrl?: string },
   ) => Promise<{ ok: boolean; filledCount: number; message: string }>;
   findBestDetectedCandidateForBBox: (bbox: BoundingBox) => QuestionBlock | null;
   findMatchingFullPageCandidate: (
@@ -190,7 +191,7 @@ type CreateContentMainWorkflowsOptions = {
   shouldReviewLowConfidenceHistory: (entry: HistoryEntry | null) => boolean;
   shouldStopAutoSolveAtTail: (currentOrder: number | null, total: number) => boolean;
   sortAutoSolveCandidates: (candidates: QuestionBlock[]) => QuestionBlock[];
-  verifyParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => { ok: boolean; message: string };
+  verifyParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, expectedUrl?: string) => { ok: boolean; message: string };
   waitForQuestionAdvance: (
     previousFingerprint: string,
     previousOrder: number | null,

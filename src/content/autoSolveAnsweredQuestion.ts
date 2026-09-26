@@ -1,5 +1,6 @@
 import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import { captureSolveStartControlState } from "./answerFiller";
+import type { FillAnswerCode } from "./answerTypes";
 
 type AnswerState = {
   mode: "choice" | "text" | "none";
@@ -38,7 +39,7 @@ type AnsweredQuestionOptions = {
 };
 
 type AnsweredQuestionDeps = {
-  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => Promise<{ ok: boolean; filledCount: number; message: string }>;
+  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => Promise<{ ok: boolean; filledCount: number; message: string; code?: FillAnswerCode }>;
   findReusableHistoryEntry: (history: HistoryEntry[], block: QuestionBlock, hostname?: string) => HistoryEntry | null;
   isChoiceLikeQuestionType: (questionType: ParseResult["questionType"]) => boolean;
   reportSolvedQuestionAndAdvance: (options: {
@@ -67,6 +68,8 @@ type AnsweredQuestionResult = {
   needsHistoryReview: boolean;
   needsQuickAnsweredChoiceReview: boolean;
   solved: number;
+  stopAutomation?: true;
+  stopReason?: string;
 };
 
 export async function handleAnsweredQuestionPhase(
@@ -193,12 +196,47 @@ export async function handleAnsweredQuestionPhase(
       currentBlock: deps.toProgressBlock(options.currentBlock),
     });
 
-    const fillResult = await deps.fillParsedAnswerInPage(options.currentBlock, historyEntry.result);
-    const isChoiceHistoryResult = deps.isChoiceLikeQuestionType(historyEntry.result.questionType);
-    const verifyResult = isChoiceHistoryResult
-      ? deps.verifyParsedAnswerInPage(options.currentBlock, historyEntry.result)
-      : { ok: true, message: fillResult.message };
-    const historyFillAccepted = isChoiceHistoryResult ? verifyResult.ok : fillResult.ok;
+    let fillResult: Awaited<ReturnType<typeof deps.fillParsedAnswerInPage>>;
+    let verifyResult: { ok: boolean; message: string };
+    try {
+      fillResult = await deps.fillParsedAnswerInPage(options.currentBlock, historyEntry.result);
+      const isChoiceHistoryResult = deps.isChoiceLikeQuestionType(historyEntry.result.questionType);
+      verifyResult = fillResult.ok && isChoiceHistoryResult
+        ? deps.verifyParsedAnswerInPage(options.currentBlock, historyEntry.result)
+        : { ok: fillResult.ok, message: fillResult.message };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      fillResult = { ok: false, filledCount: 0, code: "PARTIAL_MUTATION_UNPROVABLE", message: `History fill or final verification threw: ${message}` };
+      verifyResult = { ok: false, message: fillResult.message };
+    }
+    const historyFillAccepted = fillResult.ok && verifyResult.ok;
+
+    if (!historyFillAccepted) {
+      const stopReason = fillResult.ok ? "FILL_VERIFICATION_FAILED" : fillResult.code ?? "FILL_VERIFICATION_FAILED";
+      deps.sendAutoSolveProgress({
+        running: true,
+        solved,
+        filled,
+        total: options.total,
+        current: solved + 1,
+        statusText: `Fill stopped for safety: ${stopReason}`,
+        currentQuestionId: options.currentBlock.id,
+        currentPreview: options.currentBlock.previewText,
+        currentBlock: deps.toProgressBlock(options.currentBlock),
+      });
+      return {
+        answerState: options.answerState,
+        done: false,
+        filled,
+        handled: true,
+        historyEntry,
+        needsHistoryReview,
+        needsQuickAnsweredChoiceReview,
+        solved,
+        stopAutomation: true,
+        stopReason,
+      };
+    }
 
     if (historyFillAccepted) {
       filled += fillResult.filledCount;

@@ -8,7 +8,7 @@ type ContentMessageRouterDeps = {
   captureBlockImage: (bbox: BoundingBox) => Promise<string | null>;
   clearHighlights: () => void;
   closeFloatingResult: () => void;
-  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options: { mode: "manual" }) => Promise<unknown>;
+  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options: { mode: "manual"; expectedUrl?: string }) => Promise<unknown>;
   flashCandidate: (blockId: string) => void;
   handleAutoDetect: () => void;
   handleFullPageDetect: () => void;
@@ -17,7 +17,7 @@ type ContentMessageRouterDeps = {
   stopAutoSolveAll: () => void;
   updateCandidateSelection: (message: UpdateCandidateSelectionMsg) => void;
   validateQuestionResultAuthority: (block: QuestionBlock, expectedUrl: string) => boolean;
-  verifyParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => unknown;
+  verifyParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, expectedUrl?: string) => unknown;
 };
 
 export function handleContentMessage(
@@ -102,9 +102,18 @@ export function handleContentMessage(
         sendResponse({ ok: false, error: "Missing fill payload" });
         return false;
       }
+      if (message.expectedUrl !== undefined
+        && (typeof message.expectedUrl !== "string" || message.expectedUrl !== location.href)) {
+        sendResponse({ ok: false, filledCount: 0, code: "STALE_QUESTION_REVISION", message: "STALE_QUESTION_REVISION" });
+        return false;
+      }
       void (async () => {
         try {
-          const fillResult = await deps.fillParsedAnswerInPage(message.block as QuestionBlock, message.result as ParseResult, { mode: "manual" });
+          const fillResult = await deps.fillParsedAnswerInPage(
+            message.block as QuestionBlock,
+            message.result as ParseResult,
+            { mode: "manual", expectedUrl: message.expectedUrl },
+          );
           sendResponse(fillResult);
         } catch (err) {
           sendResponse({ ok: false, filledCount: 0, message: err instanceof Error ? err.message : String(err) });
@@ -117,9 +126,13 @@ export function handleContentMessage(
         sendResponse({ ok: false, error: "Missing verify payload" });
         return false;
       }
+      if (typeof message.expectedUrl !== "string" || message.expectedUrl !== location.href) {
+        sendResponse({ ok: false, expectedKeys: [], actualKeys: [], message: "STALE_QUESTION_REVISION" });
+        return false;
+      }
       void (async () => {
         try {
-          const verifyResult = deps.verifyParsedAnswerInPage(message.block as QuestionBlock, message.result as ParseResult);
+          const verifyResult = deps.verifyParsedAnswerInPage(message.block as QuestionBlock, message.result as ParseResult, message.expectedUrl);
           sendResponse(verifyResult);
         } catch (err) {
           sendResponse({

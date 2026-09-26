@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { requestBlockImage } from "./tabActions";
+import type { ParseResult, QuestionBlock } from "@/shared/types";
+import { requestBlockImage, sendFillMessageWithVerify } from "./tabActions";
 
 describe("sidepanel source tab screenshot authority", () => {
   beforeEach(() => {
@@ -13,5 +14,44 @@ describe("sidepanel source tab screenshot authority", () => {
 
     expect(result).toBeNull();
     expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not repeat a failed fill transaction", async () => {
+    const sendMessage = chrome.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>;
+    sendMessage.mockImplementation((_tabId: number, _message: unknown, callback: (response: unknown) => void) => {
+      callback({ ok: false, filledCount: 0, code: "FILL_VERIFICATION_FAILED", message: "write did not verify" });
+    });
+
+    const expectedUrl = "https://quiz.example.test/assignment/7";
+    const response = await sendFillMessageWithVerify(41, {} as QuestionBlock, {} as ParseResult, expectedUrl, () => true);
+
+    expect(response).toMatchObject({ ok: false, filledCount: 0, code: "FILL_VERIFICATION_FAILED" });
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(sendMessage.mock.calls[0]?.[1]).toMatchObject({ type: "FILL_PARSED_ANSWER", expectedUrl });
+  });
+
+  it("SIDEPANEL-EXPECTED-URL-1 sends the candidate origin on fill and read-only verification", async () => {
+    const sendMessage = chrome.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>;
+    const responses = [
+      { ok: true, filledCount: 1 },
+      { ok: false, message: "readback unavailable" },
+    ];
+    sendMessage.mockImplementation((_tabId: number, _message: unknown, callback: (response: unknown) => void) => {
+      callback(responses.shift());
+    });
+
+    const expectedUrl = "https://quiz.example.test/assignment/7";
+    const response = await sendFillMessageWithVerify(41, {} as QuestionBlock, {} as ParseResult, expectedUrl, () => true);
+
+    expect(response).toMatchObject({ ok: false, filledCount: 0, code: "PARTIAL_MUTATION_UNPROVABLE" });
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage.mock.calls.map((call: unknown[]) => (call[1] as { type: string }).type)).toEqual([
+      "FILL_PARSED_ANSWER",
+      "VERIFY_PARSED_ANSWER",
+    ]);
+    expect(sendMessage.mock.calls.map((call: unknown[]) => (call[1] as { expectedUrl?: string }).expectedUrl)).toEqual([
+      expectedUrl,
+      expectedUrl,
+    ]);
   });
 });

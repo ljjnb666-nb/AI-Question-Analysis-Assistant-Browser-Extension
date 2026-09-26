@@ -12,7 +12,7 @@ type RegisterContentRuntimeMessageHandlersOptions = {
   captureBlockImage: (bbox: BoundingBox) => Promise<string | null>;
   closeFloatingResult: () => void;
   clearHighlightLayer: () => void;
-  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => Promise<unknown>;
+  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options?: { mode?: "auto" | "manual"; expectedUrl?: string }) => Promise<unknown>;
   getActiveCandidates: () => QuestionBlock[];
   getActiveHighlightBlocks: () => QuestionBlock[];
   getHighlightLayer: () => HighlightLayer | null;
@@ -25,7 +25,7 @@ type RegisterContentRuntimeMessageHandlersOptions = {
   startManualCapture: (forceVisionMode: boolean) => void;
   stopAutoSolveAll: () => void;
   stopSpaWatch: () => void;
-  verifyParsedAnswerInPage: (block: QuestionBlock, result: ParseResult) => unknown;
+  verifyParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, expectedUrl?: string) => unknown;
 };
 
 export function registerContentRuntimeMessageHandlers(options: RegisterContentRuntimeMessageHandlersOptions) {

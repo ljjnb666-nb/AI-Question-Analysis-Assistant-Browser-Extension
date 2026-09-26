@@ -5,7 +5,6 @@ import { findReusableHistoryEntry } from "./autoSolveHeuristics";
 import { captureSolveStartControlState, fillParsedAnswerInPage, finishAutoSolveQuestionAttempt, hasAutoSolveQuestionAttempt } from "./answerFiller";
 import { observeLiveQuestion } from "./liveQuestionObservation";
 import { attachRuntimeRoot, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
-import { resolveAutoSolveQuestion } from "./autoSolveQuestionResolution";
 
 function makeBlock(overrides: Partial<QuestionBlock> = {}): QuestionBlock {
   return {
@@ -72,7 +71,9 @@ describe("handleAnsweredQuestionPhase", () => {
           { answerState: { mode: "none", answeredCount: 0, totalCount: 0, complete: false }, currentBlock: block, currentOrder: 12, driveFromOrderedPlan: false, filled: 0, fixedTotal: 1, history: [historyEntry], lastFingerprint: "q-hist", locationHostname: "example.com", repeatedCount: 0, solved: 0, total: 1 },
           { fillParsedAnswerInPage: fill, findReusableHistoryEntry: () => historyEntry, isChoiceLikeQuestionType: () => true, reportSolvedQuestionAndAdvance: vi.fn(async () => "continued" as const), sendAutoSolveProgress: vi.fn(), shouldReviewLowConfidenceHistory: () => false, toProgressBlock: value => value, verifyParsedAnswerInPage: () => ({ ok: false, message: "not filled" }) },
         );
-        expect(outcome.handled).toBe(false);
+        expect(outcome.handled).toBe(true);
+        expect(outcome.stopAutomation).toBe(true);
+        expect(outcome.stopReason).toBe(unavailable ? "USER_STATE_SNAPSHOT_UNAVAILABLE" : "USER_STATE_CHANGED");
         expect(fill).toHaveBeenCalledOnce();
         expect((await fill.mock.results[0]!.value).message).toBe(unavailable ? "USER_STATE_SNAPSHOT_UNAVAILABLE" : "USER_STATE_CHANGED");
         expect(document.getElementById("b")!.getAttribute("aria-checked")).toBeNull();
@@ -86,7 +87,7 @@ describe("handleAnsweredQuestionPhase", () => {
     await run(false);
   });
 
-  it("AUTO-SNAP5 keeps one immutable attempt from failed history reuse through normal parse fallback", async () => {
+  it("AUTO-SNAP5 stops after failed history reuse without a parse retry or question advance", async () => {
     document.body.innerHTML = '<section class="question-item" id="q-fallback">12. prompt <button>A. a</button><button id="b">B. b</button><button id="c">C. c</button></section>';
     const owner = document.getElementById("q-fallback")!;
     document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
@@ -96,19 +97,17 @@ describe("handleAnsweredQuestionPhase", () => {
     const historyEntry = makeHistoryEntry(historyResult);
     captureSolveStartControlState(block);
     document.getElementById("c")!.click();
-    const autoFill = (target: QuestionBlock, parsed: ParseResult) => fillParsedAnswerInPage(target, parsed, { mode: "auto" });
+    const autoFill = vi.fn((target: QuestionBlock, parsed: ParseResult) => fillParsedAnswerInPage(target, parsed, { mode: "auto" }));
     try {
+      const reportSolvedQuestionAndAdvance = vi.fn(async () => "continued" as const);
       const history = await handleAnsweredQuestionPhase(
         { answerState: { mode: "none", answeredCount: 0, totalCount: 0, complete: false }, currentBlock: block, currentOrder: 12, driveFromOrderedPlan: false, filled: 0, fixedTotal: 1, history: [historyEntry], lastFingerprint: "q-fallback", locationHostname: "example.com", repeatedCount: 0, solved: 0, total: 1 },
-        { fillParsedAnswerInPage: autoFill, findReusableHistoryEntry: () => historyEntry, isChoiceLikeQuestionType: () => true, reportSolvedQuestionAndAdvance: vi.fn(async () => "continued" as const), sendAutoSolveProgress: vi.fn(), shouldReviewLowConfidenceHistory: () => false, toProgressBlock: value => value, verifyParsedAnswerInPage: () => ({ ok: false, message: "not filled" }) },
+        { fillParsedAnswerInPage: autoFill, findReusableHistoryEntry: () => historyEntry, isChoiceLikeQuestionType: () => true, reportSolvedQuestionAndAdvance, sendAutoSolveProgress: vi.fn(), shouldReviewLowConfidenceHistory: () => false, toProgressBlock: value => value, verifyParsedAnswerInPage: () => ({ ok: false, message: "not filled" }) },
       );
-      expect(history.handled).toBe(false);
+      expect(history).toMatchObject({ handled: true, stopAutomation: true, stopReason: "USER_STATE_CHANGED", solved: 0, filled: 0 });
+      expect(reportSolvedQuestionAndAdvance).not.toHaveBeenCalled();
+      expect(autoFill).toHaveBeenCalledTimes(1);
       expect(hasAutoSolveQuestionAttempt(block)).toBe(true);
-      const normal = await resolveAutoSolveQuestion(
-        { answerStateComplete: false, currentBlock: block, filled: 0, history: [], historyEntry: null, needsHistoryReview: false, needsQuickAnsweredChoiceReview: false, solved: 0, total: 1 },
-        { fillParsedAnswerInPage: autoFill, isChoiceLikeQuestionType: () => true, parseBlockForAutoSolve: vi.fn(async () => historyResult), parseBlockForAutoSolveQuickReview: vi.fn(), parseBlockForAutoSolveReview: vi.fn(), recordAutoSolveHistory: vi.fn(), sendProgress: vi.fn(), shouldPersistAutoSolveParseResult: () => true, shouldRetryUnstableChoiceParse: () => false, toProgressBlock: value => value, verifyParsedAnswerInPage: () => ({ ok: false, message: "not filled" }) },
-      );
-      expect(normal.progressMessage).toContain("USER_STATE_CHANGED");
       expect(document.getElementById("c")!.getAttribute("aria-checked")).toBe("true");
       expect(document.getElementById("b")!.getAttribute("aria-checked")).toBeNull();
     } finally {

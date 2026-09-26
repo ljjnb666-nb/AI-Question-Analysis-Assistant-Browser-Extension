@@ -48,6 +48,64 @@ export function clickElement(target: HTMLElement) {
   }
 }
 
+export type ChoiceGestureEventName = "pointerover" | "pointerenter" | "pointerdown" | "mouseover" | "mousedown" | "mouseup" | "pointerup";
+export type TextControlEventName = "input" | "change" | "keyup" | "blur";
+
+/** Dispatch exactly one Phase 5 gesture event; the transaction owns revalidation between calls. */
+export function dispatchChoiceGestureEvent(target: HTMLElement, type: ChoiceGestureEventName): void {
+  const view = target.ownerDocument.defaultView ?? window;
+  if (type.startsWith("pointer")) {
+    const init: PointerEventInit = { bubbles: true };
+    if (type === "pointerdown") Object.assign(init, { pointerId: 1, isPrimary: true, button: 0, buttons: 1 });
+    if (type === "pointerup") Object.assign(init, { pointerId: 1, isPrimary: true, button: 0 });
+    target.dispatchEvent(new view.PointerEvent(type, init));
+    return;
+  }
+  target.dispatchEvent(new view.MouseEvent(type, { bubbles: true }));
+}
+
+/** Native activation is one synchronous boundary. Callers must discard target after it returns. */
+export function activateChoiceControl(target: HTMLElement): void {
+  if (typeof target.click === "function") target.click();
+}
+
+/** Focus is an individual boundary because page handlers may replace the control synchronously. */
+export function focusTextControl(target: HTMLElement): void {
+  target.focus();
+}
+
+/** Set only the value/text; input, change, keyup, and blur remain separate boundaries. */
+export function setTextControlValueOnly(target: HTMLElement, value: string): boolean {
+  if (isHTMLInputInOwnerRealm(target)) {
+    if (target.value === value) return false;
+    setNativeInputValue(target, value);
+    return true;
+  }
+  if (isHTMLTextAreaInOwnerRealm(target)) {
+    if (target.value === value) return false;
+    setNativeTextareaValue(target, value);
+    return true;
+  }
+  if (target.isContentEditable) {
+    if ((target.textContent || "") === value) return false;
+    if (!replaceContentEditableText(target, value)) target.textContent = value;
+    return true;
+  }
+  return false;
+}
+
+/** Dispatch exactly one legacy text event; callers re-resolve before the next event. */
+export function dispatchTextControlEvent(target: HTMLElement, type: TextControlEventName): void {
+  const view = target.ownerDocument.defaultView ?? window;
+  if (type === "keyup") {
+    target.dispatchEvent(new view.KeyboardEvent(type, { bubbles: true, key: "Enter" }));
+  } else if (type === "blur") {
+    target.dispatchEvent(new view.FocusEvent(type, { bubbles: true }));
+  } else {
+    target.dispatchEvent(new view.Event(type, { bubbles: true }));
+  }
+}
+
 export function compareRectPosition(a: DOMRect, b: DOMRect): number {
   return (a.top - b.top) || (a.left - b.left);
 }

@@ -147,6 +147,27 @@ describe("resolveAutoSolveQuestion", () => {
     expect(sendProgress).toHaveBeenCalledTimes(1);
   });
 
+  it("does not accept a failed transaction when a later readback says the answer is present", async () => {
+    const block = prepareChoiceQuestion();
+    const parsed = makeResult({ confidence: 0.95 });
+    const fill = vi.fn(async () => ({ ok: false, filledCount: 0, code: "USER_STATE_CHANGED" as const, message: "USER_STATE_CHANGED" }));
+    const verify = vi.fn(() => ({ ok: true, message: "answer happens to be selected" }));
+    const outcome = await resolveAutoSolveQuestion(
+      { answerStateComplete: false, currentBlock: block, filled: 0, history: [], historyEntry: null, needsHistoryReview: false, needsQuickAnsweredChoiceReview: false, solved: 0, total: 1 },
+      {
+        ...resolveDeps(vi.fn(async () => parsed)),
+        fillParsedAnswerInPage: fill,
+        shouldRetryUnstableChoiceParse: () => false,
+        verifyParsedAnswerInPage: verify,
+      },
+    );
+
+    expect(outcome).toMatchObject({ filledDelta: 0, questionCompleted: false, stopAutomation: true, stopReason: "USER_STATE_CHANGED" });
+    expect(fill).toHaveBeenCalledOnce();
+    expect(verify).not.toHaveBeenCalled();
+    finishAutoSolveQuestionAttempt(block);
+  });
+
   it("RC-B discards a provider result that became stale while pending", async () => {
     const block = makeBlock();
     const pending = deferred<ParseResult>();
@@ -347,10 +368,13 @@ describe("resolveAutoSolveQuestion", () => {
     const next = prepareChoiceQuestion();
     const deps = resolveDeps(vi.fn(async () => makeResult({ blockId: next.id, answer: "B", confidence: 0.95 })));
     deps.fillParsedAnswerInPage = vi.fn(async () => { throw new Error("unexpected fill failure"); });
-    await resolveAutoSolveQuestion(
-      { answerStateComplete: false, currentBlock: next, filled: 0, history: [], historyEntry: null, needsHistoryReview: false, needsQuickAnsweredChoiceReview: false, solved: 0, total: 1 },
+    deps.parseBlockForAutoSolveQuickReview = vi.fn(async () => makeResult({ blockId: next.id, answer: "B", confidence: 0.95 }));
+    deps.shouldRetryUnstableChoiceParse = () => false;
+    const outcome = await resolveAutoSolveQuestion(
+      { answerStateComplete: true, currentBlock: next, filled: 0, history: [], historyEntry: null, needsHistoryReview: false, needsQuickAnsweredChoiceReview: true, solved: 0, total: 1 },
       deps,
     );
+    expect(outcome).toMatchObject({ filledDelta: 0, questionCompleted: false, stopAutomation: true, stopReason: "PARTIAL_MUTATION_UNPROVABLE" });
     expect(hasAutoSolveQuestionAttempt(next)).toBe(true);
     finishAutoSolveQuestionAttempt(next);
     expect(hasAutoSolveQuestionAttempt(next)).toBe(false);
