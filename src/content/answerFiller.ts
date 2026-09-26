@@ -57,6 +57,7 @@ export function captureSolveStartControlState(block: QuestionBlock): void {
   // replace it after a user has interacted with the question.
   if (autoSnapshotStatus.has(key)) return;
   autoSnapshotStatus.set(key, "unavailable");
+  if (block.source === "auto_dom" && !block.identityObservationSource) return;
   const rootContext = resolveFillRootContext(sharedRootRegistry(), block);
   if (!rootContext.ok) return;
   let scope: Element;
@@ -72,7 +73,9 @@ export function captureSolveStartControlState(block: QuestionBlock): void {
   }
   const mapping = buildControlMapping(block, scope);
   if (mapping.ok) {
-    const live = observeLiveQuestion(block, mapping.owner).identity;
+    // The sealed runtime owner is the question identity authority. A semantic
+    // descendant may own the controls without replacing that identity owner.
+    const live = observeLiveQuestion(block, rootContext.owner ?? mapping.owner).identity;
     solveStartSnapshots.set(key, { controls: snapshotControls(mapping), stableId: live.stableId, contentFingerprint: live.contentFingerprint });
     autoSnapshotStatus.set(key, "captured");
   }
@@ -263,6 +266,9 @@ async function fillVerifiedAnswerIntoScope(
       if (mode === "auto" && hasQuestionRevisionAttempt() && !isCurrentQuestionRevisionBlock(block)) {
         return { ok: false, code: "STALE_QUESTION_REVISION", message: "STALE_QUESTION_REVISION" };
       }
+      if (block.source === "auto_dom" && !block.identityObservationSource) {
+        return { ok: false, code: "STALE_ACTION_PLAN", message: "Question identity observation source is unavailable" };
+      }
       const root = resolveFillRootContext(sharedRootRegistry(), block);
       if (!root.ok) return { ok: false, code: root.reason, message: root.reason };
       const candidateOwner = root.owner ?? scope;
@@ -274,7 +280,9 @@ async function fillVerifiedAnswerIntoScope(
       if (root.owner && mapping.owner !== root.owner && !root.owner.contains(mapping.owner)) {
         return { ok: false, code: "STALE_RUNTIME_QUESTION_HANDLE", message: "Fresh question mapping escaped its runtime owner" };
       }
-      const identity = observeLiveQuestion(block, mapping.owner).identity;
+      // Keep identity bound to the sealed runtime owner while allowing the
+      // control mapper to return a proven semantic descendant.
+      const identity = observeLiveQuestion(block, root.owner ?? mapping.owner).identity;
       const stableId = block.identity?.stableId ?? block.id;
       const contentFingerprint = block.identity?.contentFingerprint ?? block.id;
       if (block.identity && (identity.stableId !== stableId || identity.contentFingerprint !== contentFingerprint)) {

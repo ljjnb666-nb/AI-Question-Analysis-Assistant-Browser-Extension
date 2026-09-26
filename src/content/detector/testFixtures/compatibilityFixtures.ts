@@ -211,7 +211,7 @@ export const COMPATIBILITY_FIXTURES: CompatibilityFixture[] = [
       judgeQuestion("10000001", ["Classify this neutral statement", "T F"], ["Exam notice", "Question overview"]),
       choiceQuestion("10000002", ["Which neutral color name follows amber?", "D. Violet"], {
         previewExcludes: ["Exam notice", "Question overview"],
-        fillSupport: { capability: "known-safe-limitation", answer: "B", expectedFailure: "STALE_ACTION_PLAN", stateAfterFailure: "unchanged" },
+        fillSupport: { capability: "supported", answer: "B", expectedFilledCount: 1 },
       }),
     ],
   },

@@ -12,6 +12,7 @@ export type QuestionType =
   | "unknown";
 
 export type QuestionSource = "manual_capture" | "auto_dom" | "auto_visual";
+export type QuestionIdentityObservationSource = "structured" | "rendered";
 
 export type QuestionDisplaySegment =
   | { type: "text"; text: string; role?: "title" | "meta" | "section"; label?: string }
@@ -24,6 +25,8 @@ export interface QuestionBlock {
   identity?: QuestionIdentity;
   /** Full semantic text used only to derive identity; never a UI preview. */
   identitySourceText?: string;
+  /** Frozen live-DOM text projection used to revalidate this identity across runtime messages. */
+  identityObservationSource?: QuestionIdentityObservationSource;
   /** Scan-local semantic owner; not persisted identity or history key. */
   runtimeOwnerKey?: string;
   /** Opaque content-runtime locator; transient across extension messages only. */

@@ -2,6 +2,7 @@ import type { QuestionBlock } from "@/shared/types";
 import { collectMediaAssets, projectLegacyMedia } from "./media/mediaDiscovery";
 import { attachQuestionIdentity, extractOrdinalHint } from "./questionIdentity";
 import { extractStructuredQuestionText } from "./detector/domStructuredText";
+import { normalizeText } from "./detector/domText";
 import { resolveFillRootContext, sharedRootRegistry } from "./roots/rootRegistry";
 
 const QUESTION_OWNER_SELECTOR = ".question-item,.questionBox,.base-question-component,[data-question-id],[data-questionid],[data-problem-id],[data-problemid],[data-item-id]";
@@ -11,18 +12,17 @@ const QUESTION_OWNER_SELECTOR = ".question-item,.questionBox,.base-question-comp
  * It is used only immediately before a mutation; it does not watch or heal DOM.
  */
 export function observeLiveQuestion(block: QuestionBlock, owner: Element) {
-  // Detection attaches identity from the structured stem/options extraction,
-  // so the live reconstruction must read the same source. Real browsers insert
-  // layout line breaks into innerText for block-level option markup, which
-  // would otherwise change the canonical text and fail every fill closed.
-  const text = String(
-    extractStructuredQuestionText(owner)
-    || (owner as HTMLElement).innerText
-    || owner.textContent
-    || "",
-  ).trim();
-  const withMedia = projectLegacyMedia({ ...block, previewText: text || block.previewText }, collectMediaAssets(owner), owner);
-  return attachQuestionIdentity(withMedia, owner, { identityText: text || block.previewText });
+  // The binding-time source is serialized with the block and never re-inferred
+  // from the current DOM shape. Legacy callers that mint identity here get a
+  // deterministic structured source once; pre-identified auto_dom blocks with
+  // no provenance remain unauthorized for mutation.
+  const identityObservationSource = block.identityObservationSource
+    ?? (block.identity ? undefined : "structured");
+  const text = identityObservationSource === "rendered"
+    ? normalizeText(String((owner as HTMLElement).innerText || owner.textContent || ""))
+    : normalizeText(extractStructuredQuestionText(owner));
+  const withMedia = projectLegacyMedia({ ...block, identityObservationSource, previewText: text }, collectMediaAssets(owner), owner);
+  return attachQuestionIdentity(withMedia, owner, { identityText: text });
 }
 
 /** Resolve a single semantic question subtree; broad multi-question wrappers fail closed. */
@@ -50,7 +50,7 @@ export function resolveCanonicalQuestionOwner(block: QuestionBlock, suppliedOwne
 
 /** Validate a serialized result against its originating content runtime and live owner. */
 export function isCurrentRuntimeQuestionBlock(block: QuestionBlock): boolean {
-  if (block.source !== "auto_dom" || !block.runtimeQuestionHandle || !block.identity?.stableId || !block.identity.contentFingerprint) return false;
+  if (block.source !== "auto_dom" || !block.runtimeQuestionHandle || !block.identityObservationSource || !block.identity?.stableId || !block.identity.contentFingerprint) return false;
   const context = resolveFillRootContext(sharedRootRegistry(), block);
   if (!context.ok || !context.owner) return false;
   const live = observeLiveQuestion(block, context.owner).identity;
