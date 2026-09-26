@@ -243,6 +243,9 @@ const RERENDER_STOP_HOST_PAGE_HTML = `<!doctype html>
 <body style="margin:0"><iframe id="rerender-frame" src="/rerender-frame?change-question=1" style="width:760px;height:380px;border:0"></iframe>
   <button id="next-question">Next question</button><script>window.__advanceClicks = 0; document.getElementById("next-question").addEventListener("click", () => window.__advanceClicks++);</script>
 </body></html>`;
+const RERENDER_OWNER_HOST_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>owner rerender host</title></head>
+<body style="margin:0"><iframe id="rerender-owner-frame" src="/rerender-owner-frame" style="width:760px;height:380px;border:0"></iframe></body></html>`;
 
 const RERENDER_FRAME_PAGE_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><title>rerender-safe transaction</title></head>
@@ -293,6 +296,58 @@ const RERENDER_FRAME_PAGE_HTML = `<!doctype html>
   </script>
 </body></html>`;
 
+const RERENDER_OWNER_FRAME_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>whole owner rerender</title></head>
+<body style="margin:0"><div id="question-mount"></div>
+  <script>
+    window.__ownerEvents = [];
+    window.__detachedOldBOwnEvents = [];
+    window.__detachedOwnerControlEvents = [];
+    const selected = new Set();
+    let currentOwner;
+    let oldB;
+    const gestureEvents = ["pointerover", "pointerenter", "pointerdown", "mouseover", "mousedown", "mouseup", "pointerup", "click"];
+    const makeOwner = (generation) => {
+      const owner = document.createElement("section");
+      owner.className = "question-item";
+      owner.dataset.questionId = "21";
+      owner.style.cssText = "width:700px;min-height:260px;padding:16px;background:#fff;color:#000;font-size:18px";
+      owner.innerHTML = '<p class="stem">21. Select all that apply: Which values are correct?</p><ul style="list-style:none;margin:0;padding:0"></ul>';
+      const list = owner.querySelector("ul");
+      for (const key of ["A", "B", "C", "D"]) {
+        const item = document.createElement("li");
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = key;
+        input.checked = selected.has(key);
+        input.dataset.ownerGeneration = String(generation);
+        for (const type of gestureEvents) input.addEventListener(type, () => {
+          window.__ownerEvents.push({ type, key, generation, connected: input.isConnected });
+          if (input === oldB && !input.isConnected) window.__detachedOldBOwnEvents.push(type);
+          if (generation === 0 && !input.isConnected) window.__detachedOwnerControlEvents.push({ type, key });
+        });
+        input.addEventListener("change", () => {
+          if (input.checked) selected.add(key);
+          else selected.delete(key);
+          if (generation === 0 && key === "A") {
+            const replacement = makeOwner(1);
+            owner.replaceWith(replacement);
+            currentOwner = replacement;
+          }
+        });
+        label.append(input, document.createTextNode(" " + key + ". " + ({ A: "Alpha", B: "Beta", C: "Gamma", D: "Delta" })[key]));
+        item.append(label);
+        list.append(item);
+      }
+      return owner;
+    };
+    currentOwner = makeOwner(0);
+    document.getElementById("question-mount").append(currentOwner);
+    oldB = currentOwner.querySelector('input[value="B"]');
+  </script>
+</body></html>`;
+
 type HeldProviderRequest = {
   respond: (answerLabel: string, questionType?: "single_choice" | "multi_choice") => Promise<void>;
   reject: () => Promise<void>;
@@ -337,6 +392,16 @@ async function startRootsServer(): Promise<{ origin: string; held: HeldProviderR
     if (req.method === "GET" && url.pathname === "/rerender-stop") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(RERENDER_STOP_HOST_PAGE_HTML);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/rerender-owner") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(RERENDER_OWNER_HOST_PAGE_HTML);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/rerender-owner-frame") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(RERENDER_OWNER_FRAME_PAGE_HTML);
       return;
     }
     if (req.method === "GET" && url.pathname === "/rerender-frame") {
@@ -531,6 +596,51 @@ async function waitForEvent(driver: Page, eventType: string, timeout = 45_000): 
 }
 
 test.describe("Phase 7 accessible roots E2E", () => {
+  test("E2E-RERENDER-OWNER-1: fill rebinds a uniquely matching replacement question owner", async () => {
+    test.setTimeout(90_000);
+    const server = await startRootsServer();
+    const context = await launchExtensionContext();
+    try {
+      const extensionId = await resolveExtensionId(context);
+      const quizPage = await context.newPage();
+      await quizPage.goto(`${server.origin}/rerender-owner`);
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, "/rerender-owner");
+
+      await expect.poll(() => server.held.length, { timeout: 30_000 }).toBe(1).catch(async (err) => { await dumpDiagnostics(driver, "rerender-owner-held-provider"); throw err; });
+      await server.held[0].respond("A,B", "multi_choice");
+      server.held[0].settled = true;
+      await waitForEvent(driver, "AUTO_SOLVE_DONE").catch(async (err) => { await dumpDiagnostics(driver, "rerender-owner-done"); throw err; });
+
+      const state = await quizPage.evaluate(() => {
+        const frame = document.getElementById("rerender-owner-frame") as HTMLIFrameElement;
+        const frameDocument = frame.contentDocument!;
+        const selected = Array.from(frameDocument.querySelectorAll<HTMLInputElement>('.question-item input[type="checkbox"]'))
+          .filter((input) => input.checked)
+          .map((input) => input.value)
+          .sort();
+        const debug = frame.contentWindow as unknown as {
+          __ownerEvents: Array<{ type: string; key: string; generation: number; connected: boolean }>;
+          __detachedOldBOwnEvents: string[];
+          __detachedOwnerControlEvents: Array<{ type: string; key: string }>;
+        };
+        return {
+          selected,
+          events: debug.__ownerEvents,
+          detachedOldB: debug.__detachedOldBOwnEvents,
+          detachedOwnerControls: debug.__detachedOwnerControlEvents,
+        };
+      });
+
+      expect(state.selected).toEqual(["A", "B"]);
+      expect(state.events.filter(({ type }) => type === "click").map(({ key, generation }) => [key, generation])).toEqual([["A", 0], ["B", 1]]);
+      expect(state.detachedOldB).toEqual([]);
+      expect(state.detachedOwnerControls).toEqual([]);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+
   test("E2E-RERENDER-1: multi-choice fill reacquires controls after a synchronous framework rerender", async () => {
     test.setTimeout(90_000);
     const server = await startRootsServer();

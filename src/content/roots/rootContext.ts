@@ -41,6 +41,8 @@ export type RuntimeQuestionHandleRecord = {
   owner: Element;
 };
 
+export type SealedRuntimeQuestionHandleRecord = Omit<RuntimeQuestionHandleRecord, "owner"> & { owner: Element | undefined };
+
 type RuntimeOwnerReference = { deref: () => Element | undefined };
 type WeakRefConstructor = new (target: Element) => RuntimeOwnerReference;
 type StoredRuntimeQuestionHandle = Omit<RuntimeQuestionHandleRecord, "owner"> & { owner: RuntimeOwnerReference };
@@ -134,8 +136,8 @@ export function attachRuntimeRoot(block: QuestionBlock, attachment: RuntimeRootA
   return attached as QuestionBlock;
 }
 
-/** Resolve and bind only a live locator whose serialized semantic identity is exact. */
-export function bindRuntimeQuestionHandle(block: QuestionBlock): RuntimeQuestionHandleRecord | null {
+/** Read the sealed root and identity proof even when its previous owner detached. */
+export function readRuntimeQuestionHandle(block: QuestionBlock): SealedRuntimeQuestionHandleRecord | null {
   const handle = block.runtimeQuestionHandle;
   if (typeof handle !== "string" || !/^rqh_[0-9a-f]{32}$/.test(handle)) return null;
   const stored = runtimeQuestionHandles.get(handle);
@@ -145,14 +147,38 @@ export function bindRuntimeQuestionHandle(block: QuestionBlock): RuntimeQuestion
     || stableId !== stored.stableId
     || contentFingerprint !== stored.contentFingerprint) return null;
   const owner = stored.owner.deref();
-  if (!owner?.isConnected) {
-    runtimeQuestionHandles.delete(handle);
-    return null;
-  }
-  const attached = block as { [RUNTIME_ROOT]?: RuntimeRootAttachment; [RUNTIME_OWNER]?: Element | undefined };
-  attached[RUNTIME_ROOT] = stored.attachment;
-  attached[RUNTIME_OWNER] = owner;
   return { attachment: { ...stored.attachment }, stableId, contentFingerprint, owner };
+}
+
+/** Resolve and bind only a live locator whose serialized semantic identity is exact. */
+export function bindRuntimeQuestionHandle(block: QuestionBlock): RuntimeQuestionHandleRecord | null {
+  const sealed = readRuntimeQuestionHandle(block);
+  const owner = sealed?.owner;
+  if (!sealed || !owner?.isConnected) return null;
+  const attached = block as { [RUNTIME_ROOT]?: RuntimeRootAttachment; [RUNTIME_OWNER]?: Element | undefined };
+  attached[RUNTIME_ROOT] = sealed.attachment;
+  attached[RUNTIME_OWNER] = owner;
+  return { attachment: { ...sealed.attachment }, stableId: sealed.stableId, contentFingerprint: sealed.contentFingerprint, owner };
+}
+
+/** Update a sealed handle only after its authoritative root has proven one exact live owner. */
+export function rebindRuntimeQuestionHandle(
+  block: QuestionBlock,
+  attachment: RuntimeRootAttachment,
+  owner: Element,
+): RuntimeQuestionHandleRecord | null {
+  const sealed = readRuntimeQuestionHandle(block);
+  const handle = block.runtimeQuestionHandle;
+  const stored = typeof handle === "string" ? runtimeQuestionHandles.get(handle) : undefined;
+  if (!sealed || !stored || !owner.isConnected
+    || sealed.attachment.rootKey !== attachment.rootKey
+    || sealed.attachment.rootGeneration !== attachment.rootGeneration
+    || sealed.attachment.kind !== attachment.kind) return null;
+  stored.owner = WeakRefApi ? new WeakRefApi(owner) : { deref: () => owner };
+  const attached = block as { [RUNTIME_ROOT]?: RuntimeRootAttachment; [RUNTIME_OWNER]?: Element | undefined };
+  attached[RUNTIME_ROOT] = { ...sealed.attachment };
+  attached[RUNTIME_OWNER] = owner;
+  return { attachment: { ...sealed.attachment }, stableId: sealed.stableId, contentFingerprint: sealed.contentFingerprint, owner };
 }
 
 export function invalidateRuntimeQuestionHandlesForRoot(rootKey: string): void {

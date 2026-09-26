@@ -13,14 +13,18 @@ import {
   MAX_ACCESSIBLE_ROOTS,
   MAX_ROOT_DEPTH,
   MAX_SHADOW_HOST_PROBES,
-  bindRuntimeQuestionHandle,
+  invalidateRuntimeQuestionHandlesForRoot,
+  readRuntimeQuestionHandle,
+  rebindRuntimeQuestionHandle,
   ownerOf,
   rootAttachmentOf,
   TOP_ROOT_GENERATION,
   TOP_ROOT_KEY,
   topRootContext,
   type RootContext,
+  type SealedRuntimeQuestionHandleRecord,
 } from "./rootContext";
+import { observeLiveQuestion } from "../liveQuestionObservation";
 
 export type ProjectedRect = { left: number; top: number; width: number; height: number };
 
@@ -330,14 +334,16 @@ export type FillRootContext =
  * top-viewport bbox is converted into the root's local coordinate space.
  */
 export function resolveFillRootContext(registry: AccessibleRootRegistry, block: QuestionBlock): FillRootContext {
-  const runtime = block.source === "auto_dom" ? bindRuntimeQuestionHandle(block) : null;
+  const runtime = block.source === "auto_dom" ? readRuntimeQuestionHandle(block) : null;
   if (block.source === "auto_dom" && !runtime) return { ok: false, reason: "STALE_RUNTIME_QUESTION_HANDLE" };
   const attachment = runtime?.attachment ?? rootAttachmentOf(block);
-  const owner = runtime?.owner ?? ownerOf(block) ?? null;
+  const priorOwner = runtime?.owner ?? ownerOf(block) ?? null;
   // Top-document blocks never depend on registry lifecycle state: a registry
   // that has not reconciled yet must not fail the classic top-document path.
   if (!attachment.rootKey || attachment.rootKey === TOP_ROOT_KEY) {
-    const topDocument = registry.get(TOP_ROOT_KEY)?.ownerDocument ?? owner?.ownerDocument ?? document;
+    const topDocument = registry.get(TOP_ROOT_KEY)?.ownerDocument ?? priorOwner?.ownerDocument ?? document;
+    const context = topRootContext(topDocument);
+    const owner = runtime ? resolveRuntimeOwner(block, runtime, context) : priorOwner;
     if (runtime) {
       if (!owner || owner.ownerDocument !== topDocument || !topDocument.contains(owner)) {
         return { ok: false, reason: "STALE_RUNTIME_QUESTION_HANDLE" };
@@ -345,7 +351,7 @@ export function resolveFillRootContext(registry: AccessibleRootRegistry, block: 
     }
     return {
       ok: true,
-      context: topRootContext(topDocument),
+      context,
       doc: topDocument,
       shadowRoot: null,
       owner,
@@ -353,9 +359,17 @@ export function resolveFillRootContext(registry: AccessibleRootRegistry, block: 
     };
   }
   const context = registry.get(attachment.rootKey);
+  if (!context && runtime && !runtime.owner?.isConnected) {
+    invalidateRuntimeQuestionHandlesForRoot(attachment.rootKey);
+    return { ok: false, reason: "STALE_RUNTIME_QUESTION_HANDLE" };
+  }
   if (!context || !context.connected || context.rootGeneration !== attachment.rootGeneration) {
+    if (runtime && context && (!context.connected || context.rootGeneration !== attachment.rootGeneration)) {
+      invalidateRuntimeQuestionHandlesForRoot(attachment.rootKey);
+    }
     return { ok: false, reason: "STALE_ROOT_CONTEXT" };
   }
+  const owner = runtime ? resolveRuntimeOwner(block, runtime, context) : priorOwner;
   if (runtime) {
     if (!owner || !rootOwnsElement(context, owner)) return { ok: false, reason: "STALE_RUNTIME_QUESTION_HANDLE" };
   }
@@ -401,6 +415,39 @@ export function resolveFillRootContext(registry: AccessibleRootRegistry, block: 
   const shadowRoot = context.kind === "open-shadow-root" ? (context.root as ShadowRoot) : null;
   const doc = shadowRoot ? context.ownerDocument : (context.root as Document);
   return { ok: true, context, doc, shadowRoot, owner, localBBox };
+}
+
+const RUNTIME_QUESTION_OWNER_SELECTOR = ".question-item,.questionBox,.base-question-component,[data-question-id],[data-questionid],[data-problem-id],[data-problemid],[data-item-id]";
+
+function resolveRuntimeOwner(
+  block: QuestionBlock,
+  handle: SealedRuntimeQuestionHandleRecord,
+  context: RootContext,
+): Element | null {
+  const previousOwner = handle.owner;
+  if (previousOwner?.isConnected) return rootOwnsElement(context, previousOwner) ? previousOwner : null;
+
+  // A detached owner can be rebound only by scanning its exact authoritative
+  // root and requiring one non-nested match for both sealed identity values.
+  try {
+    const candidates = Array.from(context.root.querySelectorAll(RUNTIME_QUESTION_OWNER_SELECTOR));
+    const outermost = candidates.filter((candidate) =>
+      !candidates.some((other) => other !== candidate && other.contains(candidate)));
+    const matches = outermost.filter((candidate) => {
+      if (!rootOwnsElement(context, candidate)) return false;
+      try {
+        const identity = observeLiveQuestion(block, candidate).identity;
+        return identity.stableId === handle.stableId
+          && identity.contentFingerprint === handle.contentFingerprint;
+      } catch {
+        return false;
+      }
+    });
+    if (matches.length !== 1) return null;
+    return rebindRuntimeQuestionHandle(block, handle.attachment, matches[0])?.owner ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function rootOwnsElement(context: RootContext, owner: Element): boolean {
