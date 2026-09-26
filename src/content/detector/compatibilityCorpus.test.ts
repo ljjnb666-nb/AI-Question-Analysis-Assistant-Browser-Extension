@@ -1,14 +1,25 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { ParseResult } from "@/shared/types";
+import { fillParsedAnswerInPage, verifyParsedAnswerInPage } from "../answerFiller";
 import { buildControlMapping } from "../answer/controlMapping";
 import { detectCandidatesAcrossRoots } from "./domDetector";
 import { withQuestionCompleteness } from "./domDetectorPostprocess";
 import { ownerOf, rootAttachmentOf } from "../roots/rootContext";
 import { sharedRootRegistry } from "../roots/rootRegistry";
-import { BROWSER_SECURITY_LIMITATIONS, COMPATIBILITY_FIXTURES, type CompatibilityFixture, type CompatibilityFixtureQuestion } from "./testFixtures/compatibilityFixtures";
+import { COMPATIBILITY_FIXTURES, COMPATIBILITY_LIMITATIONS, type CompatibilityFixture, type CompatibilityFixtureQuestion } from "./testFixtures/compatibilityFixtures";
 
 type TestRect = { left: number; top: number; width: number; height: number };
-type MountedFixture = { root: Document | ShadowRoot; iframe?: HTMLIFrameElement; host?: HTMLElement };
+type MountedFixture = {
+  root: Document | ShadowRoot;
+  iframe?: HTMLIFrameElement;
+  host?: HTMLElement;
+};
+type MountedFixtureWithActions = MountedFixture & {
+  actions: { submissions: number; advances: number };
+  optionEvents: Array<{ text: string; type: string }>;
+};
+const CHOICE_EVENTS = ["pointerover", "pointerenter", "pointerdown", "mouseover", "mousedown", "mouseup", "pointerup", "click"] as const;
 
 function setRect(element: Element, rect: TestRect): void {
   Object.defineProperty(element, "getBoundingClientRect", {
@@ -47,7 +58,7 @@ function makeFrame(width: number, height: number): { iframe: HTMLIFrameElement; 
   return { iframe, document: iframe.contentDocument };
 }
 
-function mountFixture(fixture: CompatibilityFixture): MountedFixture {
+function mountFixture(fixture: CompatibilityFixture): MountedFixtureWithActions {
   document.body.innerHTML = "";
   setViewport(fixture.viewport.width, fixture.viewport.height);
   setLocation(fixture.pageUrl);
@@ -93,17 +104,51 @@ function mountFixture(fixture: CompatibilityFixture): MountedFixture {
     const image = mounted.root.querySelector(override.selector);
     if (image) Object.defineProperty(image, "currentSrc", { configurable: true, value: override.value });
   }
-  if (fixture.interactionTrigger === "pointerdown") {
-    for (const control of Array.from(mounted.root.querySelectorAll<HTMLElement>("[role=radio]"))) {
+  const optionEvents: MountedFixtureWithActions["optionEvents"] = [];
+  installControlBehaviors(mounted.root, fixture, optionEvents);
+  const actions = { submissions: 0, advances: 0 };
+  const actionForm = document.createElement("form");
+  actionForm.hidden = true;
+  actionForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    actions.submissions += 1;
+  });
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.textContent = "Submit fixture";
+  const advance = document.createElement("button");
+  advance.type = "button";
+  advance.dataset.action = "advance";
+  advance.textContent = "Next fixture";
+  advance.addEventListener("click", () => { actions.advances += 1; });
+  actionForm.append(submit, advance);
+  document.body.append(actionForm);
+  const pageState = document.createElement("div");
+  pageState.hidden = true;
+  pageState.innerHTML = '<button id="user-page-state" role="radio" aria-checked="true">Unrelated page choice</button>';
+  document.body.append(pageState);
+  sharedRootRegistry().reconcile(document);
+  return { ...mounted, actions, optionEvents };
+}
+
+function installControlBehaviors(root: Document | ShadowRoot, fixture: CompatibilityFixture, optionEvents: MountedFixtureWithActions["optionEvents"]): void {
+  for (const control of Array.from(root.querySelectorAll<HTMLElement>("[role=radio]"))) {
+    for (const type of CHOICE_EVENTS) {
+      control.addEventListener(type, () => optionEvents.push({ text: (control.textContent ?? "").trim(), type }), true);
+    }
+    if (fixture.interactionTrigger === "pointerdown") {
       control.addEventListener("pointerdown", () => {
         for (const peer of Array.from(control.parentElement?.parentElement?.querySelectorAll<HTMLElement>("[role=radio]") ?? [])) {
           peer.setAttribute("aria-checked", String(peer === control));
         }
       });
     }
+    control.addEventListener("click", () => {
+      for (const peer of Array.from(control.parentElement?.parentElement?.querySelectorAll<HTMLElement>("[role=radio]") ?? [])) {
+        peer.setAttribute("aria-checked", String(peer === control));
+      }
+    });
   }
-  sharedRootRegistry().reconcile(document);
-  return mounted;
 }
 
 function findById(root: Document | ShadowRoot, id: string): Element | null {
@@ -190,6 +235,105 @@ function assertQuestionExpectation(
   }
 }
 
+function parseResultFor(block: ReturnType<typeof detectCandidatesAcrossRoots>[number], answer: string): ParseResult {
+  return {
+    blockId: block.id,
+    questionType: block.questionTypeGuess,
+    answer,
+    confidence: 1,
+    briefExplanation: "",
+    detailedExplanation: "",
+    recognizedText: block.previewText,
+    routeUsed: "text",
+  };
+}
+
+function readOptionState(owner: Element): Array<{ text: string; checked: boolean }> {
+  return Array.from(owner.querySelectorAll<HTMLElement>("[role=radio]"), (control) => ({
+    text: (control.textContent ?? "").trim(),
+    checked: control.getAttribute("aria-checked") === "true" || (control as HTMLInputElement).checked === true,
+  }));
+}
+
+function optionMatchesAnswer(text: string, questionType: string, answer: string): boolean {
+  if (questionType === "judge") {
+    return /^(?:对|正确|true|yes)$/i.test(answer.trim())
+      ? /(?:正确|对|true|yes)/i.test(text)
+      : /(?:错误|错|false|no)/i.test(text);
+  }
+  const key = answer.trim().toUpperCase();
+  return new RegExp(`^${key}\\s*[.、):：]`).test(text);
+}
+
+function fillSupportMatrixText(fixture: CompatibilityFixture): string {
+  if (fixture.expectedQuestions.length === 0) return "not-applicable";
+  return fixture.expectedQuestions.map((question) => {
+    const contract = question.fillSupport;
+    if (contract.capability === "supported") {
+      return `${question.type}: supported (answer=${contract.answer}; filled=${contract.expectedFilledCount}; readback=verified)`;
+    }
+    if (contract.capability === "withheld") return `${question.type}: withheld (${contract.expectedFailure})`;
+    if (contract.capability === "known-safe-limitation") return `${question.type}: known-safe-limitation (${contract.expectedFailure}; state=${contract.stateAfterFailure})`;
+    return `${question.type}: not-applicable`;
+  }).join("; ");
+}
+
+async function assertFillExpectation(
+  fixture: CompatibilityFixture,
+  expected: CompatibilityFixtureQuestion,
+  block: ReturnType<typeof detectCandidatesAcrossRoots>[number],
+  mounted: MountedFixtureWithActions,
+): Promise<void> {
+  const owner = ownerOf(block)!;
+  const contract = expected.fillSupport;
+  if (contract.capability === "not-applicable") return;
+
+  const result = parseResultFor(block, contract.answer);
+  const before = readOptionState(owner);
+  const outsideOwner = Array.from(document.querySelectorAll<HTMLElement>("[role=radio]"))
+    .filter((control) => !owner.contains(control))
+    .map((control) => ({ control, checked: control.getAttribute("aria-checked") === "true" || (control as HTMLInputElement).checked === true }));
+  mounted.optionEvents.length = 0;
+  const filled = await fillParsedAnswerInPage(block, result, { mode: "manual", expectedUrl: fixture.pageUrl });
+
+  if (contract.capability === "supported") {
+    expect(filled.ok, `${fixture.fixtureId}: code=${filled.code ?? "none"}; message=${filled.message}`).toBe(true);
+    expect(filled.filledCount, fixture.fixtureId).toBe(contract.expectedFilledCount);
+    expect(verifyParsedAnswerInPage(block, result, fixture.pageUrl).ok, fixture.fixtureId).toBe(true);
+    const after = readOptionState(owner);
+    expect(after.filter(({ checked }) => checked)).toHaveLength(1);
+    const selected = after.filter(({ checked }) => checked);
+    expect(selected.every(({ text }) => optionMatchesAnswer(text, result.questionType, contract.answer))).toBe(true);
+    for (let index = 0; index < before.length; index += 1) {
+      if (!optionMatchesAnswer(before[index]!.text, result.questionType, contract.answer)) {
+        expect(after[index]!.checked, `${fixture.fixtureId} changed unrelated option ${before[index]!.text}`).toBe(before[index]!.checked);
+      }
+    }
+  } else {
+    expect(filled.ok, fixture.fixtureId).toBe(false);
+    expect(filled.filledCount, fixture.fixtureId).toBe(0);
+    expect(filled.code, fixture.fixtureId).toBe(contract.expectedFailure);
+    const after = readOptionState(owner);
+    const verified = verifyParsedAnswerInPage(block, result, fixture.pageUrl).ok;
+    if (contract.capability === "withheld" || contract.stateAfterFailure === "unchanged") {
+      expect(after, fixture.fixtureId).toEqual(before);
+      expect(verified, fixture.fixtureId).toBe(false);
+    } else {
+      expect(after.filter(({ checked }) => checked)).toHaveLength(1);
+      expect(after.filter(({ checked }) => checked).every(({ text }) => optionMatchesAnswer(text, result.questionType, contract.answer))).toBe(true);
+      expect(verified, fixture.fixtureId).toBe(true);
+      const targetEvents = mounted.optionEvents.filter(({ text }) => optionMatchesAnswer(text, result.questionType, contract.answer));
+      expect(targetEvents.map(({ type }) => type), fixture.fixtureId).toEqual(["pointerover", "pointerenter", "pointerdown"]);
+    }
+  }
+
+  for (const { control, checked } of outsideOwner) {
+    expect(control.getAttribute("aria-checked") === "true" || (control as HTMLInputElement).checked === true, fixture.fixtureId).toBe(checked);
+  }
+  expect(mounted.actions.submissions, fixture.fixtureId).toBe(0);
+  expect(mounted.actions.advances, fixture.fixtureId).toBe(0);
+}
+
 function applyTransition(fixture: CompatibilityFixture): void {
   const transition = fixture.transition;
   if (!transition) return;
@@ -224,7 +368,7 @@ describe("Phase 9A deterministic compatibility corpus", () => {
   });
 
   for (const fixture of COMPATIBILITY_FIXTURES) {
-    it(`${fixture.fixtureId} ${fixture.scenario}`, () => {
+    it(`${fixture.fixtureId} ${fixture.scenario}`, async () => {
       const mounted = mountFixture(fixture);
       const blocks = detectCandidatesAcrossRoots();
       expect(blocks).toHaveLength(fixture.expectedQuestionCount);
@@ -250,9 +394,11 @@ describe("Phase 9A deterministic compatibility corpus", () => {
       }
 
       const before = new Map<string, ReturnType<typeof detectCandidatesAcrossRoots>[number]>();
+      let fillCandidates = blocks;
+      const transitionedFillBlocks = new Map<string, ReturnType<typeof detectCandidatesAcrossRoots>[number]>();
       for (const expected of fixture.expectedQuestions) {
         const block = matchingBlock(blocks, expected);
-        expect(block, `detected block for ${expected.ownerId}`).toBeTruthy();
+        expect(block, `detected block for ${expected.ownerId}; candidates=${blocks.map((candidate) => `${ownerOf(candidate)?.id}:${candidate.questionTypeGuess}:${candidate.previewText}`).join(" | ")}`).toBeTruthy();
         assertQuestionExpectation(block!, expected);
         if (fixture.interactionTrigger === "pointerdown") {
           const owner = ownerOf(block!)!;
@@ -263,37 +409,49 @@ describe("Phase 9A deterministic compatibility corpus", () => {
         before.set(expected.ownerId, block!);
       }
 
-      if (!fixture.transition) return;
-      const expected = fixture.expectedQuestions[0]!;
-      const previous = before.get(expected.ownerId)!;
-      const previousOwner = ownerOf(previous)!;
-      const previousIdentity = previous.identity!;
-      applyTransition(fixture);
-      const after = detectCandidatesAcrossRoots();
-      expect(after).toHaveLength(fixture.expectedQuestionCount);
-      const transition = fixture.transition;
-      const afterOwnerId = transition.kind === "replace-owner" ? transition.afterOwnerId : transition.ownerId;
-      const current = after.find((block) => ownerOf(block)?.id === afterOwnerId
-        && transition.afterPreviewContains.every((signal) => block.previewText.includes(signal)));
-      expect(current, `post-transition question for ${afterOwnerId}`).toBeTruthy();
-      const currentOwner = ownerOf(current!)!;
-      if (transition.kind === "replace-owner") {
-        expect(currentOwner).not.toBe(previousOwner);
-        expect(currentOwner.isConnected).toBe(true);
-        expect(current!.identity?.stableId).toBe(previousIdentity.stableId);
-        expect(current!.identity?.contentFingerprint).toBe(previousIdentity.contentFingerprint);
-      } else {
-        expect(currentOwner).toBe(previousOwner);
-        expect(current!.identity?.stableId).not.toBe(previousIdentity.stableId);
-        expect(current!.identity?.contentFingerprint).not.toBe(previousIdentity.contentFingerprint);
+      if (fixture.transition) {
+        const expected = fixture.expectedQuestions[0]!;
+        const previous = before.get(expected.ownerId)!;
+        const previousOwner = ownerOf(previous)!;
+        const previousIdentity = previous.identity!;
+        applyTransition(fixture);
+        installControlBehaviors(document, fixture, mounted.optionEvents);
+        const after = detectCandidatesAcrossRoots();
+        expect(after).toHaveLength(fixture.expectedQuestionCount);
+        const transition = fixture.transition;
+        const afterOwnerId = transition.kind === "replace-owner" ? transition.afterOwnerId : transition.ownerId;
+        const current = after.find((block) => ownerOf(block)?.id === afterOwnerId
+          && transition.afterPreviewContains.every((signal) => block.previewText.includes(signal)));
+        expect(current, `post-transition question for ${afterOwnerId}`).toBeTruthy();
+        const currentOwner = ownerOf(current!)!;
+        if (transition.kind === "replace-owner") {
+          expect(currentOwner).not.toBe(previousOwner);
+          expect(currentOwner.isConnected).toBe(true);
+          expect(current!.identity?.stableId).toBe(previousIdentity.stableId);
+          expect(current!.identity?.contentFingerprint).toBe(previousIdentity.contentFingerprint);
+        } else {
+          expect(currentOwner).toBe(previousOwner);
+          expect(current!.identity?.stableId).not.toBe(previousIdentity.stableId);
+          expect(current!.identity?.contentFingerprint).not.toBe(previousIdentity.contentFingerprint);
+        }
+        transitionedFillBlocks.set(expected.ownerId, current!);
+        fillCandidates = after;
+      }
+
+      for (const expected of fixture.expectedQuestions) {
+        if (expected.fillSupport.capability === "not-applicable") continue;
+        const block = transitionedFillBlocks.get(expected.ownerId) ?? matchingBlock(fillCandidates, expected);
+        expect(block, `fill contract block for ${expected.ownerId}`).toBeTruthy();
+        await assertFillExpectation(fixture, expected, block!, mounted);
       }
     });
   }
 
   it("enforces the fixture contract and keeps the corpus sanitized and offline", () => {
     const fixtureIds = COMPATIBILITY_FIXTURES.map((fixture) => fixture.fixtureId);
-    expect(fixtureIds).toHaveLength(15);
-    expect(new Set(fixtureIds).size).toBe(15);
+    expect(fixtureIds.length).toBeGreaterThanOrEqual(15);
+    expect(new Set(fixtureIds).size).toBe(fixtureIds.length);
+    expect(fixtureIds).toEqual(expect.arrayContaining(Array.from({ length: 15 }, (_, index) => `COMPAT-${String(index + 1).padStart(2, "0")}`)));
     expect(new Set(COMPATIBILITY_FIXTURES.map((fixture) => fixture.sourceKind))).toEqual(new Set([
       "real-platform-derived", "synthetic-framework", "historical-regression",
     ]));
@@ -315,15 +473,27 @@ describe("Phase 9A deterministic compatibility corpus", () => {
         expect(expected.mediaOwnership).toBeDefined();
         expect(expected.optionKeys).toBeDefined();
         expect(expected.controlMapping).toBeDefined();
-        expect(expected.fillSupport).toBeTruthy();
+        expect(expected.fillSupport).toBeDefined();
+        if (expected.fillSupport.capability === "supported") {
+          expect(expected.fillSupport.answer.trim()).not.toBe("");
+          expect(expected.fillSupport.expectedFilledCount).toBeGreaterThan(0);
+        } else if (expected.fillSupport.capability !== "not-applicable") {
+          expect(expected.fillSupport.expectedFailure.trim()).not.toBe("");
+        }
       }
     }
+    const polymasRegression = COMPATIBILITY_FIXTURES.find((fixture) => fixture.fixtureId === "COMPAT-01")!;
+    expect(polymasRegression.path).toMatchObject({ kind: "site-specialized-path", siteBranch: "polymas-zhihuishu-right-cut" });
+    const genericBaseline = COMPATIBILITY_FIXTURES.find((fixture) => fixture.fixtureId === "COMPAT-16")!;
+    expect(genericBaseline.path).toEqual({ kind: "generic-path", siteBranch: "not-applicable" });
   });
 
-  it("keeps every support category explicit, including browser security limits", () => {
+  it("keeps supported, safety, architecture, and browser-security categories explicit", () => {
     const categories = new Set(COMPATIBILITY_FIXTURES.map((fixture) => fixture.category));
-    for (const limitation of BROWSER_SECURITY_LIMITATIONS) categories.add(limitation.category);
-    expect(categories).toEqual(new Set(["SUPPORTED", "KNOWN_SAFE_LIMITATION", "UNSUPPORTED_BY_BROWSER_SECURITY"]));
+    for (const limitation of COMPATIBILITY_LIMITATIONS) categories.add(limitation.category);
+    expect(categories).toEqual(new Set(["SUPPORTED", "KNOWN_SAFE_LIMITATION", "KNOWN_ARCHITECTURE_LIMITATION", "UNSUPPORTED_BY_BROWSER_SECURITY"]));
+    expect(COMPATIBILITY_LIMITATIONS.find(({ scenario }) => scenario === "Closed shadow root")?.category).toBe("UNSUPPORTED_BY_BROWSER_SECURITY");
+    expect(COMPATIBILITY_LIMITATIONS.find(({ scenario }) => scenario === "Cross-origin iframe DOM")?.category).toBe("KNOWN_ARCHITECTURE_LIMITATION");
     const specializedBranches = new Set<string>();
     const specializedHosts = new Set<string>();
     for (const fixture of COMPATIBILITY_FIXTURES) {
@@ -347,13 +517,15 @@ describe("Phase 9A deterministic compatibility corpus", () => {
     for (const fixture of COMPATIBILITY_FIXTURES) {
       expect(matrix, fixture.fixtureId).toContain(fixture.fixtureId);
       expect(matrix, fixture.fixtureId).toContain(fixture.category);
+      const row = matrix.split(/\r?\n/).find((line) => line.includes(fixture.fixtureId));
+      expect(row, `matrix row for ${fixture.fixtureId}`).toContain(fillSupportMatrixText(fixture));
       expect(matrix, fixture.fixtureId).toContain(fixture.path.kind);
       if (fixture.path.kind === "site-specialized-path") expect(matrix, fixture.fixtureId).toContain(fixture.path.siteBranch);
       if (fixture.validationReference) {
         for (const validation of fixture.validationReference.split("; ")) expect(matrix).toContain(validation.split(" ").slice(-1)[0]);
       }
     }
-    for (const limitation of BROWSER_SECURITY_LIMITATIONS) {
+    for (const limitation of COMPATIBILITY_LIMITATIONS) {
       expect(matrix).toContain(limitation.scenario);
       expect(matrix).toContain(limitation.category);
       expect(matrix).toContain(limitation.reason);
@@ -362,5 +534,8 @@ describe("Phase 9A deterministic compatibility corpus", () => {
     expect(matrix).toContain("Fill Support");
     expect(matrix).toContain("EVENT-CHOICE-POINTERDOWN-RERENDER-1");
     expect(matrix).toContain("PROD-USR1");
+    expect(matrix).toContain("with matching host permissions an extension can execute in a matching frame");
+    expect(matrix).toContain("per-frame content runtime, explicit frame identity, and message authority");
+    expect(matrix).toContain("A parent content script must not directly read or infer a cross-origin child document.");
   });
 });

@@ -3,13 +3,23 @@ import type { QuestionBoundaryState } from "@/shared/types/questionBoundary";
 import type { MediaOwnershipRole, MediaSourceKind } from "@/shared/types/mediaAsset";
 
 export type CompatibilitySourceKind = "real-platform-derived" | "synthetic-framework" | "historical-regression";
-export type CompatibilityCategory = "SUPPORTED" | "KNOWN_SAFE_LIMITATION" | "UNSUPPORTED_BY_BROWSER_SECURITY";
+export type CompatibilityCategory = "SUPPORTED" | "KNOWN_SAFE_LIMITATION" | "KNOWN_ARCHITECTURE_LIMITATION" | "UNSUPPORTED_BY_BROWSER_SECURITY";
 export type CompatibilityRootMode = "top-document" | "same-origin-frame" | "open-shadow-root" | "iframe-open-shadow";
 export type CompatibilityPath =
   | { kind: "generic-path"; siteBranch: "not-applicable" }
   | { kind: "site-specialized-path"; siteBranch: "polymas-zhihuishu-right-cut" | "pintia-programming" | "pintia-question-list" };
 export type CompatibilityCompleteness = Pick<QuestionCompleteness,
   "state" | "boundaryComplete" | "stemComplete" | "optionsComplete" | "visualComplete" | "controlsComplete">;
+export type FillSupportContract =
+  | { capability: "supported"; answer: string; expectedFilledCount: number }
+  | { capability: "withheld"; answer: string; expectedFailure: string }
+  | {
+      capability: "known-safe-limitation";
+      answer: string;
+      expectedFailure: string;
+      stateAfterFailure: "unchanged" | "requested-answer-selected-by-pointerdown";
+    }
+  | { capability: "not-applicable" };
 
 export type CompatibilityFixtureQuestion = {
   ownerId: string;
@@ -22,7 +32,7 @@ export type CompatibilityFixtureQuestion = {
   mediaOwnership: Array<{ role: MediaOwnershipRole | "not-applicable"; count: number; optionKey?: string | "not-applicable"; sourceKinds?: MediaSourceKind[] | "not-applicable" }>;
   optionKeys: string[] | "not-applicable";
   controlMapping: { capability: "supported" | "safe-rejection" | "known-limitation" | "not-applicable"; optionKeys: string[] | "not-applicable" };
-  fillSupport: "supported" | "withheld" | "known-safe-limitation" | "not-applicable";
+  fillSupport: FillSupportContract;
   rootKind: "top-document" | "same-origin-frame" | "open-shadow-root" | "open-shadow-root-in-same-origin-frame";
   displaySegmentRoles: string[] | "not-applicable";
 };
@@ -74,7 +84,7 @@ function choiceQuestion(
     mediaOwnership: [{ role: "not-applicable", count: 0, optionKey: "not-applicable", sourceKinds: "not-applicable" }],
     optionKeys: ["A", "B", "C", "D"],
     controlMapping: { capability: "supported", optionKeys: ["A", "B", "C", "D"] },
-    fillSupport: "supported",
+    fillSupport: { capability: "supported", answer: "B", expectedFilledCount: 1 },
     rootKind: "top-document",
     displaySegmentRoles: "not-applicable",
     ...overrides,
@@ -87,7 +97,16 @@ function judgeQuestion(ownerId: string, previewContains: string[], previewExclud
     completeness: COMPLETE_JUDGE_COMPLETENESS, boundary: COMPLETE_BOUNDARY,
     mediaOwnership: [{ role: "not-applicable", count: 0, optionKey: "not-applicable", sourceKinds: "not-applicable" }],
     optionKeys: "not-applicable", controlMapping: { capability: "not-applicable", optionKeys: "not-applicable" },
-    fillSupport: "not-applicable", rootKind: "top-document", displaySegmentRoles: "not-applicable",
+    fillSupport: { capability: "not-applicable" }, rootKind: "top-document", displaySegmentRoles: "not-applicable",
+  };
+}
+
+function supportedJudgeQuestion(ownerId: string, previewContains: string[]): CompatibilityFixtureQuestion {
+  return {
+    ...judgeQuestion(ownerId, previewContains),
+    optionKeys: ["A", "B"],
+    controlMapping: { capability: "supported", optionKeys: ["A", "B"] },
+    fillSupport: { capability: "supported", answer: "对", expectedFilledCount: 1 },
   };
 }
 
@@ -177,7 +196,7 @@ export const COMPATIBILITY_FIXTURES: CompatibilityFixture[] = [
       completeness: COMPLETE_SHORT_ANSWER_COMPLETENESS, boundary: COMPLETE_BOUNDARY,
       mediaOwnership: [{ role: "not-applicable", count: 0, optionKey: "not-applicable", sourceKinds: "not-applicable" }],
       optionKeys: "not-applicable", controlMapping: { capability: "not-applicable", optionKeys: "not-applicable" },
-      fillSupport: "not-applicable", rootKind: "top-document", displaySegmentRoles: ["title", "meta", "section"],
+      fillSupport: { capability: "not-applicable" }, rootKind: "top-document", displaySegmentRoles: ["title", "meta", "section"],
     }],
   },
   {
@@ -190,7 +209,10 @@ export const COMPATIBILITY_FIXTURES: CompatibilityFixture[] = [
     expectedQuestionCount: 2,
     expectedQuestions: [
       judgeQuestion("10000001", ["Classify this neutral statement", "T F"], ["Exam notice", "Question overview"]),
-      choiceQuestion("10000002", ["Which neutral color name follows amber?", "D. Violet"], { previewExcludes: ["Exam notice", "Question overview"] }),
+      choiceQuestion("10000002", ["Which neutral color name follows amber?", "D. Violet"], {
+        previewExcludes: ["Exam notice", "Question overview"],
+        fillSupport: { capability: "known-safe-limitation", answer: "B", expectedFailure: "STALE_ACTION_PLAN", stateAfterFailure: "unchanged" },
+      }),
     ],
   },
   {
@@ -248,7 +270,7 @@ export const COMPATIBILITY_FIXTURES: CompatibilityFixture[] = [
     questionRects: { "portal-question": { left: 80, top: 120, width: 820, height: 240 } },
     expectedQuestionCount: 1,
     expectedQuestions: [choiceQuestion("portal-question", ["Question 14 asks", "D. Gray"], {
-      controlMapping: { capability: "safe-rejection", optionKeys: [] }, fillSupport: "withheld",
+      controlMapping: { capability: "safe-rejection", optionKeys: [] }, fillSupport: { capability: "withheld", answer: "B", expectedFailure: "INVALID_ANSWER_OPTION" },
     })],
   },
   {
@@ -260,13 +282,34 @@ export const COMPATIBILITY_FIXTURES: CompatibilityFixture[] = [
     interactionTrigger: "pointerdown",
     expectedQuestionCount: 1,
     expectedQuestions: [choiceQuestion("pointerdown-question", ["Question 15 asks", "D. Gray"], {
-      controlMapping: { capability: "known-limitation", optionKeys: ["A", "B", "C", "D"] }, fillSupport: "known-safe-limitation",
+      controlMapping: { capability: "known-limitation", optionKeys: ["A", "B", "C", "D"] }, fillSupport: {
+        capability: "known-safe-limitation", answer: "B", expectedFailure: "PARTIAL_MUTATION_UNPROVABLE",
+        stateAfterFailure: "requested-answer-selected-by-pointerdown",
+      },
     })],
     validationReference: "transactionEventBoundary.test.ts EVENT-CHOICE-POINTERDOWN-RERENDER-1; phase5ProductionRace.test.ts PROD-USR1",
   },
+  {
+    fixtureId: "COMPAT-16", sourceKind: "synthetic-framework", platformFamily: "generic",
+    scenario: "Generic static single-choice question without media or site-specific selectors", path: generic, category: "SUPPORTED",
+    pageUrl: "https://example.test/generic/static-choice", viewport: { width: 1280, height: 900 }, rootMode: "top-document",
+    html: questionMarkup("generic-static-question", "generic-static-16", "Which neutral label follows alpha? Choose one.", ["A. Alpha", "B. Beta", "C. Gamma", "D. Delta"]),
+    questionRects: { "generic-static-question": { left: 80, top: 120, width: 820, height: 320 } },
+    expectedQuestionCount: 1,
+    expectedQuestions: [choiceQuestion("generic-static-question", ["Which neutral label follows alpha?", "D. Delta"])],
+  },
+  {
+    fixtureId: "COMPAT-17", sourceKind: "synthetic-framework", platformFamily: "generic",
+    scenario: "Generic judge question with semantic true and false controls", path: generic, category: "SUPPORTED",
+    pageUrl: "https://example.test/generic/judge", viewport: { width: 1280, height: 900 }, rootMode: "top-document",
+    html: `<section id="generic-judge-question" class="question-item" data-question-id="generic-judge-17"><h3 class="questionTit">判断题</h3><div class="stem">Classify this neutral statement and determine whether the statement is true or false. Choose one.</div><ul><li><button class="option" role="radio" aria-label="A. True" aria-checked="false">正确</button></li><li><button class="option" role="radio" aria-label="B. False" aria-checked="false">错误</button></li></ul></section>`,
+    questionRects: { "generic-judge-question": { left: 80, top: 120, width: 820, height: 280 } },
+    expectedQuestionCount: 1,
+    expectedQuestions: [supportedJudgeQuestion("generic-judge-question", ["Classify this neutral statement"])],
+  },
 ];
 
-export const BROWSER_SECURITY_LIMITATIONS = [
+export const COMPATIBILITY_LIMITATIONS = [
   { scenario: "Closed shadow root", category: "UNSUPPORTED_BY_BROWSER_SECURITY" as const, fixture: "not-applicable", reason: "Page-owned closed roots are not exposed to extension DOM traversal." },
-  { scenario: "Cross-origin iframe DOM", category: "UNSUPPORTED_BY_BROWSER_SECURITY" as const, fixture: "not-applicable", reason: "Cross-origin frame document access is denied by browser origin policy." },
+  { scenario: "Cross-origin iframe DOM", category: "KNOWN_ARCHITECTURE_LIMITATION" as const, fixture: "not-applicable", reason: "The current content runtime injects into the top frame only; host permissions do not add per-frame runtime injection or coordination." },
 ];
