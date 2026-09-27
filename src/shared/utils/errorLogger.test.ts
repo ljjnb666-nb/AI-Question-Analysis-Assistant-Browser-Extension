@@ -106,6 +106,33 @@ describe("error log secret redaction", () => {
     expect(getErrorLogs()[0].data?.url).toBe(ordinaryUrl);
   });
 
+  it("P_REL_SEC_04_SIGNED_URL_REDACTION masks AWS and Google signature credentials", () => {
+    const signedUrl = [
+      "https://media.example.test/object.png",
+      "?X-Amz-Signature=aws-secret",
+      "&X-Amz-Credential=aws-credential",
+      "&X-Amz-Security-Token=session-secret",
+      "&X-Goog-Signature=google-signature",
+      "&X-Goog-Credential=google-credential",
+      "&mode=test",
+    ].join("");
+
+    logError("Signed media request failed", undefined, "provider", { url: signedUrl });
+    const loggedUrl = getErrorLogs()[0].data?.url as string;
+    const parsed = new URL(loggedUrl);
+
+    expect(loggedUrl).not.toMatch(/aws-secret|aws-credential|session-secret|google-signature|google-credential/);
+    expect(parsed.protocol).toBe("https:");
+    expect(parsed.host).toBe("media.example.test");
+    expect(parsed.pathname).toBe("/object.png");
+    expect(parsed.searchParams.get("X-Amz-Signature")).toBe("[REDACTED]");
+    expect(parsed.searchParams.get("X-Amz-Credential")).toBe("[REDACTED]");
+    expect(parsed.searchParams.get("X-Amz-Security-Token")).toBe("[REDACTED]");
+    expect(parsed.searchParams.get("X-Goog-Signature")).toBe("[REDACTED]");
+    expect(parsed.searchParams.get("X-Goog-Credential")).toBe("[REDACTED]");
+    expect(parsed.searchParams.get("mode")).toBe("test");
+  });
+
   it("scrubs sensitive structured fields without redacting an ordinary field named key", () => {
     const warningUrl = "https://api.example.test/run?access_token=secret&mode=test";
     logWarn("Provider warning", "provider", { url: warningUrl });

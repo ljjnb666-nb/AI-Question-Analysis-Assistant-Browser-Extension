@@ -20,6 +20,7 @@ const MAX_LOG_SIZE = 100;
 let persistQueue: Promise<void> = Promise.resolve();
 
 const SENSITIVE_QUERY_PARAMETER_NAMES = new Set([
+  // Names use normalizeCredentialName's lowercase alphanumeric form.
   "key",
   "apikey",
   "xapikey",
@@ -33,11 +34,16 @@ const SENSITIVE_QUERY_PARAMETER_NAMES = new Set([
   "clientsecret",
   "signature",
   "sig",
+  "xamzsignature",
+  "xamzcredential",
+  "xamzsecuritytoken",
+  "xgoogsignature",
+  "xgoogcredential",
+  "xgoogsecuritytoken",
   "password",
   "credential",
   "credentials",
   "awsaccesskeyid",
-  "xamzsecuritytoken",
   "googleaccessid",
 ]);
 
