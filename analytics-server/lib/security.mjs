@@ -60,9 +60,19 @@ export function createFixedWindowRateLimiter(now = () => Date.now()) {
 }
 
 export function normalizeIpAddress(req) {
-  const forwarded = String(req.headers["x-forwarded-for"] || "")
-    .split(",")
-    .map((part) => part.trim())
-    .find(Boolean);
-  return forwarded || req.socket?.remoteAddress || "unknown";
+  const peerAddress = String(req.socket?.remoteAddress || "").trim();
+  if (!peerAddress) return "unknown";
+
+  const normalizedPeerAddress = peerAddress.toLowerCase();
+  const isTrustedLoopbackProxy =
+    normalizedPeerAddress === "127.0.0.1" ||
+    normalizedPeerAddress === "::1" ||
+    normalizedPeerAddress === "::ffff:127.0.0.1";
+
+  if (!isTrustedLoopbackProxy) return peerAddress;
+
+  // The deployed nginx proxy overwrites X-Real-IP with its observed $remote_addr.
+  // X-Forwarded-For is append-only in that configuration, so its first value may
+  // be attacker-controlled and is never used as rate-limit identity.
+  return String(req.headers?.["x-real-ip"] || "").trim() || peerAddress;
 }

@@ -4,13 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 import { createAnalyticsHandler } from "./server.mjs";
 import { createAdminSessionStore } from "./admin-sessions.mjs";
 
-function createReq({ method = "GET", url = "/", headers = {}, body = "" } = {}) {
+function createReq({ method = "GET", url = "/", headers = {}, body = "", socket = { remoteAddress: "127.0.0.1" } } = {}) {
   const listeners = new Map();
   return {
     method,
     url,
     headers,
-    socket: { remoteAddress: "127.0.0.1" },
+    socket,
     destroyed: false,
     on(event, listener) {
       listeners.set(event, listener);
@@ -327,6 +327,30 @@ describe("analytics handler", () => {
     for (let attempt = 0; attempt < 11; attempt += 1) last = await login(handler, "wrong-secret");
     expect(last.res.statusCode).toBe(429);
     expect(last.res.headers["Set-Cookie"]).toBeUndefined();
+  });
+
+  it("P_REL_ADM_12_ADMIN_RATE_LIMIT_PROXY_SPOOF: shares one admin login bucket despite changing XFF", async () => {
+    const createAdminSessionToken = vi.fn(() => "must-not-be-issued");
+    const handler = createHandler({ createAdminSessionToken });
+    let last;
+
+    for (let attempt = 1; attempt <= 11; attempt += 1) {
+      last = await invoke(handler, {
+        method: "POST",
+        url: "/admin/login",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "x-forwarded-for": `1.1.1.${attempt}`,
+          "x-real-ip": "203.0.113.50",
+        },
+        body: formBody("wrong-secret"),
+        socket: { remoteAddress: "127.0.0.1" },
+      });
+      expect(last.res.statusCode).toBe(attempt === 11 ? 429 : 401);
+      expect(last.res.headers["Set-Cookie"]).toBeUndefined();
+    }
+
+    expect(createAdminSessionToken).not.toHaveBeenCalled();
   });
 
   it("bounds session storage, evicts the oldest active session, and removes expired entries", () => {
