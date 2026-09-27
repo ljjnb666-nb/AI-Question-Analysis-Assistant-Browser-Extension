@@ -178,6 +178,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
   }
 
   return {
+    clearRouteOwnedState,
     handleAutoDetect,
     handleFullPageDetect,
     looksLikeGarbledFullPageText,

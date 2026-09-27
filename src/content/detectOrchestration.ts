@@ -52,7 +52,7 @@ type ViewportDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], st
   createHighlightLayer: (options: {
     onSelect: (blockId: string, selected: boolean) => void;
   }) => TLayer;
-  watchForPageChanges: (onChange: (blocks: QuestionBlock[], rootKey?: string) => void, onRouteChange?: () => void) => () => void;
+  watchForPageChanges: (onChange: (blocks: QuestionBlock[], rootKey?: string) => void) => () => void;
   isRuntimeCurrent?: () => boolean;
 };
 
@@ -260,9 +260,6 @@ export function handleAutoDetect<TLayer extends { setBlocks: (blocks: QuestionBl
     state.activeHighlightBlocks = nextBlocks;
     if (highlightLayer) highlightLayer.setBlocks(nextBlocks, deps.candidateStatusMap);
     deps.notifySidePanel(nextBlocks);
-  }, () => {
-    if (!isRuntimeCurrent()) return;
-    deps.clearRouteOwnedState?.();
   });
 
   return { ...state, highlightLayer, unwatchSPA };

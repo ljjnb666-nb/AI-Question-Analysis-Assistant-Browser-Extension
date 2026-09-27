@@ -19,7 +19,6 @@ const INTERACTION_ATTRIBUTES = new Set(["checked", "value", "aria-checked", "ari
 export type QuestionRevisionWatchOptions = {
   detectCandidates: () => QuestionBlock[];
   onCandidates: (candidates: QuestionBlock[], rootKey?: string) => void;
-  onRouteChange?: () => void;
   onEvent?: (event: QuestionRevisionEvent, rootKey?: string) => void;
   /** Root-aware detection for non-top roots (frames, open shadow roots). */
   detectRootCandidates?: (root: TraversableRoot, context: RootContext) => QuestionBlock[];
@@ -157,8 +156,15 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
       if (root.kind === "top-document" || !dirty.has(root.rootKey)) continue;
       scanned.set(root.rootKey, { root, blocks: detectRoot(root) });
     }
-    // Route tracking refreshes on every flush, matching the Phase 6 order,
-    // so the stored fingerprint never trails the real location.
+    for (const [, entry] of scanned) {
+      options.onCandidates(entry.blocks, entry.root.rootKey);
+    }
+
+    // Keep the Phase 6 revision gate as a fallback when semantic DOM work is
+    // already running. The runtime-owned route lifecycle observer remains the
+    // authority for soft state cleanup and also sees URL-only changes without
+    // a DOM mutation (including while this watcher is stopped for full-page
+    // detection).
     const routeChanged = revisions.refreshRoute();
     if (routeChanged) {
       controlRegistry.clear();
@@ -167,15 +173,9 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
         options.onEvent?.("ROUTE_CHANGED", active.rootKey);
         abortQuestionRevisionAttempt();
       }
-      options.onRouteChange?.();
-      if (stopped) return;
+      return;
     }
 
-    for (const [, entry] of scanned) {
-      options.onCandidates(entry.blocks, entry.root.rootKey);
-    }
-
-    if (routeChanged) return;
     const active = activeQuestionRevisionAttempt();
     if (!active) return;
 

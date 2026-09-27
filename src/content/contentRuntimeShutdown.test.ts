@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionBlock } from "@/shared/types";
-import { bootstrapContentRuntime, type ContentRuntimeMessageListener } from "./contentRuntimeBootstrap";
+import { bootstrapContentRuntime, shutdownContentRuntime, type ContentRuntimeMessageListener } from "./contentRuntimeBootstrap";
+import { installContentMainBootstrapListener } from "./contentMainBootstrap";
+import { activeContentRuntimeGeneration } from "./contentRuntimeLifecycle";
+import { captureSolveStartControlState, disposeAnswerFillerRuntimeState, getAnswerFillerRuntimeStateCounts } from "./answerFiller";
+import { observeLiveQuestion } from "./liveQuestionObservation";
 import { controlRegistry } from "./answer/controlRegistry";
 import { runtimeQuestionHandleCount, attachRuntimeRoot, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
 import { sharedRootRegistry } from "./roots/rootRegistry";
@@ -12,7 +16,9 @@ const mocks = vi.hoisted(() => ({
   abortCurrentSolveAttempt: vi.fn(),
   bindingsDispose: vi.fn(),
   bridgeOptions: null as any,
+  clearRouteOwnedState: vi.fn(),
   floating: null as any,
+  handleAutoDetect: vi.fn(),
   handle: null as any,
   layoutDispose: vi.fn(),
   state: null as any,
@@ -44,10 +50,11 @@ vi.mock("./contentMainBridges", () => ({
     return {
       abortCurrentSolveAttempt: mocks.abortCurrentSolveAttempt,
       captureBlockImage: vi.fn(),
+      clearRouteOwnedState: mocks.clearRouteOwnedState,
       clickNextQuestionButton: vi.fn(),
       disposeBindings: mocks.bindingsDispose,
       findNextQuestionButton: vi.fn(),
-      handleAutoDetect: vi.fn(),
+      handleAutoDetect: mocks.handleAutoDetect,
       handleFullPageDetect: vi.fn(),
       layoutWatch: {
         dispose: mocks.layoutDispose,
@@ -111,6 +118,8 @@ describe("content runtime shutdown owner", () => {
     document.body.innerHTML = "";
     listeners = new Set();
     mocks.bridgeOptions = null;
+    mocks.clearRouteOwnedState.mockReset();
+    mocks.handleAutoDetect.mockReset();
     mocks.state = null;
     mocks.floating = null;
     mocks.handle = null;
@@ -130,16 +139,19 @@ describe("content runtime shutdown owner", () => {
     sharedRootRegistry().reset();
     runtimeMediaPayloadStore.clear();
     runtimeMediaSourceLocatorStore.clear();
+    disposeAnswerFillerRuntimeState();
   });
 
   afterEach(() => {
     handle?.dispose();
     handle = null;
+    shutdownContentRuntime();
     controlRegistry.clear();
     disposeQuestionRevisionRuntime();
     sharedRootRegistry().reset();
     runtimeMediaPayloadStore.clear();
     runtimeMediaSourceLocatorStore.clear();
+    disposeAnswerFillerRuntimeState();
     vi.unstubAllGlobals();
   });
 
@@ -251,6 +263,95 @@ describe("content runtime shutdown owner", () => {
     expect(listeners.has(handle.listener)).toBe(true);
     handle.dispose();
     expect(listeners.size).toBe(0);
+    handle = null;
+  });
+
+  it("P10B-CONTENT-MAIN-REARM-01 reloads a runtime through the production bootstrap owner after shutdown", async () => {
+    const loadBootstrapModule = vi.fn(async () => ({ bootstrapContentRuntime }));
+    const removeBootstrapListener = installContentMainBootstrapListener(chrome.runtime.onMessage, loadBootstrapModule);
+    const bootstrapListener = [...listeners][0]!;
+    const message = { type: "START_AUTO_DETECT" } as never;
+    const sender = {} as never;
+    const sendResponse = vi.fn();
+
+    expect(listeners.size).toBe(1);
+    expect(bootstrapListener(message, sender, sendResponse)).toBe(true);
+    await vi.waitFor(() => expect(mocks.handleAutoDetect).toHaveBeenCalledTimes(1));
+
+    const runtimeListenerA = [...listeners][0]!;
+    const generationA = activeContentRuntimeGeneration();
+    const runtimeCurrentA = (mocks.bridgeOptions as { isRuntimeCurrent: () => boolean }).isRuntimeCurrent;
+    expect(generationA).not.toBeNull();
+    expect(runtimeListenerA).not.toBe(bootstrapListener);
+    expect(listeners.size).toBe(1);
+    expect(loadBootstrapModule).toHaveBeenCalledTimes(1);
+
+    shutdownContentRuntime();
+    expect(runtimeCurrentA()).toBe(false);
+    expect([...listeners]).toEqual([bootstrapListener]);
+    mocks.handleAutoDetect.mockReset();
+
+    expect(bootstrapListener(message, sender, sendResponse)).toBe(true);
+    await vi.waitFor(() => expect(mocks.handleAutoDetect).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(activeContentRuntimeGeneration()).not.toBe(generationA));
+
+    const runtimeListenerB = [...listeners][0]!;
+    const runtimeCurrentB = (mocks.bridgeOptions as { isRuntimeCurrent: () => boolean }).isRuntimeCurrent;
+    expect(runtimeListenerB).not.toBe(bootstrapListener);
+    expect(runtimeListenerB).not.toBe(runtimeListenerA);
+    expect(runtimeCurrentA()).toBe(false);
+    expect(runtimeCurrentB()).toBe(true);
+    expect(listeners.size).toBe(1);
+    expect(loadBootstrapModule).toHaveBeenCalledTimes(2);
+
+    shutdownContentRuntime();
+    expect([...listeners]).toEqual([bootstrapListener]);
+    removeBootstrapListener();
+    expect(listeners.size).toBe(0);
+  });
+
+  it("P10B-SNAPSHOT-SHUTDOWN-01 clears solve-start state before Runtime B captures a fresh baseline", () => {
+    const makeSnapshotQuestion = () => {
+      document.body.innerHTML = '<section class="question-item" id="snapshot-question">1. prompt <button>A. one</button><button>B. two</button></section>';
+      const owner = document.getElementById("snapshot-question")!;
+      document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
+      const observed = observeLiveQuestion({
+        id: "snapshot-question",
+        bbox: { x: 0, y: 0, width: 500, height: 240 },
+        previewText: "1. prompt A. one B. two",
+        questionTypeGuess: "single_choice",
+        hasImage: false,
+        confidence: 1,
+        source: "auto_dom",
+      }, owner);
+      return attachRuntimeRoot(observed, { rootKey: TOP_ROOT_KEY, rootGeneration: TOP_ROOT_GENERATION, kind: "top-document" }, owner);
+    };
+
+    const blockA = makeSnapshotQuestion();
+    handle = bootstrapContentRuntime();
+    captureSolveStartControlState(blockA);
+    expect(getAnswerFillerRuntimeStateCounts()).toEqual({ solveStartSnapshotCount: 1, autoSnapshotStatusCount: 1 });
+    const controller = new AbortController();
+    beginQuestionRevisionAttempt(blockA, controller);
+    let countsWhenAttemptAborted: ReturnType<typeof getAnswerFillerRuntimeStateCounts> | null = null;
+    mocks.abortCurrentSolveAttempt.mockImplementation(() => {
+      countsWhenAttemptAborted = getAnswerFillerRuntimeStateCounts();
+      controller.abort();
+    });
+
+    handle.dispose();
+    expect(controller.signal.aborted).toBe(true);
+    expect(countsWhenAttemptAborted).toEqual({ solveStartSnapshotCount: 1, autoSnapshotStatusCount: 1 });
+    expect(getAnswerFillerRuntimeStateCounts()).toEqual({ solveStartSnapshotCount: 0, autoSnapshotStatusCount: 0 });
+
+    handle = bootstrapContentRuntime();
+    const blockB = makeSnapshotQuestion();
+    expect(blockB.identity?.stableId).toBe(blockA.identity?.stableId);
+    expect(blockB.identity?.contentFingerprint).toBe(blockA.identity?.contentFingerprint);
+    captureSolveStartControlState(blockB);
+    expect(getAnswerFillerRuntimeStateCounts()).toEqual({ solveStartSnapshotCount: 1, autoSnapshotStatusCount: 1 });
+    handle.dispose();
+    expect(getAnswerFillerRuntimeStateCounts()).toEqual({ solveStartSnapshotCount: 0, autoSnapshotStatusCount: 0 });
     handle = null;
   });
 });

@@ -187,6 +187,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
   });
 
   const {
+    clearRouteOwnedState,
     handleAutoDetect,
     handleFullPageDetect,
     looksLikeGarbledFullPageText,
@@ -294,6 +295,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
   return {
     abortCurrentSolveAttempt,
     captureBlockImage,
+    clearRouteOwnedState,
     disposeBindings,
     clickNextQuestionButton,
     detectZhihuishuCurrentQuestionBlock,

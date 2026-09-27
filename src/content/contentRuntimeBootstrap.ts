@@ -12,7 +12,7 @@ import {
   getScrollLeft,
   setScrollPosition,
 } from "./detector/fullPageDetector";
-import { fillParsedAnswerInPage, verifyParsedAnswerInPage } from "./answerFiller";
+import { disposeAnswerFillerRuntimeState, clearAutoSolveSnapshotState, fillParsedAnswerInPage, verifyParsedAnswerInPage } from "./answerFiller";
 import { findMatchingFullPageCandidate, projectViewportBboxToAbsolute } from "./candidateMatching";
 import { registerContentRuntimeMessageHandlers } from "./contentRuntimeMessages";
 import {
@@ -50,6 +50,7 @@ import { createContentMainBridges } from "./contentMainBridges";
 import { createContentRuntimeState } from "./contentRuntimeState";
 import { createContentMainWorkflows } from "./contentMainWorkflows";
 import { beginContentRuntimeGeneration } from "./contentRuntimeLifecycle";
+import { startContentRouteLifecycleWatch } from "./revision/contentRouteLifecycle";
 import { controlRegistry } from "./answer/controlRegistry";
 import { sharedRootRegistry } from "./roots/rootRegistry";
 import { invalidateAllRuntimeQuestionHandles } from "./roots/rootContext";
@@ -89,6 +90,7 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     captureBlockImage,
     abortCurrentSolveAttempt,
     clickNextQuestionButton,
+    clearRouteOwnedState,
     disposeBindings,
     findNextQuestionButton,
     handleAutoDetect,
@@ -187,6 +189,18 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
   });
   startManualCaptureImpl = workflows.startManualCapture;
 
+  const stopContentRouteLifecycleWatch = startContentRouteLifecycleWatch(() => {
+    if (!lifecycle.isCurrent()) return;
+    runtimeState.setAutoSolveStopRequested(true);
+    abortCurrentSolveAttempt();
+    controlRegistry.clear();
+    clearAutoSolveSnapshotState();
+    cancelFullPageScan();
+    runtimeState.destroyActiveOverlay();
+    floatingMgr.close();
+    clearRouteOwnedState();
+  });
+
   // Floating Trigger Button
   // Disabled by default - only create when user explicitly triggers capture
   // if (!FloatingTrigger.getExisting()) {
@@ -256,8 +270,10 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
       };
 
       cleanup(() => chrome.runtime.onMessage.removeListener(listener));
+      cleanup(stopContentRouteLifecycleWatch);
       cleanup(() => runtimeState.setAutoSolveStopRequested(true));
       cleanup(abortCurrentSolveAttempt);
+      cleanup(disposeAnswerFillerRuntimeState);
       cleanup(cancelFullPageScan);
       cleanup(runtimeState.destroyActiveOverlay);
       cleanup(runtimeState.stopSpaWatch);

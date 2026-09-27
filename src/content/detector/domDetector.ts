@@ -60,13 +60,11 @@ function nextRootCandidateObservationId(): string {
 
 export function watchForPageChanges(
   callback: (blocks: QuestionBlock[], rootKey?: string) => void,
-  onRouteChange?: () => void,
 ): () => void {
   return startQuestionRevisionWatch({
     detectCandidates: detectCandidatesInViewport,
     onCandidates: callback,
     detectRootCandidates: detectCandidatesInRoot,
-    onRouteChange,
   });
 }
 
