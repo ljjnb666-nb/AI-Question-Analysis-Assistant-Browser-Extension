@@ -44,6 +44,8 @@ export type ControlMetadata = {
   lifecycleToken: number;
 };
 
+export type ControlRegistration = { ref: ControlRef; element: HTMLElement; owner: Element };
+
 type ScopeToken = { token: number; questionId: string; rootKey: string; rootGeneration: number };
 
 /** Runtime-only DOM references are weak and scope metadata has a deterministic cap. */
@@ -57,6 +59,22 @@ export class ControlRegistry {
 
   /** Read-only test/debug seam. */
   get size(): number { return this.elements.size; }
+
+  /** Read-only test/debug seam; every entry must be backed by its live scope token. */
+  get orphanEntryCount(): number {
+    return [...this.elements.values()].filter((entry) => {
+      const scope = this.scopes.get(entry.scopeKey);
+      return !scope || scope.token !== entry.lifecycleToken
+        || scope.questionId !== entry.questionId
+        || scope.rootKey !== entry.rootKey
+        || scope.rootGeneration !== entry.rootGeneration;
+    }).length;
+  }
+
+  /** Read-only test/debug seam. */
+  hasScopeForToken(lifecycleToken: number): boolean {
+    return [...this.scopes.values()].some((scope) => scope.token === lifecycleToken);
+  }
 
   /** Read-only test/debug seam; optional scope arguments keep identical questions isolated by root. */
   entryCountForQuestion(questionId: string, rootKey?: string, rootGeneration?: number): number {
@@ -93,32 +111,65 @@ export class ControlRegistry {
 
   /** Weakly register a control. Returns false only when this mapping cannot be retained safely. */
   put(ref: ControlRef, element: HTMLElement, owner: Element, rootKey: string, rootGeneration: number, lifecycleToken: number): boolean {
+    return this.putMany([{ ref, element, owner }], rootKey, rootGeneration, lifecycleToken);
+  }
+
+  /** Register a complete mapping atomically, evicting only whole safe lifecycle scopes. */
+  putMany(registrations: readonly ControlRegistration[], rootKey: string, rootGeneration: number, lifecycleToken: number): boolean {
     if (!WeakRefApi) return false;
-    const scopeKey = this.scopeKey(ref.questionId, rootKey, rootGeneration);
+    if (registrations.length === 0) {
+      return [...this.scopes.values()].some((scope) => scope.token === lifecycleToken
+        && scope.rootKey === rootKey && scope.rootGeneration === rootGeneration);
+    }
+    const questionId = registrations[0]?.ref.questionId;
+    if (registrations.some(({ ref }) => ref.questionId !== questionId)) return false;
+    const scopeKey = this.scopeKey(questionId ?? "", rootKey, rootGeneration);
     if (this.scopes.get(scopeKey)?.token !== lifecycleToken) return false;
     this.pruneDetached();
 
-    if (!this.elements.has(ref.controlId)) {
-      while (this.elements.size >= MAX_CONTROL_REGISTRY_ENTRIES) {
-        const evictableId = [...this.elements].find(([id]) => !this.isControlPinned(id))?.[0];
-        if (!evictableId) return false;
-        const evicted = this.elements.get(evictableId);
-        if (evicted) this.clearScope(evicted.scopeKey);
+    const uniqueRegistrations = new Map(registrations.map((registration) => [registration.ref.controlId, registration]));
+    if ([...uniqueRegistrations.keys()].some((id) => {
+      const existing = this.elements.get(id);
+      return existing && (existing.scopeKey !== scopeKey || existing.lifecycleToken !== lifecycleToken);
+    })) return false;
+    const additionalEntries = [...uniqueRegistrations.keys()].filter((id) => !this.elements.has(id)).length;
+    const requiredEviction = this.elements.size + additionalEntries - MAX_CONTROL_REGISTRY_ENTRIES;
+    if (requiredEviction > 0) {
+      const entryCounts = new Map<string, number>();
+      const scopesWithPinnedControls = new Set<string>();
+      for (const [id, entry] of this.elements) {
+        entryCounts.set(entry.scopeKey, (entryCounts.get(entry.scopeKey) ?? 0) + 1);
+        if (this.isControlPinned(id)) scopesWithPinnedControls.add(entry.scopeKey);
       }
-    } else {
-      this.elements.delete(ref.controlId);
+
+      const victims: string[] = [];
+      let availableEntries = 0;
+      for (const [candidateKey, scope] of this.scopes) {
+        const count = entryCounts.get(candidateKey) ?? 0;
+        if (candidateKey === scopeKey || scope.token === lifecycleToken || this.isTokenPinned(scope.token)
+          || scopesWithPinnedControls.has(candidateKey) || count === 0) continue;
+        victims.push(candidateKey);
+        availableEntries += count;
+        if (availableEntries >= requiredEviction) break;
+      }
+      // Fail before changing any other scope or partially registering this mapping.
+      if (availableEntries < requiredEviction) return false;
+      for (const victim of victims) this.clearScope(victim);
     }
 
-    this.elements.set(ref.controlId, {
-      element: new WeakRefApi(element),
-      owner: new WeakRefApi(owner),
-      questionId: ref.questionId,
-      semanticFingerprint: ref.semanticFingerprint,
-      rootKey,
-      rootGeneration,
-      scopeKey,
-      lifecycleToken,
-    });
+    if (this.elements.size + additionalEntries > MAX_CONTROL_REGISTRY_ENTRIES) return false;
+    for (const { ref, element, owner } of uniqueRegistrations.values()) {
+      this.elements.set(ref.controlId, {
+        element: new WeakRefApi(element),
+        owner: new WeakRefApi(owner),
+        questionId: ref.questionId,
+        semanticFingerprint: ref.semanticFingerprint,
+        rootKey,
+        rootGeneration,
+        scopeKey,
+        lifecycleToken,
+      });
+    }
     return true;
   }
 

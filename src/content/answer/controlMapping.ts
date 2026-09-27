@@ -1,7 +1,7 @@
 import type { QuestionBlock } from "@/shared/types";
 import { stableHash } from "../questionIdentity";
 import { discoverControls } from "./controlDiscovery";
-import { controlRegistry, type ControlMappingReason, type ControlRef } from "./controlRegistry";
+import { controlRegistry, type ControlMappingReason, type ControlRef, type ControlRegistration } from "./controlRegistry";
 import { countExpectedBlankParts } from "../autoSolveHeuristics";
 import { resolveCanonicalQuestionOwner } from "../liveQuestionObservation";
 import { RUNTIME_ROOT, TOP_ROOT_GENERATION, TOP_ROOT_KEY, type RuntimeRootAttachment } from "../roots/rootContext";
@@ -30,6 +30,7 @@ export function buildControlMapping(block: QuestionBlock, owner: Element): Contr
   const options = new Map<string, ControlRef>();
   const blanks: ControlRef[] = [];
   const textControls: ControlRef[] = [];
+  const registrations: ControlRegistration[] = [];
   // Runtime control ids are root-scoped: identical labels in different roots
   // must never alias into the same registry entry.
   const attachedRoot = (block as { [RUNTIME_ROOT]?: RuntimeRootAttachment })[RUNTIME_ROOT];
@@ -50,14 +51,19 @@ export function buildControlMapping(block: QuestionBlock, owner: Element): Contr
     const blankIndex = blankEvidence?.index ?? blanks.length;
     const ref: ControlRef = { controlId: `control_v1_${stableHash(`${questionId}\u001f${controlRootKey}\u001f${controlRootGeneration}\u001f${lifecycleToken}\u001f${role}\u001f${key ?? blankIndex}\u001f${found.text}`)}`, questionId, role, optionKey: key ?? undefined, blankIndex: role === "blank" ? blankIndex : undefined, controlType: found.controlType, semanticFingerprint: semanticFingerprintForControl(found.element, { controlType: found.controlType, role, optionKey: key ?? undefined, blankIndex, semanticText: found.text }), semanticText: found.text, enabled: found.enabled, visible: found.visible, confidence: key ? 1 : blankEvidence ? .95 : .75, reasons: blankEvidence ? ["SEMANTIC_CONTAINER"] : reason };
     if (role === "blank" && blanks[blankIndex]) return { ok: false, code: "CONTROL_MAPPING_AMBIGUOUS", message: `Multiple active controls map to blank ${blankIndex + 1}` };
-    if (!controlRegistry.put(ref, found.element, semanticOwner, controlRootKey, controlRootGeneration, lifecycleToken)) {
-      return { ok: false, code: "CONTROL_MAPPING_CHANGED", message: "Control registry capacity is exhausted" };
-    }
     if (role === "option") {
+      if (key && options.has(key)) return { ok: false, code: "CONTROL_MAPPING_AMBIGUOUS", message: `Multiple active controls map to ${key}` };
+      registrations.push({ ref, element: found.element, owner: semanticOwner });
       if (!key) continue;
-      if (options.has(key)) return { ok: false, code: "CONTROL_MAPPING_AMBIGUOUS", message: `Multiple active controls map to ${key}` };
       options.set(key, ref);
-    } else { blanks[blankIndex] = ref; textControls.push(ref); }
+    } else {
+      registrations.push({ ref, element: found.element, owner: semanticOwner });
+      blanks[blankIndex] = ref;
+      textControls.push(ref);
+    }
+  }
+  if (!controlRegistry.putMany(registrations, controlRootKey, controlRootGeneration, lifecycleToken)) {
+    return { ok: false, code: "CONTROL_MAPPING_CHANGED", message: "Control registry capacity is exhausted" };
   }
   const text = textControls.length === 1 ? textControls[0] : null;
   const expectedBlanks = countExpectedBlankParts(block.previewText);

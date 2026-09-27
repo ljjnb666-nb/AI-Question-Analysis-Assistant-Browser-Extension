@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ActionPlan, AnswerPlan, QuestionBlock } from "@/shared/types";
 import { buildActionPlan, executeTransaction } from "./transactionalExecutor";
 import { buildControlMapping } from "./controlMapping";
-import { controlRegistry, MAX_CONTROL_REGISTRY_ENTRIES } from "./controlRegistry";
+import { controlRegistry, MAX_CONTROL_REGISTRY_ENTRIES, type ControlRef } from "./controlRegistry";
 import { QuestionRevisionRegistry, instanceKeyFor, MAX_QUESTION_REVISION_ENTRIES } from "../revision/questionRevisionRegistry";
 import { revisionRegistry } from "../revision/questionRevisionRuntime";
 import { startQuestionRevisionWatch } from "../revision/questionRevisionWatch";
@@ -72,6 +72,22 @@ function mapQuestion(question: QuestionBlock, owner: Element) {
   const mapping = buildControlMapping(question, owner);
   if (!mapping.ok) throw new Error(mapping.message);
   return mapping;
+}
+
+function syntheticControlRef(questionId: string, controlId: string, semanticText: string): ControlRef {
+  return {
+    controlId,
+    questionId,
+    role: "option",
+    optionKey: semanticText,
+    controlType: "custom-choice",
+    semanticFingerprint: controlId,
+    semanticText,
+    enabled: true,
+    visible: true,
+    confidence: 1,
+    reasons: ["EXPLICIT_LABEL"],
+  };
 }
 
 describe("Phase 10A runtime registry lifecycle", () => {
@@ -246,6 +262,96 @@ describe("Phase 10A runtime registry lifecycle", () => {
     expect(owner.querySelectorAll("button")[1]?.getAttribute("aria-checked")).toBe("true");
     expect(peak).toBe(MAX_CONTROL_REGISTRY_ENTRIES);
     expect(controlRegistry.size).toBe(MAX_CONTROL_REGISTRY_ENTRIES);
+  });
+
+  it("P10A-PINNED-SCOPE-MIXED-01 never evicts an unpinned entry by clearing its pinned scope", async () => {
+    controlRegistry.clear();
+    const question = block("mixed-pinned-scope");
+    const owner = ownerWithChoices();
+    document.body.append(owner);
+    const mapping = mapQuestion(question, owner);
+    const lifecycleToken = mapping.lifecycleToken;
+    const targetIds = [...mapping.options.values()].map((ref) => ref.controlId);
+    const historical = document.createElement("button");
+    document.body.append(historical);
+    expect(controlRegistry.put(
+      syntheticControlRef(question.id, "mixed-pinned-E", "E"), historical, mapping.owner,
+      mapping.rootKey, mapping.rootGeneration, lifecycleToken,
+    )).toBe(true);
+    expect(controlRegistry.entryCountForQuestion(question.id, mapping.rootKey, mapping.rootGeneration)).toBe(5);
+
+    owner.querySelectorAll("button").forEach((button) => button.addEventListener("click", () => {
+      owner.querySelectorAll("button").forEach((other) => other.setAttribute("aria-checked", String(other === button)));
+    }));
+    const plan = answerPlan(question);
+    const action = buildActionPlan(plan, mapping);
+    let transactionPromise!: ReturnType<typeof executeTransaction>;
+
+    controlRegistry.withPinnedMapping(lifecycleToken, targetIds, () => {
+      for (let index = 0; index < 126; index += 1) {
+        const pressureOwner = ownerWithChoices();
+        document.body.append(pressureOwner);
+        expect(mapQuestion(block(`mixed-pressure-${index}`), pressureOwner).options.size).toBe(4);
+      }
+      const finalPressureOwner = ownerWithChoices();
+      finalPressureOwner.querySelector("button:last-child")!.remove();
+      document.body.append(finalPressureOwner);
+      expect(mapQuestion(block("mixed-pressure-final"), finalPressureOwner).options.size).toBe(3);
+      expect(controlRegistry.size).toBe(MAX_CONTROL_REGISTRY_ENTRIES);
+
+      const nextControl = document.createElement("button");
+      document.body.append(nextControl);
+      expect(controlRegistry.put(
+        syntheticControlRef(question.id, "mixed-pinned-F", "F"), nextControl, mapping.owner,
+        mapping.rootKey, mapping.rootGeneration, lifecycleToken,
+      )).toBe(true);
+      expect(targetIds.every((id) => controlRegistry.get(id)?.isConnected)).toBe(true);
+      expect(controlRegistry.get("mixed-pinned-E")).toBe(historical);
+      expect(controlRegistry.hasScopeForToken(lifecycleToken)).toBe(true);
+      expect(controlRegistry.orphanEntryCount).toBe(0);
+
+      transactionPromise = executeTransaction(plan, action, mapping, undefined, authorityResolver(question, owner));
+    });
+
+    const result = await transactionPromise;
+    expect(result.outcome).toBe("FILLED_VERIFIED");
+    expect(owner.querySelectorAll("button")[1]?.getAttribute("aria-checked")).toBe("true");
+    expect(targetIds.every((id) => controlRegistry.get(id)?.isConnected)).toBe(true);
+    expect(controlRegistry.hasScopeForToken(lifecycleToken)).toBe(true);
+    expect(controlRegistry.orphanEntryCount).toBe(0);
+  });
+
+  it("P10A-CURRENT-SCOPE-NO-SELF-EVICT-01 fails atomically when only the current scope could be evicted", () => {
+    controlRegistry.clear();
+    const question = block("no-self-evict");
+    const originalOwner = ownerWithChoices();
+    document.body.append(originalOwner);
+    const originalMapping = mapQuestion(question, originalOwner);
+    const originalEntries = [...originalMapping.options.values()].map((ref) => ({
+      id: ref.controlId,
+      element: controlRegistry.get(ref.controlId),
+    }));
+
+    for (let index = 0; index < MAX_CONTROL_REGISTRY_ENTRIES - 5; index += 1) {
+      expect(controlRegistry.put(
+        syntheticControlRef(question.id, `self-scope-fill-${index}`, `fill-${index}`),
+        originalOwner.querySelector("button")!, originalOwner,
+        originalMapping.rootKey, originalMapping.rootGeneration, originalMapping.lifecycleToken,
+      )).toBe(true);
+    }
+    expect(controlRegistry.size).toBe(MAX_CONTROL_REGISTRY_ENTRIES - 1);
+
+    const changedOwner = ownerWithChoices();
+    changedOwner.querySelectorAll("button")[0]!.textContent = "A. updated";
+    changedOwner.querySelectorAll("button")[1]!.textContent = "B. updated";
+    document.body.append(changedOwner);
+    const changedMapping = buildControlMapping(question, changedOwner);
+
+    expect(changedMapping).toMatchObject({ ok: false, code: "CONTROL_MAPPING_CHANGED" });
+    expect(controlRegistry.size).toBe(MAX_CONTROL_REGISTRY_ENTRIES - 1);
+    expect(originalEntries.every(({ id, element }) => controlRegistry.get(id) === element)).toBe(true);
+    expect(controlRegistry.hasScopeForToken(originalMapping.lifecycleToken)).toBe(true);
+    expect(controlRegistry.orphanEntryCount).toBe(0);
   });
 
   it("P10A-STALE-AFTER-CLEANUP rejects an old action plan without rehydrating its mapping", async () => {

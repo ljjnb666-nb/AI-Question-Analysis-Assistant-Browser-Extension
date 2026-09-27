@@ -41,7 +41,7 @@ import { buildActionPlan, executeTransaction, readSelectedOptionKeys, snapshotCo
 import { observeLiveQuestion } from "./liveQuestionObservation";
 import { clearQuestionRevisionAttemptForBlock, hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock, STALE_QUESTION_REVISION, STALE_ROOT_CONTEXT } from "./revision/questionRevisionRuntime";
 import { routeFingerprintForLocation } from "./revision/questionRevisionRegistry";
-import { rootAttachmentOf, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
+import { readRuntimeQuestionHandle, rootAttachmentOf, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
 import { resolveFillRootContext, sharedRootRegistry } from "./roots/rootRegistry";
 import { getTraversalRoot } from "./roots/rootDom";
 
@@ -49,9 +49,10 @@ const solveStartSnapshots = new Map<string, { controls: ReturnType<typeof snapsh
 const autoSnapshotStatus = new Map<string, "captured" | "unavailable">();
 // Runtime solve-start state is root-scoped: identical semantic questions in
 // different accessible roots must never share a baseline (or a snapshot key).
-const snapshotKey = (block: QuestionBlock) => `${rootAttachmentOf(block).rootKey ?? "root-top"}:${block.identity?.stableId ?? block.id}:${block.identity?.contentFingerprint ?? block.id}`;
+const runtimeAttachment = (block: QuestionBlock) => readRuntimeQuestionHandle(block)?.attachment ?? rootAttachmentOf(block);
+const snapshotKey = (block: QuestionBlock) => `${runtimeAttachment(block).rootKey ?? "root-top"}:${block.identity?.stableId ?? block.id}:${block.identity?.contentFingerprint ?? block.id}`;
 const controlScope = (block: QuestionBlock) => {
-  const attachment = rootAttachmentOf(block);
+  const attachment = runtimeAttachment(block);
   return {
     questionId: block.identity?.stableId ?? block.id,
     rootKey: attachment.rootKey ?? TOP_ROOT_KEY,
