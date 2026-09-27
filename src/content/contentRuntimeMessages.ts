@@ -12,7 +12,7 @@ type RegisterContentRuntimeMessageHandlersOptions = {
   captureBlockImage: (bbox: BoundingBox) => Promise<string | null>;
   closeFloatingResult: () => void;
   clearHighlightLayer: () => void;
-  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options?: { mode?: "auto" | "manual"; expectedUrl?: string }) => Promise<unknown>;
+  fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options?: { mode?: "auto" | "manual"; expectedUrl?: string; isRuntimeCurrent?: () => boolean }) => Promise<unknown>;
   getActiveCandidates: () => QuestionBlock[];
   getActiveHighlightBlocks: () => QuestionBlock[];
   getHighlightLayer: () => HighlightLayer | null;
@@ -26,14 +26,18 @@ type RegisterContentRuntimeMessageHandlersOptions = {
   stopAutoSolveAll: () => void;
   stopSpaWatch: () => void;
   verifyParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, expectedUrl?: string) => unknown;
+  isRuntimeCurrent?: () => boolean;
 };
 
 export function registerContentRuntimeMessageHandlers(options: RegisterContentRuntimeMessageHandlersOptions) {
-  chrome.runtime.onMessage.addListener(createContentRuntimeMessageListener(options));
+  const listener = createContentRuntimeMessageListener(options);
+  chrome.runtime.onMessage.addListener(listener);
+  return listener;
 }
 
 export function createContentRuntimeMessageListener(options: RegisterContentRuntimeMessageHandlersOptions) {
   return (message: ExtMessage, _sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) => {
+    if (options.isRuntimeCurrent && !options.isRuntimeCurrent()) return false;
     return handleContentMessage(message, sendResponse, {
       cancelFullPageScan: options.cancelFullPageScan,
       cancelManualCapture: options.cancelManualCapture,

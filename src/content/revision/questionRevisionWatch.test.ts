@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { QuestionBlock } from "@/shared/types";
 import { observeLiveQuestion } from "../liveQuestionObservation";
+import { startContentRouteLifecycleWatch } from "./contentRouteLifecycle";
 import { beginQuestionRevisionAttempt, clearQuestionRevisionAttempt } from "./questionRevisionRuntime";
 import { startQuestionRevisionWatch } from "./questionRevisionWatch";
 
@@ -84,11 +85,12 @@ describe("Phase 6 SPA semantic watcher", () => {
     const controller = new AbortController();
     beginQuestionRevisionAttempt(current, controller);
     const stop = startQuestionRevisionWatch({ detectCandidates: () => [current], onCandidates: () => {} });
+    const stopRouteWatch = startContentRouteLifecycleWatch(() => {});
     const before = location.href;
     history.pushState({}, "", "#phase6-route");
-    document.body.append(document.createElement("div"));
     await new Promise((resolve) => setTimeout(resolve, 90));
     expect(controller.signal.aborted).toBe(true);
+    stopRouteWatch();
     history.replaceState({}, "", before);
     stop(); clearQuestionRevisionAttempt(controller);
   });

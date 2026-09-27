@@ -83,6 +83,19 @@ export function createContentRuntimeState() {
       unwatchSPA?.();
       unwatchSPA = null;
     },
+    disposeEphemeralState() {
+      candidateStatusMap.clear();
+      activeOverlay = null;
+      highlightLayer = null;
+      unwatchSPA = null;
+      activeCandidates = [];
+      activeHighlightBlocks = [];
+      activeDetectMode = null;
+      lastFullPageLayoutKey = "";
+      autoSolveRunning = false;
+      autoSolveStopRequested = true;
+      pendingSubmit = false;
+    },
     resetDetectionArtifacts() {
       candidateStatusMap.clear();
       activeCandidates = [];

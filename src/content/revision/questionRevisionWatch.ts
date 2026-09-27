@@ -25,7 +25,7 @@ export type QuestionRevisionWatchOptions = {
 };
 
 function isRelevantMutation(record: MutationRecord): boolean {
-  const target =isElementNode( record.target) ? record.target : record.target.parentElement;
+  const target = isElementNode(record.target) ? record.target : record.target.parentElement;
   if (target && isExtensionUiElement(target)) return false;
   if (record.type === "attributes") return !INTERACTION_ATTRIBUTES.has(record.attributeName ?? "");
   if (record.type === "characterData") return Boolean(target && !isExtensionUiElement(target));
@@ -160,17 +160,8 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
       options.onCandidates(entry.blocks, entry.root.rootKey);
     }
 
-    // Route tracking refreshes on every flush, matching the Phase 6 order,
-    // so the stored fingerprint never trails the real location.
-    const routeChanged = revisions.refreshRoute();
-    if (routeChanged) controlRegistry.clear();
     const active = activeQuestionRevisionAttempt();
     if (!active) return;
-    if (routeChanged) {
-      options.onEvent?.("ROUTE_CHANGED", active.rootKey);
-      abortQuestionRevisionAttempt();
-      return;
-    }
 
     const scannedActive = scanned.get(active.rootKey ?? TOP_ROOT_KEY);
     if (!scannedActive) return;

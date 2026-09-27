@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, type HistoryEntry, type ParseResult, type QuestionBlock } from "@/shared/types";
+import { DEFAULT_SETTINGS, type AppSettings, type HistoryEntry, type ParseResult, type QuestionBlock } from "@/shared/types";
 import { logEvent } from "@/shared/utils/analytics";
 import { createAutoSolveRuntimeBridge } from "./contentAutoSolveRuntimeBridge";
+import { activeQuestionRevisionAttempt } from "./revision/questionRevisionRuntime";
+import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 
 vi.mock("@/shared/utils/analytics", () => ({ logEvent: vi.fn() }));
 
@@ -43,12 +45,27 @@ function makeResult(): ParseResult {
   };
 }
 
-function createBridge(block: QuestionBlock, result: ParseResult, addHistoryEntryIfCurrent: (entry: HistoryEntry, isCurrent: () => boolean) => Promise<boolean>) {
+function createBridge(
+  block: QuestionBlock,
+  result: ParseResult,
+  addHistoryEntryIfCurrent: (entry: HistoryEntry, isCurrent: () => boolean) => Promise<boolean>,
+  options: {
+    isRuntimeCurrent?: () => boolean;
+    parseWithTieredRetries?: (runtimeContext?: ParseQuestionRuntimeContext) => Promise<ParseResult>;
+  } = {},
+) {
   const autoSolveParsingDeps = {
     loadSettings: async () => ({ ...DEFAULT_SETTINGS, preferredRoute: "text" as const }),
     getProvider: () => ({ supportsVision: false }),
     tryCaptureBlockImageForAutoSolve: async () => null,
-    parseWithTieredRetries: async () => result,
+    parseWithTieredRetries: (
+      _block: QuestionBlock,
+      _settings: AppSettings,
+      _supportsVision: boolean,
+      _onStream: (partial: string) => void,
+      runtimeContext?: ParseQuestionRuntimeContext,
+    ) =>
+      options.parseWithTieredRetries?.(runtimeContext) ?? Promise.resolve(result),
     withTimeout: <T>(promise: Promise<T>) => promise,
     parseQuestion: async () => result,
     addHistoryEntryIfCurrent,
@@ -78,6 +95,7 @@ function createBridge(block: QuestionBlock, result: ParseResult, addHistoryEntry
     sendAutoSolveProgressCore: () => {},
     stopRequestedRef: () => false,
     waitForQuestionAdvanceCore: async () => false,
+    isRuntimeCurrent: options.isRuntimeCurrent,
   });
 }
 
@@ -111,5 +129,35 @@ describe("auto-solve history commit telemetry", () => {
     expect(logEvent).toHaveBeenCalledTimes(1);
     expect(logEvent).toHaveBeenCalledWith("parse_success", expect.objectContaining({ source: "auto_solve_commit" }));
     expect(logEvent).not.toHaveBeenCalledWith("provider_result_discarded_stale", expect.anything());
+  });
+
+  it("P10B-AUTOSOLVE-SHUTDOWN-01 rejects a late provider result after the runtime generation is invalidated", async () => {
+    const block = makeBlock();
+    const result = makeResult();
+    const provider = deferred<ParseResult>();
+    const history: HistoryEntry[] = [];
+    let runtimeCurrent = true;
+    const addHistoryEntryIfCurrent = vi.fn(async (entry: HistoryEntry, isCurrent: () => boolean) => {
+      if (!isCurrent()) return false;
+      history.push(entry);
+      return true;
+    });
+    const bridge = createBridge(block, result, addHistoryEntryIfCurrent, {
+      isRuntimeCurrent: () => runtimeCurrent,
+      parseWithTieredRetries: () => provider.promise,
+    });
+
+    const pending = bridge.parseBlockForAutoSolve(block);
+    expect(activeQuestionRevisionAttempt()).not.toBeNull();
+    runtimeCurrent = false;
+    bridge.abortCurrentSolveAttempt();
+    expect(activeQuestionRevisionAttempt()).toBeNull();
+    provider.resolve(result);
+
+    const lateResult = await pending;
+    expect(bridge.isCurrentAutoSolveResult(block, lateResult)).toBe(false);
+    await expect(bridge.recordAutoSolveHistory(history, block, lateResult)).resolves.toBe(false);
+    expect(addHistoryEntryIfCurrent).not.toHaveBeenCalled();
+    expect(history).toEqual([]);
   });
 });

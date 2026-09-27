@@ -65,6 +65,16 @@ export function abortQuestionRevisionAttempt(): void {
   activeAttempt?.controller.abort(STALE_QUESTION_REVISION);
 }
 
+/** Hard runtime shutdown invalidates the shared Phase 6/8 revision authority. */
+export function disposeQuestionRevisionRuntime(): void {
+  if (activeAttempt) {
+    activeAttempt.controller.abort(STALE_QUESTION_REVISION);
+    registry.unprotectInstance(activeAttempt.instanceKey);
+  }
+  activeAttempt = null;
+  registry.clear();
+}
+
 /** Abort only when the active attempt belongs to the given root (removal/replacement). */
 export function abortQuestionRevisionAttemptForRoot(rootKey: string): boolean {
   if (activeAttempt?.rootKey !== rootKey) return false;

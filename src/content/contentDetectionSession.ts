@@ -11,6 +11,7 @@ type CandidateStatus = { status: string; selected: boolean };
 
 type DetectSessionDeps = {
   candidateStatusMap: Map<string, CandidateStatus>;
+  clearRouteOwnedState?: () => void;
   createHighlightLayer: (options: ConstructorParameters<typeof HighlightLayer>[0]) => HighlightLayer;
   cancelFullPageScan: () => void;
   detectCandidatesFullPage: (onProgress: (progress: {
@@ -23,6 +24,7 @@ type DetectSessionDeps = {
   destroyHighlightLayer: () => void;
   getFullPageLayoutKey: (scrollRoot: ScanScrollRoot) => string;
   isFullPageScanRunning: () => boolean;
+  isRuntimeCurrent?: () => boolean;
   logEvent: (event: "auto_detect_started" | "auto_detect_candidates_found" | "auto_detect_candidate_selected", data?: Record<string, unknown>) => void;
   notifySidePanel: (candidates: QuestionBlock[]) => void;
   refreshFullPageHighlightsAfterLayoutChange: () => void;
@@ -51,8 +53,12 @@ export function notifyDetectedCandidates(
 }
 
 export async function runFullPageDetectSession(deps: DetectSessionDeps): Promise<void> {
+  const isRuntimeCurrent = deps.isRuntimeCurrent ?? (() => true);
+  if (!isRuntimeCurrent()) return;
   const result = await handleFullPageDetectCore({
     isFullPageScanRunning: deps.isFullPageScanRunning,
+    isRuntimeCurrent,
+    clearRouteOwnedState: deps.clearRouteOwnedState,
     cancelFullPageScan: deps.cancelFullPageScan,
     logEvent: deps.logEvent,
     destroyHighlightLayer: deps.destroyHighlightLayer,
@@ -68,7 +74,10 @@ export async function runFullPageDetectSession(deps: DetectSessionDeps): Promise
     refreshFullPageHighlightsAfterLayoutChange: deps.refreshFullPageHighlightsAfterLayoutChange,
     notifySidePanel: deps.notifySidePanel,
   });
-  if (!result) return;
+  if (!result || !isRuntimeCurrent()) {
+    result?.highlightLayer?.destroy();
+    return;
+  }
   deps.setActiveCandidates(result.activeCandidates);
   deps.setActiveHighlightBlocks(result.activeHighlightBlocks);
   deps.setActiveDetectMode(result.activeDetectMode);
@@ -77,13 +86,17 @@ export async function runFullPageDetectSession(deps: DetectSessionDeps): Promise
 }
 
 export async function runAutoDetectSession(deps: DetectSessionDeps): Promise<void> {
+  const isRuntimeCurrent = deps.isRuntimeCurrent ?? (() => true);
+  if (!isRuntimeCurrent()) return;
   const result = handleAutoDetectCore({
     logEvent: deps.logEvent,
     destroyHighlightLayer: deps.destroyHighlightLayer,
     stopSpaWatch: deps.stopSpaWatch,
     candidateStatusMap: deps.candidateStatusMap,
+    clearRouteOwnedState: deps.clearRouteOwnedState,
     detectCandidatesInViewport: deps.detectCandidatesInViewport,
     notifySidePanel: deps.notifySidePanel,
+    isRuntimeCurrent,
     createHighlightLayer: (options) => deps.createHighlightLayer(options),
     watchForPageChanges: deps.watchForPageChanges,
   });

@@ -60,6 +60,7 @@ type ManualCaptureStartDeps = {
 
 type ManualCaptureSubmitDeps = {
   forceVision: boolean;
+  isRuntimeCurrent?: () => boolean;
   isPendingSubmit: () => boolean;
   pipelineDeps: ManualCapturePipelineDeps;
   pipelineTimeoutMs: number;
@@ -91,6 +92,8 @@ export async function submitManualCapture(
   bbox: QuestionBlock["bbox"],
   deps: ManualCaptureSubmitDeps,
 ): Promise<void> {
+  const isRuntimeCurrent = deps.isRuntimeCurrent ?? (() => true);
+  if (!isRuntimeCurrent()) return;
   deps.setActiveOverlay(null);
   if (deps.isPendingSubmit()) return;
   deps.setPendingSubmit(true);
@@ -101,6 +104,7 @@ export async function submitManualCapture(
       {
         forceVision: deps.forceVision,
         pipelineTimeoutMs: deps.pipelineTimeoutMs,
+        isRuntimeCurrent,
       },
       deps.pipelineDeps,
     );

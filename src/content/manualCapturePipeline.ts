@@ -49,6 +49,7 @@ type ManualCaptureDeps = {
 type ManualCaptureOptions = {
   forceVision: boolean;
   pipelineTimeoutMs: number;
+  isRuntimeCurrent?: () => boolean;
 };
 
 export async function runManualCapturePipeline(
@@ -57,6 +58,11 @@ export async function runManualCapturePipeline(
   deps: ManualCaptureDeps,
 ): Promise<void> {
   const { forceVision, pipelineTimeoutMs } = options;
+  const isRuntimeCurrent = options.isRuntimeCurrent ?? (() => true);
+  if (!isRuntimeCurrent()) return;
+  const setStreamingText = (text: string) => {
+    if (isRuntimeCurrent()) deps.floatingMgr.setStreamingText(text);
+  };
   const resolved = deps.resolveQuestionBlockFromBBox(bbox);
   const refinedBBox = resolved.refinedBBox;
 
@@ -86,10 +92,12 @@ export async function runManualCapturePipeline(
   };
   if (block.questionImageUrl) block.hasImage = true;
 
+  if (!isRuntimeCurrent()) return;
   deps.floatingMgr.open(block);
 
   try {
     const dataUrl = await deps.screenshotWithRetry();
+    if (!isRuntimeCurrent()) return;
     if (dataUrl) {
       deps.logEvent("manual_capture_completed");
       block.imageDataUrl = await deps.cropScreenshot(dataUrl, finalBBox, window.devicePixelRatio);
@@ -97,7 +105,9 @@ export async function runManualCapturePipeline(
       deps.logEvent("manual_capture_completed", { screenshotFallback: true });
     }
 
+    if (!isRuntimeCurrent()) return;
     const settings = await deps.loadSettings();
+    if (!isRuntimeCurrent()) return;
     const provider = deps.getProvider(settings.providerId ?? "anthropic");
     const hasCapturedImage = Boolean(block.imageDataUrl);
     const forceNonTextRoute =
@@ -118,7 +128,7 @@ export async function runManualCapturePipeline(
           block,
           effectiveSettings,
           provider.supportsVision,
-          deps.floatingMgr.setStreamingText.bind(deps.floatingMgr),
+          setStreamingText,
         );
 
         let pickedResult = firstPassResult;
@@ -133,7 +143,7 @@ export async function runManualCapturePipeline(
             blockId: block.id,
             initialConfidence: firstPassResult.confidence,
           });
-          deps.floatingMgr.setStreamingText("检测到题干可能不完整，正在进行视觉复核...");
+          setStreamingText("检测到题干可能不完整，正在进行视觉复核...");
 
           const visionBlock: QuestionBlock = { ...block, hasImage: true };
           const visionSettings = { ...settings, preferredRoute: "vision" as const };
@@ -141,8 +151,9 @@ export async function runManualCapturePipeline(
             visionBlock,
             visionSettings,
             true,
-            deps.floatingMgr.setStreamingText.bind(deps.floatingMgr),
+            setStreamingText,
           );
+          if (!isRuntimeCurrent()) return firstPassResult;
 
           if (deps.shouldPreferVisionResult(firstPassResult, visionResult)) {
             pickedResult = visionResult;
@@ -170,14 +181,15 @@ export async function runManualCapturePipeline(
             blockId: block.id,
             confidence: pickedResult.confidence,
           });
-          deps.floatingMgr.setStreamingText("正在进行二次视觉复核，优化分点答案...");
+          setStreamingText("正在进行二次视觉复核，优化分点答案...");
           const secondVisionBlock: QuestionBlock = { ...block, hasImage: true };
           const secondVisionResult = await deps.parseWithTieredRetries(
             secondVisionBlock,
             { ...settings, preferredRoute: "vision" as const },
             true,
-            deps.floatingMgr.setStreamingText.bind(deps.floatingMgr),
+            setStreamingText,
           );
+          if (!isRuntimeCurrent()) return pickedResult;
           if (deps.shouldPreferSecondVisionResult(pickedResult, secondVisionResult, block)) {
             pickedResult = secondVisionResult;
             deps.logEvent("manual_second_vision_review_applied", {
@@ -199,7 +211,9 @@ export async function runManualCapturePipeline(
       "manual_pipeline_timeout",
     );
 
+    if (!isRuntimeCurrent()) return;
     deps.floatingMgr.setResult(finalResult);
+    if (!isRuntimeCurrent()) return;
     await deps.addHistoryEntry({
       id: block.id,
       timestamp: Date.now(),
@@ -209,8 +223,10 @@ export async function runManualCapturePipeline(
     });
     if (finalResult.confidence < 0.5) deps.logEvent("parse_low_confidence", { blockId: block.id });
   } catch (err) {
+    if (!isRuntimeCurrent()) return;
     let msg = err instanceof Error ? err.message : String(err);
     const settings = await deps.loadSettings();
+    if (!isRuntimeCurrent()) return;
     const provider = deps.getProvider(settings.providerId ?? "anthropic");
     if (/manual_pipeline_timeout/i.test(msg)) {
       msg = "解析超时：已尝试多次请求但未收到可用结果。请重试，或切换其他模型/路由。";
@@ -231,14 +247,16 @@ export async function runManualCapturePipeline(
 
     if (canRetryWithVision && /text[- ]?only|鏂囨湰妯″瀷|鏂囨湰璺嚎|image question/i.test(msg)) {
       try {
-        deps.floatingMgr.setStreamingText("检测到当前配置与图片题不匹配，正在自动切换视觉解析...");
+        setStreamingText("检测到当前配置与图片题不匹配，正在自动切换视觉解析...");
         const visionResult = await deps.parseWithTieredRetries(
           { ...block, hasImage: true },
           { ...settings, preferredRoute: "vision" as const },
           true,
-          deps.floatingMgr.setStreamingText.bind(deps.floatingMgr),
+          setStreamingText,
         );
+        if (!isRuntimeCurrent()) return;
         deps.floatingMgr.setResult(visionResult);
+        if (!isRuntimeCurrent()) return;
         await deps.addHistoryEntry({
           id: block.id,
           timestamp: Date.now(),
@@ -248,6 +266,7 @@ export async function runManualCapturePipeline(
         });
         return;
       } catch (visionErr) {
+        if (!isRuntimeCurrent()) return;
         const visionMsg = visionErr instanceof Error ? visionErr.message : String(visionErr);
         deps.floatingMgr.setError(visionMsg);
         deps.logEvent("parse_error", { error: visionMsg, autoVisionRetry: true });
@@ -255,6 +274,7 @@ export async function runManualCapturePipeline(
       }
     }
 
+    if (!isRuntimeCurrent()) return;
     deps.floatingMgr.setError(msg);
     deps.logEvent("parse_error", { error: msg });
   }
