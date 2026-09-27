@@ -16,6 +16,7 @@ const DATA_DIR = join(ROOT_DIR, "..", "data");
 const DEFAULT_DATA_FILE = join(DATA_DIR, "analytics-db.sqlite");
 const LEGACY_JSON_FILE = join(DATA_DIR, "analytics-db.json");
 const SQLITE_SUPPORTED = typeof DatabaseSync === "function";
+export const ANALYTICS_EVENT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
 let dbInstance = null;
 
@@ -115,7 +116,24 @@ function getDatabase() {
   `);
 
   maybeMigrateLegacyJson(dbInstance);
+  pruneSqliteAnalyticsEvents(dbInstance, Date.now());
   return dbInstance;
+}
+
+export function pruneAnalyticsEvents(db, now = Date.now()) {
+  const cutoff = now - ANALYTICS_EVENT_RETENTION_MS;
+  const events = Array.isArray(db.analytics_events) ? db.analytics_events : [];
+  const retained = events.filter((event) => {
+    const receivedAt = Number(event.receivedAt);
+    return Number.isFinite(receivedAt) && receivedAt >= cutoff;
+  });
+  const removed = events.length - retained.length;
+  db.analytics_events = retained;
+  return removed;
+}
+
+function pruneSqliteAnalyticsEvents(database, now = Date.now()) {
+  return database.prepare("DELETE FROM analytics_events WHERE receivedAt < ?").run(now - ANALYTICS_EVENT_RETENTION_MS).changes;
 }
 
 function runInTransaction(work) {
@@ -174,7 +192,7 @@ function loadDbFromJsonFile() {
   }
 
   const parsed = JSON.parse(readFileSync(file, "utf8"));
-  return {
+  const db = {
     ...createEmptyDb(),
     ...parsed,
     devices: Array.isArray(parsed.devices) ? parsed.devices : [],
@@ -184,6 +202,8 @@ function loadDbFromJsonFile() {
       ? parsed.email_verification_codes.map(normalizeVerificationCodeRecord)
       : [],
   };
+  if (pruneAnalyticsEvents(db)) saveDbToJsonFile(db);
+  return db;
 }
 
 function saveDbToJsonFile(db) {
@@ -214,6 +234,7 @@ export function loadDb() {
     return loadDbFromJsonFile();
   }
   const database = getDatabase();
+  pruneSqliteAnalyticsEvents(database, Date.now());
 
   const devices = database.prepare("SELECT deviceId, userId, installedAt, createdAt, lastSeenAt FROM devices").all();
   const users = database
@@ -373,14 +394,6 @@ function appendDeviceId(deviceIds, deviceId) {
   return next;
 }
 
-function getUserRows(database) {
-  return database
-    .prepare(
-      "SELECT userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, createdAt, deviceIdsJson FROM users",
-    )
-    .all();
-}
-
 function hydrateUserRow(row) {
   if (!row) return null;
   return normalizeUserRecord({
@@ -398,33 +411,6 @@ function findStoredUserByEmail(database, email) {
     )
     .get(normalized);
   return hydrateUserRow(row);
-}
-
-function findStoredUserByToken(database, token) {
-  const normalizedToken = String(token || "").trim();
-  if (!normalizedToken) return null;
-
-  for (const row of getUserRows(database)) {
-    const user = hydrateUserRow(row);
-    if (!user) continue;
-
-    if (user.authTokenHash && user.authTokenSalt && verifySecret(normalizedToken, user.authTokenSalt, user.authTokenHash)) {
-      return user;
-    }
-
-    if (user.authToken && user.authToken === normalizedToken) {
-      const digest = hashSecret(normalizedToken);
-      database
-        .prepare("UPDATE users SET authTokenHash = ?, authTokenSalt = ?, authToken = NULL WHERE userId = ?")
-        .run(digest.hash, digest.salt, user.userId);
-      user.authTokenHash = digest.hash;
-      user.authTokenSalt = digest.salt;
-      delete user.authToken;
-      return user;
-    }
-  }
-
-  return null;
 }
 
 function upsertStoredDevice(database, deviceId, userId, installedAt) {
@@ -611,31 +597,31 @@ export function loginUserInStorage(email, password, deviceId) {
   });
 }
 
-export function recordAnalyticsEventInStorage(payload, authToken) {
+export function pruneAnalyticsEventsInStorage(now = Date.now()) {
   if (!SQLITE_SUPPORTED) {
     const db = loadDbFromJsonFile();
-    const result = recordAnalyticsEvent(db, payload, authToken);
+    const removed = pruneAnalyticsEvents(db, now);
+    if (removed) saveDbToJsonFile(db);
+    return removed;
+  }
+  return pruneSqliteAnalyticsEvents(getDatabase(), now);
+}
+
+export function recordAnalyticsEventInStorage(payload) {
+  if (!SQLITE_SUPPORTED) {
+    const db = loadDbFromJsonFile();
+    const result = recordAnalyticsEvent(db, payload);
     saveDbToJsonFile(db);
     return result;
   }
   return runInTransaction((database) => {
-    const resolvedUser = authToken ? findStoredUserByToken(database, authToken) : null;
-    const userId = resolvedUser?.userId || null;
+    pruneSqliteAnalyticsEvents(database, Date.now());
     upsertStoredDevice(
       database,
       payload.deviceId,
-      userId,
+      null,
       payload.event === "extension_installed" ? Number(payload.ts || Date.now()) : null,
     );
-
-    if (resolvedUser) {
-      const nextDeviceIds = appendDeviceId(resolvedUser.deviceIds, payload.deviceId);
-      if (nextDeviceIds.length !== resolvedUser.deviceIds.length) {
-        database
-          .prepare("UPDATE users SET deviceIdsJson = ? WHERE userId = ?")
-          .run(JSON.stringify(nextDeviceIds), resolvedUser.userId);
-      }
-    }
 
     database
       .prepare(
@@ -650,7 +636,7 @@ export function recordAnalyticsEventInStorage(payload, authToken) {
         payload.duration ?? null,
         payload.extensionVersion || null,
         payload.deviceId,
-        userId,
+        null,
         payload.data == null ? null : JSON.stringify(payload.data),
         Date.now(),
       );
@@ -778,13 +764,9 @@ export function loginUser(db, email, password, deviceId) {
   return { user, authToken };
 }
 
-export function recordAnalyticsEvent(db, payload, authToken) {
-  const resolvedUser = findUserByToken(db, authToken);
-  const userId = resolvedUser?.userId || null;
-  const device = ensureDevice(db, payload.deviceId, userId);
-  if (resolvedUser && !resolvedUser.deviceIds.includes(payload.deviceId)) {
-    resolvedUser.deviceIds.push(payload.deviceId);
-  }
+export function recordAnalyticsEvent(db, payload) {
+  pruneAnalyticsEvents(db, Date.now());
+  const device = ensureDevice(db, payload.deviceId, null);
   if (payload.event === "extension_installed" && !device.installedAt) {
     device.installedAt = payload.ts;
   }
@@ -797,7 +779,7 @@ export function recordAnalyticsEvent(db, payload, authToken) {
     duration: payload.duration ?? null,
     extensionVersion: payload.extensionVersion || null,
     deviceId: payload.deviceId,
-    userId,
+    userId: null,
     data: payload.data || null,
     receivedAt: Date.now(),
   });

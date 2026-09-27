@@ -15,6 +15,9 @@ import {
   loadDb,
   recordAnalyticsEvent,
   recordAnalyticsEventInStorage,
+  pruneAnalyticsEvents,
+  pruneAnalyticsEventsInStorage,
+  ANALYTICS_EVENT_RETENTION_MS,
   resetDbConnectionForTests,
   saveDb,
   verifyEmailCode,
@@ -53,7 +56,7 @@ describe("analytics store", () => {
     expect(findUserByToken(db, authToken)?.userId).toBe(user.userId);
   });
 
-  it("rotates auth token on login and attaches authenticated analytics user", () => {
+  it("keeps analytics pseudonymous while auth endpoints maintain account-device association", () => {
     const db = createDb();
     createEmailVerificationCode(db, "user@example.com");
     const created = createUser(db, "user@example.com", "secret-123", "dev-1");
@@ -68,10 +71,9 @@ describe("analytics store", () => {
         event: "parse_success",
         ts: Date.now(),
       },
-      loggedIn.authToken,
     );
 
-    expect(db.analytics_events[0].userId).toBe(loggedIn.user.userId);
+    expect(db.analytics_events[0].userId).toBeNull();
     expect(db.devices.find((entry) => entry.deviceId === "dev-2")?.userId).toBe(loggedIn.user.userId);
   });
 
@@ -148,6 +150,38 @@ describe("analytics store", () => {
     expect(reloaded.devices.find((entry) => entry.deviceId === "dev-direct-2")?.userId).toBe(loggedIn.user.userId);
     expect(reloaded.analytics_events.some((entry) => entry.event === "parse_success")).toBe(true);
     expect(reloaded.email_verification_codes).toHaveLength(1);
+
+    resetDbConnectionForTests();
+    delete process.env.ANALYTICS_DB_FILE;
+    if (fs.existsSync(dbFile)) fs.unlinkSync(dbFile);
+  });
+
+  it("prunes received analytics events beyond the fixed 90 day retention window", () => {
+    const now = Date.now();
+    const db = createDb();
+    db.analytics_events = [
+      { eventId: "old", ts: now, receivedAt: now - ANALYTICS_EVENT_RETENTION_MS - 1 },
+      { eventId: "recent", ts: now - 100 * 24 * 60 * 60 * 1000, receivedAt: now - 1 },
+    ];
+
+    expect(pruneAnalyticsEvents(db, now)).toBe(1);
+    expect(db.analytics_events.map((event) => event.eventId)).toEqual(["recent"]);
+  });
+
+  it("prunes old events from SQLite by server receivedAt", () => {
+    const dbFile = path.join(os.tmpdir(), `quiz-solver-retention-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+    const now = Date.now();
+    const db = createDb();
+    db.analytics_events = [
+      { eventId: "old", event: "parse_success", ts: now, eventDate: new Date(now).toISOString().slice(0, 10), deviceId: "dev-old", receivedAt: now - ANALYTICS_EVENT_RETENTION_MS - 1 },
+      { eventId: "recent", event: "parse_success", ts: now - 100 * 24 * 60 * 60 * 1000, eventDate: new Date(now).toISOString().slice(0, 10), deviceId: "dev-recent", receivedAt: now - 1 },
+    ];
+    saveDb(db);
+
+    expect(pruneAnalyticsEventsInStorage(now)).toBe(1);
+    expect(loadDb().analytics_events.map((event) => event.eventId)).toEqual(["recent"]);
 
     resetDbConnectionForTests();
     delete process.env.ANALYTICS_DB_FILE;

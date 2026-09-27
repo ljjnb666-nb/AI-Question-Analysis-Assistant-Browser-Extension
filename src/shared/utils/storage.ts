@@ -3,6 +3,9 @@ import { DEFAULT_SETTINGS } from "../types";
 import { logError } from "./errorLogger";
 import { decryptValue, encryptValue, isEncrypted } from "./encryption";
 import { sanitizeQuestionBlockForSerialization } from "./mediaSerialization";
+import { clearSessionAnalytics, flushAnalyticsWork } from "./analyticsState";
+
+export const CURRENT_ANALYTICS_CONSENT_VERSION = 1;
 
 const KEYS = {
   floatingState: "floatingWindowState",
@@ -84,18 +87,29 @@ async function readSettingsFromStorage(): Promise<AppSettings> {
   const rawStored = (result[KEYS.settings] as Partial<AppSettings> ?? {});
   const stored = { ...DEFAULT_SETTINGS, ...rawStored };
 
-  if (!stored.deviceId) {
-    stored.deviceId = createDeviceIdValue();
+  const requiresConsentMigration = rawStored.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION;
+  if (requiresConsentMigration) {
+    stored.enableAnalytics = false;
+    stored.analyticsConsentVersion = CURRENT_ANALYTICS_CONSENT_VERSION;
+  }
+  if (!stored.deviceId) stored.deviceId = createDeviceIdValue();
+
+  stored.analyticsBaseUrl = normalizeBaseUrl(stored.analyticsBaseUrl);
+
+  if (requiresConsentMigration || !rawStored.deviceId || !rawStored.analyticsBaseUrl) {
     await chrome.storage.local.set({
       [KEYS.settings]: {
         ...rawStored,
+        ...(requiresConsentMigration ? { enableAnalytics: false, analyticsConsentVersion: CURRENT_ANALYTICS_CONSENT_VERSION } : {}),
         deviceId: stored.deviceId,
-        analyticsBaseUrl: normalizeBaseUrl(rawStored.analyticsBaseUrl),
+        analyticsBaseUrl: stored.analyticsBaseUrl,
       },
     });
+    if (requiresConsentMigration) {
+      clearSessionAnalytics();
+      await chrome.storage.local.remove(KEYS.analytics);
+    }
   }
-
-  stored.analyticsBaseUrl = normalizeBaseUrl(stored.analyticsBaseUrl);
 
   for (const key of SENSITIVE_SETTINGS_KEYS) {
     const value = stored[key];
@@ -125,6 +139,7 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<void
   ensureSettingsCacheListener();
   const existing = await loadSettings();
   const merged = { ...existing, ...settings };
+  merged.analyticsConsentVersion = CURRENT_ANALYTICS_CONSENT_VERSION;
   merged.deviceId = merged.deviceId || existing.deviceId || createDeviceIdValue();
   merged.analyticsBaseUrl = normalizeBaseUrl(merged.analyticsBaseUrl);
 
@@ -145,6 +160,11 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<void
     apiKey: settings.apiKey ?? existing.apiKey,
     authToken: settings.authToken ?? existing.authToken,
   });
+  if (existing.enableAnalytics && !merged.enableAnalytics) {
+    await flushAnalyticsWork();
+    clearSessionAnalytics();
+    await chrome.storage.local.remove(KEYS.analytics);
+  }
 }
 
 function truncateText(value: string | undefined, maxChars: number): string {

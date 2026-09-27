@@ -26,6 +26,7 @@ export const SettingsTab: React.FC<{
   const [route, setRoute] = useState<"auto" | "text" | "vision">("auto");
   const [customUrl, setCustomUrl] = useState("");
   const [analyticsBaseUrl, setAnalyticsBaseUrl] = useState(DEFAULT_ANALYTICS_BASE_URL);
+  const [enableAnalytics, setEnableAnalytics] = useState(false);
   const [customProtocol, setCustomProtocol] = useState<"openai" | "anthropic">("openai");
   const [lang, setLang] = useState<"zh" | "en">(initialLang);
   const [saved, setSaved] = useState(false);
@@ -58,6 +59,7 @@ export const SettingsTab: React.FC<{
       setRoute(settings.preferredRoute ?? "auto");
       setCustomUrl(settings.customBaseUrl ?? "");
       setAnalyticsBaseUrl(settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL);
+      setEnableAnalytics(settings.enableAnalytics ?? false);
       setCustomProtocol(settings.customProviderProtocol ?? "openai");
       setLang(settings.language ?? "zh");
       setDeviceId(settings.deviceId ?? "");
@@ -144,6 +146,7 @@ export const SettingsTab: React.FC<{
       preferredRoute: route,
       customBaseUrl: customUrl || undefined,
       analyticsBaseUrl: analyticsBaseUrl.trim() || DEFAULT_ANALYTICS_BASE_URL,
+      enableAnalytics,
       customProviderProtocol: customProtocol,
       language: lang,
     });
@@ -223,6 +226,7 @@ export const SettingsTab: React.FC<{
         customProtocol={customProtocol}
         customUrl={customUrl}
         deviceId={deviceId}
+        enableAnalytics={enableAnalytics}
         handleProviderChange={handleProviderChange}
         isEn={isEn}
         lang={lang}
@@ -231,6 +235,7 @@ export const SettingsTab: React.FC<{
         providerId={providerId}
         route={route}
         setAnalyticsBaseUrl={setAnalyticsBaseUrl}
+        setEnableAnalytics={setEnableAnalytics}
         setApiKey={setApiKey}
         setCustomProtocol={setCustomProtocol}
         setCustomUrl={setCustomUrl}

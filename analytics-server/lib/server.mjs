@@ -11,6 +11,7 @@ import {
   verifyEmailCodeInStorage,
 } from "./store.mjs";
 import { createFixedWindowRateLimiter, normalizeIpAddress } from "./security.mjs";
+import { normalizeRemoteAnalyticsEvent } from "./telemetry.mjs";
 import { ADMIN_SESSION_MAX_COUNT, ADMIN_SESSION_TTL_MS, createAdminSessionStore } from "./admin-sessions.mjs";
 
 const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
@@ -530,7 +531,7 @@ function renderDashboardHtml(summary, series, publicBaseUrl, storageInfo) {
       <section class="hero-main">
         <div class="eyebrow">本地运营视图</div>
         <h1>一眼看清插件使用状态</h1>
-        <div class="lead">直接在本地 analytics server 里查看安装、活跃设备、激活和注册情况。</div>
+        <div class="lead">直接在本地 analytics server 里查看已选择加入统计的设备使用情况和账号注册情况。安装与使用指标仅代表同意发送统计的设备，不代表全部安装量。</div>
         <div class="hero-footer">
           <div class="hero-note">
             <div class="hero-note-label">观察窗口</div>
@@ -568,7 +569,7 @@ function renderDashboardHtml(summary, series, publicBaseUrl, storageInfo) {
         <div class="panel-head">
           <div>
             <h2 class="panel-title">14 天活跃趋势</h2>
-            <div class="panel-copy">把使用、安装、激活、注册的日级变化放在一起。</div>
+            <div class="panel-copy">把同意统计设备的使用、安装、激活和账号注册按日展示。</div>
           </div>
           <div class="meta" id="generatedAt"></div>
         </div>
@@ -632,10 +633,10 @@ function renderDashboardHtml(summary, series, publicBaseUrl, storageInfo) {
 
     function renderMetrics(summary) {
       metricGrid.innerHTML = [
-        metricCard("今日日活", formatNumber(summary.daily.dau), "今天产生任意事件的设备数。"),
-        metricCard("今日安装", formatNumber(summary.daily.installs), "今天首次被记录的新设备。"),
-        metricCard("今日激活", formatNumber(summary.daily.activations), "完成关键设置或产生实际使用的设备数。"),
-        metricCard("累计设备", formatNumber(summary.totals.devices), "整个数据集里去重后的所有设备。"),
+        metricCard("今日日活", formatNumber(summary.daily.dau), "今天产生可选使用统计事件的设备数。"),
+        metricCard("今日安装", formatNumber(summary.daily.installs), "今天发送安装事件的同意统计设备。"),
+        metricCard("今日激活", formatNumber(summary.daily.activations), "同意统计且完成关键设置或产生使用事件的设备。"),
+        metricCard("账号关联设备", formatNumber(summary.totals.devices), "账号服务中关联过的设备，不是总安装量。"),
         metricCard("注册用户", formatNumber(summary.totals.registeredUsers), "当前成功注册的账号数。"),
       ].join("");
     }
@@ -1088,10 +1089,9 @@ export function createAnalyticsHandler(options = {}) {
         ensureTrustedBrowserOrigin(req);
         enforceRateLimit(rateLimiter, `events:ip:${ip}`, 240, 5 * 60 * 1000);
         const body = await readJsonBody(req);
-        if (!body.deviceId || !body.event) {
-          throw new HttpError(400, "deviceId and event are required");
-        }
-        recordAnalyticsEventImpl(body, getBearerToken(req));
+        const safePayload = normalizeRemoteAnalyticsEvent(body);
+        if (!safePayload) throw new HttpError(400, "invalid analytics event");
+        recordAnalyticsEventImpl(safePayload);
         sendJson(req, res, 200, { ok: true });
         return;
       }

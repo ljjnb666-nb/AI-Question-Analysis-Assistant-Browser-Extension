@@ -175,7 +175,7 @@ async function resolveExtensionId(context: BrowserContext) {
 }
 
 /** Boots the real extension content runtime in the SPA tab and starts the production SPA watch. */
-async function startProductionAutoSolve(context: BrowserContext, extensionId: string, origin: string): Promise<Page> {
+async function startProductionAutoSolve(context: BrowserContext, extensionId: string, origin: string, analyticsOptIn = false): Promise<Page> {
   const driver = await context.newPage();
   await driver.goto(`chrome-extension://${extensionId}/popup/popup.html`);
 
@@ -187,7 +187,7 @@ async function startProductionAutoSolve(context: BrowserContext, extensionId: st
     });
   });
 
-  await driver.evaluate((baseOrigin: string) => chrome.storage.local.set({
+  await driver.evaluate(({ baseOrigin, analyticsOptIn }: { baseOrigin: string; analyticsOptIn: boolean }) => chrome.storage.local.set({
     parseHistory: [],
     analyticsLog: [],
     appSettings: {
@@ -196,10 +196,12 @@ async function startProductionAutoSolve(context: BrowserContext, extensionId: st
       apiModel: "qwen3-vl",
       preferredRoute: "text",
       language: "en",
-      enableAnalytics: false,
+      enableAnalytics: analyticsOptIn,
+      analyticsConsentVersion: 1,
+      analyticsBaseUrl: baseOrigin,
       customBaseUrl: `${baseOrigin}/api`,
     },
-  }), origin);
+  }), { baseOrigin: origin, analyticsOptIn });
 
   const tabId = await driver.evaluate(async (baseOrigin: string) => {
     const [tab] = await chrome.tabs.query({ url: `${baseOrigin}/*` });
@@ -274,8 +276,8 @@ async function getPageTabId(driver: Page, origin: string, title: string): Promis
   return tabId;
 }
 
-async function seedAuthenticatedSidePanel(driver: Page) {
-  await driver.evaluate(async () => chrome.storage.local.set({
+async function seedAuthenticatedSidePanel(driver: Page, analyticsBaseUrl: string) {
+  await driver.evaluate(async (analyticsBaseUrl: string) => chrome.storage.local.set({
     parseHistory: [],
     analyticsLog: [],
     appSettings: {
@@ -287,9 +289,11 @@ async function seedAuthenticatedSidePanel(driver: Page) {
       apiModel: "deepseek-v4-flash",
       preferredRoute: "text",
       language: "en",
-      enableAnalytics: false,
+      enableAnalytics: true,
+      analyticsConsentVersion: 1,
+      analyticsBaseUrl,
     },
-  }));
+  }), analyticsBaseUrl);
 }
 
 async function sendDetectToTab(driver: Page, tabId: number) {
@@ -308,7 +312,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       const extensionId = await resolveExtensionId(context);
       const spaPage = await context.newPage();
       await spaPage.goto(`${server.origin}/q`);
-      const driver = await startProductionAutoSolve(context, extensionId, server.origin);
+      const driver = await startProductionAutoSolve(context, extensionId, server.origin, true);
 
       await expect.poll(() => server.held.length, { timeout: 20_000 }).toBe(1);
 
@@ -377,7 +381,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
 
       const driver = await context.newPage();
       await driver.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-      await seedAuthenticatedSidePanel(driver);
+      await seedAuthenticatedSidePanel(driver, server.origin);
       const originTabId = await getPageTabId(driver, server.origin, "Phase 8A Origin");
       const otherTabId = await getPageTabId(driver, server.origin, "Phase 8A Other");
 
@@ -432,7 +436,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
 
       const driver = await context.newPage();
       await driver.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-      await seedAuthenticatedSidePanel(driver);
+      await seedAuthenticatedSidePanel(driver, server.origin);
       const originTabId = await getPageTabId(driver, server.origin, "Phase 8A Stale Origin");
       const otherTabId = await getPageTabId(driver, server.origin, "Phase 8A Stale Other");
       const sidePanel = await context.newPage();
