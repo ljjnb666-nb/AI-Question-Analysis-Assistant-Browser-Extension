@@ -10,6 +10,7 @@ import {
   revisionRegistry,
 } from "./questionRevisionRuntime";
 import { instanceKeyFor } from "./questionRevisionRegistry";
+import { controlRegistry } from "../answer/controlRegistry";
 import type { QuestionRevisionEvent } from "./questionRevisionTypes";
 
 const RELEVANT_ATTRIBUTES = ["src", "srcset", "style", "class", "alt", "aria-label", "aria-labelledby", "aria-disabled", "disabled", "checked", "value", "aria-checked", "aria-selected"];
@@ -90,6 +91,7 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
   const handleRootLifecycle = (events: RootRegistryEvents) => {
     for (const rootKey of events.removedRootKeys) {
       detachRoot(rootKey);
+      controlRegistry.clearRoot(rootKey);
       revisions.removeRoot(rootKey);
       abortQuestionRevisionAttemptForRoot(rootKey);
       invalidateRuntimeQuestionHandlesForRoot(rootKey);
@@ -98,6 +100,8 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
     }
     for (const rootKey of events.replacedRootKeys) {
       // Same anchor, replaced document/generation: previous bindings are stale.
+      controlRegistry.clearRoot(rootKey);
+      revisions.removeRoot(rootKey);
       abortQuestionRevisionAttemptForRoot(rootKey);
       invalidateRuntimeQuestionHandlesForRoot(rootKey);
       options.onEvent?.("ROOT_REPLACED", rootKey);
@@ -159,6 +163,7 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
     // Route tracking refreshes on every flush, matching the Phase 6 order,
     // so the stored fingerprint never trails the real location.
     const routeChanged = revisions.refreshRoute();
+    if (routeChanged) controlRegistry.clear();
     const active = activeQuestionRevisionAttempt();
     if (!active) return;
     if (routeChanged) {
@@ -178,12 +183,14 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
     });
     if (!sameId) {
       const event: QuestionRevisionEvent = candidates.length ? "REPLACED" : "REMOVED";
+      controlRegistry.clearQuestion(active.stableId, active.rootKey, active.rootGeneration);
       options.onEvent?.(event, active.rootKey);
       abortQuestionRevisionAttempt();
       return;
     }
     const fingerprint = sameId.identity?.contentFingerprint ?? sameId.id;
     if (fingerprint !== active.contentFingerprint) {
+      controlRegistry.clearQuestion(active.stableId, active.rootKey, active.rootGeneration);
       options.onEvent?.("REVISION_CHANGED", active.rootKey);
       abortQuestionRevisionAttempt();
       return;
@@ -258,6 +265,7 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
       }
     }
     attached.clear();
+    controlRegistry.clear();
     for (const [iframe, pending] of pendingFrameListeners) {
       iframe.removeEventListener("load", pending.listener);
       pendingFrameListeners.delete(iframe);

@@ -3,13 +3,14 @@ import type { ParseResult, QuestionBlock, QuestionType } from "@/shared/types";
 import { detectCandidatesInRoot, detectCandidatesAcrossRoots } from "./detector/domDetector";
 import type { AccessibleRootRegistry } from "./roots/rootRegistry";
 import { sharedRootRegistry } from "./roots/rootRegistry";
-import { attachRuntimeRoot, rootAttachmentOf, TOP_ROOT_KEY, type RootContext } from "./roots/rootContext";
+import { attachRuntimeRoot, readRuntimeQuestionHandle, rootAttachmentOf, TOP_ROOT_KEY, type RootContext } from "./roots/rootContext";
 import { beginQuestionRevisionAttempt, clearQuestionRevisionAttempt } from "./revision/questionRevisionRuntime";
 import { startQuestionRevisionWatch } from "./revision/questionRevisionWatch";
 import { captureSolveStartControlState, fillParsedAnswerInPage } from "./answerFiller";
 import { finishAutoSolveQuestionAttempt, hasAutoSolveQuestionAttempt, verifyParsedAnswerInPage } from "./answerFiller";
 import { attachQuestionIdentity } from "./questionIdentity";
 import { discoverControls } from "./answer/controlDiscovery";
+import { controlRegistry } from "./answer/controlRegistry";
 import { buildControlMapping } from "./answer/controlMapping";
 import { extractStructuredQuestionText } from "./detector/domStructuredText";
 import { requestRealClick } from "./answerDomUtils";
@@ -105,6 +106,7 @@ describe("Phase 7 accessible roots", () => {
   });
   afterEach(() => {
     document.body.innerHTML = "";
+    controlRegistry.clear();
     sharedRootRegistry().reset();
     document.elementsFromPoint = originalElementsFromPoint;
   });
@@ -200,6 +202,84 @@ describe("Phase 7 accessible roots", () => {
     expect(result.ok).toBe(true);
     expect(doc.getElementById("opt-b")!.getAttribute("aria-checked")).toBe("true");
     expect(document.getElementById("top-b")!.getAttribute("aria-checked")).toBeNull();
+  });
+
+  it("P10A-SERIALIZED-FRAME-CLEANUP-01 uses the sealed frame root for manual fill and attempt cleanup", async () => {
+    const registry = sharedRootRegistry();
+    const { doc } = makeFrame();
+    const frameOwner = mountQuestion(doc.body);
+    const topContainer = document.createElement("div");
+    document.body.append(topContainer);
+    const topOwner = mountQuestion(topContainer);
+    registry.reconcile(document);
+    const frameRoot = registry.list().find((root) => root.kind === "same-origin-frame")!;
+    const frameBlock = detectCandidatesInRoot(frameRoot.root, frameRoot)[0]!;
+    const topBlock = detectCandidatesInRoot(document, registry.get(TOP_ROOT_KEY)!)[0]!;
+    const topMapping = buildControlMapping(topBlock, topOwner);
+    expect(topMapping.ok).toBe(true);
+    if (!topMapping.ok) throw new Error(topMapping.message);
+    expect(frameBlock.identity?.stableId).toBe(topBlock.identity?.stableId);
+
+    const messageBlock = JSON.parse(JSON.stringify(sanitizeQuestionBlockForRuntimeMessage(frameBlock))) as QuestionBlock;
+    expect(messageBlock.runtimeQuestionHandle).toBe(frameBlock.runtimeQuestionHandle);
+    expect(Object.getOwnPropertySymbols(messageBlock)).toHaveLength(0);
+    expect(rootAttachmentOf(messageBlock).rootKey).toBe(TOP_ROOT_KEY);
+    expect(readRuntimeQuestionHandle(messageBlock)?.attachment).toMatchObject({
+      rootKey: frameRoot.rootKey,
+      rootGeneration: frameRoot.rootGeneration,
+    });
+    const mappedMessageBlock = buildControlMapping(messageBlock, frameOwner);
+    expect(mappedMessageBlock).toMatchObject({
+      ok: true,
+      rootKey: frameRoot.rootKey,
+      rootGeneration: frameRoot.rootGeneration,
+    });
+    expect(controlRegistry.entryCountForRoot(frameRoot.rootKey, frameRoot.rootGeneration)).toBe(4);
+
+    const filled = await fillParsedAnswerInPage(messageBlock, parseResult(), { mode: "manual" });
+
+    expect(filled).toMatchObject({ ok: true, filledCount: 1 });
+    expect(doc.getElementById("opt-b")!.getAttribute("aria-checked")).toBe("true");
+    expect(controlRegistry.entryCountForRoot(frameRoot.rootKey, frameRoot.rootGeneration)).toBe(0);
+    expect(controlRegistry.entryCountForRoot(TOP_ROOT_KEY)).toBeGreaterThan(0);
+
+    const cleanupMapping = buildControlMapping(frameBlock, frameOwner);
+    expect(cleanupMapping.ok).toBe(true);
+    expect(controlRegistry.entryCountForRoot(frameRoot.rootKey, frameRoot.rootGeneration)).toBe(4);
+    finishAutoSolveQuestionAttempt(messageBlock);
+    expect(controlRegistry.entryCountForRoot(frameRoot.rootKey, frameRoot.rootGeneration)).toBe(0);
+    expect(controlRegistry.entryCountForRoot(TOP_ROOT_KEY)).toBeGreaterThan(0);
+    expect(controlRegistry.orphanEntryCount).toBe(0);
+  });
+
+  it("P10A-SERIALIZED-SHADOW-CLEANUP-01 uses the sealed shadow root for attempt cleanup", () => {
+    const { shadow } = makeShadowHost("serialized-cleanup", 120);
+    const shadowOwner = shadow.querySelector(".question-item")!;
+    const topContainer = document.createElement("div");
+    document.body.append(topContainer);
+    const topOwner = mountQuestion(topContainer);
+    const registry = sharedRootRegistry();
+    registry.reconcile(document);
+    const shadowRoot = registry.list().find((root) => root.kind === "open-shadow-root" && root.root === shadow)!;
+    const shadowBlock = detectCandidatesInRoot(shadowRoot.root, shadowRoot)[0]!;
+    const topBlock = detectCandidatesInRoot(document, registry.get(TOP_ROOT_KEY)!)[0]!;
+    const topMapping = buildControlMapping(topBlock, topOwner);
+    expect(topMapping.ok).toBe(true);
+    const shadowMapping = buildControlMapping(shadowBlock, shadowOwner);
+    expect(shadowMapping.ok).toBe(true);
+    expect(controlRegistry.entryCountForRoot(shadowRoot.rootKey, shadowRoot.rootGeneration)).toBe(4);
+
+    const messageBlock = JSON.parse(JSON.stringify(sanitizeQuestionBlockForRuntimeMessage(shadowBlock))) as QuestionBlock;
+    expect(Object.getOwnPropertySymbols(messageBlock)).toHaveLength(0);
+    expect(readRuntimeQuestionHandle(messageBlock)?.attachment).toMatchObject({
+      rootKey: shadowRoot.rootKey,
+      rootGeneration: shadowRoot.rootGeneration,
+    });
+    finishAutoSolveQuestionAttempt(messageBlock);
+
+    expect(controlRegistry.entryCountForRoot(shadowRoot.rootKey, shadowRoot.rootGeneration)).toBe(0);
+    expect(controlRegistry.entryCountForRoot(TOP_ROOT_KEY)).toBeGreaterThan(0);
+    expect(controlRegistry.orphanEntryCount).toBe(0);
   });
 
   it("REAL_CLICK sends frame-owned control coordinates in the top-tab viewport", async () => {
