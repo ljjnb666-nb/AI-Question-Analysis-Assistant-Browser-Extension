@@ -51,6 +51,13 @@ export class QuestionRevisionRegistry {
     return { routeEpoch: this.routeEpoch, routeFingerprint: this.routeFingerprint };
   }
 
+  clear(): void {
+    this.versions.clear();
+    this.protectedInstanceKey = null;
+    this.routeFingerprint = routeFingerprintForLocation();
+    this.routeEpoch += 1;
+  }
+
   refreshRoute(): boolean {
     const next = routeFingerprintForLocation();
     if (next === this.routeFingerprint) return false;

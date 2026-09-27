@@ -97,6 +97,7 @@ type RefineFullPageDeps = {
   projectViewportBboxToAbsolute: (bbox: BoundingBox, scrollRoot: ScanScrollRoot) => BoundingBox;
   getAutoSolveTextFingerprint: (text: string) => string;
   autoSolveStopRequested: () => boolean;
+  isRuntimeCurrent?: () => boolean;
 };
 
 export function buildOrderedPlanFromDomQuestionCards(
@@ -199,11 +200,12 @@ export async function refineFullPageCandidatesViaManualPipeline(
 
   try {
     for (const candidate of [...candidates].sort((a, b) => a.bbox.y - b.bbox.y || a.bbox.x - b.bbox.x)) {
-      if (deps.autoSolveStopRequested()) break;
+      if (deps.isRuntimeCurrent?.() === false || deps.autoSolveStopRequested()) break;
 
       const targetTop = Math.max(0, candidate.bbox.y - Math.max(96, Math.floor(window.innerHeight * 0.16)));
       deps.setScrollPosition(scrollRoot, targetTop, originalLeft);
       await deps.pauseFullPage(220);
+      if (deps.isRuntimeCurrent?.() === false || deps.autoSolveStopRequested()) break;
 
       const {
         finalViewportBBox,
@@ -245,6 +247,7 @@ export async function refineFullPageCandidatesViaManualPipeline(
     deps.setScrollPosition(scrollRoot, originalTop, originalLeft);
   }
 
+  if (deps.isRuntimeCurrent?.() === false) return [];
   return refined.length ? refined : candidates;
 }
 

@@ -23,32 +23,43 @@ type RuntimeListener = (
   sendResponse: (response?: unknown) => void,
 ) => boolean;
 
-type RuntimeBootstrapModule = {
-  bootstrapContentRuntime: () => RuntimeListener;
+type RuntimeHandle = {
+  listener: RuntimeListener;
+  dispose: () => void;
 };
 
-let runtimeListenerPromise: Promise<RuntimeListener> | null = null;
+type RuntimeBootstrapModule = {
+  bootstrapContentRuntime: (options?: { onShutdown?: () => void }) => RuntimeHandle;
+};
 
-async function ensureRuntimeListener(): Promise<RuntimeListener> {
-  if (!runtimeListenerPromise) {
+let runtimeHandlePromise: Promise<RuntimeHandle> | null = null;
+let bootstrapListenerInstalled = false;
+
+async function ensureRuntimeHandle(): Promise<RuntimeHandle> {
+  if (!runtimeHandlePromise) {
     const runtimeUrl = chrome.runtime.getURL("content/contentRuntimeBootstrap.js");
-    runtimeListenerPromise = import(/* @vite-ignore */ runtimeUrl)
-      .then((module) => (module as RuntimeBootstrapModule).bootstrapContentRuntime())
+    runtimeHandlePromise = import(/* @vite-ignore */ runtimeUrl)
+      .then((module) => (module as RuntimeBootstrapModule).bootstrapContentRuntime({
+        onShutdown: () => {
+          runtimeHandlePromise = null;
+          installBootstrapListener();
+        },
+      }))
       .catch((error) => {
-        runtimeListenerPromise = null;
+        runtimeHandlePromise = null;
         throw error;
       });
   }
-  return runtimeListenerPromise;
+  return runtimeHandlePromise;
 }
 
 const bootstrapListener = (message: ExtMessage, sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) => {
   if (!BOOTSTRAP_MESSAGE_TYPES.has(message.type)) return false;
 
-  void ensureRuntimeListener()
-    .then((runtimeListener) => {
-      chrome.runtime.onMessage.removeListener(bootstrapListener);
-      return runtimeListener(message, sender, sendResponse);
+  void ensureRuntimeHandle()
+    .then((runtimeHandle) => {
+      removeBootstrapListener();
+      return runtimeHandle.listener(message, sender, sendResponse);
     })
     .catch((error) => {
       console.error("[ContentBootstrap] failed to load runtime:", error);
@@ -60,4 +71,16 @@ const bootstrapListener = (message: ExtMessage, sender: chrome.runtime.MessageSe
   return true;
 };
 
-chrome.runtime.onMessage.addListener(bootstrapListener);
+function installBootstrapListener() {
+  if (bootstrapListenerInstalled) return;
+  chrome.runtime.onMessage.addListener(bootstrapListener);
+  bootstrapListenerInstalled = true;
+}
+
+function removeBootstrapListener() {
+  if (!bootstrapListenerInstalled) return;
+  chrome.runtime.onMessage.removeListener(bootstrapListener);
+  bootstrapListenerInstalled = false;
+}
+
+installBootstrapListener();

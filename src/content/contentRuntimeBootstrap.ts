@@ -14,7 +14,7 @@ import {
 } from "./detector/fullPageDetector";
 import { fillParsedAnswerInPage, verifyParsedAnswerInPage } from "./answerFiller";
 import { findMatchingFullPageCandidate, projectViewportBboxToAbsolute } from "./candidateMatching";
-import { createContentRuntimeMessageListener, registerContentRuntimeMessageHandlers } from "./contentRuntimeMessages";
+import { registerContentRuntimeMessageHandlers } from "./contentRuntimeMessages";
 import {
   detectTotalQuestionCount,
   extractQuestionImageUrlFromBBox,
@@ -49,24 +49,38 @@ import { initAnalytics } from "@/shared/utils/analytics";
 import { createContentMainBridges } from "./contentMainBridges";
 import { createContentRuntimeState } from "./contentRuntimeState";
 import { createContentMainWorkflows } from "./contentMainWorkflows";
+import { beginContentRuntimeGeneration } from "./contentRuntimeLifecycle";
+import { controlRegistry } from "./answer/controlRegistry";
+import { sharedRootRegistry } from "./roots/rootRegistry";
+import { invalidateAllRuntimeQuestionHandles } from "./roots/rootContext";
+import { disposeQuestionRevisionRuntime } from "./revision/questionRevisionRuntime";
+import { runtimeMediaPayloadStore } from "./media/mediaPayloadStore";
+import { runtimeMediaSourceLocatorStore } from "./media/mediaSourceLocatorStore";
 import type { ExtMessage } from "@/shared/types";
 
-type ContentRuntimeMessageListener = (
+export type ContentRuntimeMessageListener = (
   message: ExtMessage,
   sender: chrome.runtime.MessageSender,
   sendResponse: (response?: unknown) => void,
 ) => boolean;
 
-let runtimeListener: ContentRuntimeMessageListener | null = null;
-let runtimeWorkflows: ReturnType<typeof createContentMainWorkflows> | null = null;
+export type ContentRuntimeHandle = {
+  generation: number;
+  listener: ContentRuntimeMessageListener;
+  dispose: () => void;
+};
 
-export function bootstrapContentRuntime(): ContentRuntimeMessageListener {
-  if (runtimeListener) return runtimeListener;
+let activeRuntime: ContentRuntimeHandle | null = null;
 
+export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {}): ContentRuntimeHandle {
+  if (activeRuntime) return activeRuntime;
+
+  const lifecycle = beginContentRuntimeGeneration();
   initAnalytics();
 
   const floatingMgr = new FloatingWindowManager();
   const runtimeState = createContentRuntimeState();
+  let workflows: ReturnType<typeof createContentMainWorkflows> | null = null;
   let startManualCaptureImpl = (_forceVisionMode: boolean) => {};
   function startManualCapture(forceVisionMode: boolean) {
     startManualCaptureImpl(forceVisionMode);
@@ -75,6 +89,7 @@ export function bootstrapContentRuntime(): ContentRuntimeMessageListener {
     captureBlockImage,
     abortCurrentSolveAttempt,
     clickNextQuestionButton,
+    disposeBindings,
     findNextQuestionButton,
     handleAutoDetect,
     handleFullPageDetect,
@@ -99,12 +114,14 @@ export function bootstrapContentRuntime(): ContentRuntimeMessageListener {
   } = createContentMainBridges({
     candidateStatusMap: runtimeState.candidateStatusMap,
     floatingMgr,
-    refreshLayoutResizeObservation,
-    scheduleHighlightRelayoutRescan,
+    isRuntimeCurrent: lifecycle.isCurrent,
+    refreshLayoutResizeObservation: () => workflows?.refreshLayoutResizeObservation(),
+    scheduleHighlightRelayoutRescan: () => workflows?.scheduleHighlightRelayoutRescan(),
     startManualCapture,
     state: runtimeState,
   });
-  const workflows = createContentMainWorkflows({
+  workflows = createContentMainWorkflows({
+    isRuntimeCurrent: lifecycle.isCurrent,
     clickNextQuestionButton,
     detectCandidatesFullPage: async () => detectCandidatesFullPage(() => {}),
     detectCandidatesAcrossRoots,
@@ -114,7 +131,10 @@ export function bootstrapContentRuntime(): ContentRuntimeMessageListener {
     extractQuestionImageUrlFromBBox,
     extractRichQuestionPreviewFromElement,
     extractTextFromBBox,
-    fillParsedAnswerInPage,
+    fillParsedAnswerInPage: (block, result, fillOptions) => fillParsedAnswerInPage(block, result, {
+      ...fillOptions,
+      isRuntimeCurrent: lifecycle.isCurrent,
+    }),
     findBestDetectedCandidateForBBox,
     findMatchingFullPageCandidate,
     findNextQuestionButton,
@@ -165,7 +185,6 @@ export function bootstrapContentRuntime(): ContentRuntimeMessageListener {
     waitForQuestionAdvance,
     withTimeout,
   });
-  runtimeWorkflows = workflows;
   startManualCaptureImpl = workflows.startManualCapture;
 
   // Floating Trigger Button
@@ -191,7 +210,10 @@ export function bootstrapContentRuntime(): ContentRuntimeMessageListener {
     closeFloatingResult: () => {
       floatingMgr.close();
     },
-    fillParsedAnswerInPage,
+    fillParsedAnswerInPage: (block, result, fillOptions) => fillParsedAnswerInPage(block, result, {
+      ...fillOptions,
+      isRuntimeCurrent: lifecycle.isCurrent,
+    }),
     getActiveCandidates: runtimeState.getActiveCandidates,
     getActiveHighlightBlocks: runtimeState.getActiveHighlightBlocks,
     getHighlightLayer: runtimeState.getHighlightLayer,
@@ -213,21 +235,56 @@ export function bootstrapContentRuntime(): ContentRuntimeMessageListener {
     },
     stopSpaWatch: runtimeState.stopSpaWatch,
     verifyParsedAnswerInPage,
-  } satisfies Parameters<typeof createContentRuntimeMessageListener>[0];
+    isRuntimeCurrent: lifecycle.isCurrent,
+  } satisfies Parameters<typeof registerContentRuntimeMessageHandlers>[0];
 
-  registerContentRuntimeMessageHandlers(messageHandlerOptions);
-  runtimeListener = createContentRuntimeMessageListener(messageHandlerOptions);
-  return runtimeListener;
+  const listener = registerContentRuntimeMessageHandlers(messageHandlerOptions);
+  let disposed = false;
+  const runtimeHandle: ContentRuntimeHandle = {
+    generation: lifecycle.generation,
+    listener,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      lifecycle.invalidate();
+      const cleanup = (action: () => void) => {
+        try {
+          action();
+        } catch (error) {
+          console.warn("[ContentRuntime] shutdown cleanup failed:", error);
+        }
+      };
+
+      cleanup(() => chrome.runtime.onMessage.removeListener(listener));
+      cleanup(() => runtimeState.setAutoSolveStopRequested(true));
+      cleanup(abortCurrentSolveAttempt);
+      cleanup(cancelFullPageScan);
+      cleanup(runtimeState.destroyActiveOverlay);
+      cleanup(runtimeState.stopSpaWatch);
+      cleanup(disposeBindings);
+      cleanup(layoutWatch.dispose);
+      cleanup(() => {
+        runtimeState.getHighlightLayer()?.destroy();
+        runtimeState.setHighlightLayer(null);
+      });
+      cleanup(() => floatingMgr.destroy());
+      cleanup(() => controlRegistry.clear());
+      cleanup(disposeQuestionRevisionRuntime);
+      cleanup(() => sharedRootRegistry().reset());
+      cleanup(invalidateAllRuntimeQuestionHandles);
+      cleanup(() => runtimeMediaPayloadStore.clear());
+      cleanup(() => runtimeMediaSourceLocatorStore.clear());
+      cleanup(runtimeState.disposeEphemeralState);
+
+      if (activeRuntime === runtimeHandle) activeRuntime = null;
+      cleanup(() => options.onShutdown?.());
+    },
+  };
+  activeRuntime = runtimeHandle;
+  return runtimeHandle;
 }
 
-function scheduleHighlightRelayoutRescan() {
-  runtimeWorkflows?.scheduleHighlightRelayoutRescan();
+export function shutdownContentRuntime(): void {
+  activeRuntime?.dispose();
 }
-
-function refreshLayoutResizeObservation() {
-  runtimeWorkflows?.refreshLayoutResizeObservation();
-}
-
-// Full Page Detect
-// Auto Detect
 

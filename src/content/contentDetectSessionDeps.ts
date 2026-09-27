@@ -14,12 +14,14 @@ type RefineFullPageDeps = Parameters<typeof refineFullPageCandidatesViaManualPip
 
 type SharedDetectSessionFactoryOptions = {
   candidateStatusMap: DetectSessionDeps["candidateStatusMap"];
+  clearRouteOwnedState?: DetectSessionDeps["clearRouteOwnedState"];
   cancelFullPageScan: DetectSessionDeps["cancelFullPageScan"];
   createHighlightLayer: DetectSessionDeps["createHighlightLayer"];
   detectCandidatesFullPage: DetectSessionDeps["detectCandidatesFullPage"];
   detectCandidatesInViewport: DetectSessionDeps["detectCandidatesInViewport"];
   getFullPageLayoutKey: DetectSessionDeps["getFullPageLayoutKey"];
   isFullPageScanRunning: DetectSessionDeps["isFullPageScanRunning"];
+  isRuntimeCurrent?: DetectSessionDeps["isRuntimeCurrent"];
   logEvent: DetectSessionDeps["logEvent"];
   notifySidePanel: DetectSessionDeps["notifySidePanel"];
   refreshFullPageHighlightsAfterLayoutChange: DetectSessionDeps["refreshFullPageHighlightsAfterLayoutChange"];
@@ -43,6 +45,7 @@ export function createDetectSessionDeps(
 ): DetectSessionDeps & AutoDetectSessionDeps {
   return {
     candidateStatusMap: options.candidateStatusMap,
+    clearRouteOwnedState: options.clearRouteOwnedState ?? (() => undefined),
     cancelFullPageScan: options.cancelFullPageScan,
     createHighlightLayer: options.createHighlightLayer,
     detectCandidatesFullPage: options.detectCandidatesFullPage,
@@ -50,6 +53,7 @@ export function createDetectSessionDeps(
     destroyHighlightLayer: options.destroyHighlightLayer,
     getFullPageLayoutKey: options.getFullPageLayoutKey,
     isFullPageScanRunning: options.isFullPageScanRunning,
+    isRuntimeCurrent: options.isRuntimeCurrent ?? (() => true),
     logEvent: options.logEvent,
     notifySidePanel: options.notifySidePanel,
     refreshFullPageHighlightsAfterLayoutChange: options.refreshFullPageHighlightsAfterLayoutChange,

@@ -78,6 +78,7 @@ const AUTO_SOLVE_REVIEW_CONFIDENCE_THRESHOLD = 0.9;
 type CreateContentMainBridgesOptions = {
   candidateStatusMap: CandidateStatusMap;
   floatingMgr: FloatingWindowManager;
+  isRuntimeCurrent: () => boolean;
   refreshLayoutResizeObservation: () => void;
   scheduleHighlightRelayoutRescan: () => void;
   startManualCapture: (forceVisionMode: boolean) => void;
@@ -88,7 +89,9 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
   const parseRetryDeps = {
     logEvent,
     parseQuestion,
-    setStreamingText: options.floatingMgr.setStreamingText.bind(options.floatingMgr),
+    setStreamingText: (text: string) => {
+      if (options.isRuntimeCurrent()) options.floatingMgr.setStreamingText(text);
+    },
     withTimeout,
   };
   const autoSolveParsingTimeouts = {
@@ -229,6 +232,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     shouldPreferViewportPreviewCore,
     stopSpaWatch: options.state.stopSpaWatch,
     watchForPageChanges,
+    isRuntimeCurrent: options.isRuntimeCurrent,
     detectAutoSolveQuestionOrder: extractAutoSolveQuestionOrder,
     extractQuestionImageUrlFromBBox,
     extractTextFromBBox,
@@ -262,18 +266,23 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     findNextQuestionButtonCore,
     getAutoSolveFingerprint,
     hasVisibleAutoSolveMedia,
+    isRuntimeCurrent: options.isRuntimeCurrent,
     inferAutoSolveQuestionType,
     isElementVisible,
     isExtensionUiElement,
     parseQuestionNavDeps: questionNavDeps,
     resolveQuestionBlockFromBBox,
-    sendAutoSolveDoneCore,
-    sendAutoSolveProgressCore,
     stopRequestedRef: options.state.getAutoSolveStopRequested,
+    sendAutoSolveDoneCore: (payload) => {
+      if (options.isRuntimeCurrent()) sendAutoSolveDoneCore(payload);
+    },
+    sendAutoSolveProgressCore: (payload) => {
+      if (options.isRuntimeCurrent()) sendAutoSolveProgressCore(payload);
+    },
     waitForQuestionAdvanceCore,
   });
 
-  initializeContentBindings({
+  const disposeBindings = initializeContentBindings({
     floatingMgr: options.floatingMgr,
     handleAutoDetect,
     installFormulaEmbedFallback,
@@ -285,6 +294,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
   return {
     abortCurrentSolveAttempt,
     captureBlockImage,
+    disposeBindings,
     clickNextQuestionButton,
     detectZhihuishuCurrentQuestionBlock,
     findNextQuestionButton,

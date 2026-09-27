@@ -44,9 +44,24 @@ type BridgeDeps = {
   extractTextFromBBox: Parameters<typeof createRefineFullPageDepsFactory>[0]["extractTextFromBBox"];
   getAutoSolveTextFingerprint: Parameters<typeof createRefineFullPageDepsFactory>[0]["getAutoSolveTextFingerprint"];
   inferAutoSolveQuestionType: Parameters<typeof createRefineFullPageDepsFactory>[0]["inferAutoSolveQuestionType"];
+  isRuntimeCurrent?: () => boolean;
 };
 
 export function createContentDetectionBridge(deps: BridgeDeps) {
+  const isRuntimeCurrent = deps.isRuntimeCurrent ?? (() => true);
+
+  function clearRouteOwnedState() {
+    deps.stopSpaWatch();
+    deps.destroyHighlightLayer();
+    deps.candidateStatusMap.clear();
+    deps.setActiveCandidates([]);
+    deps.setActiveHighlightBlocks([]);
+    deps.setActiveDetectMode(null);
+    deps.setLastFullPageLayoutKey("");
+    deps.refreshLayoutResizeObservation();
+    notifySidePanel([]);
+  }
+
   async function refineFullPageCandidatesViaManualPipeline(candidates: QuestionBlock[]): Promise<QuestionBlock[]> {
     return refineFullPageCandidatesViaManualPipelineCore(
       candidates,
@@ -68,6 +83,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
         projectViewportBboxToAbsolute: deps.projectViewportBboxToAbsolute,
         getAutoSolveTextFingerprint: deps.getAutoSolveTextFingerprint,
         autoSolveStopRequested: deps.setAutoSolveStopRequestedGetter,
+        isRuntimeCurrent,
       }),
     );
   }
@@ -90,8 +106,10 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
   }
 
   async function handleFullPageDetect() {
+    if (!isRuntimeCurrent()) return;
     await runFullPageDetectSession(createDetectSessionDepsFactory({
       candidateStatusMap: deps.candidateStatusMap,
+      clearRouteOwnedState,
       cancelFullPageScan: deps.cancelFullPageScan,
       createHighlightLayer: deps.createHighlightLayer,
       detectCandidatesFullPage: deps.detectCandidatesFullPage,
@@ -99,6 +117,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
       destroyHighlightLayer: deps.destroyHighlightLayer,
       getFullPageLayoutKey: deps.getFullPageLayoutKey,
       isFullPageScanRunning: deps.isFullPageScanRunning,
+      isRuntimeCurrent,
       logEvent: deps.logEvent,
       notifySidePanel,
       refreshFullPageHighlightsAfterLayoutChange: deps.refreshFullPageHighlightsAfterLayoutChange,
@@ -118,8 +137,10 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
   }
 
   async function handleAutoDetect() {
+    if (!isRuntimeCurrent()) return;
     await runAutoDetectSession(createDetectSessionDepsFactory({
       candidateStatusMap: deps.candidateStatusMap,
+      clearRouteOwnedState,
       cancelFullPageScan: deps.cancelFullPageScan,
       createHighlightLayer: deps.createHighlightLayer,
       detectCandidatesFullPage: deps.detectCandidatesFullPage,
@@ -127,6 +148,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
       destroyHighlightLayer: deps.destroyHighlightLayer,
       getFullPageLayoutKey: deps.getFullPageLayoutKey,
       isFullPageScanRunning: deps.isFullPageScanRunning,
+      isRuntimeCurrent,
       logEvent: deps.logEvent,
       notifySidePanel,
       refreshFullPageHighlightsAfterLayoutChange: deps.refreshFullPageHighlightsAfterLayoutChange,
@@ -146,9 +168,12 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
   }
 
   function notifySidePanel(candidates: QuestionBlock[]) {
+    if (!isRuntimeCurrent()) return;
     notifyDetectedCandidates(candidates, createNotifySidePanelDepsFactory({
       candidateStatusMap: deps.candidateStatusMap,
-      safeRuntimeSendMessage: deps.safeRuntimeSendMessage,
+      safeRuntimeSendMessage: (message) => {
+        if (isRuntimeCurrent()) deps.safeRuntimeSendMessage(message);
+      },
     }));
   }
 

@@ -18,7 +18,9 @@ type FullPageProgress = {
 };
 
 type FullPageDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], statusMap: Map<string, CandidateStatus>) => void }> = {
+  clearRouteOwnedState?: () => void;
   isFullPageScanRunning: () => boolean;
+  isRuntimeCurrent?: () => boolean;
   cancelFullPageScan: () => void;
   logEvent: (event: "auto_detect_started" | "auto_detect_candidates_found" | "auto_detect_candidate_selected", data?: Record<string, unknown>) => void;
   destroyHighlightLayer: () => void;
@@ -40,6 +42,7 @@ type FullPageDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], st
 };
 
 type ViewportDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], statusMap: Map<string, CandidateStatus>) => void }> = {
+  clearRouteOwnedState?: () => void;
   logEvent: (event: "auto_detect_started" | "auto_detect_candidates_found" | "auto_detect_candidate_selected", data?: Record<string, unknown>) => void;
   destroyHighlightLayer: () => void;
   stopSpaWatch: () => void;
@@ -49,7 +52,8 @@ type ViewportDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], st
   createHighlightLayer: (options: {
     onSelect: (blockId: string, selected: boolean) => void;
   }) => TLayer;
-  watchForPageChanges: (onChange: (blocks: QuestionBlock[], rootKey?: string) => void) => () => void;
+  watchForPageChanges: (onChange: (blocks: QuestionBlock[], rootKey?: string) => void, onRouteChange?: () => void) => () => void;
+  isRuntimeCurrent?: () => boolean;
 };
 
 export function notifySidePanel(
@@ -79,6 +83,11 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
   lastFullPageLayoutKey: string;
   highlightLayer: null;
 } | null> {
+  const isRuntimeCurrent = deps.isRuntimeCurrent ?? (() => true);
+  if (!isRuntimeCurrent()) return null;
+  const startedAtUrl = location.href;
+  const isCurrentRoute = () => isRuntimeCurrent() && location.href === startedAtUrl;
+
   if (deps.isFullPageScanRunning()) {
     deps.cancelFullPageScan();
     return null;
@@ -100,6 +109,7 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
 
   try {
     const roughCandidates = await deps.detectCandidatesFullPage((p) => {
+      if (!isCurrentRoute()) return;
       deps.safeRuntimeSendMessage({
         type: "FULL_PAGE_DETECT_PROGRESS",
         progress: p.progress,
@@ -108,7 +118,16 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
         totalScrollSteps: p.totalScrollSteps,
       });
     });
+    if (!isCurrentRoute()) {
+      deps.cancelFullPageScan();
+      deps.clearRouteOwnedState?.();
+      return null;
+    }
     const candidates = await deps.refineFullPageCandidatesViaManualPipeline(roughCandidates);
+    if (!isCurrentRoute()) {
+      deps.clearRouteOwnedState?.();
+      return null;
+    }
     const scrollRoot = deps.resolveFullPageScrollRoot();
     const lastFullPageLayoutKey = deps.getFullPageLayoutKey(scrollRoot);
 
@@ -146,6 +165,7 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
 
     return { ...state, highlightLayer };
   } catch (err) {
+    if (!isCurrentRoute()) return null;
     console.error("[QS] Full page detect error:", err);
     deps.refreshLayoutResizeObservation();
     deps.safeRuntimeSendMessage({
@@ -172,6 +192,16 @@ export function handleAutoDetect<TLayer extends { setBlocks: (blocks: QuestionBl
   highlightLayer: TLayer | null;
   unwatchSPA: (() => void) | null;
 } {
+  const isRuntimeCurrent = deps.isRuntimeCurrent ?? (() => true);
+  if (!isRuntimeCurrent()) {
+    return {
+      activeCandidates: [],
+      activeHighlightBlocks: [],
+      activeDetectMode: "viewport",
+      highlightLayer: null,
+      unwatchSPA: null,
+    };
+  }
   deps.logEvent("auto_detect_started");
   deps.destroyHighlightLayer();
   deps.stopSpaWatch();
@@ -213,6 +243,7 @@ export function handleAutoDetect<TLayer extends { setBlocks: (blocks: QuestionBl
 
   let aggregate = new CandidateRootAggregation(candidates);
   const unwatchSPA = deps.watchForPageChanges((newBlocks, rootKey) => {
+    if (!isRuntimeCurrent()) return;
     let nextBlocks: QuestionBlock[];
     if (rootKey) {
       nextBlocks = newBlocks.length === 0
@@ -229,6 +260,9 @@ export function handleAutoDetect<TLayer extends { setBlocks: (blocks: QuestionBl
     state.activeHighlightBlocks = nextBlocks;
     if (highlightLayer) highlightLayer.setBlocks(nextBlocks, deps.candidateStatusMap);
     deps.notifySidePanel(nextBlocks);
+  }, () => {
+    if (!isRuntimeCurrent()) return;
+    deps.clearRouteOwnedState?.();
   });
 
   return { ...state, highlightLayer, unwatchSPA };

@@ -62,6 +62,7 @@ type AutoSolveBridgeDeps = {
   inferAutoSolveQuestionType: (text: string) => QuestionBlock["questionTypeGuess"];
   extractQuestionImageUrlFromBBox: (bbox: QuestionBlock["bbox"]) => string | null;
   hasVisibleAutoSolveMedia: (scope: Element) => boolean;
+  isRuntimeCurrent?: () => boolean;
 };
 
 export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
@@ -78,7 +79,8 @@ export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
     const live = pickLiveAutoSolveBlock();
     const liveQuestionId = live?.identity?.stableId ?? live?.id;
     const liveFingerprint = live?.identity?.contentFingerprint ?? live?.id;
-    return activeAttempt === attempt
+    return (deps.isRuntimeCurrent?.() ?? true)
+      && activeAttempt === attempt
       && !attempt.controller.signal.aborted
       && attempt.questionId === (block.identity?.stableId ?? block.id)
       && attempt.contentFingerprint === (block.identity?.contentFingerprint ?? block.id)

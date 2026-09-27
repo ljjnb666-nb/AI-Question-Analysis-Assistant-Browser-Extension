@@ -187,6 +187,15 @@ export function invalidateRuntimeQuestionHandlesForRoot(rootKey: string): void {
   }
 }
 
+export function invalidateAllRuntimeQuestionHandles(): void {
+  runtimeQuestionHandles.clear();
+}
+
+/** Read-only count for lifecycle assertions; question owners remain private. */
+export function runtimeQuestionHandleCount(): number {
+  return runtimeQuestionHandles.size;
+}
+
 function createRuntimeQuestionHandle(): string | null {
   const cryptoApi = globalThis.crypto;
   if (!cryptoApi?.getRandomValues) return null;

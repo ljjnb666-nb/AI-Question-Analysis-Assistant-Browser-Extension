@@ -37,6 +37,7 @@ type LayoutWatchLike = {
 };
 
 type CreateContentMainWorkflowsOptions = {
+  isRuntimeCurrent: () => boolean;
   floatingMgr: {
     close: () => void;
     open: (block: QuestionBlock) => void;
@@ -66,7 +67,7 @@ type CreateContentMainWorkflowsOptions = {
   fillParsedAnswerInPage: (
     block: QuestionBlock,
     result: ParseResult,
-    options?: { mode?: "auto" | "manual"; expectedUrl?: string },
+    options?: { mode?: "auto" | "manual"; expectedUrl?: string; isRuntimeCurrent?: () => boolean },
   ) => Promise<{ ok: boolean; filledCount: number; message: string }>;
   findBestDetectedCandidateForBBox: (bbox: BoundingBox) => QuestionBlock | null;
   findMatchingFullPageCandidate: (
@@ -210,6 +211,7 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
   };
 
   function startManualCapture(forceVisionMode: boolean) {
+    if (!options.isRuntimeCurrent()) return;
     startManualCaptureSession(forceVisionMode, {
       activeOverlay: options.runtimeState.getActiveOverlay(),
       clearHighlightLayer: () => {
@@ -230,8 +232,10 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
   }
 
   async function handleBBoxSubmit(bbox: BoundingBox, forceVision: boolean) {
+    if (!options.isRuntimeCurrent()) return;
     await submitManualCapture(bbox, {
       forceVision,
+      isRuntimeCurrent: options.isRuntimeCurrent,
       isPendingSubmit: options.runtimeState.getPendingSubmit,
       pipelineDeps: {
         floatingMgr: options.floatingMgr,
@@ -280,7 +284,10 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         extractQuestionImageUrlFromBBox: options.extractQuestionImageUrlFromBBox,
         extractRichQuestionPreviewFromElement: options.extractRichQuestionPreviewFromElement,
         extractTextFromBBox: options.extractTextFromBBox,
-        fillParsedAnswerInPage: options.fillParsedAnswerInPage,
+        fillParsedAnswerInPage: (block, result, fillOptions) => options.fillParsedAnswerInPage(block, result, {
+          ...fillOptions,
+          isRuntimeCurrent: options.isRuntimeCurrent,
+        }),
         findBestDetectedCandidateForBBox: options.findBestDetectedCandidateForBBox,
         findMatchingFullPageCandidate: options.findMatchingFullPageCandidate,
         findNextQuestionButton: options.findNextQuestionButton,

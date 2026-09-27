@@ -190,7 +190,15 @@ function resolveFillScopeForBlock(block: QuestionBlock): ResolvedFillScope {
   return { ok: true, doc, localBBox, shadowRoot, owner: rootContext.owner };
 }
 
-export async function fillParsedAnswerInPage(block: QuestionBlock, result: ParseResult, options: { mode?: "auto" | "manual"; expectedUrl?: string } = {}): Promise<FillAnswerResult> {
+export async function fillParsedAnswerInPage(
+  block: QuestionBlock,
+  result: ParseResult,
+  options: { mode?: "auto" | "manual"; expectedUrl?: string; isRuntimeCurrent?: () => boolean } = {},
+): Promise<FillAnswerResult> {
+  const isRuntimeCurrent = options.isRuntimeCurrent ?? (() => true);
+  if (!isRuntimeCurrent()) {
+    return { ok: false, filledCount: 0, code: STALE_QUESTION_REVISION, message: STALE_QUESTION_REVISION };
+  }
   const startUrl = location.href;
   if (options.expectedUrl !== undefined && options.expectedUrl !== startUrl) {
     return { ok: false, filledCount: 0, code: STALE_QUESTION_REVISION, message: STALE_QUESTION_REVISION };
@@ -204,19 +212,22 @@ export async function fillParsedAnswerInPage(block: QuestionBlock, result: Parse
 
   // Runtime candidates are bound to the exact owner resolved from the opaque
   // content-side handle. This also keeps shadow candidates inside their root.
-  if (owner) return fillVerifiedAnswerIntoScope(owner, block, result, options.mode ?? "manual", transactionRouteFingerprint);
+  if (owner) return fillVerifiedAnswerIntoScope(owner, block, result, options.mode ?? "manual", transactionRouteFingerprint, isRuntimeCurrent);
 
   if (shadowRoot) {
     const shadowScope = resolveShadowQuestionScope(shadowRoot, localBBox, block) ?? shadowRoot.host;
     if (shadowScope) {
-      return fillVerifiedAnswerIntoScope(shadowScope, block, result, options.mode ?? "manual", transactionRouteFingerprint);
+      return fillVerifiedAnswerIntoScope(shadowScope, block, result, options.mode ?? "manual", transactionRouteFingerprint, isRuntimeCurrent);
     }
     return { ok: false, filledCount: 0, message: STALE_ROOT_CONTEXT };
   }
 
   const directScope = await resolveDirectQuestionScope(block, result, doc).catch(() => null);
+  if (!isRuntimeCurrent()) {
+    return { ok: false, filledCount: 0, code: STALE_QUESTION_REVISION, message: STALE_QUESTION_REVISION };
+  }
   if (directScope) {
-    return fillVerifiedAnswerIntoScope(directScope.scope, block, result, options.mode ?? "manual", transactionRouteFingerprint);
+    return fillVerifiedAnswerIntoScope(directScope.scope, block, result, options.mode ?? "manual", transactionRouteFingerprint, isRuntimeCurrent);
   }
 
   ensureQuestionRegionVisible(localBBox);
@@ -224,12 +235,15 @@ export async function fillParsedAnswerInPage(block: QuestionBlock, result: Parse
   let scope = resolveQuestionScope(viewportBbox, scopeSelectors, doc);
   if (shouldRelocateScope(scope, block, result)) {
     const relocatedFirst = await relocateQuestionScopeByText(block, result, doc);
+    if (!isRuntimeCurrent()) {
+      return { ok: false, filledCount: 0, code: STALE_QUESTION_REVISION, message: STALE_QUESTION_REVISION };
+    }
     if (relocatedFirst) {
       scope = relocatedFirst.scope;
     }
   }
 
-  return fillVerifiedAnswerIntoScope(scope, block, result, options.mode ?? "manual", transactionRouteFingerprint);
+  return fillVerifiedAnswerIntoScope(scope, block, result, options.mode ?? "manual", transactionRouteFingerprint, isRuntimeCurrent);
 }
 
 export function verifyParsedAnswerInPage(block: QuestionBlock, result: ParseResult, expectedUrl?: string): VerifyAnswerResult {
@@ -272,6 +286,7 @@ async function fillVerifiedAnswerIntoScope(
   result: ParseResult,
   mode: "auto" | "manual",
   transactionRouteFingerprint: string,
+  isRuntimeCurrent: () => boolean,
 ): Promise<FillAnswerResult> {
   const key = snapshotKey(block); const autoStatus = autoSnapshotStatus.get(key);
   const solveStart = solveStartSnapshots.get(key);
@@ -279,6 +294,9 @@ async function fillVerifiedAnswerIntoScope(
 
   const resolveAuthority = (): CurrentTransactionAuthority => {
     try {
+      if (!isRuntimeCurrent()) {
+        return { ok: false, code: STALE_QUESTION_REVISION, message: STALE_QUESTION_REVISION };
+      }
       if (routeFingerprintForLocation() !== transactionRouteFingerprint) {
         return { ok: false, code: STALE_QUESTION_REVISION, message: STALE_QUESTION_REVISION };
       }
