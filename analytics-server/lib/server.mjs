@@ -1,4 +1,5 @@
 import { URL } from "node:url";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { buildAnalyticsSummary, buildTimeSeries } from "./metrics.mjs";
 import {
   createEmailVerificationCodeInStorage,
@@ -10,9 +11,13 @@ import {
   verifyEmailCodeInStorage,
 } from "./store.mjs";
 import { createFixedWindowRateLimiter, normalizeIpAddress } from "./security.mjs";
+import { ADMIN_SESSION_MAX_COUNT, ADMIN_SESSION_TTL_MS, createAdminSessionStore } from "./admin-sessions.mjs";
 
 const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
 const EXTENSION_ORIGIN_PREFIX = "chrome-extension://";
+const ADMIN_SESSION_COOKIE = "analytics_admin_session";
+const ADMIN_LOGIN_LIMIT = 10;
+const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
 class HttpError extends Error {
   constructor(statusCode, message) {
@@ -42,6 +47,7 @@ function jsonHeaders(req) {
     Expires: "0",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Referrer-Policy": "no-referrer",
     ...buildCorsHeaders(req),
   };
 }
@@ -52,6 +58,7 @@ function htmlHeaders(req) {
     "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
     Pragma: "no-cache",
     Expires: "0",
+    "Referrer-Policy": "no-referrer",
     ...buildCorsHeaders(req),
   };
 }
@@ -151,9 +158,9 @@ function renderAdminTokenGateHtml(publicBaseUrl) {
   </style>
 </head>
 <body>
-  <form class="panel" method="GET" action="/">
+  <form class="panel" method="POST" action="/admin/login">
     <h1>需要 Admin Token</h1>
-    <p>analytics dashboard 已启用管理口令。输入 token 后将通过查询参数重新加载当前页面。</p>
+    <p>请输入管理口令以建立短期安全会话。</p>
     <label for="adminToken">Admin Token</label>
     <input id="adminToken" name="adminToken" type="password" autocomplete="current-password" required>
     <button type="submit">进入 Dashboard</button>
@@ -163,7 +170,7 @@ function renderAdminTokenGateHtml(publicBaseUrl) {
 </html>`;
 }
 
-function renderDashboardHtml(summary, series, publicBaseUrl, storageInfo, tokenQuery = "") {
+function renderDashboardHtml(summary, series, publicBaseUrl, storageInfo) {
   const initialData = JSON.stringify({ summary, series }).replace(/</g, "\\u003c");
   return `<!doctype html>
 <html lang="zh-CN">
@@ -550,6 +557,7 @@ function renderDashboardHtml(summary, series, publicBaseUrl, storageInfo, tokenQ
         </div>
         <div class="actions">
           <button id="refreshBtn" type="button">刷新面板</button>
+          <form method="POST" action="/admin/logout"><button type="submit">退出</button></form>
           <div class="meta">${publicBaseUrl}</div>
         </div>
       </aside>
@@ -787,7 +795,7 @@ function renderDashboardHtml(summary, series, publicBaseUrl, storageInfo, tokenQ
       refreshBtn.disabled = true;
       status.textContent = "正在刷新面板...";
       try {
-        const response = await fetch("/admin/data${tokenQuery}", { cache: "no-store" });
+        const response = await fetch("/admin/data", { cache: "no-store" });
         if (!response.ok) throw new Error("HTTP " + response.status);
         const payload = await response.json();
         render({ summary: payload.summary, series: payload.series });
@@ -813,7 +821,7 @@ function ensureTrustedBrowserOrigin(req) {
   }
 }
 
-async function readJsonBody(req, maxBytes = DEFAULT_BODY_LIMIT_BYTES) {
+async function readRequestText(req, maxBytes = DEFAULT_BODY_LIMIT_BYTES) {
   return new Promise((resolve, reject) => {
     let raw = "";
     let aborted = false;
@@ -829,11 +837,7 @@ async function readJsonBody(req, maxBytes = DEFAULT_BODY_LIMIT_BYTES) {
     });
     req.on("end", () => {
       if (aborted) return;
-      try {
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch {
-        reject(new HttpError(400, "invalid json body"));
-      }
+      resolve(raw);
     });
     req.on("error", (error) => {
       if (aborted && error?.code === "ECONNRESET") return;
@@ -842,25 +846,71 @@ async function readJsonBody(req, maxBytes = DEFAULT_BODY_LIMIT_BYTES) {
   });
 }
 
+async function readJsonBody(req, maxBytes = DEFAULT_BODY_LIMIT_BYTES) {
+  const raw = await readRequestText(req, maxBytes);
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    throw new HttpError(400, "invalid json body");
+  }
+}
+
+async function readAdminLoginBody(req) {
+  const contentType = String(req.headers["content-type"] || "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+  if (contentType !== "application/x-www-form-urlencoded") {
+    throw new HttpError(415, "admin login requires form-encoded body");
+  }
+  const raw = await readRequestText(req);
+  return new URLSearchParams(raw).get("adminToken") || "";
+}
+
 function getBearerToken(req) {
   const authHeader = req.headers.authorization || "";
   const match = /^Bearer\s+(.+)$/i.exec(authHeader);
   return match?.[1] || "";
 }
 
-function getAdminToken(req, url) {
-  const bearerToken = getBearerToken(req);
-  if (bearerToken) return bearerToken;
-  return String(url.searchParams.get("adminToken") || "").trim();
+function getCookieValue(req, name) {
+  const cookieHeader = String(req.headers.cookie || "");
+  for (const entry of cookieHeader.split(";")) {
+    const separator = entry.indexOf("=");
+    if (separator < 0 || entry.slice(0, separator).trim() !== name) continue;
+    return entry.slice(separator + 1).trim();
+  }
+  return "";
 }
 
-function requireAdminToken(req, url, expectedToken) {
+function requireConfiguredAdminToken(expectedToken) {
   const normalized = String(expectedToken || "").trim();
-  if (!normalized) return false;
-  if (getAdminToken(req, url) !== normalized) {
-    throw new HttpError(401, "admin authorization required");
-  }
-  return true;
+  if (!normalized) throw new HttpError(503, "ADMIN_AUTH_NOT_CONFIGURED");
+  return normalized;
+}
+
+function adminTokensMatch(actual, expected) {
+  const actualDigest = createHash("sha256").update(String(actual)).digest();
+  const expectedDigest = createHash("sha256").update(String(expected)).digest();
+  return actualDigest.length === expectedDigest.length && timingSafeEqual(actualDigest, expectedDigest);
+}
+
+function hasAdminAuthority(req, expectedToken, sessionStore, allowBearer = false) {
+  const session = getCookieValue(req, ADMIN_SESSION_COOKIE);
+  if (session && sessionStore.has(session)) return true;
+  const bearer = allowBearer ? getBearerToken(req) : "";
+  return Boolean(bearer && adminTokensMatch(bearer, expectedToken));
+}
+
+function redirect(res, location, cookie) {
+  const headers = {
+    Location: location,
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    "Referrer-Policy": "no-referrer",
+  };
+  if (cookie) headers["Set-Cookie"] = cookie;
+  res.writeHead(303, headers);
+  res.end();
 }
 
 function enforceRateLimit(rateLimiter, key, limit, windowMs) {
@@ -881,6 +931,10 @@ export function createAnalyticsHandler(options = {}) {
     loginUserImpl = loginUserInStorage,
     publicBaseUrl = process.env.PUBLIC_BASE_URL || "http://127.0.0.1:8787",
     rateLimiter = createFixedWindowRateLimiter(),
+    nowImpl = () => Date.now(),
+    adminSessionTtlMs = ADMIN_SESSION_TTL_MS,
+    adminSessionMaxCount = ADMIN_SESSION_MAX_COUNT,
+    createAdminSessionToken,
     recordAnalyticsEventImpl = recordAnalyticsEventInStorage,
     sendVerificationCodeEmail,
     verifyEmailCodeImpl = verifyEmailCodeInStorage,
@@ -892,6 +946,13 @@ export function createAnalyticsHandler(options = {}) {
   if (typeof sendVerificationCodeEmail !== "function") {
     throw new Error("sendVerificationCodeEmail is required");
   }
+
+  const adminSessions = createAdminSessionStore({
+    createToken: createAdminSessionToken,
+    maxSessions: adminSessionMaxCount,
+    now: nowImpl,
+    ttlMs: adminSessionTtlMs,
+  });
 
   return async function analyticsHandler(req, res) {
     if (!req.url) {
@@ -914,8 +975,12 @@ export function createAnalyticsHandler(options = {}) {
       }
 
       if (req.method === "GET" && url.pathname === "/") {
-        const normalizedAdminToken = String(adminToken || "").trim();
-        if (normalizedAdminToken && getAdminToken(req, url) !== normalizedAdminToken) {
+        if (url.searchParams.has("adminToken")) {
+          redirect(res, "/");
+          return;
+        }
+        const normalizedAdminToken = requireConfiguredAdminToken(adminToken);
+        if (!hasAdminAuthority(req, normalizedAdminToken, adminSessions)) {
           sendHtml(req, res, 200, renderAdminTokenGateHtml(publicBaseUrl));
           return;
         }
@@ -929,14 +994,42 @@ export function createAnalyticsHandler(options = {}) {
             buildTimeSeries(db, 14),
             publicBaseUrl,
             getStorageBackendInfo(),
-            url.search,
           ),
         );
         return;
       }
 
+      if (req.method === "POST" && url.pathname === "/admin/login") {
+        const normalizedAdminToken = requireConfiguredAdminToken(adminToken);
+        enforceRateLimit(rateLimiter, `admin-login:ip:${ip}`, ADMIN_LOGIN_LIMIT, ADMIN_LOGIN_WINDOW_MS);
+        const submittedToken = await readAdminLoginBody(req);
+        if (!submittedToken || !adminTokensMatch(submittedToken, normalizedAdminToken)) {
+          sendHtml(req, res, 401, "<!doctype html><title>Unauthorized</title><p>Admin authentication failed.</p>");
+          return;
+        }
+        const session = adminSessions.issue();
+        const secure = process.env.NODE_ENV === "production" || publicBaseUrl.startsWith("https://");
+        const cookie = `${ADMIN_SESSION_COOKIE}=${session.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(adminSessionTtlMs / 1000)}${secure ? "; Secure" : ""}`;
+        redirect(res, "/", cookie);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/admin/logout") {
+        const session = getCookieValue(req, ADMIN_SESSION_COOKIE);
+        if (session) adminSessions.delete(session);
+        redirect(
+          res,
+          "/",
+          `${ADMIN_SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${process.env.NODE_ENV === "production" || publicBaseUrl.startsWith("https://") ? "; Secure" : ""}`,
+        );
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/admin/data") {
-        requireAdminToken(req, url, adminToken);
+        const normalizedAdminToken = requireConfiguredAdminToken(adminToken);
+        if (!hasAdminAuthority(req, normalizedAdminToken, adminSessions, true)) {
+          throw new HttpError(401, "admin authorization required");
+        }
         const db = loadDbImpl();
         sendJson(req, res, 200, {
           ok: true,
@@ -1004,7 +1097,10 @@ export function createAnalyticsHandler(options = {}) {
       }
 
       if (req.method === "GET" && url.pathname === "/analytics/summary") {
-        requireAdminToken(req, url, adminToken);
+        const normalizedAdminToken = requireConfiguredAdminToken(adminToken);
+        if (!hasAdminAuthority(req, normalizedAdminToken, adminSessions, true)) {
+          throw new HttpError(401, "admin authorization required");
+        }
         enforceRateLimit(rateLimiter, `summary:ip:${ip}`, 60, 5 * 60 * 1000);
         const db = loadDbImpl();
         sendJson(req, res, 200, { ok: true, summary: buildAnalyticsSummary(db) });
@@ -1012,7 +1108,10 @@ export function createAnalyticsHandler(options = {}) {
       }
 
       if (req.method === "GET" && url.pathname === "/analytics/timeseries") {
-        requireAdminToken(req, url, adminToken);
+        const normalizedAdminToken = requireConfiguredAdminToken(adminToken);
+        if (!hasAdminAuthority(req, normalizedAdminToken, adminSessions, true)) {
+          throw new HttpError(401, "admin authorization required");
+        }
         enforceRateLimit(rateLimiter, `timeseries:ip:${ip}`, 60, 5 * 60 * 1000);
         const days = Math.max(1, Math.min(90, Number(url.searchParams.get("days") || "14")));
         const db = loadDbImpl();
