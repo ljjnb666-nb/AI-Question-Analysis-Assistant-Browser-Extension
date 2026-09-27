@@ -160,22 +160,6 @@ export function startQuestionRevisionWatch(options: QuestionRevisionWatchOptions
       options.onCandidates(entry.blocks, entry.root.rootKey);
     }
 
-    // Keep the Phase 6 revision gate as a fallback when semantic DOM work is
-    // already running. The runtime-owned route lifecycle observer remains the
-    // authority for soft state cleanup and also sees URL-only changes without
-    // a DOM mutation (including while this watcher is stopped for full-page
-    // detection).
-    const routeChanged = revisions.refreshRoute();
-    if (routeChanged) {
-      controlRegistry.clear();
-      const active = activeQuestionRevisionAttempt();
-      if (active) {
-        options.onEvent?.("ROUTE_CHANGED", active.rootKey);
-        abortQuestionRevisionAttempt();
-      }
-      return;
-    }
-
     const active = activeQuestionRevisionAttempt();
     if (!active) return;
 
