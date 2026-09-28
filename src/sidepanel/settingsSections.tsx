@@ -218,6 +218,7 @@ export const SettingsConfigSections: React.FC<{
   customProtocol: "openai" | "anthropic";
   customUrl: string;
   deviceId: string;
+  enableAnalytics: boolean;
   handleProviderChange: (id: ProviderId) => void;
   isEn: boolean;
   lang: UILang;
@@ -232,6 +233,7 @@ export const SettingsConfigSections: React.FC<{
   providerId: ProviderId;
   route: "auto" | "text" | "vision";
   setAnalyticsBaseUrl: (value: string) => void;
+  setEnableAnalytics: (value: boolean) => void;
   setApiKey: (value: string) => void;
   setCustomProtocol: (value: "openai" | "anthropic") => void;
   setCustomUrl: (value: string) => void;
@@ -244,6 +246,7 @@ export const SettingsConfigSections: React.FC<{
   customProtocol,
   customUrl,
   deviceId,
+  enableAnalytics,
   handleProviderChange,
   isEn,
   lang,
@@ -252,6 +255,7 @@ export const SettingsConfigSections: React.FC<{
   providerId,
   route,
   setAnalyticsBaseUrl,
+  setEnableAnalytics,
   setApiKey,
   setCustomProtocol,
   setCustomUrl,
@@ -334,9 +338,28 @@ export const SettingsConfigSections: React.FC<{
       </SectionCard>
     ) : null}
 
-    <SectionCard title={isEn ? "Analytics Backend" : "统计后端"} description={isEn ? "Registration, login, and active-user events are sent to this service." : "邮箱注册、登录和活跃用户事件会发送到这个后端服务。"}>
+    <SectionCard title={isEn ? "Analytics Backend" : "统计后端"} description={isEn ? "The account service uses this backend for registration and login." : "账号注册和登录服务使用此后端。"}>
       <input type="text" value={analyticsBaseUrl} onChange={(event) => setAnalyticsBaseUrl(event.target.value)} placeholder={DEFAULT_ANALYTICS_BASE_URL} style={uiInputStyle} />
       <div style={hintStyle}>{isEn ? `Device ID: ${deviceId || "loading..."}` : `设备 ID：${deviceId || "加载中..."}`}</div>
+    </SectionCard>
+
+    <SectionCard title={isEn ? "Usage Analytics" : "使用情况统计"} description={isEn
+      ? "Off by default. If enabled, minimized usage events such as feature use, parse outcome category, and duration are sent. They exclude question or answer content, page domains, screenshots, API keys, passwords, and verification codes. Turning analytics off does not affect account sign-in or AI parsing."
+      : "默认关闭。开启后会发送经过最小化处理的使用事件，例如功能使用、解析成功或失败类别和耗时；不会发送题目内容、答案、网页域名、截图、API Key、账号密码或验证码。关闭统计不会影响账号登录或 AI 解析功能。"}>
+      <label style={{ ...radioRowStyle, alignItems: "flex-start" }}>
+        <input
+          type="checkbox"
+          aria-label={isEn ? "Enable optional usage analytics" : "开启可选使用情况统计"}
+          checked={enableAnalytics}
+          onChange={(event) => setEnableAnalytics(event.target.checked)}
+          style={{ accentColor: "#6366f1", marginTop: 3 }}
+        />
+        <span style={{ fontSize: 13, color: "#edf3fb", fontWeight: 500 }}>
+          {enableAnalytics
+            ? isEn ? "Send minimized optional usage analytics" : "发送最小化的可选使用统计"
+            : isEn ? "Do not send optional usage analytics" : "不发送可选的使用情况统计"}
+        </span>
+      </label>
     </SectionCard>
 
     <SectionCard title={isEn ? "Parse Route" : "解析路由"} description={isEn ? "Auto is safer. Force text or vision only when you know the page pattern." : "自动模式更稳，只有明确知道页面特征时再强制文本或视觉。"}>

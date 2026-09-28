@@ -269,13 +269,13 @@ export async function runManualCapturePipeline(
         if (!isRuntimeCurrent()) return;
         const visionMsg = visionErr instanceof Error ? visionErr.message : String(visionErr);
         deps.floatingMgr.setError(visionMsg);
-        deps.logEvent("parse_error", { error: visionMsg, autoVisionRetry: true });
+        deps.logEvent("parse_error", { category: "unknown", autoVisionRetry: true });
         return;
       }
     }
 
     if (!isRuntimeCurrent()) return;
     deps.floatingMgr.setError(msg);
-    deps.logEvent("parse_error", { error: msg });
+    deps.logEvent("parse_error", { category: "unknown" });
   }
 }

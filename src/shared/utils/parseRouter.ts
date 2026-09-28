@@ -9,7 +9,7 @@ import { buildResult } from "../ai/parseResult";
 import { callAnthropic, callGemini, callOpenAICompat } from "../ai/providerClients";
 import { decideRoute, hasSufficientPreviewText } from "../ai/routeDecision";
 import { mockParse } from "../ai/mockParse";
-import { logEvent } from "./analytics";
+import { classifyAnalyticsFailure, logEvent } from "./analytics";
 import { detectVisualKeywords } from "./ocr";
 import type { SolverQuestionPackage } from "../ai/questionPackage";
 import type { QuestionScreenshotFallback } from "../ai/questionPackage";
@@ -118,7 +118,7 @@ async function parseQuestionCore(
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
-      logEvent("parse_error", { blockId: block.id, attempt, error: lastError?.message });
+      logEvent("parse_error", { attempt, category: classifyAnalyticsFailure(lastError), provider: provider.id, route });
     }
 
     let providerResultAvailable = false;
@@ -143,7 +143,7 @@ async function parseQuestionCore(
 
       const duration = Date.now() - startTime;
       if (!runtimeContext?.deferSuccessTelemetry) {
-        logEvent("parse_success", { blockId: block.id, route, provider: provider.id, duration, attempt });
+        logEvent("parse_success", { route, provider: provider.id, duration, attempt });
       }
       return result;
     } catch (err) {
@@ -162,7 +162,7 @@ async function parseQuestionCore(
   }
 
   if (!(lastError instanceof StaleQuestionRevisionError)) {
-    logEvent("parse_error", { blockId: block.id, error: lastError?.message, exhausted: true });
+    logEvent("parse_error", { category: classifyAnalyticsFailure(lastError), exhausted: true });
   }
   throw lastError ?? new Error("Parse failed after retries");
 }

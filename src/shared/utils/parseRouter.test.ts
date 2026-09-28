@@ -677,6 +677,7 @@ describe("parseRouter", () => {
       preferredRoute: "auto",
       language: "zh",
       enableAnalytics: true,
+      analyticsConsentVersion: 1,
     };
 
     it("respects preferred route", async () => {
@@ -772,6 +773,7 @@ describe("parseRouter", () => {
         preferredRoute: "vision",
         language: "zh",
         enableAnalytics: true,
+        analyticsConsentVersion: 1,
         customBaseUrl: "http://127.0.0.1:3000",
         customProviderProtocol: "openai",
       };
@@ -835,6 +837,7 @@ describe("parseRouter", () => {
         preferredRoute: "vision",
         language: "zh",
         enableAnalytics: true,
+        analyticsConsentVersion: 1,
       };
 
       const fetchMock = vi.fn(async () =>
@@ -891,6 +894,7 @@ describe("parseRouter", () => {
         preferredRoute: "text",
         language: "zh",
         enableAnalytics: true,
+        analyticsConsentVersion: 1,
       };
 
       const fetchMock = vi.fn(async () =>
@@ -937,6 +941,7 @@ describe("parseRouter", () => {
         preferredRoute: "text",
         language: "zh",
         enableAnalytics: true,
+        analyticsConsentVersion: 1,
         customBaseUrl: "https://api.minimaxi.com/v1",
       };
 

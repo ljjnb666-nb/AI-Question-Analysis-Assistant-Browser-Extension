@@ -122,6 +122,81 @@ describe("analytics handler", () => {
     expect(parsePayload(res).error).toMatch(/request body exceeds/i);
   });
 
+  it("P_REL_PRIV_20_CURRENT_CONSENT_VERSION_ACCEPTED persists only normalized analytics fields", async () => {
+    const recordAnalyticsEventImpl = vi.fn();
+    const handler = createHandler({ recordAnalyticsEventImpl });
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/analytics/events",
+      headers: { authorization: "Bearer account-secret" },
+      body: JSON.stringify({
+        deviceId: "dev-safe-123",
+        analyticsConsentVersion: 1,
+        event: "parse_success",
+        ts: Date.now(),
+        host: "sensitive-course.example.edu",
+        userId: "account-id",
+        duration: 125,
+        data: {
+          provider: "openai", route: "text", attempt: 2, source: "sidepanel_commit",
+          questionText: "question-secret", answer: "answer-secret", blockId: "block-secret",
+          apiKey: "api-secret", authToken: "account-secret", password: "password-secret",
+          verificationCode: "123456", error: "raw-provider-error", nested: { value: "secret" },
+        },
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(recordAnalyticsEventImpl).toHaveBeenCalledTimes(1);
+    expect(recordAnalyticsEventImpl).toHaveBeenCalledWith({
+      deviceId: "dev-safe-123", event: "parse_success", ts: expect.any(Number), duration: 125,
+      data: { provider: "openai", route: "text", attempt: 2, source: "sidepanel_commit" },
+    });
+    expect(recordAnalyticsEventImpl.mock.calls[0]).toHaveLength(1);
+    expect(JSON.stringify(recordAnalyticsEventImpl.mock.calls[0])).not.toContain("sensitive-course.example.edu");
+  });
+
+  it("P_REL_PRIV_18_LEGACY_CLIENT_REJECTED without the explicit-consent protocol", async () => {
+    const recordAnalyticsEventImpl = vi.fn();
+    const handler = createHandler({ recordAnalyticsEventImpl });
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/analytics/events",
+      body: JSON.stringify({ deviceId: "legacy-device", event: "parse_success", ts: 123 }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(recordAnalyticsEventImpl).not.toHaveBeenCalled();
+  });
+
+  it("P_REL_PRIV_19_STALE_CONSENT_VERSION_REJECTED including unsupported and malformed versions", async () => {
+    const recordAnalyticsEventImpl = vi.fn();
+    const handler = createHandler({ recordAnalyticsEventImpl });
+    for (const analyticsConsentVersion of [0, 999, "1", 1.5, null]) {
+      const { res } = await invoke(handler, {
+        method: "POST",
+        url: "/analytics/events",
+        body: JSON.stringify({
+          deviceId: "legacy-device", analyticsConsentVersion, event: "parse_success", ts: 123,
+        }),
+      });
+      expect(res.statusCode).toBe(400);
+    }
+    expect(recordAnalyticsEventImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown analytics event names", async () => {
+    const recordAnalyticsEventImpl = vi.fn();
+    const handler = createHandler({ recordAnalyticsEventImpl });
+    const { res } = await invoke(handler, {
+      method: "POST", url: "/analytics/events",
+      body: JSON.stringify({ deviceId: "dev-safe-123", event: "unknown_event" }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(recordAnalyticsEventImpl).not.toHaveBeenCalled();
+  });
+
   it("rate limits repeated verification code sends", async () => {
     const db = { devices: [], users: [], analytics_events: [], email_verification_codes: [] };
     const sendVerificationCodeEmail = vi.fn().mockResolvedValue(undefined);

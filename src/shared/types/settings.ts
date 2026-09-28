@@ -7,6 +7,7 @@ export interface AppSettings {
   preferredRoute: "auto" | "text" | "vision";
   language: "zh" | "en";
   enableAnalytics: boolean;
+  analyticsConsentVersion: number;
   deviceId: string;
   analyticsBaseUrl: string;
   userId?: string;
@@ -22,7 +23,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiModel: "claude-opus-4.8",
   preferredRoute: "auto",
   language: "zh",
-  enableAnalytics: true,
+  enableAnalytics: false,
+  analyticsConsentVersion: 0,
   deviceId: "",
   analyticsBaseUrl: DEFAULT_ANALYTICS_BASE_URL,
   customProviderProtocol: "openai",

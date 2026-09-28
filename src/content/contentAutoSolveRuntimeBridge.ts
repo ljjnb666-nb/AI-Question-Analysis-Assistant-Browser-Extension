@@ -170,7 +170,7 @@ export function createAutoSolveRuntimeBridge(deps: AutoSolveBridgeDeps) {
     if (committed) {
       // parse_success records an authorized history commit. The resolver
       // independently revalidates before progress, fill, and advancement.
-      logEvent("parse_success", { blockId: block.id, route: result.routeUsed, source: "auto_solve_commit" });
+      logEvent("parse_success", { route: result.routeUsed, source: "auto_solve_commit" });
       return true;
     }
     if (!isAttemptCurrent(attempt, block)) {
