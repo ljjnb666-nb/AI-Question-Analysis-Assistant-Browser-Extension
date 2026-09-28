@@ -71,6 +71,7 @@ describe("optional analytics privacy boundary", () => {
     expect(await getStoredLog()).toEqual([]);
     expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({ analyticsLog: expect.anything() }));
     expect(fetch).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/analytics/events"))).toHaveLength(0);
   });
 
   it("clears only telemetry when a saved preference opts out", async () => {
@@ -141,7 +142,8 @@ describe("optional analytics privacy boundary", () => {
     const serialized = String(request?.body);
     const payload = JSON.parse(serialized);
     expect(payload).toEqual({
-      deviceId: "device-analytics-01", event: "parse_success", ts: expect.any(Number),
+      deviceId: "device-analytics-01", analyticsConsentVersion: CURRENT_ANALYTICS_CONSENT_VERSION,
+      event: "parse_success", ts: expect.any(Number),
       duration: 42, extensionVersion: "0.2.0", data: { provider: "openai", route: "text", duration: 42, attempt: 2, source },
     });
     expect(request?.headers).toEqual({ "Content-Type": "application/json" });

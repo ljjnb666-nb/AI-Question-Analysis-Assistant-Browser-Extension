@@ -6,6 +6,7 @@ export const REMOTE_ANALYTICS_EVENTS = new Set([
   "parse_success",
   "parse_error",
 ]);
+export const CURRENT_REMOTE_ANALYTICS_CONSENT_VERSION = 1;
 
 const EVENT_FIELDS = {
   extension_installed: ["reason"],
@@ -44,6 +45,7 @@ function normalizeData(event, data) {
 
 export function normalizeRemoteAnalyticsEvent(body, now = Date.now()) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  if (body.analyticsConsentVersion !== CURRENT_REMOTE_ANALYTICS_CONSENT_VERSION) return null;
   if (typeof body.deviceId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(body.deviceId)) return null;
   if (!REMOTE_ANALYTICS_EVENTS.has(body.event)) return null;
   const ts = typeof body.ts === "number" && Number.isFinite(body.ts) ? body.ts : now;

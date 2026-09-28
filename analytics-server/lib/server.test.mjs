@@ -122,7 +122,7 @@ describe("analytics handler", () => {
     expect(parsePayload(res).error).toMatch(/request body exceeds/i);
   });
 
-  it("persists only normalized analytics fields and ignores account bearer authority", async () => {
+  it("P_REL_PRIV_20_CURRENT_CONSENT_VERSION_ACCEPTED persists only normalized analytics fields", async () => {
     const recordAnalyticsEventImpl = vi.fn();
     const handler = createHandler({ recordAnalyticsEventImpl });
     const { res } = await invoke(handler, {
@@ -131,6 +131,7 @@ describe("analytics handler", () => {
       headers: { authorization: "Bearer account-secret" },
       body: JSON.stringify({
         deviceId: "dev-safe-123",
+        analyticsConsentVersion: 1,
         event: "parse_success",
         ts: Date.now(),
         host: "sensitive-course.example.edu",
@@ -153,6 +154,35 @@ describe("analytics handler", () => {
     });
     expect(recordAnalyticsEventImpl.mock.calls[0]).toHaveLength(1);
     expect(JSON.stringify(recordAnalyticsEventImpl.mock.calls[0])).not.toContain("sensitive-course.example.edu");
+  });
+
+  it("P_REL_PRIV_18_LEGACY_CLIENT_REJECTED without the explicit-consent protocol", async () => {
+    const recordAnalyticsEventImpl = vi.fn();
+    const handler = createHandler({ recordAnalyticsEventImpl });
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/analytics/events",
+      body: JSON.stringify({ deviceId: "legacy-device", event: "parse_success", ts: 123 }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(recordAnalyticsEventImpl).not.toHaveBeenCalled();
+  });
+
+  it("P_REL_PRIV_19_STALE_CONSENT_VERSION_REJECTED including unsupported and malformed versions", async () => {
+    const recordAnalyticsEventImpl = vi.fn();
+    const handler = createHandler({ recordAnalyticsEventImpl });
+    for (const analyticsConsentVersion of [0, 999, "1", 1.5, null]) {
+      const { res } = await invoke(handler, {
+        method: "POST",
+        url: "/analytics/events",
+        body: JSON.stringify({
+          deviceId: "legacy-device", analyticsConsentVersion, event: "parse_success", ts: 123,
+        }),
+      });
+      expect(res.statusCode).toBe(400);
+    }
+    expect(recordAnalyticsEventImpl).not.toHaveBeenCalled();
   });
 
   it("rejects unknown analytics event names", async () => {

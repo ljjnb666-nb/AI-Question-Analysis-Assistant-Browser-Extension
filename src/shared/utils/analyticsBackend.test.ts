@@ -14,8 +14,10 @@ describe("analyticsBackend", () => {
     const payload = buildAnalyticsUploadPayload(
       {
         ...DEFAULT_SETTINGS,
+        enableAnalytics: true,
         deviceId: "dev-1",
         userId: "usr-1",
+        analyticsConsentVersion: 1,
       },
       "popup_opened",
       123,
@@ -26,6 +28,7 @@ describe("analyticsBackend", () => {
 
     expect(payload).toEqual({
       deviceId: "dev-1",
+      analyticsConsentVersion: 1,
       event: "popup_opened",
       ts: 123,
       extensionVersion: "0.2.0",

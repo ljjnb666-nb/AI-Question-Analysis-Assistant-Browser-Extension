@@ -1,8 +1,15 @@
 import type { AppSettings } from "../types";
 import type { AnalyticsEvent } from "./analytics";
+import type { CURRENT_ANALYTICS_CONSENT_VERSION } from "./storage";
+
+type ConsentValidatedSettings = AppSettings & {
+  enableAnalytics: true;
+  analyticsConsentVersion: typeof CURRENT_ANALYTICS_CONSENT_VERSION;
+};
 
 export type AnalyticsUploadPayload = {
   deviceId: string;
+  analyticsConsentVersion: number;
   event: AnalyticsEvent;
   ts: number;
   duration?: number;
@@ -36,7 +43,7 @@ export function isAnalyticsUploadEvent(event: AnalyticsEvent): boolean {
 }
 
 export function buildAnalyticsUploadPayload(
-  settings: AppSettings,
+  settings: ConsentValidatedSettings,
   event: AnalyticsEvent,
   ts: number,
   extensionVersion?: string,
@@ -47,6 +54,7 @@ export function buildAnalyticsUploadPayload(
   const safeDuration = normalizeDuration(duration ?? safeData?.duration);
   return {
     deviceId: settings.deviceId,
+    analyticsConsentVersion: settings.analyticsConsentVersion,
     event,
     ts,
     ...(safeDuration === undefined ? {} : { duration: safeDuration }),

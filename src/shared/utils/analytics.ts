@@ -70,6 +70,12 @@ export interface EventEntry {
 
 const MAX_STORED = 300;
 
+function hasCurrentAnalyticsConsent(
+  settings: AppSettings,
+): settings is AppSettings & { enableAnalytics: true; analyticsConsentVersion: typeof CURRENT_ANALYTICS_CONSENT_VERSION } {
+  return settings.enableAnalytics === true && settings.analyticsConsentVersion === CURRENT_ANALYTICS_CONSENT_VERSION;
+}
+
 function isExtensionContextInvalidatedError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err || "");
   return /Extension context invalidated/i.test(message);
@@ -92,7 +98,7 @@ export function logEvent(
     try {
       if (getAnalyticsConsentGeneration() !== consentGeneration) return;
       const settings = await loadSettings();
-      if (!settings.enableAnalytics || settings.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION) return;
+      if (!hasCurrentAnalyticsConsent(settings)) return;
       if (getAnalyticsConsentGeneration() !== consentGeneration) return;
       const safeData = normalizeLocalAnalyticsData(data);
       const duration = normalizeDuration(safeData?.duration);
@@ -115,7 +121,7 @@ export function logEvent(
 async function persistEvent(entry: EventEntry, consentGeneration: number): Promise<void> {
   if (getAnalyticsConsentGeneration() !== consentGeneration) return;
   const settings = await loadSettings();
-  if (!settings.enableAnalytics || settings.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION) return;
+  if (!hasCurrentAnalyticsConsent(settings)) return;
   try {
     const r = await chrome.storage.local.get("analyticsLog");
     if (getAnalyticsConsentGeneration() !== consentGeneration) return;
@@ -140,7 +146,7 @@ async function uploadEvent(entry: EventEntry, consentGeneration: number): Promis
   try {
     if (getAnalyticsConsentGeneration() !== consentGeneration) return;
     const settings = await loadSettings();
-    if (!settings.enableAnalytics || settings.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION) return;
+    if (!hasCurrentAnalyticsConsent(settings)) return;
 
     const deviceId = settings.deviceId || await getOrCreateDeviceId();
     if (getAnalyticsConsentGeneration() !== consentGeneration) return;
