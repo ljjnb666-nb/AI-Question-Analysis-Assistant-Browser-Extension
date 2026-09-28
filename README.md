@@ -77,7 +77,8 @@ npm run check
 ```
 
 - `npm run check` 是提交前默认本地检查。
-- `npm run test:e2e` 会先重新构建扩展，再执行 Playwright。
+- `npm run test:e2e` 会先重新构建扩展，再执行 Playwright；`npm run test:e2e:dist` 只测试现有的 `dist/`，不会重新构建。
+- CI 分别运行 `check`、生产构建与 artifact 验证、真实扩展 E2E。E2E 使用构建 job 上传的同一份已验证 artifact；artifact verifier 会按最终 manifest 检查运行时文件路径。
 
 ## 说明
 

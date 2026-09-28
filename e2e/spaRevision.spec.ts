@@ -1,15 +1,8 @@
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { BrowserContext, Page } from "@playwright/test";
-import { chromium, expect, test } from "@playwright/test";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(__dirname, "..", "dist");
-const playwrightCacheDir = path.join(os.homedir(), ".cache", "ms-playwright");
+import { expect, test } from "@playwright/test";
+import { closeExtensionContext, launchExtensionContext, resolveExtensionId } from "./helpers/extensionHarness";
 
 type SpaPageWindow = Window & typeof globalThis & {
   __clicks: Array<{ generation: number; label: string }>;
@@ -138,40 +131,6 @@ async function startSpaServer(): Promise<{ origin: string; held: HeldProviderReq
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("SPA server did not report a port");
   return { origin: `http://127.0.0.1:${address.port}`, held, close: () => new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))) };
-}
-
-function resolveChromiumExecutable(): string {
-  const chromiumDirs = fs
-    .readdirSync(playwrightCacheDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && /^chromium-\d+$/.test(entry.name))
-    .map((entry) => entry.name)
-    .sort((left, right) => Number(right.split("-")[1]) - Number(left.split("-")[1]));
-
-  for (const dirName of chromiumDirs) {
-    const candidate = path.join(playwrightCacheDir, dirName, "chrome-win64", "chrome.exe");
-    if (fs.existsSync(candidate)) return candidate;
-  }
-
-  throw new Error(`No Playwright Chromium executable found under ${playwrightCacheDir}`);
-}
-
-async function launchExtensionContext(): Promise<BrowserContext> {
-  return chromium.launchPersistentContext("", {
-    executablePath: resolveChromiumExecutable(),
-    headless: false,
-    args: [
-      `--disable-extensions-except=${extensionPath}`,
-      `--load-extension=${extensionPath}`,
-    ],
-  });
-}
-
-async function resolveExtensionId(context: BrowserContext) {
-  let [serviceWorker] = context.serviceWorkers();
-  if (!serviceWorker) {
-    serviceWorker = await context.waitForEvent("serviceworker");
-  }
-  return new URL(serviceWorker.url()).host;
 }
 
 /** Boots the real extension content runtime in the SPA tab and starts the production SPA watch. */
@@ -361,7 +320,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       expect(analyticsEvents).not.toContain("parse_success");
       expect(analyticsEvents).not.toContain("manual_parse_attempt_succeeded");
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -416,7 +375,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       await expect.poll(() => originPage.evaluate(() => (window as SpaPageWindow).__clicks)).toEqual([{ generation: 0, label: "B" }]);
       expect(await otherPage.evaluate(() => (window as SpaPageWindow).__clicks)).toEqual([]);
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -478,7 +437,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       expect(await originPage.evaluate(() => (window as SpaPageWindow).__clicks)).toEqual([]);
       expect(await otherPage.evaluate(() => (window as SpaPageWindow).__clicks)).toEqual([]);
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -525,7 +484,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
         { timeout: 15_000 },
       );
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });

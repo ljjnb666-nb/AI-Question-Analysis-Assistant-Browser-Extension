@@ -1,15 +1,8 @@
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { BrowserContext, Page } from "@playwright/test";
-import { chromium, expect, test } from "@playwright/test";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(__dirname, "..", "dist");
-const playwrightCacheDir = path.join(os.homedir(), ".cache", "ms-playwright");
+import { expect, test } from "@playwright/test";
+import { closeExtensionContext, launchExtensionContext, resolveExtensionId } from "./helpers/extensionHarness";
 
 type DriverWindow = Window & typeof globalThis & { __events: string[]; __candidateBlocks: unknown[] };
 
@@ -491,40 +484,6 @@ async function startRootsServer(): Promise<{ origin: string; held: HeldProviderR
   return { origin: `http://127.0.0.1:${address.port}`, held, close: () => new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))) };
 }
 
-function resolveChromiumExecutable(): string {
-  const chromiumDirs = fs
-    .readdirSync(playwrightCacheDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && /^chromium-\d+$/.test(entry.name))
-    .map((entry) => entry.name)
-    .sort((left, right) => Number(right.split("-")[1]) - Number(left.split("-")[1]));
-
-  for (const dirName of chromiumDirs) {
-    const candidate = path.join(playwrightCacheDir, dirName, "chrome-win64", "chrome.exe");
-    if (fs.existsSync(candidate)) return candidate;
-  }
-
-  throw new Error(`No Playwright Chromium executable found under ${playwrightCacheDir}`);
-}
-
-async function launchExtensionContext(): Promise<BrowserContext> {
-  return chromium.launchPersistentContext("", {
-    executablePath: resolveChromiumExecutable(),
-    headless: false,
-    args: [
-      `--disable-extensions-except=${extensionPath}`,
-      `--load-extension=${extensionPath}`,
-    ],
-  });
-}
-
-async function resolveExtensionId(context: BrowserContext) {
-  let [serviceWorker] = context.serviceWorkers();
-  if (!serviceWorker) {
-    serviceWorker = await context.waitForEvent("serviceworker");
-  }
-  return new URL(serviceWorker.url()).host;
-}
-
 async function startProductionAutoSolve(context: BrowserContext, extensionId: string, origin: string, _pagePath: string, startSolve = true): Promise<Page> {
   const driver = await context.newPage();
   await driver.goto(`chrome-extension://${extensionId}/popup/popup.html`);
@@ -650,7 +609,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       expect(state.detachedOldB).toEqual([]);
       expect(state.detachedOwnerControls).toEqual([]);
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -701,7 +660,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       expect(state.advanceClicks).toBe(0);
       expect(messages.some((message) => message.includes("PARTIAL_MUTATION_UNPROVABLE"))).toBe(true);
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -739,7 +698,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       expect(state.mutations).toEqual([{ key: "A", generation: 0 }, { key: "B", generation: 1 }]);
       expect(state.detached).toEqual([]);
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -783,7 +742,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       expect(state.advanceClicks).toBe(0);
       expect(messages.some((message) => message.includes("PARTIAL_MUTATION_UNPROVABLE"))).toBe(true);
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -814,7 +773,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       expect(state.frameChoices).toContain("B");
       expect(state.topSelected).toBe(false);
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -844,7 +803,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       expect(state.shadowSelected).toBe(true);
       expect(state.topSelected).toBe(false);
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -905,7 +864,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       expect(state.frameSelected).toBe("true");
       expect(state.topSelected).toBe(false);
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -948,7 +907,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       expect(state.topSelected).toBe(false);
       expect(state.shadowSelected).toBe("true");
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -978,7 +937,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       expect(await spaPage.evaluate(() => window.scrollY)).toBeGreaterThan(0);
       expect(await spaPage.evaluate(() => (document.getElementById("q-frame") as HTMLIFrameElement).contentDocument?.querySelector('#opt-b')?.getAttribute("aria-checked"))).toBe("true");
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -1036,7 +995,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       });
       expect(frameText).not.toContain("aria");
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -1065,7 +1024,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       });
       expect(checked).toBe("true");
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
@@ -1119,7 +1078,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
       });
       expect(checked).toBe(0);
     } finally {
-      await context.close();
+      await closeExtensionContext(context);
       await server.close();
     }
   });
