@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite build --watch",
     "build": "node tools/build-extension.mjs",
+    "verify:artifact": "node tools/verify-extension-artifact.mjs",
+    "test:artifact": "node --test tools/verify-extension-artifact.node-test.mjs",
     "analytics:server": "node analytics-server/index.mjs",
     "build:raw": "vite build",
     "lint": "eslint src analytics-server e2e playwright.config.ts tools/build-extension.mjs vite.contentRuntime.config.ts eslint.config.mjs",
@@ -18,7 +20,8 @@
     "test:ui": "node --disable-warning=ExperimentalWarning ./node_modules/vitest/vitest.mjs --ui",
     "test:run": "node --disable-warning=ExperimentalWarning ./node_modules/vitest/vitest.mjs run",
     "test:coverage": "node --disable-warning=ExperimentalWarning ./node_modules/vitest/vitest.mjs run --coverage",
-    "test:e2e": "npm run build && playwright test"
+    "test:e2e": "npm run build && npm run test:e2e:dist",
+    "test:e2e:dist": "playwright test"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

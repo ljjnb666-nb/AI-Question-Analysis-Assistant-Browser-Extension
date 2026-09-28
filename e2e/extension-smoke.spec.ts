@@ -1,48 +1,5 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import type { BrowserContext } from "@playwright/test";
-import { chromium, expect, test } from "@playwright/test";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(__dirname, "..", "dist");
-const playwrightCacheDir = path.join(os.homedir(), ".cache", "ms-playwright");
-
-function resolveChromiumExecutable(): string {
-  const chromiumDirs = fs
-    .readdirSync(playwrightCacheDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && /^chromium-\d+$/.test(entry.name))
-    .map((entry) => entry.name)
-    .sort((left, right) => Number(right.split("-")[1]) - Number(left.split("-")[1]));
-
-  for (const dirName of chromiumDirs) {
-    const candidate = path.join(playwrightCacheDir, dirName, "chrome-win64", "chrome.exe");
-    if (fs.existsSync(candidate)) return candidate;
-  }
-
-  throw new Error(`No Playwright Chromium executable found under ${playwrightCacheDir}`);
-}
-
-async function launchExtensionContext(): Promise<BrowserContext> {
-  return chromium.launchPersistentContext("", {
-    executablePath: resolveChromiumExecutable(),
-    headless: false,
-    args: [
-      `--disable-extensions-except=${extensionPath}`,
-      `--load-extension=${extensionPath}`,
-    ],
-  });
-}
-
-async function resolveExtensionId(context: BrowserContext) {
-  let [serviceWorker] = context.serviceWorkers();
-  if (!serviceWorker) {
-    serviceWorker = await context.waitForEvent("serviceworker");
-  }
-
-  return new URL(serviceWorker.url()).host;
-}
+import { expect, test } from "@playwright/test";
+import { closeExtensionContext, launchExtensionContext, resolveExtensionId } from "./helpers/extensionHarness";
 
 test("loads the extension popup and renders the auth gate", async () => {
   const context = await launchExtensionContext();
@@ -59,7 +16,7 @@ test("loads the extension popup and renders the auth gate", async () => {
     await expect(page.getByRole("button", { name: /^(Login|登录)$/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /(Send Code|发送验证码|鍙戦€侀獙璇佺爜)/ })).toBeVisible();
   } finally {
-    await context.close();
+    await closeExtensionContext(context);
   }
 });
 
@@ -77,6 +34,6 @@ test("loads the sidepanel and defaults unauthenticated users to settings auth", 
     await expect(page.getByPlaceholder(/(Email|邮箱|閭)/)).toBeVisible();
     await expect(page.getByRole("button", { name: /(Send Code|发送验证码|鍙戦€侀獙璇佺爜)/ })).toBeVisible();
   } finally {
-    await context.close();
+    await closeExtensionContext(context);
   }
 });
