@@ -81,18 +81,22 @@ export async function fillChoiceLikeAnswer(
 
   const finalSelected = new Set(getSelectedChoiceKeys(candidateMap));
   const filledCount = desiredKeys.filter((key) => finalSelected.has(key) && !initiallySelected.has(key)).length;
-  const allDesiredSelected = desiredKeys.every((key) => finalSelected.has(key));
+  const exactSelection = finalSelected.size === desiredKeys.length
+    && desiredKeys.every((key) => finalSelected.has(key));
 
-  if (allDesiredSelected) {
+  if (exactSelection) {
     if (filledCount > 0) {
       return { ok: true, filledCount, message: `已填写 ${filledCount} 个选项` };
     }
     return { ok: true, filledCount: 0, message: "已校验当前答案" };
   }
 
-  return filledCount > 0
-    ? { ok: true, filledCount, message: `已填写 ${filledCount} 个选项` }
-    : { ok: false, filledCount: 0, message: "未找到可填写的选项控件" };
+  return {
+    ok: false,
+    filledCount: 0,
+    code: "FILL_VERIFICATION_FAILED",
+    message: "Final selected options could not be verified",
+  };
 }
 
 function buildChoiceCandidateMap(
@@ -262,11 +266,6 @@ async function tryClickCandidate(
     if (input.checked === expectedChecked || isCandidateSelected(candidate) === expectedChecked) {
       return (input.checked !== before) || isCandidateSelected(candidate);
     }
-    if (await deps.requestRealClick(target)) {
-      if (input.checked === expectedChecked || isCandidateSelected(candidate) === expectedChecked) {
-        return (input.checked !== before) || isCandidateSelected(candidate);
-      }
-    }
   }
 
   deps.clickElement(input);
@@ -281,7 +280,6 @@ async function clickCustomChoiceCandidate(candidate: ChoiceCandidate, deps: Choi
   for (const target of collectChoiceClickTargets(candidate)) {
     deps.clickElement(target);
     if (isCandidateSelected(candidate)) return true;
-    if (await deps.requestRealClick(target) && isCandidateSelected(candidate)) return true;
   }
   return false;
 }
@@ -290,7 +288,6 @@ async function clearCustomChoiceSelection(candidate: ChoiceCandidate, deps: Choi
   for (const target of collectChoiceClickTargets(candidate)) {
     deps.clickElement(target);
     if (!isCandidateSelected(candidate)) return true;
-    if (await deps.requestRealClick(target) && !isCandidateSelected(candidate)) return true;
   }
   return false;
 }

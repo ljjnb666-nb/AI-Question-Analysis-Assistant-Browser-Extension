@@ -325,7 +325,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
     }
   });
 
-  test("Phase 8A RC-D: a sidepanel result stays bound to its origin tab after switching tabs", async () => {
+  test("P_REL_PERM_07_HTTP_SITE_GENERALITY_PRESERVED and Phase 8A RC-D: sidepanel Fill stays bound to the origin tab after switching tabs", async () => {
     test.setTimeout(60_000);
     const server = await startSpaServer();
     const context = await launchExtensionContext();

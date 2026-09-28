@@ -24,10 +24,8 @@
   },
   "permissions": [
     "activeTab",
-    "debugger",
     "scripting",
     "storage",
-    "tabs",
     "sidePanel"
   ],
   "host_permissions": [

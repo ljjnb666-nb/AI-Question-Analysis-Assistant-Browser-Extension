@@ -48,6 +48,5 @@ export interface ChoiceHelperDeps {
   normalizeText(text: string): string;
   pause(ms: number): Promise<void>;
   rectIntersectsExpandedBBox(rect: DOMRect, bbox: BoundingBox, verticalPad: number, horizontalPad: number): boolean;
-  requestRealClick(target: HTMLElement): Promise<boolean>;
   setNativeChecked(input: HTMLInputElement, checked: boolean): void;
 }

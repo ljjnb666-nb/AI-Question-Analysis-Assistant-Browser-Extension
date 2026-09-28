@@ -11,7 +11,6 @@ import {
   normalizeText,
   pause,
   rectIntersectsExpandedBBox,
-  requestRealClick,
   setNativeChecked,
 } from "./answerDomUtils";
 import {
@@ -154,7 +153,6 @@ const choiceHelperDeps = {
   normalizeText,
   pause,
   rectIntersectsExpandedBBox,
-  requestRealClick,
   setNativeChecked,
 };
 

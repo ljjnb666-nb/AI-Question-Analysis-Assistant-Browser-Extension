@@ -343,7 +343,7 @@ describe("answerFiller", () => {
     expect(document.getElementById("opt-d")?.className.includes("is-choose")).toBe(true);
   });
 
-  it("clears stale custom multi-choice selections via real click fallback", async () => {
+  it("fails closed when legacy custom multi-choice state cannot be verified without a trusted click", async () => {
     document.body.innerHTML = `
       <div id="question" class="question-item">
         <div id="opt-a" class="option-item is-choose"><div class="option-order">A.</div><div class="option-content">A</div></div>
@@ -362,40 +362,24 @@ describe("answerFiller", () => {
       setRect(row.querySelector(".option-content")!, { left: 180, top: 120 + idx * 44, width: 320, height: 24 });
     });
 
-    const originalChrome = (globalThis as { chrome?: unknown }).chrome;
-    (globalThis as { chrome?: { runtime: { sendMessage: (message: { x: number; y: number; type: string }) => Promise<{ ok: boolean }> } } }).chrome = {
-      runtime: {
-        sendMessage: async ({ x, y }) => {
-          if (y >= 164 && y < 208 && x >= 120 && x < 640) {
-            document.getElementById("opt-b")?.classList.remove("is-choose");
-          }
-          return { ok: true };
-        },
-      },
+    const result: ParseResult = {
+      blockId: "q15",
+      questionType: "multi_choice",
+      answer: "A,C,D",
+      optionSelections: { A: true, C: true, D: true, B: false },
+      confidence: 0.92,
+      briefExplanation: "",
+      detailedExplanation: "",
+      recognizedText: "",
+      routeUsed: "vision",
     };
 
-    try {
-      const result: ParseResult = {
-        blockId: "q15",
-        questionType: "multi_choice",
-        answer: "A,C,D",
-        optionSelections: { A: true, C: true, D: true, B: false },
-        confidence: 0.92,
-        briefExplanation: "",
-        detailedExplanation: "",
-        recognizedText: "",
-        routeUsed: "vision",
-      };
-
-      const filled = await fillAnswerIntoScope(question, bbox, result);
-      expect(filled.ok).toBe(true);
-      expect(document.getElementById("opt-a")?.className.includes("is-choose")).toBe(true);
-      expect(document.getElementById("opt-b")?.className.includes("is-choose")).toBe(false);
-      expect(document.getElementById("opt-c")?.className.includes("is-choose")).toBe(true);
-      expect(document.getElementById("opt-d")?.className.includes("is-choose")).toBe(true);
-    } finally {
-      (globalThis as { chrome?: unknown }).chrome = originalChrome;
-    }
+    const filled = await fillAnswerIntoScope(question, bbox, result);
+    expect(filled).toMatchObject({ ok: false, filledCount: 0, code: "FILL_VERIFICATION_FAILED" });
+    expect(document.getElementById("opt-a")?.className.includes("is-choose")).toBe(true);
+    expect(document.getElementById("opt-b")?.className.includes("is-choose")).toBe(true);
+    expect(document.getElementById("opt-c")?.className.includes("is-choose")).toBe(true);
+    expect(document.getElementById("opt-d")?.className.includes("is-choose")).toBe(true);
   });
 
   it("verifies custom option-item exact selected key", () => {

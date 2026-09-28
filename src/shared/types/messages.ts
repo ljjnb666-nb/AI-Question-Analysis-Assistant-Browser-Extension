@@ -36,7 +36,6 @@ export type MessageType =
   | "VALIDATE_QUESTION_RESULT_AUTHORITY"
   | "FILL_PARSED_ANSWER"
   | "VERIFY_PARSED_ANSWER"
-  | "REAL_CLICK"
   | "START_AUTO_SOLVE_ALL"
   | "STOP_AUTO_SOLVE_ALL"
   | "AUTO_SOLVE_PROGRESS"
@@ -200,12 +199,6 @@ export interface VerifyParsedAnswerMsg extends BaseMessage {
   expectedUrl: string;
 }
 
-export interface RealClickMsg extends BaseMessage {
-  type: "REAL_CLICK";
-  x: number;
-  y: number;
-}
-
 export interface StartAutoSolveAllMsg extends BaseMessage {
   type: "START_AUTO_SOLVE_ALL";
 }
@@ -267,7 +260,6 @@ export type ExtMessage =
   | ValidateQuestionResultAuthorityMsg
   | FillParsedAnswerMsg
   | VerifyParsedAnswerMsg
-  | RealClickMsg
   | StartAutoSolveAllMsg
   | StopAutoSolveAllMsg
   | AutoSolveProgressMsg

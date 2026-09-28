@@ -76,7 +76,8 @@ results for frame roots are projected through every parent frame
 (`frameRectToTopViewport`), accounting for the frame's content origin
 (border/padding) and a provable uniform CSS scale. Non-uniform or ambiguous
 transforms fail closed: coordinate-based fallbacks are denied, and the
-debugger `REAL_CLICK` path refuses to click untransformed frame coordinates.
+transactional fills refuse to mutate controls when the owning root or live
+control mapping cannot be proven.
 Shadow roots add no viewport of their own — their geometry is the owner
 document's viewport and is never double-transformed.
 
