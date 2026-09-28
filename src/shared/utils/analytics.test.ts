@@ -89,6 +89,42 @@ describe("optional analytics privacy boundary", () => {
     expect((stored.appSettings as Record<string, unknown>).enableAnalytics).toBe(false);
   });
 
+  it("P_REL_PRIV_14_CROSS_CONTEXT_OPT_OUT fences pending and future analytics work", async () => {
+    stored.appSettings = consentedSettings();
+    await loadSettings(); // registers the same storage listener used by every extension context
+    const writes: Record<string, unknown>[] = [];
+    let releaseAnalyticsWrite!: () => void;
+    const analyticsWritePending = new Promise<void>((resolve) => { releaseAnalyticsWrite = resolve; });
+    vi.mocked(chrome.storage.local.set).mockImplementation(async (values) => {
+      writes.push(values as Record<string, unknown>);
+      if ("analyticsLog" in values) await analyticsWritePending;
+      Object.assign(stored, values);
+    });
+
+    logEvent("popup_opened");
+    await vi.waitFor(() => expect(writes.some((write) => "analyticsLog" in write)).toBe(true));
+    expect(getSessionLog()).toHaveLength(1);
+
+    const listenerCalls = vi.mocked(chrome.storage.onChanged.addListener).mock.calls;
+    const listener = listenerCalls[listenerCalls.length - 1]?.[0] as
+      ((changes: Record<string, { newValue?: unknown }>, areaName: string) => void) | undefined;
+    expect(listener).toBeTypeOf("function");
+    stored.appSettings = { ...consentedSettings(), enableAnalytics: false };
+    listener!({ appSettings: { newValue: stored.appSettings } }, "local");
+    expect(getSessionLog()).toEqual([]);
+
+    releaseAnalyticsWrite();
+    await flushAnalytics();
+    expect(stored.analyticsLog).toBeUndefined(); // stale in-flight write is removed after the consent generation changes
+
+    const analyticsWriteCount = writes.filter((write) => "analyticsLog" in write).length;
+    logEvent("popup_opened");
+    await flushAnalytics();
+    expect(getSessionLog()).toEqual([]);
+    expect(writes.filter((write) => "analyticsLog" in write)).toHaveLength(analyticsWriteCount);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("uploads allowlisted fields only, without page host, account identity, or bearer token", async () => {
     stored.appSettings = { ...consentedSettings(), authToken: "account-secret-token", userId: "account-user" };
     const source = "sidepanel_commit";

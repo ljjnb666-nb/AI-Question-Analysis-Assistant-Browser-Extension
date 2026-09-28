@@ -6,19 +6,19 @@ This document describes what the extension and its services send and store. It i
 
 Optional usage analytics is **off by default**. It is sent only after you turn it on in Settings and save your choice. The extension stores the current consent version with that choice. A stored on-state from a version that had no visible consent control is not treated as consent: the first load turns analytics off and clears the old analytics log.
 
-When enabled, analytics can send a random device ID, an event name, a timestamp, extension version, elapsed time when relevant, and small event-specific categories such as provider, route, attempt count, and normalized failure category. The analytics server accepts only known event names and allowlisted fields. It does not receive a page hostname, question or answer content, explanations, screenshots or images, block or question identifiers, API keys, account tokens, passwords, verification codes, email addresses, or client-supplied account IDs.
+When enabled, analytics can send a random device ID, an event name, a timestamp, extension version, elapsed time when relevant, and small event-specific categories such as provider, route, attempt count, and normalized failure category. The analytics server accepts only known event names and allowlisted fields. It does not receive a page hostname, question or answer content, explanations, screenshots or images, block or question identifiers, API keys, account tokens, passwords, verification codes, email addresses, or client-supplied account IDs. The random device ID is also used by account features. Analytics event records do not contain an account identity, but the same device ID can be associated with an account when account features use it; the identifier is therefore linkable across those service records. Analytics ingestion does not create or update account-device records.
 
 The local analytics log is limited to 300 events. Turning analytics off and saving clears that log and the in-memory analytics session log. Analytics-off does not remove the device ID because account features also use it. Analytics events on the server are retained for 90 days from server receipt and are then pruned during normal storage initialization, event writes, or analytics reads. Account records are not part of this analytics retention rule.
 
-To change the choice, open Settings, change **Usage Analytics / 使用情况统计**, and save. Turning it off stops optional analytics; account sign-in and AI parsing continue to make their required network requests.
+To change the choice, open Settings, change **Usage Analytics / 使用情况统计**, and save. Turning it off clears local analytics logs and stops optional analytics; account sign-in and AI parsing continue to make their required network requests.
 
 Because analytics is opt-in, installation and usage metrics describe only devices that chose to send analytics. They do not represent the total number of installs or all extension use. The extension does not backfill events from before consent.
 
 ## Account service
 
-Registration, verification, sign-in, and sign-out use the configured account service independently of the analytics choice. Registration and verification send an email address, password or verification code, and device ID over HTTPS. The service stores the email address, a salted password hash, a hashed authentication token, and account/device associations. Analytics events are not associated with the account token or account ID.
+Registration, verification, and sign-in use the configured account service independently of the analytics choice. Registration and verification send an email address, password or verification code, and device ID over HTTPS. The service stores the email address, a salted password hash, a hashed authentication token, and account/device associations. Sign-out clears credentials in the extension locally; it does not call the server to revoke the token. Analytics event records are not associated with the account token or account ID, though the shared device ID can link analytics and account/device records as described above.
 
-Turning analytics off does not disable account requests or delete an account. This release does not add account deletion or a general account retention period; account data follows the existing account-service lifecycle.
+Turning analytics off does not disable account requests or delete an account. This release does not add account deletion, server-side sign-out revocation, or a general account retention period; account data follows the existing account-service lifecycle. Server-side sign-out revocation and token expiry belong to REL-AUTH-01 and are outside this release.
 
 ## AI providers
 

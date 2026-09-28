@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from "../types";
 import { logError } from "./errorLogger";
 import { decryptValue, encryptValue, isEncrypted } from "./encryption";
 import { sanitizeQuestionBlockForSerialization } from "./mediaSerialization";
-import { clearSessionAnalytics, flushAnalyticsWork } from "./analyticsState";
+import { flushAnalyticsWork, invalidateAnalyticsConsent } from "./analyticsState";
 
 export const CURRENT_ANALYTICS_CONSENT_VERSION = 1;
 
@@ -70,6 +70,7 @@ function invalidateSettingsCache(): void {
 
 export function __resetStorageCacheForTests(): void {
   invalidateSettingsCache();
+  settingsListenerRegistered = false;
 }
 
 function ensureSettingsCacheListener(): void {
@@ -77,6 +78,10 @@ function ensureSettingsCacheListener(): void {
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "local" && changes[KEYS.settings]) {
       invalidateSettingsCache();
+      const newSettings = changes[KEYS.settings].newValue as Partial<AppSettings> | undefined;
+      if (newSettings?.enableAnalytics !== true || newSettings.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION) {
+        invalidateAnalyticsConsent();
+      }
     }
   });
   settingsListenerRegistered = true;
@@ -106,7 +111,7 @@ async function readSettingsFromStorage(): Promise<AppSettings> {
       },
     });
     if (requiresConsentMigration) {
-      clearSessionAnalytics();
+      invalidateAnalyticsConsent();
       await chrome.storage.local.remove(KEYS.analytics);
     }
   }
@@ -161,8 +166,8 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<void
     authToken: settings.authToken ?? existing.authToken,
   });
   if (existing.enableAnalytics && !merged.enableAnalytics) {
+    invalidateAnalyticsConsent();
     await flushAnalyticsWork();
-    clearSessionAnalytics();
     await chrome.storage.local.remove(KEYS.analytics);
   }
 }

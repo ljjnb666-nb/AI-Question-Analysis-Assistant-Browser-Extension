@@ -4,9 +4,17 @@
  */
 
 import { logError } from "./errorLogger";
+import type { AppSettings } from "../types";
 import { buildAnalyticsUploadPayload, isAnalyticsUploadEvent } from "./analyticsBackend";
 import { getOrCreateDeviceId, loadSettings } from "./storage";
-import { clearSessionAnalytics, enqueueAnalyticsWork, flushAnalyticsWork, SESSION_LOG } from "./analyticsState";
+import {
+  __resetAnalyticsStateForTests,
+  enqueueAnalyticsWork,
+  flushAnalyticsWork,
+  getAnalyticsConsentGeneration,
+  SESSION_LOG,
+} from "./analyticsState";
+import { CURRENT_ANALYTICS_CONSENT_VERSION } from "./storage";
 
 export type AnalyticsEvent =
   | "extension_installed"
@@ -79,10 +87,13 @@ export function logEvent(
   event: AnalyticsEvent,
   data?: Record<string, unknown>,
 ): void {
+  const consentGeneration = getAnalyticsConsentGeneration();
   void enqueueAnalyticsWork(async () => {
     try {
+      if (getAnalyticsConsentGeneration() !== consentGeneration) return;
       const settings = await loadSettings();
-      if (!settings.enableAnalytics) return;
+      if (!settings.enableAnalytics || settings.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION) return;
+      if (getAnalyticsConsentGeneration() !== consentGeneration) return;
       const safeData = normalizeLocalAnalyticsData(data);
       const duration = normalizeDuration(safeData?.duration);
       const entry: EventEntry = {
@@ -92,35 +103,47 @@ export function logEvent(
         ...(duration === undefined ? {} : { duration }),
       };
       SESSION_LOG.push(entry);
-      await persistEvent(entry);
-      if (isAnalyticsUploadEvent(event)) await uploadEvent(entry);
+      await persistEvent(entry, consentGeneration);
+      if (getAnalyticsConsentGeneration() !== consentGeneration) return;
+      if (isAnalyticsUploadEvent(event)) await uploadEvent(entry, consentGeneration);
     } catch (err) {
       if (!isExtensionContextInvalidatedError(err)) logError("Failed to record analytics event", err, "logEvent", { event });
     }
   });
 }
 
-async function persistEvent(entry: EventEntry): Promise<void> {
+async function persistEvent(entry: EventEntry, consentGeneration: number): Promise<void> {
+  if (getAnalyticsConsentGeneration() !== consentGeneration) return;
   const settings = await loadSettings();
-  if (!settings.enableAnalytics) return;
+  if (!settings.enableAnalytics || settings.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION) return;
   try {
     const r = await chrome.storage.local.get("analyticsLog");
+    if (getAnalyticsConsentGeneration() !== consentGeneration) return;
     const log: EventEntry[] = (r["analyticsLog"] as EventEntry[]) ?? [];
     const updated = [...log, entry].slice(-MAX_STORED);
     await chrome.storage.local.set({ analyticsLog: updated });
+    if (getAnalyticsConsentGeneration() !== consentGeneration) {
+      const latest = await chrome.storage.local.get("appSettings");
+      const currentSettings = latest.appSettings as Partial<AppSettings> | undefined;
+      if (currentSettings?.enableAnalytics !== true || currentSettings.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION) {
+        await chrome.storage.local.remove("analyticsLog");
+      }
+    }
   } catch (err) {
     if (isExtensionContextInvalidatedError(err)) return;
     logError("Failed to persist analytics event", err, "persistEvent", { event: entry.event });
   }
 }
 
-async function uploadEvent(entry: EventEntry): Promise<void> {
+async function uploadEvent(entry: EventEntry, consentGeneration: number): Promise<void> {
   if (!isAnalyticsUploadEvent(entry.event)) return;
   try {
+    if (getAnalyticsConsentGeneration() !== consentGeneration) return;
     const settings = await loadSettings();
-    if (!settings.enableAnalytics) return;
+    if (!settings.enableAnalytics || settings.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION) return;
 
     const deviceId = settings.deviceId || await getOrCreateDeviceId();
+    if (getAnalyticsConsentGeneration() !== consentGeneration) return;
     const baseUrl = String(settings.analyticsBaseUrl || "").trim().replace(/\/+$/, "");
     if (!baseUrl) return;
 
@@ -136,6 +159,7 @@ async function uploadEvent(entry: EventEntry): Promise<void> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
+    if (getAnalyticsConsentGeneration() !== consentGeneration) return;
     await fetch(`${baseUrl}/analytics/events`, {
       method: "POST",
       headers,
@@ -191,7 +215,7 @@ export async function flushAnalytics(): Promise<void> {
 }
 
 export function __resetAnalyticsForTests(): void {
-  clearSessionAnalytics();
+  __resetAnalyticsStateForTests();
 }
 
 export function classifyAnalyticsFailure(error: unknown): "timeout" | "network" | "http_4xx" | "http_5xx" | "media_unavailable" | "unsupported" | "unknown" {
