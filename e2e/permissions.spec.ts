@@ -90,7 +90,7 @@ test("P_REL_PERM_03_TABS_PERMISSION_REMOVAL proves matching-tab query, get, and 
   }
 });
 
-test("P_REL_PERM_04_SCREENSHOT_AUTHORITY returns real PNG data or an explicit Chrome authority error", async () => {
+test("AUTOMATED_ACTIVE_TAB_UNAVAILABLE_FAILS_CLOSED proves harness authority error and no fake image", async () => {
   const server = await startHttpPage();
   const context = await launchExtensionContext();
   try {
@@ -128,13 +128,11 @@ test("P_REL_PERM_04_SCREENSHOT_AUTHORITY returns real PNG data or an explicit Ch
     }, server.origin);
 
     expect(screenshot.targetUrl).toBe(`${server.origin}/`);
-    if (screenshot.dataUrl) {
-      expect(screenshot.error).toBeUndefined();
-      expect(screenshot.dataUrl).toMatch(/^data:image\/png;base64,/);
-      expect(screenshot.dataUrl.length).toBeGreaterThan(500);
-    } else {
-      expect(screenshot.error).toMatch(/Either the '<all_urls>' or 'activeTab' permission is required/);
-    }
+    // action.openPopup() is initiated from an extension page in this Playwright
+    // harness. It does not model a physical click on Chrome's toolbar action,
+    // so this test only proves the expected fail-closed harness limitation.
+    expect(screenshot.dataUrl).toBeUndefined();
+    expect(screenshot.error).toMatch(/Either the '<all_urls>' or 'activeTab' permission is required/);
 
     const tabId = await driver.evaluate(async (origin: string) => {
       const api = (window as PermissionProbeWindow).chrome;
@@ -147,15 +145,9 @@ test("P_REL_PERM_04_SCREENSHOT_AUTHORITY returns real PNG data or an explicit Ch
       const api = (window as PermissionProbeWindow).chrome;
       return await api.tabs.sendMessage(id, { type: "CAPTURE_BLOCK_IMAGE", bbox: { x: 0, y: 0, width: 280, height: 180 } }) as { ok?: boolean; dataUrl?: string; error?: string };
     }, tabId);
-    if (screenshot.dataUrl) {
-      expect(blockCapture.ok).toBe(true);
-      expect(blockCapture.dataUrl).toMatch(/^data:image\/png;base64,/);
-      expect(blockCapture.dataUrl!.length).toBeGreaterThan(250);
-    } else {
-      expect(blockCapture.ok).toBe(false);
-      expect(blockCapture.error).toMatch(/Either the '<all_urls>' or 'activeTab' permission is required/);
-      expect(blockCapture.dataUrl).toBeUndefined();
-    }
+    expect(blockCapture.ok).toBe(false);
+    expect(blockCapture.error).toMatch(/Either the '<all_urls>' or 'activeTab' permission is required/);
+    expect(blockCapture.dataUrl).toBeUndefined();
   } finally {
     await closeExtensionContext(context);
     await server.close();
