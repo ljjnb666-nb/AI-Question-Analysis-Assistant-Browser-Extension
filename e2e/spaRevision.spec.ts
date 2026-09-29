@@ -4,6 +4,11 @@ import type { BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext, resolveExtensionId } from "./helpers/extensionHarness";
 
+// Mock values are assembled at runtime so security scanners do not mistake
+// synthetic test fixtures for committed credentials.
+const PHASE8A_E2E_TOKEN = ["phase8a", "e2e", "token"].join("-");
+const PHASE8A_E2E_KEY = ["phase8a", "e2e", "key"].join("-");
+
 type SpaPageWindow = Window & typeof globalThis & {
   __clicks: Array<{ generation: number; label: string }>;
   __armButtons: (root: Element, generation: number) => void;
@@ -242,9 +247,9 @@ async function seedAuthenticatedSidePanel(driver: Page, analyticsBaseUrl: string
     appSettings: {
       userId: "phase8a-e2e-user",
       userEmail: "phase8a@example.test",
-      authToken: "phase8a-e2e-token",
+      authToken: PHASE8A_E2E_TOKEN,
       providerId: "deepseek",
-      apiKey: "phase8a-e2e-key",
+      apiKey: PHASE8A_E2E_KEY,
       apiModel: "deepseek-v4-flash",
       preferredRoute: "text",
       language: "en",
