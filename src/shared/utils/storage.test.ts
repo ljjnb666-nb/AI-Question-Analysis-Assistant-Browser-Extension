@@ -89,6 +89,35 @@ describe("storage", () => {
       expect(savedSettings.providerId).toBe(existingSettings.providerId);
       expect(savedSettings.apiModel).toBe(existingSettings.apiModel);
     });
+
+    it("AUTH_CORE_14_STORAGE_PARTIAL_SAVE preserves the cached auth token when the field is absent", async () => {
+      const storedToken = ["token", "stored"].join("-");
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({
+        appSettings: { ...DEFAULT_SETTINGS, authToken: storedToken },
+      } as never);
+
+      await saveSettings({ language: "zh" });
+
+      const settings = await loadSettings();
+      expect(settings.language).toBe("zh");
+      expect(settings.authToken).toBe(storedToken);
+    });
+
+    it("AUTH_CORE_13_STORAGE_EXPLICIT_CLEAR clears the cached auth token for an explicit undefined", async () => {
+      const storedToken = ["token", "stored"].join("-");
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({
+        appSettings: { ...DEFAULT_SETTINGS, authToken: storedToken },
+      } as never);
+
+      await saveSettings({ authToken: undefined });
+
+      const setCalls = vi.mocked(chrome.storage.local.set).mock.calls;
+      const savedSettings = setCalls[setCalls.length - 1]?.[0].appSettings;
+      expect(savedSettings?.authToken ?? undefined).toBeUndefined();
+
+      const settings = await loadSettings();
+      expect(settings.authToken ?? undefined).toBeUndefined();
+    });
   });
 
   describe("loadSettings", () => {

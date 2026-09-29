@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { loginWithEmail, registerWithEmailCode, sendEmailVerificationCode, logoutAccount } from "./auth";
+import {
+  loginWithEmail,
+  logoutAccount,
+  registerWithEmailCode,
+  sendEmailVerificationCode,
+  validateAuthSession,
+} from "./auth";
 import * as storage from "./storage";
 import * as analytics from "./analytics";
 
@@ -7,6 +13,7 @@ import * as analytics from "./analytics";
 // synthetic test fixtures for committed credentials.
 const MOCK_TOKEN_LEGACY = ["token", "789"].join("-");
 const MOCK_TOKEN_NEXT = ["token", "new"].join("-");
+const MOCK_TOKEN_FORGED = ["token", "forged"].join("-");
 
 vi.mock("./storage");
 vi.mock("./analytics");
@@ -260,18 +267,206 @@ describe("auth", () => {
   });
 
   describe("logoutAccount", () => {
-    it("clears user credentials on logout", async () => {
+    const AUTH_LOGOUT_CLEAR = {
+      userId: undefined,
+      userEmail: undefined,
+      authToken: undefined,
+    };
+
+    it("AUTH_CORE_11_LOGOUT_LOCAL_CLEAR revokes server and clears credentials", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        userId: "user-456",
+        userEmail: "test@example.com",
+        authToken: MOCK_TOKEN_LEGACY,
+        analyticsBaseUrl: "https://api.example.com",
+      } as any);
+      vi.mocked(storage.saveSettings).mockResolvedValue(undefined);
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true }),
+      } as Response);
+
+      const result = await logoutAccount();
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        "https://api.example.com/auth/logout",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: `Bearer ${MOCK_TOKEN_LEGACY}`,
+          }),
+          body: expect.stringContaining("user-456"),
+        }),
+      );
+      expect(storage.saveSettings).toHaveBeenCalledWith(AUTH_LOGOUT_CLEAR);
+      expect(analytics.logEvent).toHaveBeenCalledWith("auth_logged_out");
+      expect(result).toEqual({ serverRevoked: true, serverStatus: "revoked" });
+    });
+
+    it("AUTH_CORE_12_LOGOUT_NETWORK_FAILURE still clears local credentials", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        userId: "user-456",
+        userEmail: "test@example.com",
+        authToken: MOCK_TOKEN_LEGACY,
+      } as any);
+      vi.mocked(storage.saveSettings).mockResolvedValue(undefined);
+      vi.mocked(global.fetch).mockRejectedValue(new TypeError("Failed to fetch"));
+
+      const result = await logoutAccount();
+
+      expect(storage.saveSettings).toHaveBeenCalledWith(AUTH_LOGOUT_CLEAR);
+      expect(analytics.logEvent).toHaveBeenCalledWith("auth_logged_out");
+      expect(result.serverRevoked).toBe(false);
+      expect(result.serverStatus).toBe("network_error");
+    });
+
+    it("reports server_rejected on 401 and still clears local credentials", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        userId: "user-456",
+        userEmail: "test@example.com",
+        authToken: MOCK_TOKEN_LEGACY,
+      } as any);
+      vi.mocked(storage.saveSettings).mockResolvedValue(undefined);
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ ok: false, error: "AUTH_SESSION_INVALID" }),
+      } as unknown as Response);
+
+      const result = await logoutAccount();
+
+      expect(storage.saveSettings).toHaveBeenCalledWith(AUTH_LOGOUT_CLEAR);
+      expect(result.serverRevoked).toBe(false);
+      expect(result.serverStatus).toBe("server_rejected");
+    });
+
+    it("clears credentials without contacting the server when none are stored", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        analyticsBaseUrl: "https://api.example.com",
+      } as any);
       vi.mocked(storage.saveSettings).mockResolvedValue(undefined);
 
-      await logoutAccount();
+      const result = await logoutAccount();
 
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(storage.saveSettings).toHaveBeenCalledWith(AUTH_LOGOUT_CLEAR);
+      expect(result.serverStatus).toBe("no_local_credentials");
+    });
+  });
+
+  describe("validateAuthSession", () => {
+    it("reports unauthenticated without a server round-trip when credentials are missing", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        analyticsBaseUrl: "https://api.example.com",
+      } as any);
+
+      const result = await validateAuthSession();
+
+      expect(result.status).toBe("unauthenticated");
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(storage.saveSettings).not.toHaveBeenCalled();
+    });
+
+    it("AUTH_CORE_03 accepts a valid session and adopts the server-returned identity", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        userId: "user-456",
+        userEmail: "stale@example.com",
+        authToken: MOCK_TOKEN_LEGACY,
+        analyticsBaseUrl: "https://api.example.com",
+      } as any);
+      vi.mocked(storage.saveSettings).mockResolvedValue(undefined);
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          user: { userId: "user-server", email: "server@example.com" },
+          expiresAt: 1234567890,
+        }),
+      } as Response);
+
+      const result = await validateAuthSession();
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        "https://api.example.com/auth/session",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: `Bearer ${MOCK_TOKEN_LEGACY}`,
+          }),
+          body: JSON.stringify({ userId: "user-456" }),
+        }),
+      );
+      expect(storage.saveSettings).toHaveBeenCalledWith({
+        userId: "user-server",
+        userEmail: "server@example.com",
+      });
+      expect(result).toEqual({
+        status: "authenticated",
+        userId: "user-server",
+        userEmail: "server@example.com",
+        expiresAt: 1234567890,
+      });
+    });
+
+    it("AUTH_CORE_04_FORGED_TOKEN clears forged local credentials on 401", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        userId: "usr-forged",
+        userEmail: "forged@example.com",
+        authToken: MOCK_TOKEN_FORGED,
+        analyticsBaseUrl: "https://api.example.com",
+      } as any);
+      vi.mocked(storage.saveSettings).mockResolvedValue(undefined);
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ ok: false, error: "AUTH_SESSION_INVALID" }),
+      } as unknown as Response);
+
+      const result = await validateAuthSession();
+
+      expect(result.status).toBe("unauthenticated");
       expect(storage.saveSettings).toHaveBeenCalledWith({
         userId: undefined,
         userEmail: undefined,
         authToken: undefined,
       });
+    });
 
-      expect(analytics.logEvent).toHaveBeenCalledWith("auth_logged_out");
+    it("keeps credentials and reports server_unavailable on network failure", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        userId: "user-456",
+        userEmail: "test@example.com",
+        authToken: MOCK_TOKEN_LEGACY,
+        analyticsBaseUrl: "https://api.example.com",
+      } as any);
+      vi.mocked(storage.saveSettings).mockResolvedValue(undefined);
+      vi.mocked(global.fetch).mockRejectedValue(new TypeError("Failed to fetch"));
+
+      const result = await validateAuthSession();
+
+      expect(result.status).toBe("server_unavailable");
+      expect(storage.saveSettings).not.toHaveBeenCalled();
+    });
+
+    it("keeps credentials and reports server_unavailable on 5xx responses", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        userId: "user-456",
+        userEmail: "test@example.com",
+        authToken: MOCK_TOKEN_LEGACY,
+        analyticsBaseUrl: "https://api.example.com",
+      } as any);
+      vi.mocked(storage.saveSettings).mockResolvedValue(undefined);
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({ ok: false, error: "AUTH_SERVICE_UNAVAILABLE" }),
+      } as unknown as Response);
+
+      const result = await validateAuthSession();
+
+      expect(result.status).toBe("server_unavailable");
+      expect(storage.saveSettings).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomInt, scryptSync, timingSafeEqual } from "node:crypto";
 import { hashSecret, issueOpaqueToken, verifySecret } from "./security.mjs";
 
 let DatabaseSync = null;
@@ -12,12 +12,15 @@ try {
 }
 
 const ROOT_DIR = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(ROOT_DIR, "..", "data");
-const DEFAULT_DATA_FILE = join(DATA_DIR, "analytics-db.sqlite");
-const LEGACY_JSON_FILE = join(DATA_DIR, "analytics-db.json");
+// ANALYTICS_DATA_DIR redirects the whole data directory (test isolation);
+// without it the store resolves the same paths as before.
+function getDataDir() {
+  return process.env.ANALYTICS_DATA_DIR || join(ROOT_DIR, "..", "data");
+}
 const SQLITE_SUPPORTED = typeof DatabaseSync === "function";
 export const ANALYTICS_EVENT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 export const CURRENT_ANALYTICS_PRIVACY_EPOCH = 1;
+export const AUTH_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 let dbInstance = null;
 
@@ -32,16 +35,16 @@ function createEmptyDb() {
 }
 
 function ensureDataDir() {
-  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+  if (!existsSync(getDataDir())) mkdirSync(getDataDir(), { recursive: true });
 }
 
 function getDataFile() {
-  return process.env.ANALYTICS_DB_FILE || DEFAULT_DATA_FILE;
+  return process.env.ANALYTICS_DB_FILE || join(getDataDir(), "analytics-db.sqlite");
 }
 
 function getJsonDataFile() {
   const configured = String(process.env.ANALYTICS_DB_FILE || "").trim();
-  if (!configured) return LEGACY_JSON_FILE;
+  if (!configured) return join(getDataDir(), "analytics-db.json");
   return configured.replace(/\.sqlite$/i, ".json");
 }
 
@@ -51,6 +54,7 @@ function normalizeUserRecord(user) {
     authToken: user?.authToken ? String(user.authToken) : undefined,
     authTokenHash: user?.authTokenHash ? String(user.authTokenHash) : undefined,
     authTokenSalt: user?.authTokenSalt ? String(user.authTokenSalt) : undefined,
+    authTokenExpiresAt: user?.authTokenExpiresAt == null ? undefined : Number(user.authTokenExpiresAt) || undefined,
     deviceIds: Array.isArray(user?.deviceIds) ? user.deviceIds.filter(Boolean) : [],
   };
 }
@@ -89,6 +93,7 @@ function getDatabase() {
       authTokenHash TEXT,
       authTokenSalt TEXT,
       authToken TEXT,
+      authTokenExpiresAt INTEGER,
       createdAt INTEGER NOT NULL,
       deviceIdsJson TEXT NOT NULL DEFAULT '[]'
     );
@@ -121,10 +126,25 @@ function getDatabase() {
     );
   `);
 
+  // Schema migration must complete before anything that reads or writes
+  // authTokenExpiresAt — including the legacy JSON import below, whose
+  // saveDb round-trip inserts that column.
+  ensureAuthTokenExpiresAtColumn(dbInstance);
   maybeMigrateLegacyJson(dbInstance);
   migrateAnalyticsPrivacyEpochSqlite(dbInstance);
   pruneSqliteAnalyticsEvents(dbInstance, Date.now());
   return dbInstance;
+}
+
+// CREATE TABLE IF NOT EXISTS does not add columns to pre-existing databases,
+// so the token expiry column has to be added idempotently for older files.
+// Existing rows keep NULL: legacy tokens without a provable expiry fail
+// closed during session validation until the next login re-issues one.
+function ensureAuthTokenExpiresAtColumn(database) {
+  const columns = database.prepare("PRAGMA table_info(users)").all();
+  if (columns.some((column) => column.name === "authTokenExpiresAt")) return false;
+  database.exec("ALTER TABLE users ADD COLUMN authTokenExpiresAt INTEGER");
+  return true;
 }
 
 export function pruneAnalyticsEvents(db, now = Date.now()) {
@@ -185,9 +205,9 @@ function maybeMigrateLegacyJson(database) {
     Number(database.prepare("SELECT COUNT(*) AS count FROM email_verification_codes").get().count || 0) > 0;
 
   if (hasUsers || hasEvents || hasDevices || hasCodes) return;
-  if (!existsSync(LEGACY_JSON_FILE)) return;
+  if (!existsSync(getJsonDataFile())) return;
 
-  const parsed = JSON.parse(readFileSync(LEGACY_JSON_FILE, "utf8"));
+  const parsed = JSON.parse(readFileSync(getJsonDataFile(), "utf8"));
   const legacyDb = {
     ...createEmptyDb(),
     ...parsed,
@@ -271,7 +291,7 @@ export function loadDb() {
   const devices = database.prepare("SELECT deviceId, userId, installedAt, createdAt, lastSeenAt FROM devices").all();
   const users = database
     .prepare(
-      "SELECT userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, createdAt, deviceIdsJson FROM users",
+      "SELECT userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, authTokenExpiresAt, createdAt, deviceIdsJson FROM users",
     )
     .all()
     .map((row) =>
@@ -340,7 +360,7 @@ export function saveDb(db) {
     }
 
     const insertUser = database.prepare(
-      "INSERT INTO users (userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, createdAt, deviceIdsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO users (userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, authTokenExpiresAt, createdAt, deviceIdsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const user of db.users) {
       insertUser.run(
@@ -351,6 +371,7 @@ export function saveDb(db) {
         user.authTokenHash ?? null,
         user.authTokenSalt ?? null,
         user.authToken ?? null,
+        user.authTokenExpiresAt ?? null,
         user.createdAt,
         JSON.stringify(Array.isArray(user.deviceIds) ? user.deviceIds : []),
       );
@@ -416,11 +437,12 @@ export function issueAuthToken() {
   return issueOpaqueToken("tok");
 }
 
-function issueStoredAuthToken(user) {
+function issueStoredAuthToken(user, now = Date.now()) {
   const authToken = issueAuthToken();
   const digest = hashSecret(authToken);
   user.authTokenHash = digest.hash;
   user.authTokenSalt = digest.salt;
+  user.authTokenExpiresAt = now + AUTH_SESSION_TTL_MS;
   delete user.authToken;
   return authToken;
 }
@@ -506,6 +528,36 @@ export function createEmailVerificationCodeInStorage(email) {
   return { code, expiresAt };
 }
 
+// Stable, public registration failures. The HTTP boundary maps these onto
+// fixed status/error codes; any other error is treated as an internal
+// storage failure and never surfaced.
+export class RegistrationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "RegistrationError";
+  }
+}
+
+function matchesVerificationCode(entry, normalizedCode) {
+  if (entry.codeHash && entry.codeSalt) {
+    return verifySecret(normalizedCode, entry.codeSalt, entry.codeHash);
+  }
+  return entry.code === normalizedCode;
+}
+
+function consumeVerificationCodeRow(database, match, normalizedCode, now) {
+  if (match.code) {
+    const digest = hashSecret(normalizedCode);
+    database
+      .prepare("UPDATE email_verification_codes SET codeHash = ?, codeSalt = ?, code = NULL, consumedAt = ? WHERE codeId = ?")
+      .run(digest.hash, digest.salt, now, match.codeId);
+    return;
+  }
+  database
+    .prepare("UPDATE email_verification_codes SET consumedAt = ? WHERE codeId = ?")
+    .run(now, match.codeId);
+}
+
 export function verifyEmailCodeInStorage(email, code) {
   if (!SQLITE_SUPPORTED) {
     const db = loadDbFromJsonFile();
@@ -525,27 +577,30 @@ export function verifyEmailCodeInStorage(email, code) {
       .all(normalized, now)
       .map(normalizeVerificationCodeRecord);
 
-    const match = candidates.find((entry) => {
-      if (entry.codeHash && entry.codeSalt) {
-        return verifySecret(normalizedCode, entry.codeSalt, entry.codeHash);
-      }
-      return entry.code === normalizedCode;
-    });
-
+    const match = candidates.find((entry) => matchesVerificationCode(entry, normalizedCode));
     if (!match) throw new Error("invalid or expired verification code");
 
-    if (match.code) {
-      const digest = hashSecret(normalizedCode);
-      database
-        .prepare("UPDATE email_verification_codes SET codeHash = ?, codeSalt = ?, code = NULL, consumedAt = ? WHERE codeId = ?")
-        .run(digest.hash, digest.salt, now, match.codeId);
-      return;
-    }
-
-    database
-      .prepare("UPDATE email_verification_codes SET consumedAt = ? WHERE codeId = ?")
-      .run(now, match.codeId);
+    consumeVerificationCodeRow(database, match, normalizedCode, now);
   });
+}
+
+function insertStoredUser(database, user) {
+  database
+    .prepare(
+      "INSERT INTO users (userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, authTokenExpiresAt, createdAt, deviceIdsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      user.userId,
+      user.email,
+      user.passwordHash,
+      user.passwordSalt,
+      user.authTokenHash ?? null,
+      user.authTokenSalt ?? null,
+      null,
+      user.authTokenExpiresAt ?? null,
+      user.createdAt,
+      JSON.stringify(user.deviceIds),
+    );
 }
 
 export function createUserInStorage(email, password, deviceId) {
@@ -575,21 +630,7 @@ export function createUserInStorage(email, password, deviceId) {
       throw new Error("email already registered");
     }
 
-    database
-      .prepare(
-        "INSERT INTO users (userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, createdAt, deviceIdsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
-      .run(
-        user.userId,
-        user.email,
-        user.passwordHash,
-        user.passwordSalt,
-        user.authTokenHash ?? null,
-        user.authTokenSalt ?? null,
-        null,
-        user.createdAt,
-        JSON.stringify(user.deviceIds),
-      );
+    insertStoredUser(database, user);
 
     if (deviceId) {
       upsertStoredDevice(database, deviceId, user.userId, null);
@@ -597,6 +638,101 @@ export function createUserInStorage(email, password, deviceId) {
   });
 
   return { user, authToken };
+}
+
+// Authoritative registration: input validation, code verification, the
+// duplicate check, account creation, and code consumption run inside one
+// transaction boundary. Account existence is only ever evaluated after a
+// valid one-time code proved email control, and every failure rolls back so
+// the code is neither consumed nor left behind with partial session state.
+export function registerUserWithVerificationCodeInStorage(email, password, verificationCode, deviceId) {
+  const normalized = String(email || "").trim().toLowerCase();
+  const normalizedCode = String(verificationCode || "").trim();
+  if (!normalized) throw new RegistrationError("email is required");
+  if (String(password || "").length < 6) throw new RegistrationError("password must be at least 6 characters");
+  if (!normalizedCode) throw new RegistrationError("verification code is required");
+
+  if (!SQLITE_SUPPORTED) {
+    const db = loadDbFromJsonFile();
+    const result = registerUserWithVerificationCode(db, normalized, password, normalizedCode, deviceId);
+    saveDbToJsonFile(db);
+    return result;
+  }
+
+  const now = Date.now();
+  return runInTransaction((database) => {
+    const candidates = database
+      .prepare(
+        "SELECT codeId, email, codeHash, codeSalt, code, createdAt, expiresAt, consumedAt FROM email_verification_codes WHERE email = ? AND consumedAt IS NULL AND expiresAt > ?",
+      )
+      .all(normalized, now)
+      .map(normalizeVerificationCodeRecord);
+    const match = candidates.find((entry) => matchesVerificationCode(entry, normalizedCode));
+    if (!match) throw new RegistrationError("invalid or expired verification code");
+
+    if (findStoredUserByEmail(database, normalized)) {
+      throw new RegistrationError("email already registered");
+    }
+
+    const passwordDigest = hashPassword(password);
+    const user = {
+      userId: generateId("usr"),
+      email: normalized,
+      passwordHash: passwordDigest.hash,
+      passwordSalt: passwordDigest.salt,
+      createdAt: now,
+      deviceIds: appendDeviceId([], deviceId),
+    };
+    const authToken = issueStoredAuthToken(user, now);
+    insertStoredUser(database, user);
+    if (deviceId) {
+      upsertStoredDevice(database, deviceId, user.userId, null);
+    }
+    consumeVerificationCodeRow(database, match, normalizedCode, now);
+    return { user, authToken };
+  });
+}
+
+export function registerUserWithVerificationCode(db, email, password, verificationCode, deviceId, now = Date.now()) {
+  const normalized = String(email || "").trim().toLowerCase();
+  const normalizedCode = String(verificationCode || "").trim();
+  if (!normalized) throw new RegistrationError("email is required");
+  if (String(password || "").length < 6) throw new RegistrationError("password must be at least 6 characters");
+  if (!normalizedCode) throw new RegistrationError("verification code is required");
+
+  const entry = db.email_verification_codes.find((item) => {
+    if (item.email !== normalized || item.consumedAt || item.expiresAt <= now) return false;
+    return matchesVerificationCode(item, normalizedCode);
+  });
+  if (!entry) throw new RegistrationError("invalid or expired verification code");
+
+  if (findUserByEmail(db, normalized)) {
+    throw new RegistrationError("email already registered");
+  }
+
+  const { user, authToken } = createUser(db, normalized, password, deviceId);
+  if (entry.code) {
+    const digest = hashSecret(normalizedCode);
+    entry.codeHash = digest.hash;
+    entry.codeSalt = digest.salt;
+    delete entry.code;
+  }
+  entry.consumedAt = now;
+  return { user, authToken };
+}
+
+// AUTH-CORE-INV-10: failed logins must pay comparable password-verification
+// cost whether or not the account exists, or response timing would reveal
+// registered emails. A dummy credential is generated once at module init
+// with the same hashPassword/verifyPassword scrypt parameters; its raw
+// secret stays in this closure only and is never persisted or logged.
+const DUMMY_LOGIN_PASSWORD_DIGEST = hashPassword(randomBytes(32).toString("hex"));
+
+function verifyLoginPassword(user, password) {
+  const record = user
+    ? { salt: user.passwordSalt, hash: user.passwordHash }
+    : DUMMY_LOGIN_PASSWORD_DIGEST;
+  return verifyPassword(password, record.salt, record.hash);
 }
 
 export function loginUserInStorage(email, password, deviceId) {
@@ -610,20 +746,20 @@ export function loginUserInStorage(email, password, deviceId) {
 
   return runInTransaction((database) => {
     const user = findStoredUserByEmail(database, normalized);
+    const passwordMatches = verifyLoginPassword(user, password);
     if (!user) throw new Error("account not found");
-    if (!verifyPassword(password, user.passwordSalt, user.passwordHash)) {
-      throw new Error("invalid password");
-    }
+    if (!passwordMatches) throw new Error("invalid password");
 
     const nextDeviceIds = appendDeviceId(user.deviceIds, deviceId);
     user.deviceIds = nextDeviceIds;
     const authToken = issueStoredAuthToken(user);
 
     database
-      .prepare("UPDATE users SET authTokenHash = ?, authTokenSalt = ?, authToken = NULL, deviceIdsJson = ? WHERE userId = ?")
+      .prepare("UPDATE users SET authTokenHash = ?, authTokenSalt = ?, authToken = NULL, authTokenExpiresAt = ?, deviceIdsJson = ? WHERE userId = ?")
       .run(
         user.authTokenHash ?? null,
         user.authTokenSalt ?? null,
+        user.authTokenExpiresAt ?? null,
         JSON.stringify(nextDeviceIds),
         user.userId,
       );
@@ -636,8 +772,83 @@ export function loginUserInStorage(email, password, deviceId) {
   });
 }
 
-export function pruneAnalyticsEventsInStorage(now = Date.now()) {
+export function findUserByEmailInStorage(email) {
   if (!SQLITE_SUPPORTED) {
+    return findUserByEmail(loadDbFromJsonFile(), email);
+  }
+  return findStoredUserByEmail(getDatabase(), email);
+}
+
+// A session is valid only when the stored token hash matches AND the token
+// carries a provable, unexpired expiry. Records without an expiry (pre-TTL
+// legacy tokens) fail closed and require a fresh login.
+function validateSessionRecord(record, authToken, now) {
+  if (!record) return null;
+  if (!record.authTokenHash || !record.authTokenSalt) return null;
+  const expiresAt = Number(record.authTokenExpiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) return null;
+  if (!verifySecret(String(authToken || ""), record.authTokenSalt, record.authTokenHash)) return null;
+  return { user: { userId: record.userId, email: record.email }, expiresAt };
+}
+
+export function validateUserSession(db, userId, authToken, now = Date.now()) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId || !String(authToken || "")) return null;
+  const user = db.users.find((entry) => entry.userId === normalizedUserId);
+  return validateSessionRecord(user, authToken, now);
+}
+
+export function validateUserSessionInStorage(userId, authToken, now = Date.now()) {
+  if (!SQLITE_SUPPORTED) {
+    return validateUserSession(loadDbFromJsonFile(), userId, authToken, now);
+  }
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId || !String(authToken || "")) return null;
+  const row = getDatabase()
+    .prepare(
+      "SELECT userId, email, authTokenHash, authTokenSalt, authToken, authTokenExpiresAt, deviceIdsJson FROM users WHERE userId = ?",
+    )
+    .get(normalizedUserId);
+  return validateSessionRecord(hydrateUserRow(row), authToken, now);
+}
+
+export function revokeUserSession(db, userId, authToken, now = Date.now()) {
+  const session = validateUserSession(db, userId, authToken, now);
+  if (!session) return false;
+  const user = db.users.find((entry) => entry.userId === session.user.userId);
+  if (user) {
+    user.authTokenHash = undefined;
+    user.authTokenSalt = undefined;
+    user.authTokenExpiresAt = undefined;
+    delete user.authToken;
+  }
+  return true;
+}
+
+export function revokeUserSessionInStorage(userId, authToken, now = Date.now()) {
+  if (!SQLITE_SUPPORTED) {
+    const db = loadDbFromJsonFile();
+    const result = revokeUserSession(db, userId, authToken, now);
+    if (result) saveDbToJsonFile(db);
+    return result;
+  }
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) return false;
+  return runInTransaction((database) => {
+    const row = database
+      .prepare(
+        "SELECT userId, email, authTokenHash, authTokenSalt, authToken, authTokenExpiresAt, deviceIdsJson FROM users WHERE userId = ?",
+      )
+      .get(normalizedUserId);
+    if (!validateSessionRecord(hydrateUserRow(row), authToken, now)) return false;
+    database
+      .prepare("UPDATE users SET authTokenHash = NULL, authTokenSalt = NULL, authToken = NULL, authTokenExpiresAt = NULL WHERE userId = ?")
+      .run(normalizedUserId);
+    return true;
+  });
+}
+
+export function pruneAnalyticsEventsInStorage(now = Date.now()) {  if (!SQLITE_SUPPORTED) {
     const db = loadDbFromJsonFile();
     const removed = pruneAnalyticsEvents(db, now);
     if (removed) saveDbToJsonFile(db);
@@ -743,7 +954,7 @@ export function createUser(db, email, password, deviceId) {
 }
 
 export function issueVerificationCode() {
-  return `${Math.floor(100000 + Math.random() * 900000)}`;
+  return `${randomInt(100000, 1000000)}`;
 }
 
 export function createEmailVerificationCode(db, email) {
@@ -791,10 +1002,9 @@ export function verifyEmailCode(db, email, code) {
 
 export function loginUser(db, email, password, deviceId) {
   const user = findUserByEmail(db, email);
+  const passwordMatches = verifyLoginPassword(user, password);
   if (!user) throw new Error("account not found");
-  if (!verifyPassword(password, user.passwordSalt, user.passwordHash)) {
-    throw new Error("invalid password");
-  }
+  if (!passwordMatches) throw new Error("invalid password");
   const authToken = issueStoredAuthToken(user);
   if (deviceId && !user.deviceIds.includes(deviceId)) user.deviceIds.push(deviceId);
   if (deviceId) ensureDevice(db, deviceId, user.userId);

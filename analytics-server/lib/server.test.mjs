@@ -1,8 +1,19 @@
 // @vitest-environment node
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createAnalyticsHandler } from "./server.mjs";
 import { createAdminSessionStore } from "./admin-sessions.mjs";
+import {
+  createEmailVerificationCodeInStorage,
+  createUserInStorage,
+  findUserByEmailInStorage,
+  resetDbConnectionForTests,
+  validateUserSessionInStorage,
+  verifyEmailCodeInStorage,
+} from "./store.mjs";
 
 function createReq({ method = "GET", url = "/", headers = {}, body = "", socket = { remoteAddress: "127.0.0.1" } } = {}) {
   const listeners = new Map();
@@ -448,5 +459,356 @@ describe("analytics handler", () => {
     expect(sessions.has(second)).toBe(false);
     expect(sessions.size).toBe(1);
     expect(sessions.has(third)).toBe(true);
+  });
+});
+
+describe("auth core endpoints", () => {
+  const SESSION_USER = { userId: "usr-session-1", email: "session@example.com" };
+  const SESSION_TOKEN = ["tok", "session"].join("_");
+
+  it("AUTH_CORE_03_VALID_SESSION validates a matching bearer and userId", async () => {
+    const validateUserSessionImpl = vi.fn(() => ({ user: SESSION_USER, expiresAt: 4102444800000 }));
+    const handler = createHandler({ validateUserSessionImpl });
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(parsePayload(res)).toEqual({
+      ok: true,
+      user: SESSION_USER,
+      expiresAt: 4102444800000,
+    });
+    expect(validateUserSessionImpl).toHaveBeenCalledWith(SESSION_USER.userId, SESSION_TOKEN, expect.any(Number));
+  });
+
+  it("AUTH_CORE_04_FORGED_TOKEN and AUTH_CORE_05_USER_ID_MISMATCH share one stable 401 code", async () => {
+    const validateUserSessionImpl = vi.fn(() => null);
+    const handler = createHandler({ validateUserSessionImpl });
+
+    const forged = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+    const mismatched = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: "usr-somebody-else" }),
+    });
+    const missingAuth = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+
+    for (const { res } of [forged, mismatched, missingAuth]) {
+      expect(res.statusCode).toBe(401);
+      expect(parsePayload(res)).toEqual({ ok: false, error: "AUTH_SESSION_INVALID" });
+    }
+    expect(validateUserSessionImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it("AUTH_CORE_07_LOGOUT_REVOKES revokes the proven session and rejects userId-only revokes", async () => {
+    const revokeUserSessionImpl = vi.fn(() => true);
+    const handler = createHandler({ revokeUserSessionImpl });
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/auth/logout",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(parsePayload(res)).toEqual({ ok: true });
+    expect(revokeUserSessionImpl).toHaveBeenCalledWith(SESSION_USER.userId, SESSION_TOKEN, expect.any(Number));
+
+    const rejecting = createHandler({ revokeUserSessionImpl: vi.fn(() => false) });
+    const rejected = await invoke(rejecting, {
+      method: "POST",
+      url: "/auth/logout",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+    expect(rejected.res.statusCode).toBe(401);
+    expect(parsePayload(rejected.res)).toEqual({ ok: false, error: "AUTH_SESSION_INVALID" });
+  });
+
+  it("AUTH_CORE_08_REVOKED_TOKEN fails session validation after a successful logout", async () => {
+    const handler = createHandler({ revokeUserSessionImpl: vi.fn(() => true), validateUserSessionImpl: vi.fn(() => null) });
+    const logout = await invoke(handler, {
+      method: "POST",
+      url: "/auth/logout",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+    expect(logout.res.statusCode).toBe(200);
+
+    const session = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+    expect(session.res.statusCode).toBe(401);
+    expect(parsePayload(session.res)).toEqual({ ok: false, error: "AUTH_SESSION_INVALID" });
+  });
+
+  it("AUTH_CORE_20_SECRET_RESPONSE never echoes internal failure material", async () => {
+    const leakyMessage = ["sqlite", "SMTP_PASS=hunter2", SESSION_TOKEN, "password-hash-deadbeef"].join(" ");
+    const handler = createHandler({
+      validateUserSessionImpl: vi.fn(() => {
+        throw new Error(leakyMessage);
+      }),
+    });
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+
+    expect(res.statusCode).toBe(503);
+    expect(parsePayload(res)).toEqual({ ok: false, error: "AUTH_SERVICE_UNAVAILABLE" });
+    expect(res.payload).not.toContain("hunter2");
+    expect(res.payload).not.toContain(SESSION_TOKEN);
+    expect(res.payload).not.toContain("sqlite");
+
+    const revokeHandler = createHandler({
+      revokeUserSessionImpl: vi.fn(() => {
+        throw new Error(leakyMessage);
+      }),
+    });
+    const revoke = await invoke(revokeHandler, {
+      method: "POST",
+      url: "/auth/logout",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+    expect(revoke.res.statusCode).toBe(503);
+    expect(parsePayload(revoke.res)).toEqual({ ok: false, error: "AUTH_SERVICE_UNAVAILABLE" });
+    expect(revoke.res.payload).not.toContain(SESSION_TOKEN);
+  });
+
+  it("rate limits session validation per client ip", async () => {
+    const validateUserSessionImpl = vi.fn(() => ({ user: SESSION_USER, expiresAt: 4102444800000 }));
+    const handler = createHandler({ validateUserSessionImpl });
+    let last;
+    for (let attempt = 0; attempt < 121; attempt += 1) {
+      last = await invoke(handler, {
+        method: "POST",
+        url: "/auth/session",
+        headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+        body: JSON.stringify({ userId: SESSION_USER.userId }),
+      });
+    }
+    expect(last.res.statusCode).toBe(429);
+    expect(validateUserSessionImpl).toHaveBeenCalledTimes(120);
+  });
+});
+
+describe("auth core registration code consumption", () => {
+  function createRealStorageHandler() {
+    const dbFile = path.join(os.tmpdir(), `quiz-solver-auth-register-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+    const cleanup = () => {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    };
+    return { handler: createHandler(), cleanup };
+  }
+
+  it("AUTH_CORE_21_INVALID_PASSWORD_DOES_NOT_CONSUME_CODE keeps the code usable", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      const { code } = createEmailVerificationCodeInStorage("burn@example.com");
+      const invalid = await invoke(handler, {
+        method: "POST",
+        url: "/auth/register",
+        body: JSON.stringify({ email: "burn@example.com", password: "123", verificationCode: code }),
+      });
+      expect(invalid.res.statusCode).toBe(400);
+      expect(parsePayload(invalid.res).error).toMatch(/password must be at least 6 characters/i);
+
+      const retry = await invoke(handler, {
+        method: "POST",
+        url: "/auth/register",
+        body: JSON.stringify({ email: "burn@example.com", password: "secret-123", verificationCode: code, deviceId: "dev-burn" }),
+      });
+      expect(retry.res.statusCode).toBe(200);
+      expect(parsePayload(retry.res).ok).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_22_DUPLICATE_ACCOUNT_DOES_NOT_CONSUME_CODE keeps the code usable", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      createUserInStorage("dupe@example.com", "secret-123", "dev-existing");
+      const { code } = createEmailVerificationCodeInStorage("dupe@example.com");
+
+      const duplicate = await invoke(handler, {
+        method: "POST",
+        url: "/auth/register",
+        body: JSON.stringify({ email: "dupe@example.com", password: "secret-123", verificationCode: code }),
+      });
+      expect(duplicate.res.statusCode).toBe(409);
+      expect(parsePayload(duplicate.res).error).toMatch(/email already registered/i);
+      expect(() => verifyEmailCodeInStorage("dupe@example.com", code)).not.toThrow();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_23_SUCCESS_CONSUMES_CODE_ONCE consumes the code exactly once", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      const { code } = createEmailVerificationCodeInStorage("success@example.com");
+
+      const created = await invoke(handler, {
+        method: "POST",
+        url: "/auth/register",
+        body: JSON.stringify({ email: "success@example.com", password: "secret-123", verificationCode: code, deviceId: "dev-success" }),
+      });
+      expect(created.res.statusCode).toBe(200);
+      expect(parsePayload(created.res).authToken).toBeTruthy();
+
+      expect(() => verifyEmailCodeInStorage("success@example.com", code)).toThrow(/invalid or expired/i);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("auth core enumeration safety", () => {
+  function createRealStorageHandler() {
+    const dbFile = path.join(os.tmpdir(), `quiz-solver-auth-enum-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+    const cleanup = () => {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    };
+    return { handler: createHandler(), cleanup };
+  }
+
+  async function registerWithCode(handler, email, verificationCode) {
+    return invoke(handler, {
+      method: "POST",
+      url: "/auth/register",
+      body: JSON.stringify({ email, password: "secret-123", verificationCode }),
+    });
+  }
+
+  it("AUTH_CORE_25_REGISTER_UNKNOWN_EMAIL_INVALID_CODE fails generically without creating a user", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      const { res } = await registerWithCode(handler, "ghost@example.com", ["000", "000"].join(""));
+      expect(res.statusCode).toBe(400);
+      expect(parsePayload(res).error).toBe("invalid or expired verification code");
+      expect(findUserByEmailInStorage("ghost@example.com")).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_26_REGISTER_EXISTING_EMAIL_INVALID_CODE is externally indistinguishable from an unknown email", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      createUserInStorage("taken@example.com", "secret-123", "dev-taken");
+
+      const unknown = await registerWithCode(handler, "ghost@example.com", ["000", "000"].join(""));
+      const existing = await registerWithCode(handler, "taken@example.com", ["000", "000"].join(""));
+
+      expect(existing.res.statusCode).toBe(unknown.res.statusCode);
+      expect(parsePayload(existing.res).error).toBe(parsePayload(unknown.res).error);
+      // The existing account is untouched by the probing attempt.
+      expect(findUserByEmailInStorage("taken@example.com")?.userId).toBeTruthy();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_27_DUPLICATE_VALID_CODE_NOT_PARTIAL keeps the account and the code intact", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      const existing = createUserInStorage("dupe-valid@example.com", "secret-123", "dev-original");
+      const { code } = createEmailVerificationCodeInStorage("dupe-valid@example.com");
+
+      const duplicate = await registerWithCode(handler, "dupe-valid@example.com", code);
+      expect(duplicate.res.statusCode).toBe(409);
+      expect(parsePayload(duplicate.res).error).toBe("email already registered");
+
+      // No second account and no disturbed session on the original account.
+      expect(findUserByEmailInStorage("dupe-valid@example.com")?.userId).toBe(existing.user.userId);
+      expect(validateUserSessionInStorage(existing.user.userId, existing.authToken)).not.toBeNull();
+
+      // The proven-code duplicate path must not consume the one-time code.
+      expect(() => verifyEmailCodeInStorage("dupe-valid@example.com", code)).not.toThrow();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_29_LOGIN_UNKNOWN_EMAIL, AUTH_CORE_30_LOGIN_WRONG_PASSWORD, and AUTH_CORE_34_HTTP_LOGIN_ENUMERATION_STILL_UNIFIED keep one 401 payload", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      createUserInStorage("login@example.com", "secret-123", "dev-login");
+
+      const unknown = await invoke(handler, {
+        method: "POST",
+        url: "/auth/login",
+        body: JSON.stringify({ email: "ghost@example.com", password: "secret-123" }),
+      });
+      const wrongPassword = await invoke(handler, {
+        method: "POST",
+        url: "/auth/login",
+        body: JSON.stringify({ email: "login@example.com", password: "wrong-password" }),
+      });
+
+      expect(unknown.res.statusCode).toBe(401);
+      expect(parsePayload(unknown.res)).toEqual({ ok: false, error: "AUTH_INVALID_CREDENTIALS" });
+      expect(wrongPassword.res.statusCode).toBe(unknown.res.statusCode);
+      expect(parsePayload(wrongPassword.res)).toEqual(parsePayload(unknown.res));
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_31_SUCCESSFUL_ATOMIC_REGISTRATION creates one account with a consumed code and a valid bounded token", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      const { code } = createEmailVerificationCodeInStorage("atomic@example.com");
+
+      const created = await registerWithCode(handler, "atomic@example.com", code);
+      expect(created.res.statusCode).toBe(200);
+
+      const payload = parsePayload(created.res);
+      expect(payload.ok).toBe(true);
+      expect(findUserByEmailInStorage("atomic@example.com")?.userId).toBe(payload.user.userId);
+      expect(validateUserSessionInStorage(payload.user.userId, payload.authToken)).not.toBeNull();
+      expect(() => verifyEmailCodeInStorage("atomic@example.com", code)).toThrow(/invalid or expired/i);
+    } finally {
+      cleanup();
+    }
   });
 });

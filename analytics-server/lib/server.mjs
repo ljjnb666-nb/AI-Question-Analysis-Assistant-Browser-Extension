@@ -3,12 +3,14 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { buildAnalyticsSummary, buildTimeSeries } from "./metrics.mjs";
 import {
   createEmailVerificationCodeInStorage,
-  createUserInStorage,
   getStorageBackendInfo,
   loadDb,
   loginUserInStorage,
   recordAnalyticsEventInStorage,
-  verifyEmailCodeInStorage,
+  registerUserWithVerificationCodeInStorage,
+  revokeUserSessionInStorage,
+  validateUserSessionInStorage,
+  RegistrationError,
 } from "./store.mjs";
 import { createFixedWindowRateLimiter, normalizeIpAddress } from "./security.mjs";
 import { normalizeRemoteAnalyticsEvent } from "./telemetry.mjs";
@@ -926,7 +928,6 @@ export function createAnalyticsHandler(options = {}) {
   const {
     adminToken = process.env.ANALYTICS_ADMIN_TOKEN,
     createEmailVerificationCodeImpl = createEmailVerificationCodeInStorage,
-    createUserImpl = createUserInStorage,
     isMailerConfigured,
     loadDbImpl = loadDb,
     loginUserImpl = loginUserInStorage,
@@ -937,8 +938,10 @@ export function createAnalyticsHandler(options = {}) {
     adminSessionMaxCount = ADMIN_SESSION_MAX_COUNT,
     createAdminSessionToken,
     recordAnalyticsEventImpl = recordAnalyticsEventInStorage,
+    registerUserImpl = registerUserWithVerificationCodeInStorage,
+    revokeUserSessionImpl = revokeUserSessionInStorage,
     sendVerificationCodeEmail,
-    verifyEmailCodeImpl = verifyEmailCodeInStorage,
+    validateUserSessionImpl = validateUserSessionInStorage,
   } = options;
 
   if (typeof isMailerConfigured !== "function") {
@@ -1062,12 +1065,24 @@ export function createAnalyticsHandler(options = {}) {
         ensureTrustedBrowserOrigin(req);
         enforceRateLimit(rateLimiter, `register:ip:${ip}`, 20, 15 * 60 * 1000);
         const body = await readJsonBody(req);
-        verifyEmailCodeImpl(body.email, body.verificationCode);
-        const { user, authToken } = createUserImpl(body.email, body.password, body.deviceId);
+        // One authoritative primitive performs validation, code verification,
+        // the duplicate check, creation, and code consumption atomically, so a
+        // failed registration never burns the one-time code and account
+        // existence is only surfaced after a valid code proved email control.
+        let registered;
+        try {
+          registered = registerUserImpl(body.email, body.password, body.verificationCode, body.deviceId);
+        } catch (err) {
+          if (err instanceof RegistrationError) {
+            if (err.message === "email already registered") throw new HttpError(409, err.message);
+            throw new HttpError(400, err.message);
+          }
+          throw new HttpError(503, "AUTH_SERVICE_UNAVAILABLE");
+        }
         sendJson(req, res, 200, {
           ok: true,
-          user: { userId: user.userId, email: user.email },
-          authToken,
+          user: { userId: registered.user.userId, email: registered.user.email },
+          authToken: registered.authToken,
         });
         return;
       }
@@ -1076,12 +1091,63 @@ export function createAnalyticsHandler(options = {}) {
         ensureTrustedBrowserOrigin(req);
         enforceRateLimit(rateLimiter, `login:ip:${ip}`, 30, 15 * 60 * 1000);
         const body = await readJsonBody(req);
-        const { user, authToken } = loginUserImpl(body.email, body.password, body.deviceId);
+        // Unknown account and wrong password share one stable response so the
+        // login endpoint never discloses whether an email is registered.
+        let loggedIn;
+        try {
+          loggedIn = loginUserImpl(body.email, body.password, body.deviceId);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (message === "account not found" || message === "invalid password") {
+            throw new HttpError(401, "AUTH_INVALID_CREDENTIALS");
+          }
+          throw new HttpError(503, "AUTH_SERVICE_UNAVAILABLE");
+        }
         sendJson(req, res, 200, {
           ok: true,
-          user: { userId: user.userId, email: user.email },
-          authToken,
+          user: { userId: loggedIn.user.userId, email: loggedIn.user.email },
+          authToken: loggedIn.authToken,
         });
+        return;
+      }
+
+      // Session validation is server-authoritative: userId is only a lookup
+      // hint and every request must prove the bearer token against the stored
+      // hash plus a live expiry. All failures share one stable error code so
+      // callers cannot distinguish missing users from bad or expired tokens.
+      if (req.method === "POST" && url.pathname === "/auth/session") {
+        ensureTrustedBrowserOrigin(req);
+        enforceRateLimit(rateLimiter, `session:ip:${ip}`, 120, 5 * 60 * 1000);
+        const body = await readJsonBody(req);
+        let session;
+        try {
+          session = validateUserSessionImpl(String(body.userId || ""), getBearerToken(req), nowImpl());
+        } catch {
+          throw new HttpError(503, "AUTH_SERVICE_UNAVAILABLE");
+        }
+        if (!session) throw new HttpError(401, "AUTH_SESSION_INVALID");
+        sendJson(req, res, 200, {
+          ok: true,
+          user: { userId: session.user.userId, email: session.user.email },
+          expiresAt: session.expiresAt,
+        });
+        return;
+      }
+
+      // Logout revokes the server-side session only after the bearer token is
+      // proven; a correct userId alone never revokes anything.
+      if (req.method === "POST" && url.pathname === "/auth/logout") {
+        ensureTrustedBrowserOrigin(req);
+        enforceRateLimit(rateLimiter, `logout:ip:${ip}`, 30, 15 * 60 * 1000);
+        const body = await readJsonBody(req);
+        let revoked;
+        try {
+          revoked = revokeUserSessionImpl(String(body.userId || ""), getBearerToken(req), nowImpl());
+        } catch {
+          throw new HttpError(503, "AUTH_SERVICE_UNAVAILABLE");
+        }
+        if (!revoked) throw new HttpError(401, "AUTH_SESSION_INVALID");
+        sendJson(req, res, 200, { ok: true });
         return;
       }
 
