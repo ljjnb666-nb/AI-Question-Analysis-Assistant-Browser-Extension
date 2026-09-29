@@ -30,6 +30,8 @@ set PUBLIC_BASE_URL=https://analytics.082515.online
 - `POST /auth/send-verification-code`: send a real email verification code
 - `POST /auth/register`: email registration for plugin access
 - `POST /auth/login`: email login for plugin access
+- `POST /auth/session`: server-authoritative session validation; requires `Authorization: Bearer <authToken>` and a `{ "userId": "..." }` body. Returns `{ ok: true, user: { userId, email }, expiresAt }` for a live session, or `401 AUTH_SESSION_INVALID` for any invalid, expired, revoked, or mismatched session
+- `POST /auth/logout`: validates the bearer session and revokes the stored token server-side; returns `401 AUTH_SESSION_INVALID` for unknown or already-revoked sessions
 - `POST /analytics/events`: anonymous/authenticated event ingestion
 - `GET /analytics/summary`: daily + rolling metrics summary, requires an admin session cookie or `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
 - `GET /analytics/timeseries?days=14`: recent DAU/install/activation/registration series, requires an admin session cookie or `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
@@ -49,6 +51,9 @@ Security notes:
 
 - Verification codes are stored hashed, not in plaintext.
 - Extension account auth tokens are stored hashed, not in plaintext. Analytics admin session credentials are random and held only in the bounded server-memory registry until expiry or eviction.
+- Account tokens carry a server-side expiry (`AUTH_SESSION_TTL_MS`, 30 days). Every session is validated against the stored hash and expiry; the `chrome.storage.local` copy is only a client cache.
+- Each account has a single active token: registering or logging in again revokes the previous token, and logout revokes the token server-side.
+- Databases created before token expiries existed are migrated in place (`ALTER TABLE users ADD COLUMN authTokenExpiresAt`); legacy tokens without a provable expiry fail session validation until the next login issues a fresh bounded token.
 - The server enforces basic fixed-window rate limits on auth, event ingestion, and metrics reads.
 - JSON request bodies larger than 64 KB are rejected.
 

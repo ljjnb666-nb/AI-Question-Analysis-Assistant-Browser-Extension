@@ -5,7 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { scryptSync } from "node:crypto";
 import {
+  ANALYTICS_EVENT_RETENTION_MS,
+  AUTH_SESSION_TTL_MS,
   createEmailVerificationCode,
   createEmailVerificationCodeInStorage,
   createUser,
@@ -20,11 +23,14 @@ import {
   recordAnalyticsEventInStorage,
   pruneAnalyticsEvents,
   pruneAnalyticsEventsInStorage,
-  ANALYTICS_EVENT_RETENTION_MS,
   CURRENT_ANALYTICS_PRIVACY_EPOCH,
   resetDbConnectionForTests,
+  revokeUserSession,
+  revokeUserSessionInStorage,
   saveDb,
   saveDbToJsonFile,
+  validateUserSession,
+  validateUserSessionInStorage,
   verifyEmailCode,
   verifyEmailCodeInStorage,
 } from "./store.mjs";
@@ -319,3 +325,194 @@ describe("analytics store", () => {
     if (fs.existsSync(dbFile)) fs.unlinkSync(dbFile);
   });
 });
+
+describe("auth core session lifecycle", () => {
+  it("AUTH_CORE_01_TOKEN_HAS_EXPIRY bounds register and login tokens with AUTH_SESSION_TTL_MS", () => {
+    const db = createDb();
+    const registered = createUser(db, "expiry@example.com", "secret-123", "dev-1");
+    const registerNow = Date.now();
+    expect(registered.user.authTokenExpiresAt).toBeGreaterThan(registerNow);
+    expect(registered.user.authTokenExpiresAt).toBeLessThanOrEqual(registerNow + AUTH_SESSION_TTL_MS);
+
+    const loginNow = Date.now();
+    const loggedIn = loginUser(db, "expiry@example.com", "secret-123", "dev-1");
+    expect(loggedIn.user.authTokenExpiresAt).toBeGreaterThan(loginNow);
+    // Password verification runs scrypt before issuance, so the expiry is
+    // bounded by the clock taken AFTER the login call completed.
+    expect(loggedIn.user.authTokenExpiresAt).toBeLessThanOrEqual(Date.now() + AUTH_SESSION_TTL_MS);
+  });
+
+  it("AUTH_CORE_02_LOGIN_ROTATES_TOKEN invalidates the previous token", () => {
+    const db = createDb();
+    const first = createUser(db, "rotate@example.com", "secret-123", "dev-1");
+    const second = loginUser(db, "rotate@example.com", "secret-123", "dev-2");
+
+    expect(second.authToken).not.toBe(first.authToken);
+    expect(validateUserSession(db, first.user.userId, first.authToken, Date.now())).toBeNull();
+    expect(validateUserSession(db, second.user.userId, second.authToken, Date.now())?.user.userId).toBe(first.user.userId);
+  });
+
+  it("AUTH_CORE_03_VALID_SESSION accepts a matching userId and bearer token", () => {
+    const db = createDb();
+    const { user, authToken } = createUser(db, "valid@example.com", "secret-123", "dev-1");
+
+    const session = validateUserSession(db, user.userId, authToken);
+    expect(session?.user).toEqual({ userId: user.userId, email: "valid@example.com" });
+    expect(session?.expiresAt).toBe(user.authTokenExpiresAt);
+  });
+
+  it("AUTH_CORE_04_FORGED_TOKEN rejects a forged token for a real userId", () => {
+    const db = createDb();
+    const { user } = createUser(db, "forged@example.com", "secret-123", "dev-1");
+
+    expect(validateUserSession(db, user.userId, ["tok", "forged"].join("_"))).toBeNull();
+    expect(validateUserSession(db, user.userId, "")).toBeNull();
+  });
+
+  it("AUTH_CORE_05_USER_ID_MISMATCH rejects a real token paired with the wrong userId", () => {
+    const db = createDb();
+    const { authToken } = createUser(db, "mismatch@example.com", "secret-123", "dev-1");
+
+    expect(validateUserSession(db, "usr-somebody-else", authToken)).toBeNull();
+  });
+
+  it("AUTH_CORE_06_EXPIRED_TOKEN rejects tokens past their expiry", () => {
+    const db = createDb();
+    const { user, authToken } = createUser(db, "expired@example.com", "secret-123", "dev-1");
+
+    const afterExpiry = user.authTokenExpiresAt + 1;
+    expect(validateUserSession(db, user.userId, authToken, afterExpiry)).toBeNull();
+    expect(validateUserSession(db, user.userId, authToken, user.authTokenExpiresAt)).toBeNull();
+    expect(validateUserSession(db, user.userId, authToken, user.authTokenExpiresAt - 1)).not.toBeNull();
+  });
+
+  it("AUTH_CORE_07_LOGOUT_REVOKES clears the server-side session for the valid bearer", () => {
+    const db = createDb();
+    const { user, authToken } = createUser(db, "revoke@example.com", "secret-123", "dev-1");
+
+    expect(revokeUserSession(db, user.userId, authToken)).toBe(true);
+    expect(user.authTokenHash).toBeUndefined();
+    expect(user.authTokenSalt).toBeUndefined();
+    expect(user.authTokenExpiresAt).toBeUndefined();
+  });
+
+  it("AUTH_CORE_08_REVOKED_TOKEN fails session validation after logout", () => {
+    const db = createDb();
+    const { user, authToken } = createUser(db, "revoked@example.com", "secret-123", "dev-1");
+
+    expect(revokeUserSession(db, user.userId, authToken)).toBe(true);
+    expect(validateUserSession(db, user.userId, authToken)).toBeNull();
+  });
+
+  it("AUTH_CORE_09_LEGACY_NO_EXPIRY fails closed for legacy tokens without an expiry", () => {
+    const db = createDb();
+    const { user, authToken } = createUser(db, "legacy@example.com", "secret-123", "dev-1");
+    delete user.authTokenExpiresAt;
+
+    expect(validateUserSession(db, user.userId, authToken)).toBeNull();
+  });
+
+  it("AUTH_CORE_10_SERVER_RESTART keeps non-expired tokens valid across a DB reopen", () => {
+    const dbFile = path.join(os.tmpdir(), `quiz-solver-auth-session-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+    try {
+      const created = createUserInStorage("restart@example.com", "secret-123", "dev-restart");
+      const before = validateUserSessionInStorage(created.user.userId, created.authToken);
+      expect(before?.user.email).toBe("restart@example.com");
+
+      resetDbConnectionForTests();
+      const after = validateUserSessionInStorage(created.user.userId, created.authToken);
+      expect(after?.user).toEqual({ userId: created.user.userId, email: "restart@example.com" });
+      expect(after?.expiresAt).toBe(before?.expiresAt);
+    } finally {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    }
+  });
+
+  it("AUTH_CORE_08_REVOKED_TOKEN fails closed in SQLite storage and rejects userId-only revoke attempts", () => {
+    const dbFile = path.join(os.tmpdir(), `quiz-solver-auth-revoke-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+    try {
+      const created = createUserInStorage("revoke-sqlite@example.com", "secret-123", "dev-revoke");
+
+      expect(revokeUserSessionInStorage(created.user.userId, ["tok", "wrong"].join("_"))).toBe(false);
+      expect(validateUserSessionInStorage(created.user.userId, created.authToken)).not.toBeNull();
+
+      expect(revokeUserSessionInStorage(created.user.userId, created.authToken)).toBe(true);
+      expect(validateUserSessionInStorage(created.user.userId, created.authToken)).toBeNull();
+      expect(revokeUserSessionInStorage(created.user.userId, created.authToken)).toBe(false);
+    } finally {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    }
+  });
+
+  it("migrates pre-existing SQLite databases by adding the expiry column and failing legacy sessions closed", () => {
+    const dbFile = path.join(os.tmpdir(), `quiz-solver-auth-legacy-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    try {
+      // Simulate a database written before authTokenExpiresAt existed.
+      const legacyDatabase = new DatabaseSync(dbFile);
+      try {
+        legacyDatabase.exec(`
+          CREATE TABLE users (
+            userId TEXT PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            passwordHash TEXT NOT NULL,
+            passwordSalt TEXT NOT NULL,
+            authTokenHash TEXT,
+            authTokenSalt TEXT,
+            authToken TEXT,
+            createdAt INTEGER NOT NULL,
+            deviceIdsJson TEXT NOT NULL DEFAULT '[]'
+          );
+        `);
+        const legacyDigest = scryptSync("secret-123", "legacy-salt", 64).toString("hex");
+        legacyDatabase
+          .prepare(
+            "INSERT INTO users (userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, createdAt, deviceIdsJson) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, '[]')",
+          )
+          .run("usr-legacy", "legacy-migration@example.com", legacyDigest, "legacy-salt", "legacy-hash", "legacy-salt", 0);
+      } finally {
+        legacyDatabase.close();
+      }
+
+      process.env.ANALYTICS_DB_FILE = dbFile;
+      // Opening the store must add the missing column without touching data.
+      expect(loadDb().users.map((user) => user.email)).toEqual(["legacy-migration@example.com"]);
+
+      const legacyToken = ["tok", "legacy"].join("_");
+      expect(validateUserSessionInStorage("usr-legacy", legacyToken)).toBeNull();
+      expect(loadDb().users.map((user) => user.userId)).toEqual(["usr-legacy"]);
+
+      // A fresh login re-issues a bounded token through the migrated schema.
+      const loggedIn = loginUserInStorage("legacy-migration@example.com", "secret-123", "dev-legacy");
+      expect(validateUserSessionInStorage(loggedIn.user.userId, loggedIn.authToken)).not.toBeNull();
+    } finally {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    }
+  });
+});
+

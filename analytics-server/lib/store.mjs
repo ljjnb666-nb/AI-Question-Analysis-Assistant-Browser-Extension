@@ -18,6 +18,7 @@ const LEGACY_JSON_FILE = join(DATA_DIR, "analytics-db.json");
 const SQLITE_SUPPORTED = typeof DatabaseSync === "function";
 export const ANALYTICS_EVENT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 export const CURRENT_ANALYTICS_PRIVACY_EPOCH = 1;
+export const AUTH_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 let dbInstance = null;
 
@@ -51,6 +52,7 @@ function normalizeUserRecord(user) {
     authToken: user?.authToken ? String(user.authToken) : undefined,
     authTokenHash: user?.authTokenHash ? String(user.authTokenHash) : undefined,
     authTokenSalt: user?.authTokenSalt ? String(user.authTokenSalt) : undefined,
+    authTokenExpiresAt: user?.authTokenExpiresAt == null ? undefined : Number(user.authTokenExpiresAt) || undefined,
     deviceIds: Array.isArray(user?.deviceIds) ? user.deviceIds.filter(Boolean) : [],
   };
 }
@@ -89,6 +91,7 @@ function getDatabase() {
       authTokenHash TEXT,
       authTokenSalt TEXT,
       authToken TEXT,
+      authTokenExpiresAt INTEGER,
       createdAt INTEGER NOT NULL,
       deviceIdsJson TEXT NOT NULL DEFAULT '[]'
     );
@@ -122,9 +125,21 @@ function getDatabase() {
   `);
 
   maybeMigrateLegacyJson(dbInstance);
+  ensureAuthTokenExpiresAtColumn(dbInstance);
   migrateAnalyticsPrivacyEpochSqlite(dbInstance);
   pruneSqliteAnalyticsEvents(dbInstance, Date.now());
   return dbInstance;
+}
+
+// CREATE TABLE IF NOT EXISTS does not add columns to pre-existing databases,
+// so the token expiry column has to be added idempotently for older files.
+// Existing rows keep NULL: legacy tokens without a provable expiry fail
+// closed during session validation until the next login re-issues one.
+function ensureAuthTokenExpiresAtColumn(database) {
+  const columns = database.prepare("PRAGMA table_info(users)").all();
+  if (columns.some((column) => column.name === "authTokenExpiresAt")) return false;
+  database.exec("ALTER TABLE users ADD COLUMN authTokenExpiresAt INTEGER");
+  return true;
 }
 
 export function pruneAnalyticsEvents(db, now = Date.now()) {
@@ -271,7 +286,7 @@ export function loadDb() {
   const devices = database.prepare("SELECT deviceId, userId, installedAt, createdAt, lastSeenAt FROM devices").all();
   const users = database
     .prepare(
-      "SELECT userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, createdAt, deviceIdsJson FROM users",
+      "SELECT userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, authTokenExpiresAt, createdAt, deviceIdsJson FROM users",
     )
     .all()
     .map((row) =>
@@ -340,7 +355,7 @@ export function saveDb(db) {
     }
 
     const insertUser = database.prepare(
-      "INSERT INTO users (userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, createdAt, deviceIdsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO users (userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, authTokenExpiresAt, createdAt, deviceIdsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const user of db.users) {
       insertUser.run(
@@ -351,6 +366,7 @@ export function saveDb(db) {
         user.authTokenHash ?? null,
         user.authTokenSalt ?? null,
         user.authToken ?? null,
+        user.authTokenExpiresAt ?? null,
         user.createdAt,
         JSON.stringify(Array.isArray(user.deviceIds) ? user.deviceIds : []),
       );
@@ -416,11 +432,12 @@ export function issueAuthToken() {
   return issueOpaqueToken("tok");
 }
 
-function issueStoredAuthToken(user) {
+function issueStoredAuthToken(user, now = Date.now()) {
   const authToken = issueAuthToken();
   const digest = hashSecret(authToken);
   user.authTokenHash = digest.hash;
   user.authTokenSalt = digest.salt;
+  user.authTokenExpiresAt = now + AUTH_SESSION_TTL_MS;
   delete user.authToken;
   return authToken;
 }
@@ -577,7 +594,7 @@ export function createUserInStorage(email, password, deviceId) {
 
     database
       .prepare(
-        "INSERT INTO users (userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, createdAt, deviceIdsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO users (userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, authTokenExpiresAt, createdAt, deviceIdsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         user.userId,
@@ -587,6 +604,7 @@ export function createUserInStorage(email, password, deviceId) {
         user.authTokenHash ?? null,
         user.authTokenSalt ?? null,
         null,
+        user.authTokenExpiresAt ?? null,
         user.createdAt,
         JSON.stringify(user.deviceIds),
       );
@@ -620,10 +638,11 @@ export function loginUserInStorage(email, password, deviceId) {
     const authToken = issueStoredAuthToken(user);
 
     database
-      .prepare("UPDATE users SET authTokenHash = ?, authTokenSalt = ?, authToken = NULL, deviceIdsJson = ? WHERE userId = ?")
+      .prepare("UPDATE users SET authTokenHash = ?, authTokenSalt = ?, authToken = NULL, authTokenExpiresAt = ?, deviceIdsJson = ? WHERE userId = ?")
       .run(
         user.authTokenHash ?? null,
         user.authTokenSalt ?? null,
+        user.authTokenExpiresAt ?? null,
         JSON.stringify(nextDeviceIds),
         user.userId,
       );
@@ -636,8 +655,76 @@ export function loginUserInStorage(email, password, deviceId) {
   });
 }
 
-export function pruneAnalyticsEventsInStorage(now = Date.now()) {
+// A session is valid only when the stored token hash matches AND the token
+// carries a provable, unexpired expiry. Records without an expiry (pre-TTL
+// legacy tokens) fail closed and require a fresh login.
+function validateSessionRecord(record, authToken, now) {
+  if (!record) return null;
+  if (!record.authTokenHash || !record.authTokenSalt) return null;
+  const expiresAt = Number(record.authTokenExpiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) return null;
+  if (!verifySecret(String(authToken || ""), record.authTokenSalt, record.authTokenHash)) return null;
+  return { user: { userId: record.userId, email: record.email }, expiresAt };
+}
+
+export function validateUserSession(db, userId, authToken, now = Date.now()) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId || !String(authToken || "")) return null;
+  const user = db.users.find((entry) => entry.userId === normalizedUserId);
+  return validateSessionRecord(user, authToken, now);
+}
+
+export function validateUserSessionInStorage(userId, authToken, now = Date.now()) {
   if (!SQLITE_SUPPORTED) {
+    return validateUserSession(loadDbFromJsonFile(), userId, authToken, now);
+  }
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId || !String(authToken || "")) return null;
+  const row = getDatabase()
+    .prepare(
+      "SELECT userId, email, authTokenHash, authTokenSalt, authToken, authTokenExpiresAt, deviceIdsJson FROM users WHERE userId = ?",
+    )
+    .get(normalizedUserId);
+  return validateSessionRecord(hydrateUserRow(row), authToken, now);
+}
+
+export function revokeUserSession(db, userId, authToken, now = Date.now()) {
+  const session = validateUserSession(db, userId, authToken, now);
+  if (!session) return false;
+  const user = db.users.find((entry) => entry.userId === session.user.userId);
+  if (user) {
+    user.authTokenHash = undefined;
+    user.authTokenSalt = undefined;
+    user.authTokenExpiresAt = undefined;
+    delete user.authToken;
+  }
+  return true;
+}
+
+export function revokeUserSessionInStorage(userId, authToken, now = Date.now()) {
+  if (!SQLITE_SUPPORTED) {
+    const db = loadDbFromJsonFile();
+    const result = revokeUserSession(db, userId, authToken, now);
+    if (result) saveDbToJsonFile(db);
+    return result;
+  }
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) return false;
+  return runInTransaction((database) => {
+    const row = database
+      .prepare(
+        "SELECT userId, email, authTokenHash, authTokenSalt, authToken, authTokenExpiresAt, deviceIdsJson FROM users WHERE userId = ?",
+      )
+      .get(normalizedUserId);
+    if (!validateSessionRecord(hydrateUserRow(row), authToken, now)) return false;
+    database
+      .prepare("UPDATE users SET authTokenHash = NULL, authTokenSalt = NULL, authToken = NULL, authTokenExpiresAt = NULL WHERE userId = ?")
+      .run(normalizedUserId);
+    return true;
+  });
+}
+
+export function pruneAnalyticsEventsInStorage(now = Date.now()) {  if (!SQLITE_SUPPORTED) {
     const db = loadDbFromJsonFile();
     const removed = pruneAnalyticsEvents(db, now);
     if (removed) saveDbToJsonFile(db);

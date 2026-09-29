@@ -140,6 +140,13 @@ export async function loadFloatingState(): Promise<Partial<FloatingWindowState>>
   return (result[KEYS.floatingState] as Partial<FloatingWindowState>) ?? {};
 }
 
+function hasOwnSetting<K extends keyof AppSettings>(
+  settings: Partial<AppSettings>,
+  key: K,
+): settings is Partial<AppSettings> & Record<K, AppSettings[K]> {
+  return Object.prototype.hasOwnProperty.call(settings, key);
+}
+
 export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
   ensureSettingsCacheListener();
   const existing = await loadSettings();
@@ -160,10 +167,14 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<void
   }
 
   await chrome.storage.local.set({ [KEYS.settings]: merged });
+  // The in-memory cache must distinguish "property absent" (keep the previous
+  // credential) from "property present with undefined" (explicit clear).
+  // Falling back with ?? would resurrect a stale token after a logout that
+  // only mutated chrome.storage.
   setCachedSettings({
     ...merged,
-    apiKey: settings.apiKey ?? existing.apiKey,
-    authToken: settings.authToken ?? existing.authToken,
+    apiKey: hasOwnSetting(settings, "apiKey") ? settings.apiKey : existing.apiKey,
+    authToken: hasOwnSetting(settings, "authToken") ? settings.authToken : existing.authToken,
   });
   if (existing.enableAnalytics && !merged.enableAnalytics) {
     invalidateAnalyticsConsent();

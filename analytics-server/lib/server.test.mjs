@@ -450,3 +450,153 @@ describe("analytics handler", () => {
     expect(sessions.has(third)).toBe(true);
   });
 });
+
+describe("auth core endpoints", () => {
+  const SESSION_USER = { userId: "usr-session-1", email: "session@example.com" };
+  const SESSION_TOKEN = ["tok", "session"].join("_");
+
+  it("AUTH_CORE_03_VALID_SESSION validates a matching bearer and userId", async () => {
+    const validateUserSessionImpl = vi.fn(() => ({ user: SESSION_USER, expiresAt: 4102444800000 }));
+    const handler = createHandler({ validateUserSessionImpl });
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(parsePayload(res)).toEqual({
+      ok: true,
+      user: SESSION_USER,
+      expiresAt: 4102444800000,
+    });
+    expect(validateUserSessionImpl).toHaveBeenCalledWith(SESSION_USER.userId, SESSION_TOKEN, expect.any(Number));
+  });
+
+  it("AUTH_CORE_04_FORGED_TOKEN and AUTH_CORE_05_USER_ID_MISMATCH share one stable 401 code", async () => {
+    const validateUserSessionImpl = vi.fn(() => null);
+    const handler = createHandler({ validateUserSessionImpl });
+
+    const forged = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+    const mismatched = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: "usr-somebody-else" }),
+    });
+    const missingAuth = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+
+    for (const { res } of [forged, mismatched, missingAuth]) {
+      expect(res.statusCode).toBe(401);
+      expect(parsePayload(res)).toEqual({ ok: false, error: "AUTH_SESSION_INVALID" });
+    }
+    expect(validateUserSessionImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it("AUTH_CORE_07_LOGOUT_REVOKES revokes the proven session and rejects userId-only revokes", async () => {
+    const revokeUserSessionImpl = vi.fn(() => true);
+    const handler = createHandler({ revokeUserSessionImpl });
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/auth/logout",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(parsePayload(res)).toEqual({ ok: true });
+    expect(revokeUserSessionImpl).toHaveBeenCalledWith(SESSION_USER.userId, SESSION_TOKEN, expect.any(Number));
+
+    const rejecting = createHandler({ revokeUserSessionImpl: vi.fn(() => false) });
+    const rejected = await invoke(rejecting, {
+      method: "POST",
+      url: "/auth/logout",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+    expect(rejected.res.statusCode).toBe(401);
+    expect(parsePayload(rejected.res)).toEqual({ ok: false, error: "AUTH_SESSION_INVALID" });
+  });
+
+  it("AUTH_CORE_08_REVOKED_TOKEN fails session validation after a successful logout", async () => {
+    const handler = createHandler({ revokeUserSessionImpl: vi.fn(() => true), validateUserSessionImpl: vi.fn(() => null) });
+    const logout = await invoke(handler, {
+      method: "POST",
+      url: "/auth/logout",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+    expect(logout.res.statusCode).toBe(200);
+
+    const session = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+    expect(session.res.statusCode).toBe(401);
+    expect(parsePayload(session.res)).toEqual({ ok: false, error: "AUTH_SESSION_INVALID" });
+  });
+
+  it("AUTH_CORE_20_SECRET_RESPONSE never echoes internal failure material", async () => {
+    const leakyMessage = ["sqlite", "SMTP_PASS=hunter2", SESSION_TOKEN, "password-hash-deadbeef"].join(" ");
+    const handler = createHandler({
+      validateUserSessionImpl: vi.fn(() => {
+        throw new Error(leakyMessage);
+      }),
+    });
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+
+    expect(res.statusCode).toBe(503);
+    expect(parsePayload(res)).toEqual({ ok: false, error: "AUTH_SERVICE_UNAVAILABLE" });
+    expect(res.payload).not.toContain("hunter2");
+    expect(res.payload).not.toContain(SESSION_TOKEN);
+    expect(res.payload).not.toContain("sqlite");
+
+    const revokeHandler = createHandler({
+      revokeUserSessionImpl: vi.fn(() => {
+        throw new Error(leakyMessage);
+      }),
+    });
+    const revoke = await invoke(revokeHandler, {
+      method: "POST",
+      url: "/auth/logout",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+    });
+    expect(revoke.res.statusCode).toBe(503);
+    expect(parsePayload(revoke.res)).toEqual({ ok: false, error: "AUTH_SERVICE_UNAVAILABLE" });
+    expect(revoke.res.payload).not.toContain(SESSION_TOKEN);
+  });
+
+  it("rate limits session validation per client ip", async () => {
+    const validateUserSessionImpl = vi.fn(() => ({ user: SESSION_USER, expiresAt: 4102444800000 }));
+    const handler = createHandler({ validateUserSessionImpl });
+    let last;
+    for (let attempt = 0; attempt < 121; attempt += 1) {
+      last = await invoke(handler, {
+        method: "POST",
+        url: "/auth/session",
+        headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+        body: JSON.stringify({ userId: SESSION_USER.userId }),
+      });
+    }
+    expect(last.res.statusCode).toBe(429);
+    expect(validateUserSessionImpl).toHaveBeenCalledTimes(120);
+  });
+});

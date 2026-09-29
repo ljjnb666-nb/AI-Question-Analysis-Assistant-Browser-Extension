@@ -8,6 +8,8 @@ import {
   loadDb,
   loginUserInStorage,
   recordAnalyticsEventInStorage,
+  revokeUserSessionInStorage,
+  validateUserSessionInStorage,
   verifyEmailCodeInStorage,
 } from "./store.mjs";
 import { createFixedWindowRateLimiter, normalizeIpAddress } from "./security.mjs";
@@ -937,7 +939,9 @@ export function createAnalyticsHandler(options = {}) {
     adminSessionMaxCount = ADMIN_SESSION_MAX_COUNT,
     createAdminSessionToken,
     recordAnalyticsEventImpl = recordAnalyticsEventInStorage,
+    revokeUserSessionImpl = revokeUserSessionInStorage,
     sendVerificationCodeEmail,
+    validateUserSessionImpl = validateUserSessionInStorage,
     verifyEmailCodeImpl = verifyEmailCodeInStorage,
   } = options;
 
@@ -1082,6 +1086,46 @@ export function createAnalyticsHandler(options = {}) {
           user: { userId: user.userId, email: user.email },
           authToken,
         });
+        return;
+      }
+
+      // Session validation is server-authoritative: userId is only a lookup
+      // hint and every request must prove the bearer token against the stored
+      // hash plus a live expiry. All failures share one stable error code so
+      // callers cannot distinguish missing users from bad or expired tokens.
+      if (req.method === "POST" && url.pathname === "/auth/session") {
+        ensureTrustedBrowserOrigin(req);
+        enforceRateLimit(rateLimiter, `session:ip:${ip}`, 120, 5 * 60 * 1000);
+        const body = await readJsonBody(req);
+        let session;
+        try {
+          session = validateUserSessionImpl(String(body.userId || ""), getBearerToken(req), nowImpl());
+        } catch {
+          throw new HttpError(503, "AUTH_SERVICE_UNAVAILABLE");
+        }
+        if (!session) throw new HttpError(401, "AUTH_SESSION_INVALID");
+        sendJson(req, res, 200, {
+          ok: true,
+          user: { userId: session.user.userId, email: session.user.email },
+          expiresAt: session.expiresAt,
+        });
+        return;
+      }
+
+      // Logout revokes the server-side session only after the bearer token is
+      // proven; a correct userId alone never revokes anything.
+      if (req.method === "POST" && url.pathname === "/auth/logout") {
+        ensureTrustedBrowserOrigin(req);
+        enforceRateLimit(rateLimiter, `logout:ip:${ip}`, 30, 15 * 60 * 1000);
+        const body = await readJsonBody(req);
+        let revoked;
+        try {
+          revoked = revokeUserSessionImpl(String(body.userId || ""), getBearerToken(req), nowImpl());
+        } catch {
+          throw new HttpError(503, "AUTH_SERVICE_UNAVAILABLE");
+        }
+        if (!revoked) throw new HttpError(401, "AUTH_SESSION_INVALID");
+        sendJson(req, res, 200, { ok: true });
         return;
       }
 
