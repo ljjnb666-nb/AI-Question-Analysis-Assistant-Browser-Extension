@@ -3,10 +3,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext, resolveExtensionId } from "./helpers/extensionHarness";
+import { startTestAnalyticsBackend, type TestAnalyticsBackend } from "./helpers/authUiHarness";
 
 // Mock values are assembled at runtime so security scanners do not mistake
 // synthetic test fixtures for committed credentials.
-const PHASE8A_E2E_TOKEN = ["phase8a", "e2e", "token"].join("-");
 const PHASE8A_E2E_KEY = ["phase8a", "e2e", "key"].join("-");
 
 type SpaPageWindow = Window & typeof globalThis & {
@@ -240,16 +240,21 @@ async function getPageTabId(driver: Page, origin: string, title: string): Promis
   return tabId;
 }
 
-async function seedAuthenticatedSidePanel(driver: Page, analyticsBaseUrl: string) {
-  // The evaluate callback runs in the page context, so the assembled fixture
-  // values are passed as arguments instead of being closed over.
-  await driver.evaluate(async ({ analyticsBaseUrl, token, key }) => chrome.storage.local.set({
+async function seedAuthenticatedSidePanel(driver: Page, backend: TestAnalyticsBackend, account: {
+  userId: string;
+  email: string;
+  authToken: string;
+}) {
+  // Server-authoritative UI sessions require REAL credentials: the sidepanel
+  // validates the seeded session against the real analytics backend before
+  // unlocking the workspace, so a synthetic token can never unlock it.
+  await driver.evaluate(async ({ analyticsBaseUrl, userId, userEmail, authToken, key }) => chrome.storage.local.set({
     parseHistory: [],
     analyticsLog: [],
     appSettings: {
-      userId: "phase8a-e2e-user",
-      userEmail: "phase8a@example.test",
-      authToken: token,
+      userId,
+      userEmail,
+      authToken,
       providerId: "deepseek",
       apiKey: key,
       apiModel: "deepseek-v4-flash",
@@ -259,7 +264,7 @@ async function seedAuthenticatedSidePanel(driver: Page, analyticsBaseUrl: string
       analyticsConsentVersion: 1,
       analyticsBaseUrl,
     },
-  }), { analyticsBaseUrl, token: PHASE8A_E2E_TOKEN, key: PHASE8A_E2E_KEY });
+  }), { analyticsBaseUrl: backend.baseUrl, userId: account.userId, userEmail: account.email, authToken: account.authToken, key: PHASE8A_E2E_KEY });
 }
 
 async function sendDetectToTab(driver: Page, tabId: number) {
@@ -336,6 +341,8 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
     test.setTimeout(60_000);
     const server = await startSpaServer();
     const context = await launchExtensionContext();
+    const authBackend = await startTestAnalyticsBackend();
+    const phase8aAccount = await authBackend.registerAccount("phase8a");
     try {
       const extensionId = await resolveExtensionId(context);
       const originPage = await context.newPage();
@@ -347,7 +354,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
 
       const driver = await context.newPage();
       await driver.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-      await seedAuthenticatedSidePanel(driver, server.origin);
+      await seedAuthenticatedSidePanel(driver, authBackend, phase8aAccount);
       const originTabId = await getPageTabId(driver, server.origin, "Phase 8A Origin");
       const otherTabId = await getPageTabId(driver, server.origin, "Phase 8A Other");
 
@@ -384,6 +391,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
     } finally {
       await closeExtensionContext(context);
       await server.close();
+      await authBackend.close();
     }
   });
 
@@ -391,6 +399,8 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
     test.setTimeout(60_000);
     const server = await startSpaServer();
     const context = await launchExtensionContext();
+    const authBackend = await startTestAnalyticsBackend();
+    const phase8aAccount = await authBackend.registerAccount("phase8a-stale");
     try {
       const extensionId = await resolveExtensionId(context);
       const originPage = await context.newPage();
@@ -402,7 +412,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
 
       const driver = await context.newPage();
       await driver.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-      await seedAuthenticatedSidePanel(driver, server.origin);
+      await seedAuthenticatedSidePanel(driver, authBackend, phase8aAccount);
       const originTabId = await getPageTabId(driver, server.origin, "Phase 8A Stale Origin");
       const otherTabId = await getPageTabId(driver, server.origin, "Phase 8A Stale Other");
       const sidePanel = await context.newPage();
@@ -446,6 +456,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
     } finally {
       await closeExtensionContext(context);
       await server.close();
+      await authBackend.close();
     }
   });
 

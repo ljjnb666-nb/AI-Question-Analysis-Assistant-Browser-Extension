@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useReducer, useRef } from "reac
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { loadSettings } from "@/shared/utils/storage";
+import { useAuthSession } from "@/shared/auth/useAuthSession";
 import type { UILang } from "./displayUtils";
 import { isRiskyCandidate } from "./batchParseHeuristics";
 import { HistoryTab } from "./HistoryTab";
@@ -34,6 +35,15 @@ export const SidePanelApp: React.FC = () => {
   );
   const setUserEmail = useCallback(
     (updater: React.SetStateAction<string>) => dispatch({ type: "userEmail", updater }),
+    [],
+  );
+  const setAuthStatus = useCallback(
+    (updater: React.SetStateAction<SidePanelAppState["authStatus"]>) =>
+      dispatch({ type: "authStatus", updater }),
+    [],
+  );
+  const setSessionRejected = useCallback(
+    (updater: React.SetStateAction<boolean>) => dispatch({ type: "sessionRejected", updater }),
     [],
   );
   const setTab = useCallback((updater: React.SetStateAction<SidePanelAppState["tab"]>) => dispatch({ type: "tab", updater }), []);
@@ -86,12 +96,37 @@ export const SidePanelApp: React.FC = () => {
     [],
   );
 
+  // Server-authoritative session lifecycle for this surface. The coordinator
+  // validates the locally cached candidate against /auth/session at startup
+  // and re-reconciles on auth-related storage changes; storage values alone
+  // never unlock the workspace.
+  const session = useAuthSession();
+
+  useEffect(() => {
+    let disposed = false;
+    const applySessionState = () => {
+      if (disposed) return;
+      const snapshot = session.getState();
+      setAuthStatus(snapshot.status);
+      setUserEmail(snapshot.userEmail);
+      setSessionRejected(snapshot.sessionRejected);
+      setIsAuthenticated(snapshot.status === "authenticated");
+      if (snapshot.status === "unauthenticated") {
+        setTab("settings");
+      }
+    };
+    applySessionState();
+    const unsubscribe = session.subscribe(applySessionState);
+    session.start();
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [session, setAuthStatus, setIsAuthenticated, setSessionRejected, setTab, setUserEmail]);
+
   useEffect(() => {
     loadSettings().then((settings) => {
       setUiLang((settings.language ?? "zh") as UILang);
-      setIsAuthenticated(!!(settings.userId && settings.authToken));
-      setUserEmail(settings.userEmail ?? "");
-      if (!(settings.userId && settings.authToken)) setTab("settings");
     });
 
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
@@ -99,20 +134,13 @@ export const SidePanelApp: React.FC = () => {
 
       const nextSettings = changes.appSettings.newValue as {
         language?: UILang;
-        userId?: string;
-        userEmail?: string;
-        authToken?: string;
       };
 
       if (nextSettings.language === "zh" || nextSettings.language === "en") {
         setUiLang(nextSettings.language);
       }
-
-      const nextAuthenticated = !!(nextSettings.userId && nextSettings.authToken);
-      setIsAuthenticated(nextAuthenticated);
-      setUserEmail(nextSettings.userEmail ?? "");
-
-      if (!nextAuthenticated) setTab("settings");
+      // Auth-related storage changes are intentionally NOT converted into an
+      // authenticated state here: the session coordinator owns that authority.
     };
 
     chrome.storage.onChanged.addListener(handleStorageChange);
@@ -139,14 +167,11 @@ export const SidePanelApp: React.FC = () => {
     setCandidates,
     setExpandedIds,
     setFillFeedback,
-    setIsAuthenticated,
     setIsAutoSolving,
     setIsDetecting,
     setIsFullPageScan,
     setScanProgress,
-    setTab,
     setUiLang,
-    setUserEmail,
   ]);
 
   const {
@@ -224,6 +249,7 @@ export const SidePanelApp: React.FC = () => {
   return (
     <div ref={scopeRef} style={APP_SHELL_STYLE}>
       <SidePanelHeader
+        authStatus={state.authStatus}
         isAuthenticated={state.isAuthenticated}
         lang={state.uiLang}
         onTabChange={setTab}
@@ -233,7 +259,11 @@ export const SidePanelApp: React.FC = () => {
 
       <div style={PANEL_BODY_STYLE}>
         {!state.isAuthenticated && state.tab !== "settings" ? (
-          <SidePanelLockedState lang={state.uiLang} onOpenSettings={() => setTab("settings")} />
+          <SidePanelLockedState
+            authStatus={state.authStatus}
+            lang={state.uiLang}
+            onOpenSettings={() => setTab("settings")}
+          />
         ) : state.tab === "candidates" ? (
           <CandidatesTab
             autoSolveProgress={state.autoSolveProgress}
@@ -276,7 +306,12 @@ export const SidePanelApp: React.FC = () => {
 
         {state.tab === "history" ? <HistoryTab lang={state.uiLang} /> : null}
         {state.tab === "settings" ? (
-          <SettingsTab lang={state.uiLang} onLanguageChange={setUiLang} authOnly={!state.isAuthenticated} />
+          <SettingsTab
+            lang={state.uiLang}
+            onLanguageChange={setUiLang}
+            authOnly={!state.isAuthenticated}
+            sessionRejectedHint={state.sessionRejected}
+          />
         ) : null}
       </div>
     </div>

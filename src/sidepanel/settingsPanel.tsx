@@ -18,7 +18,11 @@ export const SettingsTab: React.FC<{
   lang: UILang;
   onLanguageChange: (lang: UILang) => void;
   authOnly?: boolean;
-}> = ({ lang: initialLang, onLanguageChange, authOnly = false }) => {
+  /** A sibling coordinator already got this session rejected (401); the auth
+   * form must surface the generic sign-in-again hint even though the local
+   * credentials were cleared before this tab's own validation ran. */
+  sessionRejectedHint?: boolean;
+}> = ({ lang: initialLang, onLanguageChange, authOnly = false, sessionRejectedHint = false }) => {
   const scopeRef = useRef<HTMLDivElement | null>(null);
   const [providerId, setProviderId] = useState<ProviderId>("anthropic");
   const [apiKey, setApiKey] = useState("");
@@ -63,10 +67,8 @@ export const SettingsTab: React.FC<{
       setCustomProtocol(settings.customProviderProtocol ?? "openai");
       setLang(settings.language ?? "zh");
       setDeviceId(settings.deviceId ?? "");
-      authRef.current.setIdentity({
-        userId: settings.userId ?? "",
-        userEmail: settings.userEmail ?? "",
-      });
+      // Auth identity is owned by the shared session coordinator inside
+      // useAuthController; storage values never establish "signed in" here.
     });
     return () => {
       disposed = true;
@@ -213,7 +215,7 @@ export const SettingsTab: React.FC<{
   if (authOnly) {
     return (
       <div ref={scopeRef} style={{ padding: "14px 10px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
-        <SettingsAccountSection auth={auth} authText={authText} isEn={isEn} />
+        <SettingsAccountSection auth={auth} authText={authText} isEn={isEn} rejectedSessionHint={sessionRejectedHint} />
       </div>
     );
   }
@@ -244,7 +246,7 @@ export const SettingsTab: React.FC<{
         setRoute={setRoute}
       />
 
-      <SettingsAccountSection auth={auth} authText={authText} isEn={isEn} />
+      <SettingsAccountSection auth={auth} authText={authText} isEn={isEn} rejectedSessionHint={sessionRejectedHint} />
 
       <SettingsActionsSection
         isEn={isEn}

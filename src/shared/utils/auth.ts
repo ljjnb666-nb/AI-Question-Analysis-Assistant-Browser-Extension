@@ -1,6 +1,7 @@
 import { logEvent } from "./analytics";
 import { DEFAULT_ANALYTICS_BASE_URL } from "../constants/analytics";
 import { loadSettings, saveSettings, getOrCreateDeviceId } from "./storage";
+import { fetchJsonWithTimeout, readAuthErrorMessage } from "./authFetch";
 
 type AuthSuccessResponse = {
   ok: true;
@@ -9,11 +10,6 @@ type AuthSuccessResponse = {
     email: string;
   };
   authToken: string;
-};
-
-type AuthFailureResponse = {
-  ok: false;
-  error?: string;
 };
 
 type SendCodeSuccessResponse = {
@@ -51,6 +47,18 @@ function resolveBaseUrl(value: string | undefined): string {
   return String(value || DEFAULT_ANALYTICS_BASE_URL).trim().replace(/\/+$/, "");
 }
 
+function isWellFormedAuthSuccess(payload: unknown): payload is AuthSuccessResponse {
+  const candidate = payload as AuthSuccessResponse | null;
+  return (
+    !!candidate &&
+    candidate.ok === true &&
+    typeof candidate.authToken === "string" &&
+    candidate.authToken.length > 0 &&
+    typeof candidate.user?.userId === "string" &&
+    candidate.user.userId.length > 0
+  );
+}
+
 async function submitAuth(
   path: "/auth/register" | "/auth/login",
   email: string,
@@ -60,7 +68,7 @@ async function submitAuth(
   const deviceId = settings.deviceId || await getOrCreateDeviceId();
   const baseUrl = resolveBaseUrl(settings.analyticsBaseUrl);
 
-  const response = await fetch(`${baseUrl}${path}`, {
+  const { ok, payload } = await fetchJsonWithTimeout(`${baseUrl}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -72,24 +80,29 @@ async function submitAuth(
     }),
   });
 
-  const payload = await response.json() as AuthSuccessResponse | AuthFailureResponse;
-  if (!response.ok || !payload.ok) {
-    throw new Error((payload as AuthFailureResponse).error || "Authentication failed");
+  if (!ok) {
+    throw new Error(readAuthErrorMessage(payload) || "Authentication failed");
+  }
+  // A success response that is missing its credential fields must fail
+  // closed: nothing is persisted and the UI never enters authenticated state.
+  if (!isWellFormedAuthSuccess(payload)) {
+    throw new Error("AUTH_MALFORMED_RESPONSE");
   }
 
+  const success = payload;
   await saveSettings({
     deviceId,
     analyticsBaseUrl: baseUrl,
-    userId: payload.user.userId,
-    userEmail: payload.user.email,
-    authToken: payload.authToken,
+    userId: success.user.userId,
+    userEmail: success.user.email,
+    authToken: success.authToken,
   });
 
   logEvent(path === "/auth/register" ? "auth_registered" : "auth_logged_in", {
-    userId: payload.user.userId,
+    userId: success.user.userId,
   });
 
-  return payload;
+  return success;
 }
 
 export async function loginWithEmail(email: string, password: string): Promise<AuthSuccessResponse> {
@@ -99,18 +112,30 @@ export async function loginWithEmail(email: string, password: string): Promise<A
 export async function sendEmailVerificationCode(email: string): Promise<SendCodeSuccessResponse> {
   const settings = await loadSettings();
   const baseUrl = resolveBaseUrl(settings.analyticsBaseUrl);
-  const response = await fetch(`${baseUrl}/auth/send-verification-code`, {
+  const { ok, status, payload } = await fetchJsonWithTimeout(`${baseUrl}/auth/send-verification-code`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ email: email.trim() }),
   });
-  const payload = await response.json() as SendCodeSuccessResponse | AuthFailureResponse;
-  if (!response.ok || !payload.ok) {
-    throw new Error((payload as AuthFailureResponse).error || "Failed to send verification code");
+
+  if (ok) {
+    const success = payload as SendCodeSuccessResponse | null;
+    if (success?.ok && Number.isFinite(success.expiresAt)) return success;
+    throw new Error("AUTH_SEND_CODE_FAILED");
   }
-  return payload as SendCodeSuccessResponse;
+
+  // The client only surfaces stable, sanitized outcomes: rate limiting, the
+  // server's email-service contract code, or a generic failure. Raw server
+  // messages (which may mention internal configuration) never propagate.
+  if (status === 429) {
+    throw new Error("AUTH_RATE_LIMITED");
+  }
+  if (readAuthErrorMessage(payload) === "EMAIL_SERVICE_UNAVAILABLE") {
+    throw new Error("EMAIL_SERVICE_UNAVAILABLE");
+  }
+  throw new Error("AUTH_SEND_CODE_FAILED");
 }
 
 export async function registerWithEmailCode(email: string, password: string, verificationCode: string): Promise<AuthSuccessResponse> {
@@ -118,7 +143,7 @@ export async function registerWithEmailCode(email: string, password: string, ver
   const deviceId = settings.deviceId || await getOrCreateDeviceId();
   const baseUrl = resolveBaseUrl(settings.analyticsBaseUrl);
 
-  const response = await fetch(`${baseUrl}/auth/register`, {
+  const { ok, payload } = await fetchJsonWithTimeout(`${baseUrl}/auth/register`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -131,9 +156,11 @@ export async function registerWithEmailCode(email: string, password: string, ver
     }),
   });
 
-  const payload = await response.json() as AuthSuccessResponse | AuthFailureResponse;
-  if (!response.ok || !payload.ok) {
-    throw new Error((payload as AuthFailureResponse).error || "Registration failed");
+  if (!ok) {
+    throw new Error(readAuthErrorMessage(payload) || "Registration failed");
+  }
+  if (!isWellFormedAuthSuccess(payload)) {
+    throw new Error("AUTH_MALFORMED_RESPONSE");
   }
 
   await saveSettings({
@@ -160,9 +187,9 @@ export async function validateAuthSession(): Promise<AuthSessionValidationResult
   }
 
   const baseUrl = resolveBaseUrl(settings.analyticsBaseUrl);
-  let response: Response;
+  let response;
   try {
-    response = await fetch(`${baseUrl}/auth/session`, {
+    response = await fetchJsonWithTimeout(`${baseUrl}/auth/session`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -177,27 +204,30 @@ export async function validateAuthSession(): Promise<AuthSessionValidationResult
   }
 
   if (response.status === 401) {
-    await saveSettings({ userId: undefined, userEmail: undefined, authToken: undefined });
+    // Only clear the credentials this validation actually proved invalid:
+    // a newer login may have replaced them while the request was in flight,
+    // and a stale 401 must never wipe the fresh session.
+    const current = await loadSettings();
+    const currentUserId = String(current.userId || "").trim();
+    const currentAuthToken = String(current.authToken || "");
+    if (currentUserId === localUserId && currentAuthToken === localAuthToken) {
+      await saveSettings({ userId: undefined, userEmail: undefined, authToken: undefined });
+    }
     return { status: "unauthenticated" };
   }
 
   if (response.ok) {
-    try {
-      const payload = (await response.json()) as SessionValidationSuccessResponse;
-      if (payload?.ok && payload.user?.userId) {
-        const serverUserId = String(payload.user.userId);
-        const serverUserEmail = String(payload.user.email || "");
-        await saveSettings({ userId: serverUserId, userEmail: serverUserEmail });
-        return {
-          status: "authenticated",
-          userId: serverUserId,
-          userEmail: serverUserEmail,
-          expiresAt: Number(payload.expiresAt) || undefined,
-        };
-      }
-    } catch {
-      // Malformed success payloads prove nothing; treat like any other
-      // inconclusive server response below.
+    const payload = response.payload as SessionValidationSuccessResponse | null;
+    if (payload?.ok && payload.user?.userId) {
+      const serverUserId = String(payload.user.userId);
+      const serverUserEmail = String(payload.user.email || "");
+      await saveSettings({ userId: serverUserId, userEmail: serverUserEmail });
+      return {
+        status: "authenticated",
+        userId: serverUserId,
+        userEmail: serverUserEmail,
+        expiresAt: Number(payload.expiresAt) || undefined,
+      };
     }
   }
 
@@ -213,7 +243,7 @@ export async function logoutAccount(): Promise<AuthLogoutResult> {
   if (userId && authToken) {
     try {
       const baseUrl = resolveBaseUrl(settings.analyticsBaseUrl);
-      const response = await fetch(`${baseUrl}/auth/logout`, {
+      const response = await fetchJsonWithTimeout(`${baseUrl}/auth/logout`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

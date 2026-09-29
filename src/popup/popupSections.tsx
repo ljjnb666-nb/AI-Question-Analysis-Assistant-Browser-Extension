@@ -77,6 +77,7 @@ type AuthText = {
   loggingIn: string;
   showPassword: string;
   hidePassword: string;
+  sessionExpired: string;
 };
 
 export const PopupHeroCard: React.FC<{
@@ -86,8 +87,10 @@ export const PopupHeroCard: React.FC<{
   isRuntimeConfigured: boolean;
   loaded: boolean;
   providerName: string;
+  sessionStatus: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
+  validatingSessionText: string;
   view: "register" | "login";
-}> = ({ copy, hasApiKey, isAuthenticated, isRuntimeConfigured, loaded, providerName, view }) => (
+}> = ({ copy, hasApiKey, isAuthenticated, isRuntimeConfigured, loaded, providerName, sessionStatus, validatingSessionText, view }) => (
   <div
     className="popup-hero"
     style={{
@@ -157,22 +160,26 @@ export const PopupHeroCard: React.FC<{
             textShadow: "0 0 18px rgba(99,102,241,0.2)",
           }}
         >
-          {!isAuthenticated
-            ? view === "register"
-              ? copy.registerAccount
-              : copy.loginAccount
-            : isRuntimeConfigured
-              ? copy.readyToWork
-              : copy.finishSetup}
+          {sessionStatus === "loading" || sessionStatus === "validating"
+            ? validatingSessionText
+            : !isAuthenticated
+              ? view === "register"
+                ? copy.registerAccount
+                : copy.loginAccount
+              : isRuntimeConfigured
+                ? copy.readyToWork
+                : copy.finishSetup}
         </div>
         <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 5, lineHeight: 1.45, maxWidth: 220 }}>
-          {!isAuthenticated
-            ? view === "register"
-              ? copy.registerHint
-              : copy.loginHint
-            : isRuntimeConfigured
-              ? copy.tagline
-              : copy.setupHint}
+          {sessionStatus === "loading" || sessionStatus === "validating"
+            ? ""
+            : !isAuthenticated
+              ? view === "register"
+                ? copy.registerHint
+                : copy.loginHint
+              : isRuntimeConfigured
+                ? copy.tagline
+                : copy.setupHint}
         </div>
       </div>
       <div
@@ -181,19 +188,31 @@ export const PopupHeroCard: React.FC<{
           fontWeight: 600,
           padding: "6px 10px",
           borderRadius: 999,
-          backgroundColor: isRuntimeConfigured ? "rgba(16, 185, 129, 0.1)" : "rgba(245, 158, 11, 0.1)",
-          border: `1px solid ${isRuntimeConfigured ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.18)"}`,
-          color: isRuntimeConfigured ? "#34d399" : "#fbbf24",
+          backgroundColor: isRuntimeConfigured
+            ? "rgba(16, 185, 129, 0.1)"
+            : sessionStatus === "loading" || sessionStatus === "validating"
+              ? "rgba(99, 102, 241, 0.12)"
+              : "rgba(245, 158, 11, 0.1)",
+          border: `1px solid ${
+            isRuntimeConfigured
+              ? "rgba(16, 185, 129, 0.2)"
+              : sessionStatus === "loading" || sessionStatus === "validating"
+                ? "rgba(99, 102, 241, 0.25)"
+                : "rgba(245, 158, 11, 0.18)"
+          }`,
+          color: isRuntimeConfigured ? "#34d399" : sessionStatus === "loading" || sessionStatus === "validating" ? "#a5b4fc" : "#fbbf24",
           whiteSpace: "nowrap",
         }}
       >
-        {!isAuthenticated
-          ? copy.locked
-          : loaded
-            ? hasApiKey
-              ? copy.connected(providerName)
-              : copy.demoMode
-            : copy.loading}
+        {sessionStatus === "loading" || sessionStatus === "validating"
+          ? validatingSessionText
+          : !isAuthenticated
+            ? copy.locked
+            : loaded
+              ? hasApiKey
+                ? copy.connected(providerName)
+                : copy.demoMode
+              : copy.loading}
       </div>
     </div>
 
@@ -218,6 +237,7 @@ export const PopupAuthCard: React.FC<{
     handleRegister: () => Promise<void>;
     handleSendCode: () => Promise<void>;
     password: string;
+    sessionRejected: boolean;
     setEmail: (value: string) => void;
     setPassword: (value: string) => void;
     setVerificationCode: (value: string) => void;
@@ -342,8 +362,71 @@ export const PopupAuthCard: React.FC<{
       )}
     </div>
     <div style={{ fontSize: 10, color: "#8ea8c6", marginTop: 8, lineHeight: 1.45 }}>
-      {auth.feedback || copy.backendHint}
+      {auth.feedback || (auth.sessionRejected ? authText.sessionExpired : copy.backendHint)}
     </div>
+  </div>
+);
+
+const gateRetryButtonStyle: React.CSSProperties = {
+  padding: "9px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(99, 102, 241, 0.4)",
+  background: "linear-gradient(180deg, rgba(99, 102, 241, 0.28), rgba(139, 92, 246, 0.2))",
+  color: "#ffffff",
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: "pointer",
+  textAlign: "center",
+  fontFamily: "inherit",
+};
+
+const gateSecondaryButtonStyle: React.CSSProperties = {
+  ...gateRetryButtonStyle,
+  border: "1px solid rgba(255, 255, 255, 0.12)",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03))",
+  color: "#cbd5f5",
+};
+
+export const PopupSessionGateCard: React.FC<{
+  authText: {
+    validatingSession: string;
+    sessionUnavailable: string;
+    sessionUnavailableHint: string;
+    retrySession: string;
+    sessionExpired: string;
+    logout: string;
+    loggingOut: string;
+  };
+  isBusy: boolean;
+  isServerUnavailable: boolean;
+  onRetry: () => void;
+  onLogout: () => void;
+}> = ({ authText, isBusy, isServerUnavailable, onRetry, onLogout }) => (
+  <div className="popup-section" style={{ ...popupCardStyle, padding: 10 }}>
+    {isBusy ? (
+      <div style={{ fontSize: 11, color: "#a5b4fc", lineHeight: 1.5 }}>{authText.validatingSession}</div>
+    ) : (
+      <div style={{ display: "grid", gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 650, color: "#fbbf24" }}>
+            {isServerUnavailable ? authText.sessionUnavailable : authText.sessionExpired}
+          </div>
+          {isServerUnavailable ? (
+            <div style={{ fontSize: 10, color: "#8ea8c6", marginTop: 3, lineHeight: 1.45 }}>
+              {authText.sessionUnavailableHint}
+            </div>
+          ) : null}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button className="popup-action" onClick={onRetry} style={gateRetryButtonStyle}>
+            {authText.retrySession}
+          </button>
+          <button className="popup-action" onClick={onLogout} style={gateSecondaryButtonStyle}>
+            {authText.logout}
+          </button>
+        </div>
+      </div>
+    )}
   </div>
 );
 

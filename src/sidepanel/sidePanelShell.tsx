@@ -40,10 +40,40 @@ const lockedCardStyle: React.CSSProperties = {
   padding: 16,
 };
 
-const getHeaderCopy = (lang: UILang, isAuthenticated: boolean, tab: SidePanelTabId) => {
+export type SidePanelAuthStatus =
+  | "loading"
+  | "validating"
+  | "authenticated"
+  | "unauthenticated"
+  | "server_unavailable";
+
+const getHeaderCopy = (
+  lang: UILang,
+  isAuthenticated: boolean,
+  tab: SidePanelTabId,
+  authStatus: SidePanelAuthStatus,
+) => {
   const isEn = lang === "en";
 
   if (!isAuthenticated) {
+    if (authStatus === "loading" || authStatus === "validating") {
+      return {
+        appName: isEn ? "Quiz Solver" : "题目解析助手",
+        title: isEn ? "Verifying session..." : "正在验证登录状态",
+        description: isEn
+          ? "Checking your sign-in status with the account service."
+          : "正在向账号服务确认你的登录状态。",
+      };
+    }
+    if (authStatus === "server_unavailable") {
+      return {
+        appName: isEn ? "Quiz Solver" : "题目解析助手",
+        title: isEn ? "Can't verify sign-in" : "无法验证登录状态",
+        description: isEn
+          ? "The account service can't be reached, so the workspace stays locked."
+          : "账号服务暂时不可达，工作台保持锁定。",
+      };
+    }
     return {
       appName: isEn ? "Quiz Solver" : "题目解析助手",
       title: isEn ? "Login Account" : "登录账号",
@@ -75,14 +105,15 @@ const getHeaderCopy = (lang: UILang, isAuthenticated: boolean, tab: SidePanelTab
 };
 
 export const SidePanelHeader: React.FC<{
+  authStatus: SidePanelAuthStatus;
   isAuthenticated: boolean;
   lang: UILang;
   onTabChange: (tab: SidePanelTabId) => void;
   tab: SidePanelTabId;
   userEmail: string;
-}> = ({ isAuthenticated, lang, onTabChange, tab, userEmail }) => {
+}> = ({ authStatus, isAuthenticated, lang, onTabChange, tab, userEmail }) => {
   const isEn = lang === "en";
-  const copy = getHeaderCopy(lang, isAuthenticated, tab);
+  const copy = getHeaderCopy(lang, isAuthenticated, tab, authStatus);
   const tabs: Array<{ id: SidePanelTabId; label: string }> = [
     { id: "candidates", label: isEn ? "Candidates" : "候选题" },
     { id: "history", label: isEn ? "History" : "历史" },
@@ -134,17 +165,42 @@ export const SidePanelHeader: React.FC<{
 };
 
 export const SidePanelLockedState: React.FC<{
+  authStatus: SidePanelAuthStatus;
   lang: UILang;
   onOpenSettings: () => void;
-}> = ({ lang, onOpenSettings }) => {
+}> = ({ authStatus, lang, onOpenSettings }) => {
   const isEn = lang === "en";
+  const title =
+    authStatus === "loading" || authStatus === "validating"
+      ? isEn
+        ? "Verifying session..."
+        : "正在验证登录状态..."
+      : authStatus === "server_unavailable"
+        ? isEn
+          ? "Can't verify sign-in right now"
+          : "暂时无法验证登录状态"
+        : isEn
+          ? "Workspace Locked"
+          : "工作台未解锁";
+  const description =
+    authStatus === "loading" || authStatus === "validating"
+      ? isEn
+        ? "Checking your saved sign-in with the account service. This only takes a moment."
+        : "正在向账号服务确认本地保存的登录状态，请稍候。"
+      : authStatus === "server_unavailable"
+        ? isEn
+          ? "The account service can't be reached. Protected features stay locked; open Settings to retry or sign out."
+          : "账号服务暂时不可达，受保护的功能保持锁定。可前往设置重试或退出登录。"
+        : isEn
+          ? "Open Settings, register or log in with your email account, then return here to start detection and solving."
+          : "请先打开设置页，完成邮箱注册或登录，之后再返回这里开始识题、解析和自动答题。";
 
   return (
     <div style={{ padding: "18px 8px" }}>
       <div style={lockedCardStyle}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: "#f8fafc" }}>{isEn ? "Workspace Locked" : "工作台未解锁"}</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "#f8fafc" }}>{title}</div>
         <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.6, marginTop: 8 }}>
-          {isEn ? "Open Settings, register or log in with your email account, then return here to start detection and solving." : "请先打开设置页，完成邮箱注册或登录，之后再返回这里开始识题、解析和自动答题。"}
+          {description}
         </div>
         <div style={{ marginTop: 12 }}>
           <UiButton primary onClick={onOpenSettings}>

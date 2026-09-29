@@ -18,6 +18,7 @@ import {
   PopupActionsCard,
   PopupAuthCard,
   PopupHeroCard,
+  PopupSessionGateCard,
   PopupStatusCard,
   PopupWorkspaceCard,
 } from "./popupSections";
@@ -52,7 +53,7 @@ export const PopupApp: React.FC = () => {
   const copy = POPUP_COPY[lang];
   const authText = getAuthText(lang, "popup");
   const auth = useAuthController({ lang, variant: "popup" });
-  const { isAuthenticated } = auth;
+  const { isAuthenticated, isSessionPending, isServerUnavailable } = auth;
   const authRef = useRef(auth);
 
   useEffect(() => {
@@ -70,10 +71,6 @@ export const PopupApp: React.FC = () => {
       setProviderId(nextProviderId);
       setProviderName(getProviderShortName(nextProviderId));
       setLang(nextLang);
-      authRef.current.setIdentity({
-        userId: settings.userId ?? "",
-        userEmail: settings.userEmail ?? "",
-      });
       setLoaded(true);
     });
     return () => {
@@ -156,7 +153,7 @@ export const PopupApp: React.FC = () => {
               ? "0 16px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12)"
               : isAction
                 ? "0 12px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.08)"
-                : "0 16px 32px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255,255,255,0.1)",
+                : "0 16px 32px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.1)",
             duration: 0.2,
             ease: "power2.out",
           });
@@ -209,6 +206,17 @@ export const PopupApp: React.FC = () => {
       | "START_AUTO_SOLVE_ALL",
     openPanel = false,
   ) => {
+    // Handler-level fail closed: the button being visible is not authority.
+    // Only a server-validated session may dispatch protected runtime actions.
+    if (authRef.current.status !== "authenticated") {
+      setStatus(
+        lang === "en"
+          ? "Sign in with a verified session before using this action."
+          : "请先通过登录验证后再使用该功能。",
+      );
+      setActiveFeature(null);
+      return;
+    }
     try {
       setActiveFeature(feature);
       setStatus(startText);
@@ -222,9 +230,22 @@ export const PopupApp: React.FC = () => {
   };
 
   const handleOpenSidePanel = async () => {
+    if (authRef.current.status !== "authenticated") {
+      setStatus(
+        lang === "en"
+          ? "Sign in with a verified session before opening the workspace."
+          : "请先通过登录验证后再打开工作台。",
+      );
+      return;
+    }
     await openSidePanelDirect();
     window.close();
   };
+
+  // The retry gate is only for indeterminate states (pending validation or
+  // unreachable server). A server-REJECTED session converges to the auth form
+  // with a generic "sign in again" hint.
+  const sessionGateVisible = isSessionPending || isServerUnavailable;
 
   return (
     <div ref={scopeRef} style={shellStyle}>
@@ -235,10 +256,22 @@ export const PopupApp: React.FC = () => {
         isRuntimeConfigured={isRuntimeConfigured}
         loaded={loaded}
         providerName={providerName}
+        sessionStatus={auth.status}
+        validatingSessionText={authText.validatingSession}
         view={auth.view}
       />
 
-      {!isAuthenticated ? (
+      {isAuthenticated ? (
+        <PopupActionsCard activeFeature={activeFeature} copy={copy} onRunAction={(...args) => void runAction(...args)} />
+      ) : sessionGateVisible ? (
+        <PopupSessionGateCard
+          authText={authText}
+          isBusy={isSessionPending}
+          isServerUnavailable={isServerUnavailable}
+          onRetry={() => void auth.retryValidation()}
+          onLogout={() => void auth.handleLogout()}
+        />
+      ) : (
         <PopupAuthCard
           auth={auth}
           authText={authText}
@@ -247,8 +280,6 @@ export const PopupApp: React.FC = () => {
           primaryGateButtonStyle={primaryGateButtonStyle}
           secondaryGateButtonStyle={secondaryGateButtonStyle}
         />
-      ) : (
-        <PopupActionsCard activeFeature={activeFeature} copy={copy} onRunAction={(...args) => void runAction(...args)} />
       )}
 
       <PopupWorkspaceCard
