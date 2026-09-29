@@ -13,7 +13,6 @@ import { discoverControls } from "./answer/controlDiscovery";
 import { controlRegistry } from "./answer/controlRegistry";
 import { buildControlMapping } from "./answer/controlMapping";
 import { extractStructuredQuestionText } from "./detector/domStructuredText";
-import { requestRealClick } from "./answerDomUtils";
 import { sanitizeQuestionBlockForRuntimeMessage, sanitizeQuestionBlockForSerialization } from "@/shared/utils/mediaSerialization";
 import { sendAutoSolveProgress } from "./contentRuntime";
 
@@ -280,24 +279,6 @@ describe("Phase 7 accessible roots", () => {
     expect(controlRegistry.entryCountForRoot(shadowRoot.rootKey, shadowRoot.rootGeneration)).toBe(0);
     expect(controlRegistry.entryCountForRoot(TOP_ROOT_KEY)).toBeGreaterThan(0);
     expect(controlRegistry.orphanEntryCount).toBe(0);
-  });
-
-  it("REAL_CLICK sends frame-owned control coordinates in the top-tab viewport", async () => {
-    const sendMessage = vi.fn(async () => ({ ok: true }));
-    vi.stubGlobal("chrome", { runtime: { sendMessage } });
-    try {
-      const { iframe, doc } = makeFrame();
-      stubRect(iframe, { left: 100, top: 50, width: 800, height: 600 });
-      const button = doc.createElement("button");
-      doc.body.append(button);
-      stubRect(button, { left: 10, top: 20, width: 20, height: 10 });
-      sharedRootRegistry().reconcile(document);
-
-      expect(await requestRealClick(button)).toBe(true);
-      expect(sendMessage).toHaveBeenCalledWith({ type: "REAL_CLICK", x: 120, y: 75 });
-    } finally {
-      vi.unstubAllGlobals();
-    }
   });
 
   it("SECURITY-PROGRESS-1 strips runtime root locators from progress messages", () => {

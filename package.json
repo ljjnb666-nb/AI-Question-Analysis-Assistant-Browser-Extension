@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite build --watch",
     "build": "node tools/build-extension.mjs",
-    "verify:artifact": "node tools/verify-extension-artifact.mjs",
+    "verify:artifact": "node tools/verify-extension-artifact.mjs && node tools/verify-extension-permissions.mjs --require-dist",
     "test:artifact": "node --test tools/verify-extension-artifact.node-test.mjs",
+    "verify:permissions": "node tools/verify-extension-permissions.mjs",
+    "test:permissions": "node --test tools/verify-extension-permissions.node-test.mjs",
     "analytics:server": "node analytics-server/index.mjs",
     "build:raw": "vite build",
     "lint": "eslint src analytics-server e2e playwright.config.ts tools/build-extension.mjs vite.contentRuntime.config.ts eslint.config.mjs",

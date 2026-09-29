@@ -134,6 +134,25 @@ function installTextQuestion(rerenderAt: "focus" | "input", routeChangeAtInput =
   };
 }
 
+function installTrustedOnlyChoiceQuestion() {
+  document.body.innerHTML = `<section class="question-item" id="trusted-only-choice">
+    <p class="stem">31. Choose one answer. A. Alpha B. Beta</p>
+    <div role="radiogroup">
+      <button type="button" role="radio" aria-checked="false">A. Alpha</button>
+      <button type="button" role="radio" aria-checked="false">B. Beta</button>
+    </div>
+  </section>`;
+  const owner = document.getElementById("trusted-only-choice")!;
+  const controls = Array.from(owner.querySelectorAll<HTMLElement>("[role=radio]"));
+  const trustedClicks: boolean[] = [];
+  controls.forEach((control) => control.addEventListener("click", (event) => {
+    trustedClicks.push(event.isTrusted === true);
+    if (event.isTrusted !== true) return;
+    controls.forEach((candidate) => candidate.setAttribute("aria-checked", String(candidate === control)));
+  }));
+  return { block: createBlock(owner, "single_choice", "31. Choose one answer. A. Alpha B. Beta"), controls, trustedClicks };
+}
+
 beforeEach(() => {
   originalUrl = location.href;
 });
@@ -145,6 +164,17 @@ afterEach(() => {
 });
 
 describe("Phase 8B event-boundary authority", () => {
+  it("P_REL_PERM_02_TRUSTED_ONLY_CONTROL_FAILS_CLOSED", async () => {
+    const fixture = installTrustedOnlyChoiceQuestion();
+
+    const fill = await fillParsedAnswerInPage(fixture.block, choiceResult());
+
+    expect(fill.ok).toBe(false);
+    expect(fill.code).not.toBe("FILLED_VERIFIED");
+    expect(fixture.trustedClicks).toEqual([false]);
+    expect(fixture.controls.every((control) => control.getAttribute("aria-checked") !== "true")).toBe(true);
+  });
+
   it("EVENT-CHOICE-ORDER-1 preserves the Phase 5 choice gesture sequence", async () => {
     const fixture = installChoiceQuestion(false);
 
