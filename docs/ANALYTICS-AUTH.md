@@ -55,6 +55,7 @@ Security notes:
 - Each account has a single active token: registering or logging in again revokes the previous token, and logout revokes the token server-side.
 - Databases created before token expiries existed are migrated in place (`ALTER TABLE users ADD COLUMN authTokenExpiresAt`) before any read, write, or legacy JSON import touches the new column; legacy tokens without a provable expiry fail session validation until the next login issues a fresh bounded token.
 - Registration and login do not disclose account existence without proof of email control: registration verifies the one-time code before any duplicate check, and login returns the same `AUTH_INVALID_CREDENTIALS` error for unknown accounts and wrong passwords.
+- Login failures use a runtime dummy password verifier for unknown accounts, so unknown-email and wrong-password paths both pay comparable scrypt verification cost.
 - The server enforces basic fixed-window rate limits on auth, event ingestion, and metrics reads.
 - JSON request bodies larger than 64 KB are rejected.
 

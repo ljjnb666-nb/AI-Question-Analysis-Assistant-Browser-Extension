@@ -769,7 +769,7 @@ describe("auth core enumeration safety", () => {
     }
   });
 
-  it("AUTH_CORE_29_LOGIN_UNKNOWN_EMAIL and AUTH_CORE_30_LOGIN_WRONG_PASSWORD share one response", async () => {
+  it("AUTH_CORE_29_LOGIN_UNKNOWN_EMAIL, AUTH_CORE_30_LOGIN_WRONG_PASSWORD, and AUTH_CORE_34_HTTP_LOGIN_ENUMERATION_STILL_UNIFIED keep one 401 payload", async () => {
     const { handler, cleanup } = createRealStorageHandler();
     try {
       createUserInStorage("login@example.com", "secret-123", "dev-login");

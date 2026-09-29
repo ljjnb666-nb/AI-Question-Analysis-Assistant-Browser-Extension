@@ -721,6 +721,20 @@ export function registerUserWithVerificationCode(db, email, password, verificati
   return { user, authToken };
 }
 
+// AUTH-CORE-INV-10: failed logins must pay comparable password-verification
+// cost whether or not the account exists, or response timing would reveal
+// registered emails. A dummy credential is generated once at module init
+// with the same hashPassword/verifyPassword scrypt parameters; its raw
+// secret stays in this closure only and is never persisted or logged.
+const DUMMY_LOGIN_PASSWORD_DIGEST = hashPassword(randomBytes(32).toString("hex"));
+
+function verifyLoginPassword(user, password) {
+  const record = user
+    ? { salt: user.passwordSalt, hash: user.passwordHash }
+    : DUMMY_LOGIN_PASSWORD_DIGEST;
+  return verifyPassword(password, record.salt, record.hash);
+}
+
 export function loginUserInStorage(email, password, deviceId) {
   if (!SQLITE_SUPPORTED) {
     const db = loadDbFromJsonFile();
@@ -732,10 +746,9 @@ export function loginUserInStorage(email, password, deviceId) {
 
   return runInTransaction((database) => {
     const user = findStoredUserByEmail(database, normalized);
+    const passwordMatches = verifyLoginPassword(user, password);
     if (!user) throw new Error("account not found");
-    if (!verifyPassword(password, user.passwordSalt, user.passwordHash)) {
-      throw new Error("invalid password");
-    }
+    if (!passwordMatches) throw new Error("invalid password");
 
     const nextDeviceIds = appendDeviceId(user.deviceIds, deviceId);
     user.deviceIds = nextDeviceIds;
@@ -989,10 +1002,9 @@ export function verifyEmailCode(db, email, code) {
 
 export function loginUser(db, email, password, deviceId) {
   const user = findUserByEmail(db, email);
+  const passwordMatches = verifyLoginPassword(user, password);
   if (!user) throw new Error("account not found");
-  if (!verifyPassword(password, user.passwordSalt, user.passwordHash)) {
-    throw new Error("invalid password");
-  }
+  if (!passwordMatches) throw new Error("invalid password");
   const authToken = issueStoredAuthToken(user);
   if (deviceId && !user.deviceIds.includes(deviceId)) user.deviceIds.push(deviceId);
   if (deviceId) ensureDevice(db, deviceId, user.userId);

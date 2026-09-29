@@ -7,11 +7,16 @@ import { describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import * as nodeCrypto from "node:crypto";
 
-// randomInt is wrapped (not replaced) so every other crypto primitive keeps
-// its real behaviour; the AUTH_CORE_16 test pins the RNG contract on it.
+// randomInt and scryptSync are wrapped (not replaced) so every other crypto
+// primitive keeps its real behaviour; the AUTH_CORE_16 and AUTH_CORE_32/33
+// tests pin the RNG and KDF-parity contracts on them.
 vi.mock("node:crypto", async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, randomInt: vi.fn(actual.randomInt) };
+  return {
+    ...actual,
+    randomInt: vi.fn(actual.randomInt),
+    scryptSync: vi.fn(actual.scryptSync),
+  };
 });
 
 import {
@@ -701,5 +706,66 @@ describe("auth core registration and migration hardening", () => {
         if (fs.existsSync(file)) fs.unlinkSync(file);
       }
     }
+  });
+});
+
+describe("auth core login failure kdf parity", () => {
+  it("AUTH_CORE_32_LOGIN_FAILURE_KDF_PARITY runs one comparable scrypt verification per failed SQLite login", () => {
+    const dbFile = path.join(os.tmpdir(), `quiz-solver-auth-parity-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+    const scryptMock = vi.mocked(nodeCrypto.scryptSync);
+    try {
+      const created = createUserInStorage("parity@example.com", "secret-123", "dev-parity");
+
+      // Known account + wrong password: exactly one real-record verification.
+      scryptMock.mockClear();
+      expect(() => loginUserInStorage("parity@example.com", "wrong-password", "dev-parity")).toThrow("invalid password");
+      expect(scryptMock).toHaveBeenCalledTimes(1);
+      const wrongPasswordCall = scryptMock.mock.calls[0];
+      expect(wrongPasswordCall[1]).toBe(created.user.passwordSalt);
+      expect(wrongPasswordCall[2]).toBe(64);
+
+      // Unknown account: exactly one dummy-record verification with the same
+      // scrypt key length, so both failure paths pay comparable KDF cost.
+      scryptMock.mockClear();
+      expect(() => loginUserInStorage("ghost@example.com", "wrong-password", "dev-parity")).toThrow("account not found");
+      expect(scryptMock).toHaveBeenCalledTimes(1);
+      const unknownCall = scryptMock.mock.calls[0];
+      expect(unknownCall[2]).toBe(64);
+      expect(unknownCall[1]).not.toBe(created.user.passwordSalt);
+
+      // Successful login keeps verifying against the real record.
+      scryptMock.mockClear();
+      const loggedIn = loginUserInStorage("parity@example.com", "secret-123", "dev-parity");
+      expect(loggedIn.authToken).toBeTruthy();
+      expect(scryptMock.mock.calls[0][1]).toBe(created.user.passwordSalt);
+    } finally {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    }
+  });
+
+  it("AUTH_CORE_33_JSON_LOGIN_FAILURE_KDF_PARITY gives the JSON login path the same KDF workload", () => {
+    const db = createDb();
+    const created = createUser(db, "json-parity@example.com", "secret-123", "dev-json");
+    const scryptMock = vi.mocked(nodeCrypto.scryptSync);
+
+    scryptMock.mockClear();
+    expect(() => loginUser(db, "json-parity@example.com", "wrong-password", "dev-json")).toThrow("invalid password");
+    expect(scryptMock).toHaveBeenCalledTimes(1);
+    expect(scryptMock.mock.calls[0][2]).toBe(64);
+
+    scryptMock.mockClear();
+    expect(() => loginUser(db, "ghost@example.com", "wrong-password", "dev-json")).toThrow("account not found");
+    expect(scryptMock).toHaveBeenCalledTimes(1);
+    expect(scryptMock.mock.calls[0][2]).toBe(64);
+    expect(scryptMock.mock.calls[0][1]).not.toBe(created.user.passwordSalt);
   });
 });
