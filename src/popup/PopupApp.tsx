@@ -7,6 +7,7 @@ import { logEvent } from "@/shared/utils/analytics";
 import { loadSettings } from "@/shared/utils/storage";
 import { getAuthText } from "@/shared/auth/authText";
 import { useAuthController } from "@/shared/auth/useAuthController";
+import { createPopupAuthority } from "./popupAuthority";
 import {
   SHARED_FONT_FAMILY,
   primaryButtonStyle,
@@ -54,11 +55,10 @@ export const PopupApp: React.FC = () => {
   const authText = getAuthText(lang, "popup");
   const auth = useAuthController({ lang, variant: "popup" });
   const { isAuthenticated, isSessionPending, isServerUnavailable } = auth;
-  const authRef = useRef(auth);
-
-  useEffect(() => {
-    authRef.current = auth;
-  }, [auth]);
+  // Handler-level authority reads the coordinator's CURRENT state directly,
+  // not an effect-lagged ref or a render snapshot (AUTH-UI-INV-09).
+  const authority = createPopupAuthority(auth.session);
+  const isAuthenticatedNow = authority.isAuthenticatedNow;
 
   useEffect(() => {
     let disposed = false;
@@ -208,7 +208,7 @@ export const PopupApp: React.FC = () => {
   ) => {
     // Handler-level fail closed: the button being visible is not authority.
     // Only a server-validated session may dispatch protected runtime actions.
-    if (authRef.current.status !== "authenticated") {
+    if (!isAuthenticatedNow()) {
       setStatus(
         lang === "en"
           ? "Sign in with a verified session before using this action."
@@ -230,7 +230,7 @@ export const PopupApp: React.FC = () => {
   };
 
   const handleOpenSidePanel = async () => {
-    if (authRef.current.status !== "authenticated") {
+    if (!isAuthenticatedNow()) {
       setStatus(
         lang === "en"
           ? "Sign in with a verified session before opening the workspace."

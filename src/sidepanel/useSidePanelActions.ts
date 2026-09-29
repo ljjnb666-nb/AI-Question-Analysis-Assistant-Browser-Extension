@@ -38,6 +38,13 @@ import type { UILang } from "./displayUtils";
 type UseSidePanelActionsOptions = {
   candidates: DetectedCandidate[];
   isBatchParsing: boolean;
+  /**
+   * Synchronous authority check against the live session coordinator —
+   * never a React render snapshot, which would leave a stale-closure
+   * window. Protected handlers must fail closed before any state mutation
+   * or runtime/tab dispatch (AUTH-UI-INV-09).
+   */
+  isAuthenticatedNow: () => boolean;
   setCandidates: React.Dispatch<React.SetStateAction<DetectedCandidate[]>>;
   setExpandedIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   setFillFeedback: React.Dispatch<React.SetStateAction<string>>;
@@ -54,9 +61,24 @@ type UseSidePanelActionsOptions = {
 
 export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   const candidateAttempts = useRef(createCandidateAttemptRegistry()).current;
+  const requireAuthenticatedAction = useCallback((): boolean => {
+    if (options.isAuthenticatedNow()) return true;
+    options.setFillFeedback(
+      options.uiLang === "en"
+        ? "Sign-in verification required. Please check your session in Settings."
+        : "需要登录验证，请在设置中确认登录状态。",
+    );
+    return false;
+  }, [options]);
   const isCandidateCurrent = useCallback(
-    (candidate: DetectedCandidate) => isCandidateResultAuthorityCurrent(candidate.origin, candidate.block),
-    [],
+    async (candidate: DetectedCandidate) => {
+      // Auth loss invalidates every in-flight protected commit: batch parse,
+      // retry, and fill results must not re-enter committed UI state or hit
+      // the page after the session stopped being server-validated.
+      if (!options.isAuthenticatedNow()) return false;
+      return isCandidateResultAuthorityCurrent(candidate.origin, candidate.block);
+    },
+    [options],
   );
   const syncSelection = useCallback(
     async (payload: { blockId?: string; selected?: boolean; selectAll?: boolean }) => {
@@ -81,20 +103,22 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   );
 
   const handleDetect = useCallback(async () => {
+    if (!requireAuthenticatedAction()) return;
     applyDetectState(resetDetectState());
     const activeTab = await getBestActionTab();
     if (activeTab?.id) {
       await sendTabMessageWithBootstrap(activeTab.id, { type: "START_AUTO_DETECT" });
     }
-  }, [applyDetectState]);
+  }, [applyDetectState, requireAuthenticatedAction]);
 
   const handleFullPageDetect = useCallback(async () => {
+    if (!requireAuthenticatedAction()) return;
     applyDetectState(startFullPageDetectState());
     const activeTab = await getBestActionTab();
     if (activeTab?.id) {
       await sendTabMessageWithBootstrap(activeTab.id, { type: "START_FULL_PAGE_DETECT" });
     }
-  }, [applyDetectState]);
+  }, [applyDetectState, requireAuthenticatedAction]);
 
   const handleCancelFullPage = useCallback(async () => {
     const activeTab = await getBestActionTab();
@@ -107,6 +131,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
 
   const toggleSelect = useCallback(
     (id: string) => {
+      if (!requireAuthenticatedAction()) return;
       options.setCandidates((prev) => {
         const next = toggleCandidateSelection(prev, id);
         const target = next.find((candidate) => candidate.block.id === id);
@@ -114,21 +139,23 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
         return next;
       });
     },
-    [options, syncSelection],
+    [options, requireAuthenticatedAction, syncSelection],
   );
 
   const handleFlash = useCallback(async (blockId: string) => {
+    if (!requireAuthenticatedAction()) return;
     const activeTab = await getBestActionTab();
     if (activeTab?.id) {
       await sendTabMessageWithBootstrap(activeTab.id, { type: "HIGHLIGHT_CANDIDATE", blockId });
     }
-  }, []);
+  }, [requireAuthenticatedAction]);
 
   const toggleDetails = useCallback((id: string) => {
     options.setExpandedIds((prev) => ({ ...prev, [id]: !prev[id] }));
   }, [options]);
 
   const handleBatchParse = useCallback(async () => {
+    if (!requireAuthenticatedAction()) return;
     if (!options.candidates.some((candidate) => candidate.selected)) return;
     options.setIsBatchParsing(true);
     await runBatchParse(options.candidates, {
@@ -152,9 +179,10 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       setCandidates: options.setCandidates,
     });
     options.setIsBatchParsing(false);
-  }, [options, candidateAttempts, isCandidateCurrent]);
+  }, [options, candidateAttempts, isCandidateCurrent, requireAuthenticatedAction]);
 
   const handleRetryVision = useCallback(async (candidate: DetectedCandidate) => {
+    if (!requireAuthenticatedAction()) return;
     await runRetryVision(candidate, {
       loadSettings,
       getProvider,
@@ -171,9 +199,10 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       shouldRetryBatchParseForIncompleteResult,
       preferBatchRetryResult,
     });
-  }, [options.setCandidates, candidateAttempts, isCandidateCurrent]);
+  }, [options.setCandidates, candidateAttempts, isCandidateCurrent, requireAuthenticatedAction]);
 
   const handleSelectRisky = useCallback(() => {
+    if (!requireAuthenticatedAction()) return;
     options.setCandidates((prev) => {
       const { next, selectedIds } = selectRiskyCandidates(prev, isRiskyCandidate);
       for (const candidate of next) {
@@ -181,9 +210,10 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       }
       return next;
     });
-  }, [options, syncSelection]);
+  }, [options, requireAuthenticatedAction, syncSelection]);
 
   const handleRetryRisky = useCallback(async () => {
+    if (!requireAuthenticatedAction()) return;
     if (!options.candidates.some(isRiskyCandidate)) return;
 
     options.setIsRetryingRisky(true);
@@ -204,9 +234,10 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       preferBatchRetryResult,
     });
     options.setIsRetryingRisky(false);
-  }, [options, candidateAttempts, isCandidateCurrent]);
+  }, [options, candidateAttempts, isCandidateCurrent, requireAuthenticatedAction]);
 
   const handleFillCandidate = useCallback(async (candidate: DetectedCandidate) => {
+    if (!requireAuthenticatedAction()) return;
     const response = await runFillCandidate(candidate, {
       isCandidateCurrent,
       setCandidates: options.setCandidates,
@@ -215,9 +246,10 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     });
     options.setFillFeedback(getSingleFillFeedback(options.uiLang, !!response?.ok, response?.message));
     window.setTimeout(() => options.setFillFeedback(""), 2200);
-  }, [options, isCandidateCurrent]);
+  }, [options, isCandidateCurrent, requireAuthenticatedAction]);
 
   const handleBatchFill = useCallback(async () => {
+    if (!requireAuthenticatedAction()) return;
     options.setIsBatchFilling(true);
     const { totalFilled, totalQuestions } = await runBatchFill(options.candidates, {
       isCandidateCurrent,
@@ -228,17 +260,20 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     options.setIsBatchFilling(false);
     options.setFillFeedback(getBatchFillFeedback(options.uiLang, totalFilled, totalQuestions));
     window.setTimeout(() => options.setFillFeedback(""), 2600);
-  }, [options, isCandidateCurrent]);
+  }, [options, isCandidateCurrent, requireAuthenticatedAction]);
 
   const handleStartAutoSolve = useCallback(async () => {
+    if (!requireAuthenticatedAction()) return;
     const activeTab = await getBestActionTab();
     if (!activeTab?.id) return;
     options.setFillFeedback("");
     options.setIsAutoSolving(true);
     options.setAutoSolveProgress(buildAutoSolveStartingState(options.uiLang));
     await sendTabMessageWithBootstrap(activeTab.id, { type: "START_AUTO_SOLVE_ALL" });
-  }, [options]);
+  }, [options, requireAuthenticatedAction]);
 
+  // STOP / CANCEL are deliberately NOT auth-gated: after an auth loss they
+  // are the only way to terminate an already-started protected workflow.
   const handleStopAutoSolve = useCallback(async () => {
     const activeTab = await getBestActionTab();
     if (!activeTab?.id) return;
@@ -246,14 +281,16 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   }, []);
 
   const handleClearSelection = useCallback(() => {
+    if (!requireAuthenticatedAction()) return;
     options.setCandidates((prev) => clearCandidateSelection(prev));
     void syncSelection({ selectAll: false });
-  }, [options, syncSelection]);
+  }, [options, requireAuthenticatedAction, syncSelection]);
 
   const handleSelectAll = useCallback(() => {
+    if (!requireAuthenticatedAction()) return;
     options.setCandidates((prev) => selectAllCandidates(prev));
     void syncSelection({ selectAll: true });
-  }, [options, syncSelection]);
+  }, [options, requireAuthenticatedAction, syncSelection]);
 
   return {
     handleBatchFill,

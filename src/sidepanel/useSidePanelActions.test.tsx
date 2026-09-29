@@ -1,0 +1,177 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook } from "@testing-library/react";
+import type { DetectedCandidate } from "@/shared/types";
+import { useSidePanelActions } from "./useSidePanelActions";
+
+const sentMessages: Array<{ tabId: number; type: string }> = [];
+
+vi.mock("./tabActions", () => ({
+  getBestActionTab: vi.fn(async () => ({ id: 7 }) as chrome.tabs.Tab | null),
+  sendTabMessageWithBootstrap: vi.fn(async (tabId: number, message: { type: string }) => {
+    sentMessages.push({ tabId, type: message.type });
+    return {};
+  }),
+  requestBlockImage: vi.fn(),
+  sendFillMessageWithVerify: vi.fn(),
+  isCandidateResultAuthorityCurrent: vi.fn(async () => true),
+}));
+
+vi.mock("./batchOperations", () => ({
+  runBatchParse: vi.fn(async () => undefined),
+  runBatchFill: vi.fn(async () => ({ totalFilled: 0, totalQuestions: 0 })),
+  runFillCandidate: vi.fn(async () => ({ ok: true })),
+  runRetryRisky: vi.fn(async () => undefined),
+  runRetryVision: vi.fn(async () => undefined),
+}));
+
+vi.mock("@/shared/utils/parseRouter", () => ({
+  getProvider: vi.fn(() => ({ defaultModel: "m", baseUrl: "b", models: [] })),
+  hasSufficientPreviewText: vi.fn(() => true),
+  parseQuestion: vi.fn(),
+}));
+
+vi.mock("@/shared/utils/analytics", () => ({
+  logEvent: vi.fn(),
+}));
+
+function makeCandidate(overrides: Partial<DetectedCandidate> = {}): DetectedCandidate {
+  return {
+    block: {
+      id: "block-1",
+      bbox: { x: 0, y: 0, width: 10, height: 10 },
+      previewText: "1+1=? A.2",
+      confidence: 1,
+      source: "manual_capture",
+    },
+    origin: { tabId: 7, url: "https://quiz.example.com/page" },
+    selected: true,
+    status: "idle",
+    ...overrides,
+  } as unknown as DetectedCandidate;
+}
+
+type HookOptions = Parameters<typeof useSidePanelActions>[0];
+
+function makeOptions(overrides: Partial<HookOptions> = {}): HookOptions {
+  const candidates = [makeCandidate()];
+  return {
+    candidates,
+    isBatchParsing: false,
+    isAuthenticatedNow: () => authenticated,
+    setCandidates: vi.fn(),
+    setExpandedIds: vi.fn(),
+    setFillFeedback: vi.fn(),
+    setIsAutoSolving: vi.fn(),
+    setIsBatchFilling: vi.fn(),
+    setIsBatchParsing: vi.fn(),
+    setIsDetecting: vi.fn(),
+    setIsFullPageScan: vi.fn(),
+    setIsRetryingRisky: vi.fn(),
+    setAutoSolveProgress: vi.fn(),
+    setScanProgress: vi.fn(),
+    uiLang: "en",
+    ...overrides,
+  };
+}
+
+// The gate under test mirrors the live coordinator: the hook must consult
+// this getter at invocation time, never a cached snapshot.
+let authenticated = false;
+
+beforeEach(() => {
+  sentMessages.length = 0;
+  authenticated = false;
+  vi.clearAllMocks();
+});
+
+describe("useSidePanelActions authority gate", () => {
+  it("AUTH_UI_22_SIDEPANEL_HANDLER_GATE protected handlers dispatch nothing while unauthenticated", async () => {
+    const setters = {
+      setIsDetecting: vi.fn(),
+      setIsFullPageScan: vi.fn(),
+      setIsAutoSolving: vi.fn(),
+      setIsBatchParsing: vi.fn(),
+      setIsBatchFilling: vi.fn(),
+      setIsRetryingRisky: vi.fn(),
+    };
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions(setters),
+    });
+
+    await result.current.handleDetect();
+    await result.current.handleFullPageDetect();
+    await result.current.handleStartAutoSolve();
+    await result.current.handleBatchParse();
+    await result.current.handleBatchFill();
+    await result.current.handleFillCandidate(makeCandidate());
+    await result.current.handleRetryVision(makeCandidate());
+    await result.current.handleRetryRisky();
+    result.current.toggleSelect("block-1");
+    await result.current.handleFlash("block-1");
+    result.current.handleSelectAll();
+    result.current.handleSelectRisky();
+    result.current.handleClearSelection();
+
+    expect(sentMessages).toEqual([]);
+    // No protected flag may have been raised by a gated handler.
+    for (const setter of Object.values(setters)) {
+      expect(setter).not.toHaveBeenCalledWith(true);
+    }
+  });
+
+  it("AUTH_UI_22_SIDEPANEL_HANDLER_GATE gate covers validating and server_unavailable states", async () => {
+    // The getter is the contract: any non-authenticated status — validating,
+    // server_unavailable, unauthenticated — must read as false at call time.
+    for (const status of ["validating", "server_unavailable", "unauthenticated", "loading"]) {
+      authenticated = status === "authenticated";
+      const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+        initialProps: makeOptions(),
+      });
+      await result.current.handleDetect();
+      await result.current.handleStartAutoSolve();
+      expect(sentMessages, `status=${status} must not dispatch`).toEqual([]);
+    }
+  });
+
+  it("AUTH_UI_22_SIDEPANEL_HANDLER_GATE gate opens exactly when the coordinator is authenticated", async () => {
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions(),
+    });
+    authenticated = true;
+    await result.current.handleDetect();
+    expect(sentMessages).toEqual([{ tabId: 7, type: "START_AUTO_DETECT" }]);
+  });
+
+  it("AUTH_UI_22_SIDEPANEL_HANDLER_GATE auth loss invalidates in-flight batch commits via isCandidateCurrent", async () => {
+    const { runBatchParse } = await import("./batchOperations");
+    authenticated = true;
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions(),
+    });
+    await result.current.handleBatchParse();
+    expect(runBatchParse).toHaveBeenCalledTimes(1);
+    const deps = vi.mocked(runBatchParse).mock.calls[0][1];
+    const candidate = makeCandidate();
+
+    authenticated = true;
+    expect(await deps.isCandidateCurrent(candidate)).toBe(true);
+    // Between async work and the committed side effect the session stopped
+    // being validated: the commit authority must flip to false immediately.
+    authenticated = false;
+    expect(await deps.isCandidateCurrent(candidate)).toBe(false);
+  });
+
+  it("AUTH_UI_23_STOP_CANCEL_ALLOWED_AFTER_AUTH_LOSS stop and cancel stay available when logged out", async () => {
+    authenticated = false;
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions(),
+    });
+
+    await result.current.handleStopAutoSolve();
+    expect(sentMessages).toEqual([{ tabId: 7, type: "STOP_AUTO_SOLVE_ALL" }]);
+
+    sentMessages.length = 0;
+    await result.current.handleCancelFullPage();
+    expect(sentMessages).toEqual([{ tabId: 7, type: "FULL_PAGE_DETECT_CANCELLED" }]);
+  });
+});

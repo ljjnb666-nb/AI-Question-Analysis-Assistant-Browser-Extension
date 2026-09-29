@@ -751,3 +751,90 @@ test("AUTH_UI_21_SEND_CODE_FEEDBACK_NEVER_ECHOES_SECRETS feedback never contains
     await closeExtensionContext(context);
   }
 });
+
+// ---------------------------------------------------------------------------
+// AUTH_UI_25..26 — History must obey the authoritative session gate in every
+// non-authenticated status (validating, server_unavailable), not just after
+// an explicit logout.
+// ---------------------------------------------------------------------------
+async function openAuthenticatedHistoryTab(
+  context: Awaited<ReturnType<typeof launchExtensionContext>>,
+  extensionId: string,
+  account: TestAccount,
+): Promise<Page> {
+  await seedValidSession(context, extensionId, account);
+  const sidepanel = await context.newPage();
+  await sidepanel.goto(SIDEPANEL_URL(extensionId));
+  await expectEventually(sidepanel, () => sidepanelWorkspaceHeader(sidepanel).first().isVisible(), {
+    timeout: 30_000,
+  });
+  await sidepanel.getByRole("button", { name: /^(历史|History)$/ }).click();
+  // With no records the History surface renders its empty state.
+  await expectEventually(
+    sidepanel,
+    () => sidepanel.getByText(/(还没有历史记录|No history yet)/).first().isVisible(),
+    { timeout: 15_000 },
+  );
+  return sidepanel;
+}
+
+test("AUTH_UI_25_HISTORY_LOCKED_ON_SERVER_UNAVAILABLE history never renders while the session is unverifiable", async () => {
+  test.setTimeout(120_000);
+  const context = await launchExtensionContext();
+  try {
+    const extensionId = await resolveExtensionId(context);
+    const closedBase = await getClosedPortBaseUrl();
+    const sidepanel = await openAuthenticatedHistoryTab(context, extensionId, accountD);
+
+    // Make the auth backend unreachable: the coordinator must reconcile to
+    // server_unavailable and the History surface must unmount.
+    await seedExtensionSettings(context, extensionId, { analyticsBaseUrl: closedBase });
+
+    await expectEventually(
+      sidepanel,
+      () => sidepanel.getByText(/(暂时无法验证登录状态|Can't verify sign-in)/).first().isVisible(),
+      { timeout: 30_000 },
+    );
+    await expectEventually(
+      sidepanel,
+      async () => (await sidepanel.getByText(/(还没有历史记录|No history yet)/).count()) === 0,
+      { timeout: 15_000 },
+    );
+    expect(await sidepanel.getByRole("button", { name: /(导出 JSON|Export JSON)/ }).count()).toBe(0);
+    expect(await sidepanel.getByRole("button", { name: /(清空历史|Clear History)/ }).count()).toBe(0);
+  } finally {
+    await closeExtensionContext(context);
+  }
+});
+
+test("AUTH_UI_26_HISTORY_LOCKED_WHILE_VALIDATING history never renders during the validating window", async () => {
+  test.setTimeout(120_000);
+  const context = await launchExtensionContext();
+  const hanging = await startHangingServer();
+  try {
+    const extensionId = await resolveExtensionId(context);
+    const sidepanel = await openAuthenticatedHistoryTab(context, extensionId, accountD);
+
+    // Point validation at a hung server: the surface must flip to
+    // validating/locked and History must never render while the outcome is
+    // undetermined.
+    await seedExtensionSettings(context, extensionId, { analyticsBaseUrl: hanging.baseUrl });
+
+    await expectEventually(
+      sidepanel,
+      () => sidepanel.getByText(/(正在验证登录状态|Verifying session|暂时无法验证登录状态|Can't verify sign-in)/).first().isVisible(),
+      { timeout: 20_000 },
+    );
+    expect(await sidepanel.getByText(/(还没有历史记录|No history yet)/).count()).toBe(0);
+    expect(await sidepanel.getByRole("button", { name: /(导出 JSON|Export JSON)/ }).count()).toBe(0);
+    // The window stays fail-closed for as long as the server holds the
+    // validation open.
+    for (let check = 0; check < 6; check += 1) {
+      expect(await sidepanel.getByText(/(还没有历史记录|No history yet)/).count()).toBe(0);
+      await sidepanel.waitForTimeout(500);
+    }
+  } finally {
+    await hanging.close();
+    await closeExtensionContext(context);
+  }
+});

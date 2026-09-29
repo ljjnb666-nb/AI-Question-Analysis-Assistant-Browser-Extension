@@ -9,7 +9,9 @@ import { HistoryTab } from "./HistoryTab";
 import { SettingsTab } from "./settingsPanel";
 import { registerSidePanelRuntimeListeners } from "./sidepanelMessageBridge";
 import { computeCandidateMetrics, type CandidateViewFilter } from "./sidepanelCandidateMetrics";
+import { planAuthLossStop } from "./sidepanelAuthLoss";
 import { CandidatesTab } from "./CandidatesTab";
+import { getBestActionTab, sendTabMessageWithBootstrap } from "./tabActions";
 import {
   APP_SHELL_STYLE,
   PANEL_BODY_STYLE,
@@ -102,18 +104,62 @@ export const SidePanelApp: React.FC = () => {
   // never unlock the workspace.
   const session = useAuthSession();
 
+  // Latest committed state for non-render consumers (the auth-loss watchdog
+  // runs from coordinator notifications, outside React's render cycle).
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   useEffect(() => {
     let disposed = false;
+    // Transition marker lives in the effect closure: coordinator notifications
+    // can arrive outside React's render/effect cycle, so the authenticated→
+    // non-authenticated flip must not depend on a ref that only refreshes
+    // after a render.
+    let wasAuthenticated: boolean | null = null;
     const applySessionState = () => {
       if (disposed) return;
       const snapshot = session.getState();
+      const nowAuthenticated = snapshot.status === "authenticated";
       setAuthStatus(snapshot.status);
       setUserEmail(snapshot.userEmail);
       setSessionRejected(snapshot.sessionRejected);
-      setIsAuthenticated(snapshot.status === "authenticated");
+      setIsAuthenticated(nowAuthenticated);
       if (snapshot.status === "unauthenticated") {
         setTab("settings");
       }
+      // AUTH-UI-INV-11: leaving `authenticated` must terminate protected
+      // work already dispatched to the content script and reset the
+      // transient protected-work flags, best-effort. The in-flight flags are
+      // read from the latest committed state.
+      if (wasAuthenticated === true && !nowAuthenticated) {
+        const plan = planAuthLossStop(stateRef.current);
+        void (async () => {
+          try {
+            if (!plan.stopAutoSolve && !plan.cancelFullPage) return;
+            const activeTab = await getBestActionTab();
+            if (!activeTab?.id) return;
+            if (plan.stopAutoSolve) {
+              await sendTabMessageWithBootstrap(activeTab.id, { type: "STOP_AUTO_SOLVE_ALL" });
+            }
+            if (plan.cancelFullPage) {
+              await sendTabMessageWithBootstrap(activeTab.id, { type: "FULL_PAGE_DETECT_CANCELLED" });
+            }
+          } catch {
+            // Best-effort termination; the flags are reset regardless.
+          }
+        })();
+        setIsAutoSolving(false);
+        setAutoSolveProgress(null);
+        setIsFullPageScan(false);
+        setScanProgress(null);
+        setIsDetecting(false);
+        setIsBatchParsing(false);
+        setIsBatchFilling(false);
+        setIsRetryingRisky(false);
+      }
+      wasAuthenticated = nowAuthenticated;
     };
     applySessionState();
     const unsubscribe = session.subscribe(applySessionState);
@@ -122,7 +168,7 @@ export const SidePanelApp: React.FC = () => {
       disposed = true;
       unsubscribe();
     };
-  }, [session, setAuthStatus, setIsAuthenticated, setSessionRejected, setTab, setUserEmail]);
+  }, [session, setAuthStatus, setAutoSolveProgress, setIsAuthenticated, setIsAutoSolving, setIsBatchFilling, setIsBatchParsing, setIsDetecting, setIsFullPageScan, setIsRetryingRisky, setScanProgress, setSessionRejected, setTab, setUserEmail]);
 
   useEffect(() => {
     loadSettings().then((settings) => {
@@ -194,6 +240,7 @@ export const SidePanelApp: React.FC = () => {
   } = useSidePanelActions({
     candidates: state.candidates,
     isBatchParsing: state.isBatchParsing,
+    isAuthenticatedNow: () => session.getState().status === "authenticated",
     setCandidates,
     setExpandedIds,
     setFillFeedback,
@@ -258,7 +305,18 @@ export const SidePanelApp: React.FC = () => {
       />
 
       <div style={PANEL_BODY_STYLE}>
-        {!state.isAuthenticated && state.tab !== "settings" ? (
+        {state.tab === "settings" ? (
+          <SettingsTab
+            lang={state.uiLang}
+            onLanguageChange={setUiLang}
+            authOnly={!state.isAuthenticated}
+            sessionRejectedHint={state.sessionRejected}
+          />
+        ) : !state.isAuthenticated ? (
+          // Authority-first structure: while not server-validated, nothing
+          // but the locked state may mount — History and Candidates are
+          // unreachable in every non-authenticated status (validating,
+          // server_unavailable, unauthenticated).
           <SidePanelLockedState
             authStatus={state.authStatus}
             lang={state.uiLang}
@@ -302,16 +360,8 @@ export const SidePanelApp: React.FC = () => {
             onToggleCandidate={toggleSelect}
             onToggleDetails={toggleDetails}
           />
-        ) : null}
-
-        {state.tab === "history" ? <HistoryTab lang={state.uiLang} /> : null}
-        {state.tab === "settings" ? (
-          <SettingsTab
-            lang={state.uiLang}
-            onLanguageChange={setUiLang}
-            authOnly={!state.isAuthenticated}
-            sessionRejectedHint={state.sessionRejected}
-          />
+        ) : state.tab === "history" ? (
+          <HistoryTab lang={state.uiLang} />
         ) : null}
       </div>
     </div>
