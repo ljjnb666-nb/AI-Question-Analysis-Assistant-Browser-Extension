@@ -28,9 +28,9 @@ set PUBLIC_BASE_URL=https://analytics.082515.online
 ## What it provides
 
 - `POST /auth/send-verification-code`: send a real email verification code
-- `POST /auth/register`: email registration for plugin access
-- `POST /auth/login`: email login for plugin access
-- `POST /auth/session`: server-authoritative session validation; requires `Authorization: Bearer <authToken>` and a `{ "userId": "..." }` body. Returns `{ ok: true, user: { userId, email }, expiresAt }` for a live session, or `401 AUTH_SESSION_INVALID` for any invalid, expired, revoked, or mismatched session
+- `POST /auth/register`: email registration for plugin access. Registration runs as one all-or-nothing operation (validate input, verify the one-time code, check the account, create the user, consume the code). Invalid or expired codes always return `400 invalid or expired verification code` regardless of whether the account exists; `409 email already registered` is only returned after a valid code proved email control
+- `POST /auth/login`: email login for plugin access; unknown account and wrong password share the same `401 AUTH_INVALID_CREDENTIALS` response
+- `POST /auth/session`: server-side session validation authority; requires `Authorization: Bearer <authToken>` and a `{ "userId": "..." }` body. Returns `{ ok: true, user: { userId, email }, expiresAt }` for a live session, or `401 AUTH_SESSION_INVALID` for any invalid, expired, revoked, or mismatched session
 - `POST /auth/logout`: validates the bearer session and revokes the stored token server-side; returns `401 AUTH_SESSION_INVALID` for unknown or already-revoked sessions
 - `POST /analytics/events`: anonymous/authenticated event ingestion
 - `GET /analytics/summary`: daily + rolling metrics summary, requires an admin session cookie or `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
@@ -51,10 +51,10 @@ Security notes:
 
 - Verification codes are stored hashed, not in plaintext, and are generated with `crypto.randomInt`.
 - Extension account auth tokens are stored hashed, not in plaintext. Analytics admin session credentials are random and held only in the bounded server-memory registry until expiry or eviction.
-- Account tokens carry a server-side expiry (`AUTH_SESSION_TTL_MS`, 30 days). Every session is validated against the stored hash and expiry; the `chrome.storage.local` copy is only a client cache.
+- Account tokens carry a server-side expiry (`AUTH_SESSION_TTL_MS`, 30 days). The server exposes the validation and revocation authority (`/auth/session`, `/auth/logout`), but the `chrome.storage.local` copy of `userId`/`userEmail`/`authToken` is still only an unverified client cache: until REL-AUTH-01C wires startup validation into the popup / side panel / settings surfaces, those UIs continue to gate on the cached identity.
 - Each account has a single active token: registering or logging in again revokes the previous token, and logout revokes the token server-side.
-- Databases created before token expiries existed are migrated in place (`ALTER TABLE users ADD COLUMN authTokenExpiresAt`); legacy tokens without a provable expiry fail session validation until the next login issues a fresh bounded token.
-- Registration rejects empty emails, short passwords, and duplicate accounts before consuming the one-time verification code.
+- Databases created before token expiries existed are migrated in place (`ALTER TABLE users ADD COLUMN authTokenExpiresAt`) before any read, write, or legacy JSON import touches the new column; legacy tokens without a provable expiry fail session validation until the next login issues a fresh bounded token.
+- Registration and login do not disclose account existence without proof of email control: registration verifies the one-time code before any duplicate check, and login returns the same `AUTH_INVALID_CREDENTIALS` error for unknown accounts and wrong passwords.
 - The server enforces basic fixed-window rate limits on auth, event ingestion, and metrics reads.
 - JSON request bodies larger than 64 KB are rejected.
 

@@ -33,6 +33,7 @@ import {
   pruneAnalyticsEvents,
   pruneAnalyticsEventsInStorage,
   CURRENT_ANALYTICS_PRIVACY_EPOCH,
+  registerUserWithVerificationCodeInStorage,
   resetDbConnectionForTests,
   revokeUserSession,
   revokeUserSessionInStorage,
@@ -564,5 +565,141 @@ describe("verification code lifecycle", () => {
     expect(second.code).not.toBe(first.code);
     expect(() => verifyEmailCode(db, "rotate-code@example.com", first.code)).toThrow(/invalid or expired/i);
     expect(() => verifyEmailCode(db, "rotate-code@example.com", second.code)).not.toThrow();
+  });
+});
+
+describe("auth core registration and migration hardening", () => {
+  it("AUTH_CORE_24_LEGACY_EMPTY_SQLITE_JSON_IMPORT migrates the schema before importing legacy users", () => {
+    const dataDir = path.join(os.tmpdir(), `quiz-solver-auth-dataimport-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    const previousDataDir = process.env.ANALYTICS_DATA_DIR;
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    delete process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    try {
+      fs.mkdirSync(dataDir, { recursive: true });
+
+      // An old pre-TTL database: schema without authTokenExpiresAt, empty users.
+      const legacyDatabase = new DatabaseSync(path.join(dataDir, "analytics-db.sqlite"));
+      try {
+        legacyDatabase.exec(`
+          CREATE TABLE users (
+            userId TEXT PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            passwordHash TEXT NOT NULL,
+            passwordSalt TEXT NOT NULL,
+            authTokenHash TEXT,
+            authTokenSalt TEXT,
+            authToken TEXT,
+            createdAt INTEGER NOT NULL,
+            deviceIdsJson TEXT NOT NULL DEFAULT '[]'
+          );
+        `);
+      } finally {
+        legacyDatabase.close();
+      }
+
+      // A legacy JSON snapshot with one user whose password is known and whose
+      // token has no provable expiry.
+      const importedDigest = nodeCrypto.scryptSync("secret-123", "legacy-import-salt", 64).toString("hex");
+      fs.writeFileSync(
+        path.join(dataDir, "analytics-db.json"),
+        JSON.stringify({
+          devices: [],
+          analytics_events: [],
+          email_verification_codes: [],
+          users: [{
+            userId: "usr-imported",
+            email: "imported@example.com",
+            passwordHash: importedDigest,
+            passwordSalt: "legacy-import-salt",
+            authTokenHash: "imported-token-hash",
+            authTokenSalt: "imported-token-salt",
+            createdAt: 0,
+            deviceIds: [],
+          }],
+        }),
+        "utf8",
+      );
+
+      process.env.ANALYTICS_DATA_DIR = dataDir;
+      const opened = loadDb();
+
+      // Schema gained the expiry column and the user was imported.
+      const probe = new DatabaseSync(path.join(dataDir, "analytics-db.sqlite"));
+      try {
+        expect(probe.prepare("PRAGMA table_info(users)").all().map((column) => column.name)).toContain("authTokenExpiresAt");
+      } finally {
+        probe.close();
+      }
+      expect(opened.users.map((user) => user.email)).toEqual(["imported@example.com"]);
+
+      // The imported legacy token has no provable expiry and fails closed.
+      expect(validateUserSessionInStorage("usr-imported", ["tok", "imported"].join("_"))).toBeNull();
+
+      // A fresh login on the migrated schema issues a bounded valid session.
+      const loggedIn = loginUserInStorage("imported@example.com", "secret-123", "dev-import");
+      expect(validateUserSessionInStorage(loggedIn.user.userId, loggedIn.authToken)).not.toBeNull();
+
+      // A second reopen stays healthy with no data loss.
+      resetDbConnectionForTests();
+      expect(loadDb().users).toHaveLength(1);
+      expect(validateUserSessionInStorage(loggedIn.user.userId, loggedIn.authToken)).not.toBeNull();
+    } finally {
+      resetDbConnectionForTests();
+      if (previousDataDir === undefined) delete process.env.ANALYTICS_DATA_DIR;
+      else process.env.ANALYTICS_DATA_DIR = previousDataDir;
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("AUTH_CORE_28_REGISTRATION_CREATE_FAILURE_ROLLBACK leaves code and tables untouched when creation fails", () => {
+    const dbFile = path.join(os.tmpdir(), `quiz-solver-auth-rollback-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+    try {
+      const { code } = createEmailVerificationCodeInStorage("rollback@example.com");
+
+      // Simulate a storage-level creation failure inside the registration
+      // transaction via a raising trigger on the users table.
+      const saboteur = new DatabaseSync(dbFile);
+      try {
+        saboteur.exec("CREATE TRIGGER fail_user_insert BEFORE INSERT ON users BEGIN SELECT RAISE(ABORT, 'simulated create failure'); END;");
+      } finally {
+        saboteur.close();
+      }
+
+      expect(() =>
+        registerUserWithVerificationCodeInStorage("rollback@example.com", "secret-123", code, "dev-rollback"),
+      ).toThrow();
+
+      // All-or-nothing: no user, no device, and the code is still unconsumed.
+      const afterFailure = loadDb();
+      expect(afterFailure.users).toHaveLength(0);
+      expect(afterFailure.devices).toHaveLength(0);
+      expect(afterFailure.email_verification_codes[0].consumedAt ?? null).toBeNull();
+
+      // With the failure removed the same code still registers successfully.
+      const remover = new DatabaseSync(dbFile);
+      try {
+        remover.exec("DROP TRIGGER fail_user_insert");
+      } finally {
+        remover.close();
+      }
+      const registered = registerUserWithVerificationCodeInStorage("rollback@example.com", "secret-123", code, "dev-rollback");
+      expect(registered.user.email).toBe("rollback@example.com");
+      expect(validateUserSessionInStorage(registered.user.userId, registered.authToken)).not.toBeNull();
+      expect(loadDb().email_verification_codes[0].consumedAt ?? null).not.toBeNull();
+    } finally {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    }
   });
 });

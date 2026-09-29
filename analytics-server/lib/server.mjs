@@ -3,15 +3,14 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { buildAnalyticsSummary, buildTimeSeries } from "./metrics.mjs";
 import {
   createEmailVerificationCodeInStorage,
-  createUserInStorage,
-  findUserByEmailInStorage,
   getStorageBackendInfo,
   loadDb,
   loginUserInStorage,
   recordAnalyticsEventInStorage,
+  registerUserWithVerificationCodeInStorage,
   revokeUserSessionInStorage,
   validateUserSessionInStorage,
-  verifyEmailCodeInStorage,
+  RegistrationError,
 } from "./store.mjs";
 import { createFixedWindowRateLimiter, normalizeIpAddress } from "./security.mjs";
 import { normalizeRemoteAnalyticsEvent } from "./telemetry.mjs";
@@ -929,8 +928,6 @@ export function createAnalyticsHandler(options = {}) {
   const {
     adminToken = process.env.ANALYTICS_ADMIN_TOKEN,
     createEmailVerificationCodeImpl = createEmailVerificationCodeInStorage,
-    createUserImpl = createUserInStorage,
-    findUserByEmailImpl = findUserByEmailInStorage,
     isMailerConfigured,
     loadDbImpl = loadDb,
     loginUserImpl = loginUserInStorage,
@@ -941,10 +938,10 @@ export function createAnalyticsHandler(options = {}) {
     adminSessionMaxCount = ADMIN_SESSION_MAX_COUNT,
     createAdminSessionToken,
     recordAnalyticsEventImpl = recordAnalyticsEventInStorage,
+    registerUserImpl = registerUserWithVerificationCodeInStorage,
     revokeUserSessionImpl = revokeUserSessionInStorage,
     sendVerificationCodeEmail,
     validateUserSessionImpl = validateUserSessionInStorage,
-    verifyEmailCodeImpl = verifyEmailCodeInStorage,
   } = options;
 
   if (typeof isMailerConfigured !== "function") {
@@ -1068,19 +1065,24 @@ export function createAnalyticsHandler(options = {}) {
         ensureTrustedBrowserOrigin(req);
         enforceRateLimit(rateLimiter, `register:ip:${ip}`, 20, 15 * 60 * 1000);
         const body = await readJsonBody(req);
-        // Predictable registration failures are rejected before the verification
-        // code is consumed so invalid input does not burn a one-time code.
-        const email = String(body.email || "").trim().toLowerCase();
-        const password = String(body.password || "");
-        if (!email) throw new HttpError(400, "email is required");
-        if (password.length < 6) throw new HttpError(400, "password must be at least 6 characters");
-        if (findUserByEmailImpl(email)) throw new HttpError(409, "email already registered");
-        verifyEmailCodeImpl(body.email, body.verificationCode);
-        const { user, authToken } = createUserImpl(body.email, body.password, body.deviceId);
+        // One authoritative primitive performs validation, code verification,
+        // the duplicate check, creation, and code consumption atomically, so a
+        // failed registration never burns the one-time code and account
+        // existence is only surfaced after a valid code proved email control.
+        let registered;
+        try {
+          registered = registerUserImpl(body.email, body.password, body.verificationCode, body.deviceId);
+        } catch (err) {
+          if (err instanceof RegistrationError) {
+            if (err.message === "email already registered") throw new HttpError(409, err.message);
+            throw new HttpError(400, err.message);
+          }
+          throw new HttpError(503, "AUTH_SERVICE_UNAVAILABLE");
+        }
         sendJson(req, res, 200, {
           ok: true,
-          user: { userId: user.userId, email: user.email },
-          authToken,
+          user: { userId: registered.user.userId, email: registered.user.email },
+          authToken: registered.authToken,
         });
         return;
       }
@@ -1089,11 +1091,22 @@ export function createAnalyticsHandler(options = {}) {
         ensureTrustedBrowserOrigin(req);
         enforceRateLimit(rateLimiter, `login:ip:${ip}`, 30, 15 * 60 * 1000);
         const body = await readJsonBody(req);
-        const { user, authToken } = loginUserImpl(body.email, body.password, body.deviceId);
+        // Unknown account and wrong password share one stable response so the
+        // login endpoint never discloses whether an email is registered.
+        let loggedIn;
+        try {
+          loggedIn = loginUserImpl(body.email, body.password, body.deviceId);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (message === "account not found" || message === "invalid password") {
+            throw new HttpError(401, "AUTH_INVALID_CREDENTIALS");
+          }
+          throw new HttpError(503, "AUTH_SERVICE_UNAVAILABLE");
+        }
         sendJson(req, res, 200, {
           ok: true,
-          user: { userId: user.userId, email: user.email },
-          authToken,
+          user: { userId: loggedIn.user.userId, email: loggedIn.user.email },
+          authToken: loggedIn.authToken,
         });
         return;
       }

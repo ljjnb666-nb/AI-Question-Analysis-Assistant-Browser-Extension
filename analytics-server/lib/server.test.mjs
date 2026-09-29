@@ -9,7 +9,9 @@ import { createAdminSessionStore } from "./admin-sessions.mjs";
 import {
   createEmailVerificationCodeInStorage,
   createUserInStorage,
+  findUserByEmailInStorage,
   resetDbConnectionForTests,
+  validateUserSessionInStorage,
   verifyEmailCodeInStorage,
 } from "./store.mjs";
 
@@ -685,6 +687,126 @@ describe("auth core registration code consumption", () => {
       expect(parsePayload(created.res).authToken).toBeTruthy();
 
       expect(() => verifyEmailCodeInStorage("success@example.com", code)).toThrow(/invalid or expired/i);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("auth core enumeration safety", () => {
+  function createRealStorageHandler() {
+    const dbFile = path.join(os.tmpdir(), `quiz-solver-auth-enum-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+    const cleanup = () => {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    };
+    return { handler: createHandler(), cleanup };
+  }
+
+  async function registerWithCode(handler, email, verificationCode) {
+    return invoke(handler, {
+      method: "POST",
+      url: "/auth/register",
+      body: JSON.stringify({ email, password: "secret-123", verificationCode }),
+    });
+  }
+
+  it("AUTH_CORE_25_REGISTER_UNKNOWN_EMAIL_INVALID_CODE fails generically without creating a user", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      const { res } = await registerWithCode(handler, "ghost@example.com", ["000", "000"].join(""));
+      expect(res.statusCode).toBe(400);
+      expect(parsePayload(res).error).toBe("invalid or expired verification code");
+      expect(findUserByEmailInStorage("ghost@example.com")).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_26_REGISTER_EXISTING_EMAIL_INVALID_CODE is externally indistinguishable from an unknown email", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      createUserInStorage("taken@example.com", "secret-123", "dev-taken");
+
+      const unknown = await registerWithCode(handler, "ghost@example.com", ["000", "000"].join(""));
+      const existing = await registerWithCode(handler, "taken@example.com", ["000", "000"].join(""));
+
+      expect(existing.res.statusCode).toBe(unknown.res.statusCode);
+      expect(parsePayload(existing.res).error).toBe(parsePayload(unknown.res).error);
+      // The existing account is untouched by the probing attempt.
+      expect(findUserByEmailInStorage("taken@example.com")?.userId).toBeTruthy();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_27_DUPLICATE_VALID_CODE_NOT_PARTIAL keeps the account and the code intact", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      const existing = createUserInStorage("dupe-valid@example.com", "secret-123", "dev-original");
+      const { code } = createEmailVerificationCodeInStorage("dupe-valid@example.com");
+
+      const duplicate = await registerWithCode(handler, "dupe-valid@example.com", code);
+      expect(duplicate.res.statusCode).toBe(409);
+      expect(parsePayload(duplicate.res).error).toBe("email already registered");
+
+      // No second account and no disturbed session on the original account.
+      expect(findUserByEmailInStorage("dupe-valid@example.com")?.userId).toBe(existing.user.userId);
+      expect(validateUserSessionInStorage(existing.user.userId, existing.authToken)).not.toBeNull();
+
+      // The proven-code duplicate path must not consume the one-time code.
+      expect(() => verifyEmailCodeInStorage("dupe-valid@example.com", code)).not.toThrow();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_29_LOGIN_UNKNOWN_EMAIL and AUTH_CORE_30_LOGIN_WRONG_PASSWORD share one response", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      createUserInStorage("login@example.com", "secret-123", "dev-login");
+
+      const unknown = await invoke(handler, {
+        method: "POST",
+        url: "/auth/login",
+        body: JSON.stringify({ email: "ghost@example.com", password: "secret-123" }),
+      });
+      const wrongPassword = await invoke(handler, {
+        method: "POST",
+        url: "/auth/login",
+        body: JSON.stringify({ email: "login@example.com", password: "wrong-password" }),
+      });
+
+      expect(unknown.res.statusCode).toBe(401);
+      expect(parsePayload(unknown.res)).toEqual({ ok: false, error: "AUTH_INVALID_CREDENTIALS" });
+      expect(wrongPassword.res.statusCode).toBe(unknown.res.statusCode);
+      expect(parsePayload(wrongPassword.res)).toEqual(parsePayload(unknown.res));
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_31_SUCCESSFUL_ATOMIC_REGISTRATION creates one account with a consumed code and a valid bounded token", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      const { code } = createEmailVerificationCodeInStorage("atomic@example.com");
+
+      const created = await registerWithCode(handler, "atomic@example.com", code);
+      expect(created.res.statusCode).toBe(200);
+
+      const payload = parsePayload(created.res);
+      expect(payload.ok).toBe(true);
+      expect(findUserByEmailInStorage("atomic@example.com")?.userId).toBe(payload.user.userId);
+      expect(validateUserSessionInStorage(payload.user.userId, payload.authToken)).not.toBeNull();
+      expect(() => verifyEmailCodeInStorage("atomic@example.com", code)).toThrow(/invalid or expired/i);
     } finally {
       cleanup();
     }
