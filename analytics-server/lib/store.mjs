@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomInt, scryptSync, timingSafeEqual } from "node:crypto";
 import { hashSecret, issueOpaqueToken, verifySecret } from "./security.mjs";
 
 let DatabaseSync = null;
@@ -655,6 +655,13 @@ export function loginUserInStorage(email, password, deviceId) {
   });
 }
 
+export function findUserByEmailInStorage(email) {
+  if (!SQLITE_SUPPORTED) {
+    return findUserByEmail(loadDbFromJsonFile(), email);
+  }
+  return findStoredUserByEmail(getDatabase(), email);
+}
+
 // A session is valid only when the stored token hash matches AND the token
 // carries a provable, unexpired expiry. Records without an expiry (pre-TTL
 // legacy tokens) fail closed and require a fresh login.
@@ -830,7 +837,7 @@ export function createUser(db, email, password, deviceId) {
 }
 
 export function issueVerificationCode() {
-  return `${Math.floor(100000 + Math.random() * 900000)}`;
+  return `${randomInt(100000, 1000000)}`;
 }
 
 export function createEmailVerificationCode(db, email) {

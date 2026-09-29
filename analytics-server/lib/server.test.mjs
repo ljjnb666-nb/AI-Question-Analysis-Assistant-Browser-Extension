@@ -1,8 +1,17 @@
 // @vitest-environment node
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createAnalyticsHandler } from "./server.mjs";
 import { createAdminSessionStore } from "./admin-sessions.mjs";
+import {
+  createEmailVerificationCodeInStorage,
+  createUserInStorage,
+  resetDbConnectionForTests,
+  verifyEmailCodeInStorage,
+} from "./store.mjs";
 
 function createReq({ method = "GET", url = "/", headers = {}, body = "", socket = { remoteAddress: "127.0.0.1" } } = {}) {
   const listeners = new Map();
@@ -598,5 +607,86 @@ describe("auth core endpoints", () => {
     }
     expect(last.res.statusCode).toBe(429);
     expect(validateUserSessionImpl).toHaveBeenCalledTimes(120);
+  });
+});
+
+describe("auth core registration code consumption", () => {
+  function createRealStorageHandler() {
+    const dbFile = path.join(os.tmpdir(), `quiz-solver-auth-register-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+    const cleanup = () => {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    };
+    return { handler: createHandler(), cleanup };
+  }
+
+  it("AUTH_CORE_21_INVALID_PASSWORD_DOES_NOT_CONSUME_CODE keeps the code usable", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      const { code } = createEmailVerificationCodeInStorage("burn@example.com");
+      const invalid = await invoke(handler, {
+        method: "POST",
+        url: "/auth/register",
+        body: JSON.stringify({ email: "burn@example.com", password: "123", verificationCode: code }),
+      });
+      expect(invalid.res.statusCode).toBe(400);
+      expect(parsePayload(invalid.res).error).toMatch(/password must be at least 6 characters/i);
+
+      const retry = await invoke(handler, {
+        method: "POST",
+        url: "/auth/register",
+        body: JSON.stringify({ email: "burn@example.com", password: "secret-123", verificationCode: code, deviceId: "dev-burn" }),
+      });
+      expect(retry.res.statusCode).toBe(200);
+      expect(parsePayload(retry.res).ok).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_22_DUPLICATE_ACCOUNT_DOES_NOT_CONSUME_CODE keeps the code usable", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      createUserInStorage("dupe@example.com", "secret-123", "dev-existing");
+      const { code } = createEmailVerificationCodeInStorage("dupe@example.com");
+
+      const duplicate = await invoke(handler, {
+        method: "POST",
+        url: "/auth/register",
+        body: JSON.stringify({ email: "dupe@example.com", password: "secret-123", verificationCode: code }),
+      });
+      expect(duplicate.res.statusCode).toBe(409);
+      expect(parsePayload(duplicate.res).error).toMatch(/email already registered/i);
+      expect(() => verifyEmailCodeInStorage("dupe@example.com", code)).not.toThrow();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("AUTH_CORE_23_SUCCESS_CONSUMES_CODE_ONCE consumes the code exactly once", async () => {
+    const { handler, cleanup } = createRealStorageHandler();
+    try {
+      const { code } = createEmailVerificationCodeInStorage("success@example.com");
+
+      const created = await invoke(handler, {
+        method: "POST",
+        url: "/auth/register",
+        body: JSON.stringify({ email: "success@example.com", password: "secret-123", verificationCode: code, deviceId: "dev-success" }),
+      });
+      expect(created.res.statusCode).toBe(200);
+      expect(parsePayload(created.res).authToken).toBeTruthy();
+
+      expect(() => verifyEmailCodeInStorage("success@example.com", code)).toThrow(/invalid or expired/i);
+    } finally {
+      cleanup();
+    }
   });
 });

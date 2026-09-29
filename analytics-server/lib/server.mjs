@@ -4,6 +4,7 @@ import { buildAnalyticsSummary, buildTimeSeries } from "./metrics.mjs";
 import {
   createEmailVerificationCodeInStorage,
   createUserInStorage,
+  findUserByEmailInStorage,
   getStorageBackendInfo,
   loadDb,
   loginUserInStorage,
@@ -929,6 +930,7 @@ export function createAnalyticsHandler(options = {}) {
     adminToken = process.env.ANALYTICS_ADMIN_TOKEN,
     createEmailVerificationCodeImpl = createEmailVerificationCodeInStorage,
     createUserImpl = createUserInStorage,
+    findUserByEmailImpl = findUserByEmailInStorage,
     isMailerConfigured,
     loadDbImpl = loadDb,
     loginUserImpl = loginUserInStorage,
@@ -1066,6 +1068,13 @@ export function createAnalyticsHandler(options = {}) {
         ensureTrustedBrowserOrigin(req);
         enforceRateLimit(rateLimiter, `register:ip:${ip}`, 20, 15 * 60 * 1000);
         const body = await readJsonBody(req);
+        // Predictable registration failures are rejected before the verification
+        // code is consumed so invalid input does not burn a one-time code.
+        const email = String(body.email || "").trim().toLowerCase();
+        const password = String(body.password || "");
+        if (!email) throw new HttpError(400, "email is required");
+        if (password.length < 6) throw new HttpError(400, "password must be at least 6 characters");
+        if (findUserByEmailImpl(email)) throw new HttpError(409, "email already registered");
         verifyEmailCodeImpl(body.email, body.verificationCode);
         const { user, authToken } = createUserImpl(body.email, body.password, body.deviceId);
         sendJson(req, res, 200, {

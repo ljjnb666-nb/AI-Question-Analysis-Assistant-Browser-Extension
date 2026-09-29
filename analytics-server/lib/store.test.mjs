@@ -3,9 +3,17 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { scryptSync } from "node:crypto";
+import * as nodeCrypto from "node:crypto";
+
+// randomInt is wrapped (not replaced) so every other crypto primitive keeps
+// its real behaviour; the AUTH_CORE_16 test pins the RNG contract on it.
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, randomInt: vi.fn(actual.randomInt) };
+});
+
 import {
   ANALYTICS_EVENT_RETENTION_MS,
   AUTH_SESSION_TTL_MS,
@@ -13,6 +21,7 @@ import {
   createEmailVerificationCodeInStorage,
   createUser,
   createUserInStorage,
+  findUserByEmailInStorage,
   findUserByToken,
   loginUser,
   loginUserInStorage,
@@ -483,7 +492,7 @@ describe("auth core session lifecycle", () => {
             deviceIdsJson TEXT NOT NULL DEFAULT '[]'
           );
         `);
-        const legacyDigest = scryptSync("secret-123", "legacy-salt", 64).toString("hex");
+        const legacyDigest = nodeCrypto.scryptSync("secret-123", "legacy-salt", 64).toString("hex");
         legacyDatabase
           .prepare(
             "INSERT INTO users (userId, email, passwordHash, passwordSalt, authTokenHash, authTokenSalt, authToken, createdAt, deviceIdsJson) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, '[]')",
@@ -499,7 +508,7 @@ describe("auth core session lifecycle", () => {
 
       const legacyToken = ["tok", "legacy"].join("_");
       expect(validateUserSessionInStorage("usr-legacy", legacyToken)).toBeNull();
-      expect(loadDb().users.map((user) => user.userId)).toEqual(["usr-legacy"]);
+      expect(findUserByEmailInStorage("legacy-migration@example.com")?.userId).toBe("usr-legacy");
 
       // A fresh login re-issues a bounded token through the migrated schema.
       const loggedIn = loginUserInStorage("legacy-migration@example.com", "secret-123", "dev-legacy");
@@ -516,3 +525,44 @@ describe("auth core session lifecycle", () => {
   });
 });
 
+describe("verification code lifecycle", () => {
+  it("AUTH_CORE_16_CRYPTO_CODE_GENERATOR derives codes from crypto.randomInt", () => {
+    const randomIntMock = vi.mocked(nodeCrypto.randomInt);
+    randomIntMock.mockReturnValueOnce(654321);
+    try {
+      const db = createDb();
+      const { code } = createEmailVerificationCode(db, "rng@example.com");
+      expect(code).toBe("654321");
+      expect(randomIntMock).toHaveBeenCalledWith(100000, 1000000);
+      expect(code).toMatch(/^\d{6}$/);
+    } finally {
+      randomIntMock.mockReset();
+    }
+  });
+
+  it("AUTH_CORE_17_CODE_REPLAY rejects a consumed verification code", () => {
+    const db = createDb();
+    const { code } = createEmailVerificationCode(db, "replay@example.com");
+    verifyEmailCode(db, "replay@example.com", code);
+
+    expect(() => verifyEmailCode(db, "replay@example.com", code)).toThrow(/invalid or expired/i);
+  });
+
+  it("AUTH_CORE_18_CODE_EXPIRED rejects codes past their 10 minute window", () => {
+    const db = createDb();
+    const { code } = createEmailVerificationCode(db, "expired-code@example.com");
+    db.email_verification_codes[0].expiresAt = Date.now() - 1;
+
+    expect(() => verifyEmailCode(db, "expired-code@example.com", code)).toThrow(/invalid or expired/i);
+  });
+
+  it("AUTH_CORE_19_NEW_CODE_REVOKES_OLD invalidates the previous code for the same email", () => {
+    const db = createDb();
+    const first = createEmailVerificationCode(db, "rotate-code@example.com");
+    const second = createEmailVerificationCode(db, "rotate-code@example.com");
+
+    expect(second.code).not.toBe(first.code);
+    expect(() => verifyEmailCode(db, "rotate-code@example.com", first.code)).toThrow(/invalid or expired/i);
+    expect(() => verifyEmailCode(db, "rotate-code@example.com", second.code)).not.toThrow();
+  });
+});

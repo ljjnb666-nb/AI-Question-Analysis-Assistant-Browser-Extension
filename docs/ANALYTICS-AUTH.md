@@ -49,11 +49,12 @@ If a legacy `analytics-server/data/analytics-db.json` file exists and the SQLite
 
 Security notes:
 
-- Verification codes are stored hashed, not in plaintext.
+- Verification codes are stored hashed, not in plaintext, and are generated with `crypto.randomInt`.
 - Extension account auth tokens are stored hashed, not in plaintext. Analytics admin session credentials are random and held only in the bounded server-memory registry until expiry or eviction.
 - Account tokens carry a server-side expiry (`AUTH_SESSION_TTL_MS`, 30 days). Every session is validated against the stored hash and expiry; the `chrome.storage.local` copy is only a client cache.
 - Each account has a single active token: registering or logging in again revokes the previous token, and logout revokes the token server-side.
 - Databases created before token expiries existed are migrated in place (`ALTER TABLE users ADD COLUMN authTokenExpiresAt`); legacy tokens without a provable expiry fail session validation until the next login issues a fresh bounded token.
+- Registration rejects empty emails, short passwords, and duplicate accounts before consuming the one-time verification code.
 - The server enforces basic fixed-window rate limits on auth, event ingestion, and metrics reads.
 - JSON request bodies larger than 64 KB are rejected.
 
