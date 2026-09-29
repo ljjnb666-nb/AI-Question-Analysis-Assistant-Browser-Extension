@@ -241,15 +241,17 @@ async function getPageTabId(driver: Page, origin: string, title: string): Promis
 }
 
 async function seedAuthenticatedSidePanel(driver: Page, analyticsBaseUrl: string) {
-  await driver.evaluate(async (analyticsBaseUrl: string) => chrome.storage.local.set({
+  // The evaluate callback runs in the page context, so the assembled fixture
+  // values are passed as arguments instead of being closed over.
+  await driver.evaluate(async ({ analyticsBaseUrl, token, key }) => chrome.storage.local.set({
     parseHistory: [],
     analyticsLog: [],
     appSettings: {
       userId: "phase8a-e2e-user",
       userEmail: "phase8a@example.test",
-      authToken: PHASE8A_E2E_TOKEN,
+      authToken: token,
       providerId: "deepseek",
-      apiKey: PHASE8A_E2E_KEY,
+      apiKey: key,
       apiModel: "deepseek-v4-flash",
       preferredRoute: "text",
       language: "en",
@@ -257,7 +259,7 @@ async function seedAuthenticatedSidePanel(driver: Page, analyticsBaseUrl: string
       analyticsConsentVersion: 1,
       analyticsBaseUrl,
     },
-  }), analyticsBaseUrl);
+  }), { analyticsBaseUrl, token: PHASE8A_E2E_TOKEN, key: PHASE8A_E2E_KEY });
 }
 
 async function sendDetectToTab(driver: Page, tabId: number) {
