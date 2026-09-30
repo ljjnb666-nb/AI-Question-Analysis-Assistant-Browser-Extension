@@ -32,9 +32,9 @@ let releaseLogout: (() => void) | null = null;
 vi.mock("@/shared/utils/auth", () => ({
   logoutAccount: vi.fn(
     () =>
-      new Promise((_resolve) => {
+      new Promise((resolve) => {
         eventLog.push("logoutAccount");
-        releaseLogout = () => _resolve({ serverRevoked: false, serverStatus: "network_error" });
+        releaseLogout = () => resolve({ serverRevoked: false, serverStatus: "network_error" });
       }),
   ),
   loginWithEmail: vi.fn(),
@@ -53,7 +53,7 @@ describe("useAuthController immediate logout", () => {
   it("AUTH_UI_41_SETTINGS_LOGOUT_IMMEDIATE settings logout bypasses beforeAction and fails closed first", async () => {
     const beforeAction = vi.fn(
       () =>
-        new Promise<void>((resolve) => {
+        new Promise<void>((_resolve) => {
           eventLog.push("beforeAction");
           releaseLogout?.();
         }),

@@ -59,6 +59,14 @@ vi.mock("@/shared/utils/analytics", () => ({
   logEvent: vi.fn(),
 }));
 
+// The cross-surface owner registry is mocked so the owner-commit promise can
+// be parked deterministically (AUTH_UI_61/62).
+vi.mock("@/shared/auth/protectedWorkOwner", () => ({
+  markProtectedWorkOwner: vi.fn(async () => undefined),
+  clearProtectedWorkOwner: vi.fn(async () => undefined),
+  readProtectedWorkOwners: vi.fn(async () => ({ autoSolve: [], fullPage: [] })),
+}));
+
 function makeCandidate(overrides: Partial<DetectedCandidate> = {}): DetectedCandidate {
   return {
     block: {
@@ -302,7 +310,7 @@ describe("useSidePanelActions authority gate", () => {
     // progress, and the protected-work registry is cleared again.
     expect(setIsFullPageScan).not.toHaveBeenCalledWith(true);
     expect(setScanProgress).not.toHaveBeenCalledWith(expect.objectContaining({ progress: expect.anything() }));
-    expect(markProtectedWork).toHaveBeenLastCalledWith("fullPage", false);
+    expect(markProtectedWork).toHaveBeenLastCalledWith("fullPage", false, 7);
     expect(sentMessages).toEqual([]);
   });
 
@@ -344,6 +352,9 @@ describe("useSidePanelActions authority gate", () => {
     authenticated = false;
     resolveSend({ ok: true });
     await running;
+    // Drain every microtask the blocked handler left behind: a suspended
+    // chain here would starve the NEXT test's awaited dispatches.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // The dispatch "succeeded" at transport level, but the authority had
     // already lapsed: no running UI state may be entered.

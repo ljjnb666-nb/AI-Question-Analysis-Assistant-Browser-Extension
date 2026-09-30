@@ -54,9 +54,12 @@ type UseSidePanelActionsOptions = {
    * happens. The auth-loss watchdog reads this instead of a passive-effect
    * state snapshot so termination authority cannot miss an active run
    * (AUTH-UI-INV-13). The registry records the owner tab: STOP/CANCEL target
-   * the recorded owner, never a re-guessed best tab.
+   * the recorded owner, never a re-guessed best tab. The returned promise
+   * resolves once the cross-surface owner write has committed — callers MUST
+   * await it before dispatching and re-check authority afterwards, and on
+   * every failed path clean up with the same exact (kind, tabId).
    */
-  markProtectedWork: (kind: "autoSolve" | "fullPage", active: boolean, tabId?: number) => void;
+  markProtectedWork: (kind: "autoSolve" | "fullPage", active: boolean, tabId: number) => Promise<void>;
   protectedWork?: {
     current: {
       autoSolve: { active: boolean; tabId?: number };
@@ -153,22 +156,27 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     const activeTab = await getBestActionTab();
     if (!activeTab?.id) return;
     // Last-responsible-moment recheck after the tab lookup await. A full
-    // page scan is long-running protected work: the synchronous work marker
-    // is set before the START so the auth-loss watchdog can always see it.
+    // page scan is long-running protected work: the owner record commits
+    // (awaited) before the START so the auth-loss watchdog can always see
+    // it, with the exact owner tab.
     if (!options.isAuthenticatedNow()) return;
-    if (!options.isAuthenticatedNow()) return;
-    // Record the owner tab with the START: auth-loss termination must go to
-    // the tab that actually runs the scan, never to a re-guessed best tab.
-    options.markProtectedWork("fullPage", true, activeTab.id);
+    await options.markProtectedWork("fullPage", true, activeTab.id);
+    // The owner write awaited — re-confirm the authority before dispatching:
+    // a session lost during the owner commit must not start the workflow.
+    if (!options.isAuthenticatedNow()) {
+      await options.markProtectedWork("fullPage", false, activeTab.id);
+      return;
+    }
     const response = await sendProtectedTabMessageWithBootstrap(
       activeTab.id,
       { type: "START_FULL_PAGE_DETECT" },
       options.isAuthenticatedNow,
     );
     // Running UI state only after a confirmed transport dispatch with the
-    // authority still holding (AUTH-UI-INV-12/13).
+    // authority still holding; every failed path clears the exact owner
+    // record it created (AUTH-UI-INV-12/13).
     if (response.ok === false || !options.isAuthenticatedNow()) {
-      options.markProtectedWork("fullPage", false);
+      await options.markProtectedWork("fullPage", false, activeTab.id);
       return;
     }
     applyDetectState(startFullPageDetectState());
@@ -348,18 +356,24 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     // loss while the lookup was pending must never resurrect the workflow
     // after the watchdog already sent STOP.
     if (!options.isAuthenticatedNow()) return;
-    // Record the owner tab with the START: auth-loss termination must go to
-    // the tab that actually runs the workflow, never to a re-guessed best
-    // tab. Running UI state only flips on after a confirmed transport
-    // dispatch with the authority still holding (AUTH-UI-INV-12/13).
-    options.markProtectedWork("autoSolve", true, activeTab.id);
+    // Record the owner tab with the START (awaited): auth-loss termination
+    // must go to the tab that actually runs the workflow, never to a
+    // re-guessed best tab. The cross-surface owner is established BEFORE the
+    // dispatch, and running UI state only flips on after a confirmed
+    // transport dispatch with the authority still holding (AUTH-UI-INV-12
+    // /13/16). Every failed path clears the exact owner record it created.
+    await options.markProtectedWork("autoSolve", true, activeTab.id);
+    if (!options.isAuthenticatedNow()) {
+      await options.markProtectedWork("autoSolve", false, activeTab.id);
+      return;
+    }
     const response = await sendProtectedTabMessageWithBootstrap(
       activeTab.id,
       { type: "START_AUTO_SOLVE_ALL" },
       options.isAuthenticatedNow,
     );
     if (response.ok === false || !options.isAuthenticatedNow()) {
-      options.markProtectedWork("autoSolve", false);
+      await options.markProtectedWork("autoSolve", false, activeTab.id);
       return;
     }
     options.setFillFeedback("");

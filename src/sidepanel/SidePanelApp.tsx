@@ -127,12 +127,17 @@ export const SidePanelApp: React.FC = () => {
     fullPage: { active: boolean; tabId?: number };
   }>({ autoSolve: { active: false }, fullPage: { active: false } });
   const markProtectedWork = useCallback(
-    (kind: "autoSolve" | "fullPage", active: boolean, tabId?: number) => {
+    async (kind: "autoSolve" | "fullPage", active: boolean, tabId: number) => {
+      // Zero-lag sync flip FIRST: the auth-loss watchdog must see the local
+      // START intent even while the cross-surface write below is in flight.
       protectedWorkRef.current[kind] = { active, tabId: active ? tabId : undefined };
-      if (active && tabId != null) {
-        void markProtectedWorkOwner(kind, tabId);
-      } else if (tabId != null) {
-        void clearProtectedWorkOwner(kind, tabId);
+      // Awaited cross-surface commit: callers re-check authority after this
+      // resolves, so a pending mark can never resurrect a stale owner
+      // (AUTH-UI-INV-15/16).
+      if (active) {
+        await markProtectedWorkOwner(kind, tabId);
+      } else {
+        await clearProtectedWorkOwner(kind, tabId);
       }
     },
     [],
