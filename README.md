@@ -8,7 +8,7 @@
 - 支持视口内和整页题目检测
 - Side Panel 中支持批量解析和批量填充
 - 悬浮结果窗口，带持久化状态
-- 自动答题流程，包含重试和复核启发式
+- auto-solve 自动解析/填充流程，包含重试和复核启发式
 - 多个 AI 提供方，通过统一解析层路由
 - 可选本地 analytics/auth 后端，用于操作侧统计与鉴权
 
@@ -30,7 +30,12 @@ tools/            构建辅助脚本
 ## 文档导航
 
 - [docs/README.md](./docs/README.md)：文档索引
+- [docs/RELEASE-READINESS.md](./docs/RELEASE-READINESS.md)：release hardening 状态、冻结不变量与已知限制
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)：模块边界与重构约束
+- [docs/COMPATIBILITY-MATRIX.md](./docs/COMPATIBILITY-MATRIX.md)：DOM 兼容性语料与已知安全限制
+- [docs/PERMISSIONS.md](./docs/PERMISSIONS.md)：生产权限契约与运行时依据
+- [PRIVACY.md](./PRIVACY.md)：数据流与隐私说明
+- [docs/API-KEY-SECURITY.md](./docs/API-KEY-SECURITY.md)：本地 API Key 存储威胁模型
 - [docs/MANUAL-TEST-GUIDE.md](./docs/MANUAL-TEST-GUIDE.md)：手工验证流程
 - [docs/ANALYTICS-AUTH.md](./docs/ANALYTICS-AUTH.md)：本地 analytics/auth 后端配置说明
 
@@ -82,5 +87,6 @@ npm run check
 
 ## 说明
 
+- auto-solve 指自动解析/填充工作流。The extension does not automatically submit answers; submission remains user-controlled. 插件不会自动提交答案，提交动作仍由用户控制。
 - 扩展只会注入 `http://*/*` 和 `https://*/*` 页面，浏览器内部页面会被刻意排除。
 - `npm run build:raw` 仅在你明确需要原始 Vite 输出时使用；正常打包流程应使用 `npm run build`。

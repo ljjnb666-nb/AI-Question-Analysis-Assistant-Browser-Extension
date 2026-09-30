@@ -11,7 +11,7 @@
 
 3. **加载扩展**
    - 点击「加载解压缩的扩展」
-   - 选择目录：`C:\Users\LJJ2004\所有项目\quiz-solver-ext\dist`
+   - 选择目录：项目仓库根目录下的 `dist/`（先运行 `npm run build` 生成）
    - 扩展应该出现在列表中，图标为 📘
 
 ## P0 改进功能测试
@@ -81,23 +81,51 @@ chrome.storage.local.get('appSettings', (result) => {
 
 ## 自动化测试验证
 
+在项目仓库根目录执行：
+
 ```bash
-cd C:\Users\LJJ2004\所有项目\quiz-solver-ext
-
-# 运行所有测试
-npm run test:run
-
-# 类型检查
-npm run typecheck
+# 提交前默认本地检查（lint + typecheck + 单元测试）
+npm run check
 
 # 构建验证
 npm run build
+
+# 构建产物 + 权限契约验证
+npm run verify:artifact
+
+# 权限验证器单元测试
+npm run test:permissions
+
+# 真实扩展 E2E（会先重新构建扩展）
+npm run test:e2e
 ```
 
-**预期输出：**
-```
-✅ Test Files  4 passed (4)
-✅ Tests      37 passed (37)
-✅ TypeScript check passed
-✅ Build completed successfully
-```
+**预期结果：** 以上每条命令都必须以退出码 0 结束。本指南不硬编码测试文件数/用例数等易漂移指标；以命令实际输出为准。
+
+---
+
+## 发布前手动检查（Release Manual Checks）
+
+除自动化门禁外，每次发布前在真实 Chrome/Edge 中完成以下手动检查：
+
+1. **加载产物**
+   - 在 Chrome/Edge MV3（`chrome://extensions` / `edge://extensions` 开发者模式）加载仓库构建出的 `dist/`，扩展正常出现且无加载报错。
+
+2. **登录与启动会话校验**
+   - 注册/登录后刷新或重开 popup / Side Panel，界面基于服务端会话校验结果解锁；服务端会话失效时 UI 回到未登录状态，不凭本地缓存直接放行。
+
+3. **Analytics 默认关闭**
+   - 全新配置下确认 analytics 默认为 OFF，不产生任何上报请求；设置页中能看到「Usage Analytics / 使用情况统计」控件，显式开启后才发送。
+
+4. **API Key 保存形态**
+   - 保存设置后，`chrome.storage.local` 中的 API Key 应为 `qse:v1:<base64>` 版本化密文 envelope（见上文测试 1）。
+   - 文档口径：这是本地 encrypted-at-rest 混淆表示，**不是秘密保险库**（详见 [API-KEY-SECURITY.md](./API-KEY-SECURITY.md)）。
+
+5. **基础检测/解析/填充**
+   - 手动截图 → 解析 → 填充基本流程可用，填充后有权威回读确认。
+
+6. **确认无自动提交**
+   - 确认整个流程只做解析与填充，**不会自动提交答案**；提交动作始终由用户自己控制。
+
+7. **已知浏览器限制记录**
+   - 按需记录已知限制的实测表现（如关闭的 shadow root 不可遍历、跨域 iframe 不注入、portal 控件 fail-closed 等），与 [COMPATIBILITY-MATRIX.md](./COMPATIBILITY-MATRIX.md) 的已知限制口径保持一致。

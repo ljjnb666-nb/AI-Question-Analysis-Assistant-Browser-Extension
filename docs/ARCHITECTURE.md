@@ -36,10 +36,7 @@ Runtime bootstrap and state management are delegated to:
 
 Detection orchestration:
 - `src/content/contentDetectionBridge.ts`: viewport/full-page detection orchestration
-- `src/content/detector/domDetector.ts`: main detection logic (1140 lines - see REFACTOR-PLAN-domDetector.md for split plan)
-- `src/content/detector/domDetectorPlatforms.ts`: (planned) platform-specific detection
-- `src/content/detector/domDetectorScoring.ts`: (planned) candidate scoring system
-- `src/content/detector/domDetectorContainers.ts`: (planned) container detection
+- `src/content/detector/domDetector.ts`: main detector implementation (large module — see REFACTOR-PLAN-domDetector.md for the split plan)
 
 Auto-solve orchestration:
 - `src/content/contentAutoSolveRuntimeBridge.ts`: runtime wrappers used by auto-solve orchestration
@@ -82,24 +79,26 @@ Message handling:
 The repo has baseline engineering gates:
 
 ```bash
-npm run lint        # ESLint check (21 warnings currently, see TYPESCRIPT-RULES-PLAN.md)
+npm run lint        # ESLint check
 npm run typecheck   # TypeScript compilation check
-npm run test:run    # Unit tests (204 passing, 28 test files)
-npm run test:e2e    # Playwright E2E tests
-npm run check       # All of the above
+npm run test:run    # Unit tests
+npm run test:e2e    # Playwright E2E tests (rebuilds the extension first)
+npm run check       # lint + typecheck + unit tests
 ```
 
-`npm run check` is the minimum pre-merge gate.
+`npm run check` is the minimum pre-merge gate. It covers lint, typecheck, and unit tests only — not E2E, not the production build, and not artifact verification.
 
-Test coverage baseline: 51.16% (see docs/COVERAGE-ANALYSIS.md for improvement roadmap)
+Release and PR CI additionally runs the production build, artifact and permission verification (`npm run verify:artifact`, `npm run verify:permissions`), and real extension Playwright E2E against the exact checked-out commit, reusing the same verified artifact across jobs (see [RELEASE-READINESS.md](./RELEASE-READINESS.md)).
+
+Current test coverage is tracked in docs/COVERAGE-ANALYSIS.md along with its improvement roadmap.
 
 ## Maintenance Plans
 
 Active improvement plans:
 
-- **REFACTOR-PLAN-domDetector.md**: 5-phase plan to split domDetector.ts (1140 lines → ~240 lines)
+- **REFACTOR-PLAN-domDetector.md**: 5-phase plan to split the large `domDetector.ts` module into smaller detector modules (historical planned modules: `domDetectorPlatforms.ts`, `domDetectorScoring.ts`, `domDetectorContainers.ts` — these do not exist in the current runtime; they name the plan's intended split targets, not shipped files)
 - **TYPESCRIPT-RULES-PLAN.md**: Phased TypeScript strictness roadmap (4 phases over 3 months)
-- **COVERAGE-ANALYSIS.md**: Test coverage improvement roadmap (51% → 65% → 75% → 80%)
+- **COVERAGE-ANALYSIS.md**: Test coverage improvement roadmap
 
 ## Refactor Rule
 

@@ -36,9 +36,11 @@ The manifest grants `http://*/*` and `https://*/*` host permissions. The bootstr
 
 The corpus is executed by `src/content/detector/compatibilityCorpus.test.ts`. Contract and fixture data live in `src/content/detector/testFixtures/compatibilityFixtures.ts`. Known limitations are recorded as expected outcomes; they are tested behavior, not detector test failures. A future compatibility fix must add or update a deterministic fixture before changing the production detector.
 
-## Phase 9B compatibility finding (addressed on branch; Issue #13 remains OPEN)
+## Phase 9B compatibility finding (historical record; merged and closed)
 
-### COMPAT-08 — Pintia question-list single-choice fill (P2, addressed)
+This section is the historical record of the Phase 9A/9B defect cycle. The repair is part of the authoritative main branch, was independently reviewed and merged, and Issue #13 is closed. The compatibility corpus above treats COMPAT-08 as SUPPORTED.
+
+### COMPAT-08 — Pintia question-list single-choice fill (P2, resolved)
 
 - **Fixture:** `COMPAT-08` (`real-platform-derived`, Pintia question list).
 - **Before repair:** The detected/runtime identity owner was the outer `DIV#10000002`, with stable ID `q_v1_71543e92` and content fingerprint `cf_v1_ceff99b1`. Control mapping correctly found A/B/C/D under its contained `.question-item` with confidence 1.0 and the same question ID.
@@ -46,6 +48,6 @@ The corpus is executed by `src/content/detector/compatibilityCorpus.test.ts`. Co
 - **Repair:** The sealed runtime owner remains the identity authority, while the control mapper may use its proven semantic descendant. The canonical DOM binder records `identityObservationSource` as `structured` or `rendered`; live observation uses only that serialized source. It never re-infers the mode from current DOM shape or reuses stored text as live identity content. Solve-start snapshots use the same identity owner and frozen projection.
 - **Unclassified identity sources:** If binding cannot match identity text to either known projection, it leaves provenance unavailable. Such blocks cannot pass `isCurrentRuntimeQuestionBlock` or authoritative fill validation. The corpus records this safe, non-fillable case for COMPAT-07, whose fill contract is not applicable.
 - **After repair:** The single-choice card fills B once, authoritative readback passes, and no wrong option, submit, or advance occurs. `P9B-OWNER-01` proves the same outer-owner/inner-control model on a generic fixture; `P9B-NESTED-NEG-01` rejects an independent nested question's controls; `P9B-FINGERPRINT-NEG-01` still rejects changed live outer content.
-- **Disposition:** The P2 compatibility defect is addressed on the Phase 9B branch. Issue #13 remains OPEN until independent review, merge, and post-merge CI succeed.
+- **Disposition:** The defect was found during Phase 9A, repaired in Phase 9B, independently reviewed, and merged into the authoritative main branch; Issue #13 is closed. The deterministic compatibility corpus treats COMPAT-08 as SUPPORTED.
 
-**Open production finding count on this branch:** P0 0, P1 0, P2 0. Issue #13 remains open as the delivery and review record.
+**Historical production finding count at closure:** P0 0, P1 0, P2 0. Issue #13 was closed as the delivery and review record.

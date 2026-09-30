@@ -51,12 +51,12 @@ Security notes:
 
 - Verification codes are stored hashed, not in plaintext, and are generated with `crypto.randomInt`.
 - Extension account auth tokens are stored hashed, not in plaintext. Analytics admin session credentials are random and held only in the bounded server-memory registry until expiry or eviction.
-- Account tokens carry a server-side expiry (`AUTH_SESSION_TTL_MS`, 30 days). The server exposes the validation and revocation authority (`/auth/session`, `/auth/logout`), but the `chrome.storage.local` copy of `userId`/`userEmail`/`authToken` is still only an unverified client cache: until REL-AUTH-01C wires startup validation into the popup / side panel / settings surfaces, those UIs continue to gate on the cached identity.
+- Account tokens carry a server-side expiry (`AUTH_SESSION_TTL_MS`, 30 days). The server exposes the validation and revocation authority (`/auth/session`, `/auth/logout`). The `chrome.storage.local` copy of `userId`/`userEmail`/`authToken` is only a client cache; it does not establish authenticated authority. UI startup/session state is validated against the server session authority before authenticated actions unlock.
 - Each account has a single active token: registering or logging in again revokes the previous token, and logout revokes the token server-side.
 - Databases created before token expiries existed are migrated in place (`ALTER TABLE users ADD COLUMN authTokenExpiresAt`) before any read, write, or legacy JSON import touches the new column; legacy tokens without a provable expiry fail session validation until the next login issues a fresh bounded token.
 - Registration and login do not disclose account existence without proof of email control: registration verifies the one-time code before any duplicate check, and login returns the same `AUTH_INVALID_CREDENTIALS` error for unknown accounts and wrong passwords.
 - Login failures use a runtime dummy password verifier for unknown accounts, so unknown-email and wrong-password paths both pay comparable scrypt verification cost.
-- The server enforces basic fixed-window rate limits on auth, event ingestion, and metrics reads.
+- The server enforces per-process fixed-window rate limits on auth, event ingestion, and metrics reads. Each namespace has its own bounded limiter; active buckets are never evicted or reset by capacity pressure, and expired buckets are reclaimed by a sweep. This is a single-process limiter, not a distributed one: horizontally scaled replicas would each enforce their own window and would need a shared limiter to enforce a global quota.
 - JSON request bodies larger than 64 KB are rejected.
 
 ## Default plugin behavior
@@ -65,5 +65,6 @@ Security notes:
 - Registration and login use separate pages in the popup/settings UI.
 - Registration requires a verification code that is delivered through SMTP email.
 - The extension generates a local `deviceId` automatically.
-- Core events are uploaded with `deviceId`, event name, timestamp, host, and extension version.
+- Usage analytics is optional and **off by default**; events are sent only after the user explicitly turns the setting on and saves it. Before consent, no analytics events are uploaded.
+- Core events are uploaded with `deviceId`, the consent protocol version, event name, timestamp, extension version, and a small allowlist of event-specific fields. They do not include the page hostname, question or answer content, screenshots or images, API key, auth token, password, verification code, email address, or client-supplied account identity. See [../PRIVACY.md](../PRIVACY.md) for the full data-flow contract.
 - The default analytics backend URL is `https://analytics.082515.online`.
