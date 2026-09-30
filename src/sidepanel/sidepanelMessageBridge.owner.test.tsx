@@ -76,7 +76,10 @@ describe("runtime reconciliation of protected-work owners", () => {
 
     // A run on tab 7 reports progress, then finishes.
     dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", running: true }, 7);
-    await vi.waitFor(() => expect(sessionStore.has("protectedWorkOwners")).toBe(true), { timeout: 2000, interval: 20 });
+    await vi.waitFor(
+      () => expect(sessionStore.has("protectedWorkOwner:autoSolve")).toBe(true),
+      { timeout: 2000, interval: 20 },
+    );
     const owners = await readProtectedWorkOwners();
     expect(owners.autoSolve).toEqual({ active: true, tabId: 7 });
 

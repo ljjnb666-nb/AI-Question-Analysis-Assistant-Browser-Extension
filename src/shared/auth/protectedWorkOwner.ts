@@ -10,6 +10,12 @@
  * chrome.storage.session is the backing store: it is extension-context-only
  * (never user config), and transient — it disappears with the browser
  * session, exactly like the runtime work it tracks.
+ *
+ * Storage layout: ONE KEY PER WORKFLOW KIND. Each mark/clear writes only its
+ * own key, so concurrent Popup and Side Panel mutations of different kinds
+ * can never overwrite each other (no shared-object read-merge-write across
+ * contexts — chrome.storage.session is the visibility boundary, not a
+ * transaction coordinator, and no distributed transaction is claimed).
  */
 export type ProtectedWorkKind = "autoSolve" | "fullPage";
 
@@ -23,12 +29,12 @@ export type ProtectedWorkOwners = {
   fullPage: ProtectedWorkOwnerRecord;
 };
 
-const OWNERS_KEY = "protectedWorkOwners";
-
-const EMPTY_OWNERS: ProtectedWorkOwners = {
-  autoSolve: { active: false },
-  fullPage: { active: false },
+const OWNER_KEYS: Record<ProtectedWorkKind, string> = {
+  autoSolve: "protectedWorkOwner:autoSolve",
+  fullPage: "protectedWorkOwner:fullPage",
 };
+
+const INACTIVE: ProtectedWorkOwnerRecord = { active: false };
 
 function sessionArea(): chrome.storage.StorageArea | null {
   try {
@@ -38,77 +44,76 @@ function sessionArea(): chrome.storage.StorageArea | null {
   }
 }
 
-// storage.session has no transactions: get→merge→set is serialized through
-// this queue so concurrent mark/clear calls from different surfaces cannot
-// lose updates.
-let writeQueue: Promise<unknown> = Promise.resolve();
-
-function enqueue<T>(job: () => Promise<T>): Promise<T> {
-  const run = writeQueue.then(job, job);
-  writeQueue = run.catch(() => undefined);
-  return run;
+function keyFor(kind: ProtectedWorkKind): string {
+  return OWNER_KEYS[kind];
 }
 
-async function readOwnersRaw(): Promise<ProtectedWorkOwners> {
+async function readOwnerRecord(kind: ProtectedWorkKind): Promise<ProtectedWorkOwnerRecord> {
   const area = sessionArea();
-  if (!area) return { ...EMPTY_OWNERS };
-  const result = await area.get(OWNERS_KEY);
-  const stored = (result[OWNERS_KEY] ?? {}) as Partial<ProtectedWorkOwners>;
-  return {
-    autoSolve: { active: Boolean(stored.autoSolve?.active), tabId: stored.autoSolve?.tabId },
-    fullPage: { active: Boolean(stored.fullPage?.active), tabId: stored.fullPage?.tabId },
-  };
+  if (!area) return { ...INACTIVE };
+  const result = await area.get(keyFor(kind));
+  const stored = result[keyFor(kind)] as ProtectedWorkOwnerRecord | undefined;
+  if (!stored) return { ...INACTIVE };
+  return { active: Boolean(stored.active), tabId: stored.tabId };
 }
 
-export function readProtectedWorkOwners(): Promise<ProtectedWorkOwners> {
-  return enqueue(readOwnersRaw);
+/** Read aggregation of both kinds. Never used for read-modify-write. */
+export async function readProtectedWorkOwners(): Promise<ProtectedWorkOwners> {
+  const [autoSolve, fullPage] = await Promise.all([
+    readOwnerRecord("autoSolve"),
+    readOwnerRecord("fullPage"),
+  ]);
+  return { autoSolve, fullPage };
 }
 
-/** START path: record the exact dispatch target tab for the workflow. */
-export function markProtectedWorkOwner(kind: ProtectedWorkKind, tabId: number): Promise<void> {
-  return enqueue(async () => {
-    const owners = await readOwnersRaw();
-    owners[kind] = { active: true, tabId };
-    await sessionArea()?.set({ [OWNERS_KEY]: owners });
-  });
+/**
+ * START path: record the exact dispatch target tab for this workflow kind.
+ * A single-key write — no read of the other kind, no merge — so a concurrent
+ * mark of the other kind from another surface cannot be lost.
+ */
+export async function markProtectedWorkOwner(
+  kind: ProtectedWorkKind,
+  tabId: number,
+): Promise<void> {
+  await sessionArea()?.set({ [keyFor(kind)]: { active: true, tabId } });
 }
 
 /**
  * Runtime progress reconciliation: once the content script reports a running
  * workflow from its tab, that tab becomes the recorded owner even if the
  * original START record was missed (recovery path, never the only path).
+ * Single-key write, same cross-context safety as mark.
  */
-export function reconcileProtectedWorkOwnerFromRuntime(
+export async function reconcileProtectedWorkOwnerFromRuntime(
   kind: ProtectedWorkKind,
   tabId: number,
 ): Promise<void> {
-  return enqueue(async () => {
-    const owners = await readOwnersRaw();
-    if (!owners[kind].active || owners[kind].tabId !== tabId) {
-      owners[kind] = { active: true, tabId };
-      await sessionArea()?.set({ [OWNERS_KEY]: owners });
-    }
-  });
+  const current = await readOwnerRecord(kind);
+  if (current.active && current.tabId === tabId) return;
+  await sessionArea()?.set({ [keyFor(kind)]: { active: true, tabId } });
 }
 
 /**
- * Natural completion / explicit stop: clear the owner. When `tabId` is
- * given, only a matching owner is cleared so a stale DONE from another tab
- * cannot erase a different active run.
+ * Natural completion / explicit stop: clear THIS kind's key only. When
+ * `tabId` is given, the clear is a same-kind compare-then-clear (best
+ * effort, not a transaction): a stale DONE from another tab never erases a
+ * different active run, and the other kind's key is never touched.
  */
-export function clearProtectedWorkOwner(kind: ProtectedWorkKind, tabId?: number): Promise<void> {
-  return enqueue(async () => {
-    const owners = await readOwnersRaw();
-    if (!owners[kind].active) return;
-    if (tabId != null && owners[kind].tabId !== tabId) return;
-    owners[kind] = { active: false };
-    await sessionArea()?.set({ [OWNERS_KEY]: owners });
-  });
+export async function clearProtectedWorkOwner(
+  kind: ProtectedWorkKind,
+  tabId?: number,
+): Promise<void> {
+  const current = await readOwnerRecord(kind);
+  if (!current.active) return;
+  if (tabId != null && current.tabId !== tabId) return;
+  await sessionArea()?.set({ [keyFor(kind)]: { ...INACTIVE } });
 }
 
-export function clearAllProtectedWorkOwners(): Promise<void> {
-  return enqueue(async () => {
-    await sessionArea()?.set({ [OWNERS_KEY]: { ...EMPTY_OWNERS } });
+/** One multi-key write resetting both kinds (used after termination). */
+export async function clearAllProtectedWorkOwners(): Promise<void> {
+  await sessionArea()?.set({
+    [keyFor("autoSolve")]: { ...INACTIVE },
+    [keyFor("fullPage")]: { ...INACTIVE },
   });
 }
 
