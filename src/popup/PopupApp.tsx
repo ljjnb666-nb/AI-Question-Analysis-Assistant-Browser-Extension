@@ -1,12 +1,23 @@
 import React, { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import { sendToActiveTab } from "@/shared/utils/messaging";
+import {
+  isInjectablePageUrl,
+  sendToActiveTab,
+  sendToTabWithBootstrap,
+} from "@/shared/utils/messaging";
+import type { ExtMessage } from "@/shared/types";
 import { getProviderShortName } from "@/shared/ai/providers";
 import { logEvent } from "@/shared/utils/analytics";
 import { loadSettings } from "@/shared/utils/storage";
 import { getAuthText } from "@/shared/auth/authText";
 import { useAuthController } from "@/shared/auth/useAuthController";
+import {
+  clearProtectedWorkOwner,
+  markProtectedWorkOwner,
+  terminateRecordedProtectedWork,
+  type ProtectedWorkKind,
+} from "@/shared/auth/protectedWorkOwner";
 import { createPopupAuthority } from "./popupAuthority";
 import {
   SHARED_FONT_FAMILY,
@@ -59,6 +70,32 @@ export const PopupApp: React.FC = () => {
   // not an effect-lagged ref or a render snapshot (AUTH-UI-INV-09).
   const authority = createPopupAuthority(auth.session);
   const isAuthenticatedNow = authority.isAuthenticatedNow;
+
+  // AUTH-UI-INV-11 + INV-15 (popup side): when this surface observes the
+  // session leave `authenticated`, any long-running protected work recorded
+  // in the cross-surface owner store — Popup- or Side-Panel-started — is
+  // terminated at its recorded owner tab.
+  const sessionRef = useRef(auth.session);
+  useEffect(() => {
+    sessionRef.current = auth.session;
+  }, [auth.session]);
+  useEffect(() => {
+    let wasAuthenticated: boolean | null = null;
+    const applySessionState = () => {
+      const nowAuthenticated = sessionRef.current.getState().status === "authenticated";
+      if (wasAuthenticated === true && !nowAuthenticated) {
+        void terminateRecordedProtectedWork((tabId, message) =>
+          sendToTabWithBootstrap(tabId, message as ExtMessage),
+        );
+      }
+      wasAuthenticated = nowAuthenticated;
+    };
+    applySessionState();
+    const unsubscribe = sessionRef.current.subscribe(applySessionState);
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -217,13 +254,23 @@ export const PopupApp: React.FC = () => {
       setActiveFeature(null);
       return;
     }
+    // AUTH-UI-INV-15: long-running protected work records its cross-surface
+    // owner BEFORE dispatch, with the exact target tab, so an auth loss on
+    // any surface can find and terminate the real owner. Hoisted so the
+    // failure path can clear a half-built record.
+    const longRunningKind: ProtectedWorkKind | null =
+      messageType === "START_AUTO_SOLVE_ALL"
+        ? "autoSolve"
+        : messageType === "START_FULL_PAGE_DETECT"
+          ? "fullPage"
+          : null;
+    let ownerTabId: number | undefined;
     try {
       setActiveFeature(feature);
       setStatus(startText);
       if (openPanel) await openSidePanelDirect();
       // Last-responsible-moment recheck: opening the panel awaited, so the
-      // session may have lapsed since the entry gate (AUTH-UI-INV-12). The
-      // guard also re-checks after any bootstrap/injection retry.
+      // session may have lapsed since the entry gate (AUTH-UI-INV-12).
       if (!isAuthenticatedNow()) {
         setStatus(
           lang === "en"
@@ -233,9 +280,37 @@ export const PopupApp: React.FC = () => {
         setActiveFeature(null);
         return;
       }
-      await sendToActiveTab({ type: messageType }, isAuthenticatedNow);
+      if (longRunningKind) {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id || !isInjectablePageUrl(tab.url)) {
+          setStatus(errorText);
+          setActiveFeature(null);
+          return;
+        }
+        ownerTabId = tab.id;
+        await markProtectedWorkOwner(longRunningKind, ownerTabId);
+        if (!isAuthenticatedNow()) {
+          await clearProtectedWorkOwner(longRunningKind, ownerTabId);
+          setStatus(
+            lang === "en"
+              ? "Sign-in verification ended. The action was not started."
+              : "登录验证已失效，该操作未开始。",
+          );
+          setActiveFeature(null);
+          return;
+        }
+        // Dispatch to the exact recorded owner tab (guard re-checks at every
+        // await boundary inside the messaging chain).
+        await sendToTabWithBootstrap(ownerTabId, { type: messageType }, isAuthenticatedNow);
+      } else {
+        await sendToActiveTab({ type: messageType }, isAuthenticatedNow);
+      }
       window.close();
     } catch {
+      // A failed dispatch must not leave an owner record behind.
+      if (ownerTabId != null && longRunningKind) {
+        void clearProtectedWorkOwner(longRunningKind, ownerTabId);
+      }
       setStatus(errorText);
       setActiveFeature(null);
     }

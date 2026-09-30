@@ -3,6 +3,12 @@ import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { loadSettings } from "@/shared/utils/storage";
 import { useAuthSession } from "@/shared/auth/useAuthSession";
+import {
+  clearAllProtectedWorkOwners,
+  clearProtectedWorkOwner,
+  markProtectedWorkOwner,
+  readProtectedWorkOwners,
+} from "@/shared/auth/protectedWorkOwner";
 import type { UILang } from "./displayUtils";
 import { isRiskyCandidate } from "./batchParseHeuristics";
 import { HistoryTab } from "./HistoryTab";
@@ -110,13 +116,13 @@ export const SidePanelApp: React.FC = () => {
     stateRef.current = state;
   }, [state]);
 
-  // AUTH-UI-INV-13: synchronous registry of long-running protected runtime
-  // work. It is flipped synchronously in useSidePanelActions around the
-  // START/STOP/CANCEL dispatch — never via a passive-effect snapshot — so an
-  // auth loss can never miss an active run whose React state has not yet
-  // been committed. The registry records the OWNER tab so termination is
-  // sent to the tab that actually runs the workflow, never to whatever tab
-  // currently looks "best".
+  // AUTH-UI-INV-13 + INV-15: synchronous registry of long-running protected
+  // runtime work, mirrored into the cross-surface owner store
+  // (chrome.storage.session) so a Popup-started or Side-Panel-started
+  // workflow has exactly one visible owner record everywhere. The sync ref
+  // covers the zero-lag window between dispatch and the async mirror; the
+  // cross-surface store is what makes the owner visible beyond this
+  // component (never user config, transient by design).
   const protectedWorkRef = useRef<{
     autoSolve: { active: boolean; tabId?: number };
     fullPage: { active: boolean; tabId?: number };
@@ -124,6 +130,11 @@ export const SidePanelApp: React.FC = () => {
   const markProtectedWork = useCallback(
     (kind: "autoSolve" | "fullPage", active: boolean, tabId?: number) => {
       protectedWorkRef.current[kind] = { active, tabId: active ? tabId : undefined };
+      if (active && tabId != null) {
+        void markProtectedWorkOwner(kind, tabId);
+      } else {
+        void clearProtectedWorkOwner(kind);
+      }
     },
     [],
   );
@@ -152,7 +163,7 @@ export const SidePanelApp: React.FC = () => {
       // authority reads the synchronous protected-work registry, not the
       // effect-lagged state snapshot.
       if (wasAuthenticated === true && !nowAuthenticated) {
-        const plan = planAuthLossStop({
+        const syncPlan = planAuthLossStop({
           isAutoSolving: protectedWorkRef.current.autoSolve.active,
           autoSolveTabId: protectedWorkRef.current.autoSolve.tabId,
           isFullPageScan: protectedWorkRef.current.fullPage.active,
@@ -162,18 +173,29 @@ export const SidePanelApp: React.FC = () => {
         protectedWorkRef.current.fullPage = { active: false };
         void (async () => {
           try {
-            if (!plan.stopAutoSolve && !plan.cancelFullPage) return;
-            // Termination targets the RECORDED owner tab: the current "best"
-            // tab may have changed since the START, and sending STOP there
-            // would both miss the run and touch an unrelated tab.
-            if (plan.stopAutoSolve && plan.autoSolveTabId != null) {
-              await sendTabMessageWithBootstrap(plan.autoSolveTabId, { type: "STOP_AUTO_SOLVE_ALL" });
+            // INV-15: merge this surface's zero-lag sync registry with the
+            // cross-surface owner store, so a Popup-started workflow is
+            // terminated exactly like a locally started one — always at the
+            // recorded owner tab, never a re-guessed best tab.
+            const owners = await readProtectedWorkOwners();
+            const stopAutoSolve = syncPlan.stopAutoSolve || owners.autoSolve.active;
+            const autoSolveTabId = syncPlan.stopAutoSolve
+              ? syncPlan.autoSolveTabId
+              : owners.autoSolve.tabId;
+            const cancelFullPage = syncPlan.cancelFullPage || owners.fullPage.active;
+            const fullPageTabId = syncPlan.cancelFullPage
+              ? syncPlan.fullPageTabId
+              : owners.fullPage.tabId;
+            if (stopAutoSolve && autoSolveTabId != null) {
+              await sendTabMessageWithBootstrap(autoSolveTabId, { type: "STOP_AUTO_SOLVE_ALL" });
             }
-            if (plan.cancelFullPage && plan.fullPageTabId != null) {
-              await sendTabMessageWithBootstrap(plan.fullPageTabId, { type: "FULL_PAGE_DETECT_CANCELLED" });
+            if (cancelFullPage && fullPageTabId != null) {
+              await sendTabMessageWithBootstrap(fullPageTabId, { type: "FULL_PAGE_DETECT_CANCELLED" });
             }
+            await clearAllProtectedWorkOwners();
           } catch {
-            // Best-effort termination; the registry is cleared regardless.
+            // Best-effort termination; the registries are cleared regardless
+            // of individual send failures.
           }
         })();
         setIsAutoSolving(false);

@@ -324,6 +324,33 @@ describe("useSidePanelActions authority gate", () => {
     expect(sentMessages).toEqual([]);
   });
 
+  it("AUTH_UI_51_DETECT_POST_AWAIT_AUTH_LOSS a late-resolving successful detect cannot revive running UI", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    authenticated = true;
+    // Park the protected send itself: the authority recheck after the await
+    // is what must gate the running-state flip.
+    let resolveSend: (value: { ok: boolean }) => void = () => undefined;
+    vi.mocked(sendProtectedTabMessageWithBootstrap).mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveSend = resolve;
+      }),
+    );
+    const setIsDetecting = vi.fn();
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({ setIsDetecting }),
+    });
+
+    const running = result.current.handleDetect();
+    authenticated = false;
+    resolveSend({ ok: true });
+    await running;
+
+    // The dispatch "succeeded" at transport level, but the authority had
+    // already lapsed: no running UI state may be entered.
+    expect(setIsDetecting).not.toHaveBeenCalledWith(true);
+    expect(sentMessages).toEqual([]);
+  });
+
   it("AUTH_UI_31_CANDIDATE_AUTHORITY_TOCTOU commit authority flips false when auth is lost mid-check", async () => {
     const { runBatchFill } = await import("./batchOperations");
     authenticated = true;

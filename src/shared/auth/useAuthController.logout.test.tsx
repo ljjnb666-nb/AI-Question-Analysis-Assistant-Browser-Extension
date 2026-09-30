@@ -1,4 +1,3 @@
-import React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useAuthController } from "./useAuthController";
@@ -33,9 +32,9 @@ let releaseLogout: (() => void) | null = null;
 vi.mock("@/shared/utils/auth", () => ({
   logoutAccount: vi.fn(
     () =>
-      new Promise((resolve) => {
+      new Promise((_resolve) => {
         eventLog.push("logoutAccount");
-        releaseLogout = () => resolve({ serverRevoked: false, serverStatus: "network_error" });
+        releaseLogout = () => _resolve({ serverRevoked: false, serverStatus: "network_error" });
       }),
   ),
   loginWithEmail: vi.fn(),

@@ -9,12 +9,21 @@ vi.mock("@gsap/react", () => ({ useGSAP: vi.fn() }));
 vi.mock("@/shared/utils/analytics", () => ({ logEvent: vi.fn() }));
 
 const sentRuntimeMessages: string[] = [];
+const sentTabTargets: Array<{ tabId: number; type: string }> = [];
 
 vi.mock("@/shared/utils/messaging", () => ({
   sendToActiveTab: vi.fn(async (message: { type: string }) => {
     sentRuntimeMessages.push(message.type);
     return {};
   }),
+  // The popup dispatches long-running work straight to the recorded owner
+  // tab; keep that channel observable too.
+  sendToTabWithBootstrap: vi.fn(async (tabId: number, message: { type: string }) => {
+    sentRuntimeMessages.push(message.type);
+    sentTabTargets.push({ tabId, type: message.type });
+    return {};
+  }),
+  isInjectablePageUrl: (url: string | undefined) => /^https?:/i.test(String(url || "")),
 }));
 
 // In-memory chrome.storage.local mirroring authSession.test.ts's harness, so
@@ -42,10 +51,29 @@ const storageApi = {
   QUOTA_BYTES: 5242880,
 };
 
+// Ephemeral session store backing the cross-surface protected-work owner
+// registry under test.
+const sessionStore = new Map<string, unknown>();
+const sessionApi = {
+  get: async (keys: string | string[] | null) => {
+    const requested = keys == null ? [...sessionStore.keys()] : Array.isArray(keys) ? keys : [keys];
+    const result: Record<string, unknown> = {};
+    for (const key of requested) if (sessionStore.has(key)) result[key] = sessionStore.get(key);
+    return result;
+  },
+  set: async (items: Record<string, unknown>) => {
+    for (const [key, value] of Object.entries(items)) sessionStore.set(key, value);
+  },
+  remove: async (keys: string | string[]) => {
+    for (const key of Array.isArray(keys) ? keys : [keys]) sessionStore.delete(key);
+  },
+};
+
 (globalThis as unknown as { chrome: unknown }).chrome = {
   runtime: { id: "test-extension-id" },
   storage: {
     local: storageApi,
+    session: sessionApi,
     onChanged: {
       addListener: (fn: (changes: unknown, area: string) => void) => storageListeners.push(fn),
       removeListener: (fn: (changes: unknown, area: string) => void) => {
@@ -89,10 +117,13 @@ vi.stubGlobal("fetch", vi.fn(async (_url: string | URL, init?: { headers?: Recor
 
 import { PopupApp } from "./PopupApp";
 import { __resetStorageCacheForTests } from "@/shared/utils/storage";
+import { readProtectedWorkOwners } from "@/shared/auth/protectedWorkOwner";
 
 beforeEach(() => {
   sentRuntimeMessages.length = 0;
+  sentTabTargets.length = 0;
   store.clear();
+  sessionStore.clear();
   storageListeners.length = 0;
   sessionResponse = { ok: true, user: { userId: "usr-1", email: "user@example.com" } };
   // The storage module memoizes settings per JS context: without this reset
@@ -154,5 +185,47 @@ describe("PopupApp protected dispatch authority", () => {
     });
 
     await waitFor(() => expect(sentRuntimeMessages).toEqual(["START_AUTO_DETECT"]), { timeout: 10_000 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AUTH_UI_45/46 — a Popup-started long-running workflow must establish the
+ // cross-surface owner record with the EXACT dispatch target tab before the
+// START goes out (AUTH-UI-INV-15).
+// ---------------------------------------------------------------------------
+describe("PopupApp protected work ownership", () => {
+  it("AUTH_UI_45_POPUP_AUTO_SOLVE_OWNER popup START records the auto-solve owner tab", async () => {
+    render(<PopupApp />);
+    // 定位真正的动作按钮：hero 提示与 workspace 快捷键文案也包含"自动答题"。
+    await screen.findByRole("button", { name: /自动答题|Auto Solve/ }, { timeout: 10_000 });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /自动答题|Auto Solve/ }));
+    });
+
+    await waitFor(() => expect(sentRuntimeMessages).toEqual(["START_AUTO_SOLVE_ALL"]), {
+      timeout: 10_000,
+    });
+    // The dispatch went to the recorded owner tab, and the cross-surface
+    // registry now shows the popup-established owner.
+    expect(sentTabTargets).toEqual([{ tabId: 5, type: "START_AUTO_SOLVE_ALL" }]);
+    const owners = await readProtectedWorkOwners();
+    expect(owners.autoSolve).toEqual({ active: true, tabId: 5 });
+  });
+
+  it("AUTH_UI_46_POPUP_FULL_PAGE_OWNER popup START records the full-page owner tab", async () => {
+    render(<PopupApp />);
+    await screen.findByText(/整页扫描|Scan Full Page/, {}, { timeout: 10_000 });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText(/整页扫描|Scan Full Page/));
+    });
+
+    await waitFor(() => expect(sentRuntimeMessages).toEqual(["START_FULL_PAGE_DETECT"]), {
+      timeout: 10_000,
+    });
+    expect(sentTabTargets).toEqual([{ tabId: 5, type: "START_FULL_PAGE_DETECT" }]);
+    const owners = await readProtectedWorkOwners();
+    expect(owners.fullPage).toEqual({ active: true, tabId: 5 });
   });
 });

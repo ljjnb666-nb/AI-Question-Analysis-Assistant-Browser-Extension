@@ -121,8 +121,10 @@ describe("messaging authority guard (real helpers)", () => {
     resolveInjection!();
 
     await expect(running).rejects.toThrow(/AUTHORITY_LOST/);
-    // The first send failed into bootstrap; the RETRY send must never fire.
-    expect(sentRetry).toEqual([]);
+    // Direct proof on the REAL send channel: exactly ONE sendMessage call
+    // ever happened (the failed first send). No second/retry send fired
+    // after the injection resolved.
+    expect(chromeStub().tabs.sendMessage).toHaveBeenCalledTimes(1);
   });
 
   it("guard-passing dispatch still completes a normal first send", async () => {

@@ -3,6 +3,7 @@ import type { DetectedCandidate } from "@/shared/types";
 import { addHistoryEntryIfCurrent, loadSettings } from "@/shared/utils/storage";
 import { getProvider, hasSufficientPreviewText, parseQuestion } from "@/shared/utils/parseRouter";
 import { logEvent } from "@/shared/utils/analytics";
+import { readProtectedWorkOwners } from "@/shared/auth/protectedWorkOwner";
 import {
   isChoiceLikeResult,
   isRiskyCandidate,
@@ -140,9 +141,10 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       { type: "START_AUTO_DETECT" },
       options.isAuthenticatedNow,
     );
-    // A rejected/authority-lost START must not flip the UI into a stale
-    // running state (AUTH-UI-INV-12/13).
-    if (response.ok === false) return;
+    // A rejected/authority-lost START — or one whose authority lapsed during
+    // the dispatch itself — must not flip the UI into a stale running state
+    // (AUTH-UI-INV-12/13).
+    if (response.ok === false || !options.isAuthenticatedNow()) return;
     applyDetectState(resetDetectState());
   }, [applyDetectState, options, requireAuthenticatedAction]);
 
@@ -173,10 +175,15 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   }, [applyDetectState, options, requireAuthenticatedAction]);
 
   const handleCancelFullPage = useCallback(async () => {
-    // Prefer the recorded owner tab; fall back to the current best tab only
-    // for runs started before this registry existed.
-    const ownerTabId = options.protectedWork?.current.fullPage.tabId;
-    const activeTab = ownerTabId != null ? { id: ownerTabId } as chrome.tabs.Tab : await getBestActionTab();
+    // AUTH-UI-INV-15: resolve the owner across surfaces — this surface's
+    // zero-lag sync registry first, then the cross-surface owner store (a
+    // Popup-started scan), and only fall back to the current best tab when
+    // no owner record exists (legacy runs).
+    const localTabId = options.protectedWork?.current.fullPage.tabId;
+    const ownerTabId =
+      localTabId ?? (await readProtectedWorkOwners()).fullPage.tabId ?? undefined;
+    const activeTab =
+      ownerTabId != null ? ({ id: ownerTabId } as chrome.tabs.Tab) : await getBestActionTab();
     if (activeTab?.id) {
       await sendTabMessageWithBootstrap(activeTab.id, { type: "FULL_PAGE_DETECT_CANCELLED" });
     }
@@ -352,12 +359,16 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
 
   // STOP / CANCEL are deliberately NOT auth-gated: after an auth loss they
   // are the only way to terminate an already-started protected workflow.
-  // They target the RECORDED owner tab so stopping still works — and only
-  // works — on the tab that actually runs the workflow, even after the user
-  // switched tabs.
+  // They resolve the owner across surfaces (sync registry → cross-surface
+  // owner store) and target the RECORDED owner tab, so stopping still works
+  // — and only works — on the tab that actually runs the workflow, even
+  // after the user switched tabs or the run started from the Popup.
   const handleStopAutoSolve = useCallback(async () => {
-    const ownerTabId = options.protectedWork?.current.autoSolve.tabId;
-    const activeTab = ownerTabId != null ? { id: ownerTabId } as chrome.tabs.Tab : await getBestActionTab();
+    const localTabId = options.protectedWork?.current.autoSolve.tabId;
+    const ownerTabId =
+      localTabId ?? (await readProtectedWorkOwners()).autoSolve.tabId ?? undefined;
+    const activeTab =
+      ownerTabId != null ? ({ id: ownerTabId } as chrome.tabs.Tab) : await getBestActionTab();
     if (!activeTab?.id) return;
     await sendTabMessageWithBootstrap(activeTab.id, { type: "STOP_AUTO_SOLVE_ALL" });
     options.markProtectedWork("autoSolve", false);

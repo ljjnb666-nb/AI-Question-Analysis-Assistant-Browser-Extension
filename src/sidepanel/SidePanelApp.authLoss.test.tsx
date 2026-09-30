@@ -27,6 +27,36 @@ let hasActiveTab = true;
 // changes AFTER a protected workflow already runs on its original tab.
 let currentBestTabId = 7;
 
+// Ephemeral session store for the cross-surface protected-work owner
+// registry (chrome.storage.session in production).
+const sessionStore = new Map<string, unknown>();
+const sessionChangeListeners = new Array<(changes: unknown, area: string) => void>();
+(globalThis as unknown as { chrome: unknown }).chrome = {
+  storage: {
+    onChanged: {
+      addListener: (fn: (changes: unknown, area: string) => void) => sessionChangeListeners.push(fn),
+      removeListener: (fn: (changes: unknown, area: string) => void) => {
+        const index = sessionChangeListeners.indexOf(fn);
+        if (index >= 0) sessionChangeListeners.splice(index, 1);
+      },
+    },
+    session: {
+      get: async (keys: string | string[] | null) => {
+        const requested = keys == null ? [...sessionStore.keys()] : Array.isArray(keys) ? keys : [keys];
+        const result: Record<string, unknown> = {};
+        for (const key of requested) if (sessionStore.has(key)) result[key] = sessionStore.get(key);
+        return result;
+      },
+      set: async (items: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(items)) sessionStore.set(key, value);
+      },
+      remove: async (keys: string | string[]) => {
+        for (const key of Array.isArray(keys) ? keys : [keys]) sessionStore.delete(key);
+      },
+    },
+  },
+};
+
 vi.mock("./tabActions", () => ({
   getBestActionTab: vi.fn(async () => (hasActiveTab ? ({ id: currentBestTabId } as chrome.tabs.Tab) : null)),
   sendTabMessageWithBootstrap: vi.fn(async (tabId: number, message: { type: string }) => {
@@ -42,8 +72,17 @@ vi.mock("./tabActions", () => ({
   sendFillMessageWithVerify: vi.fn(),
 }));
 
+// Captured so tests can drive the runtime-reported UI state (e.g. a
+// popup-started run reporting AUTO_SOLVE_PROGRESS into this surface).
+let bridgeHandlers: {
+  setIsAutoSolving: (next: boolean) => void;
+} | null = null;
+
 vi.mock("./sidepanelMessageBridge", () => ({
-  registerSidePanelRuntimeListeners: vi.fn(() => vi.fn()),
+  registerSidePanelRuntimeListeners: vi.fn((handlers: never) => {
+    bridgeHandlers = handlers;
+    return () => undefined;
+  }),
 }));
 
 // Programmable session coordinator stub: tests drive status transitions and
@@ -96,10 +135,12 @@ const sessionStub = {
   applyLoggedOut: vi.fn(),
 };
 
+import { markProtectedWorkOwner } from "@/shared/auth/protectedWorkOwner";
 import { SidePanelApp } from "./SidePanelApp";
 
 beforeEach(() => {
   for (const key of Object.keys(sentMessages)) delete sentMessages[key as keyof typeof sentMessages];
+  sessionStore.clear();
   hasActiveTab = true;
   currentBestTabId = 7;
   sessionState.status = "authenticated";
@@ -265,6 +306,48 @@ describe("SidePanelApp auth-loss watchdog", () => {
     expect(sentMessages.STOP_AUTO_SOLVE_ALL?.some((m) => m.tabId === 8)).toBe(false);
     // Clearing the running UI is the content completion callback's job; the
     // manual stop's contract is the correctly-targeted STOP dispatch.
+  });
+
+  it("AUTH_UI_47_POPUP_STARTED_AUTH_LOSS_STOP a popup-started run is terminated at its owner tab on auth loss", async () => {
+    // The popup's ownership contract: markProtectedWorkOwner BEFORE dispatch.
+    // Simulate a popup START on tab 7 (the sidepanel's own sync registry has
+    // nothing — termination must come from the cross-surface store).
+    await markProtectedWorkOwner("autoSolve", 7);
+    // The user then switches tabs: the current best becomes 8.
+    currentBestTabId = 8;
+
+    render(<SidePanelApp />);
+    await findButton("Auto Solve");
+    await transitionSessionStatus("server_unavailable");
+
+    await waitFor(() =>
+      expect(sentMessages.STOP_AUTO_SOLVE_ALL?.length ?? 0).toBeGreaterThanOrEqual(1),
+    { timeout: UI_TIMEOUT });
+    expect(sentMessages.STOP_AUTO_SOLVE_ALL?.[0]?.tabId).toBe(7);
+    expect(sentMessages.STOP_AUTO_SOLVE_ALL?.some((m) => m.tabId === 8)).toBe(false);
+  });
+
+  it("AUTH_UI_48_POPUP_STARTED_MANUAL_STOP_OWNER an explicit Stop terminates a popup-started run at its owner tab", async () => {
+    await markProtectedWorkOwner("autoSolve", 7);
+    currentBestTabId = 8;
+
+    render(<SidePanelApp />);
+    // The popup-started run reports progress into this surface: the UI shows
+    // the running state while the OWNER stays tab 7 in the cross-surface
+    // registry.
+    await act(async () => {
+      bridgeHandlers?.setIsAutoSolving(true);
+    });
+    const stop = await findButton("Stop Auto Solve");
+    await act(async () => {
+      fireEvent.click(stop);
+    });
+
+    await waitFor(() =>
+      expect(sentMessages.STOP_AUTO_SOLVE_ALL?.length ?? 0).toBeGreaterThanOrEqual(1),
+    { timeout: UI_TIMEOUT });
+    expect(sentMessages.STOP_AUTO_SOLVE_ALL?.[0]?.tabId).toBe(7);
+    expect(sentMessages.STOP_AUTO_SOLVE_ALL?.some((m) => m.tabId === 8)).toBe(false);
   });
 
   it("AUTH_UI_33_WATCHDOG_NO_EFFECT_LAG_GAP termination fires without waiting for the passive stateRef refresh", async () => {

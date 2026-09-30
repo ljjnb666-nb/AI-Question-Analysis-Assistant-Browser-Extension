@@ -1,4 +1,8 @@
 import type { CandidateSnapshot, DetectedCandidate, QuestionBlock } from "@/shared/types";
+import {
+  clearProtectedWorkOwner,
+  reconcileProtectedWorkOwnerFromRuntime,
+} from "@/shared/auth/protectedWorkOwner";
 import type { AutoSolveProgressState, ScanProgressState } from "./sidepanelStateSync";
 import {
   mapAutoSolveDoneFeedback,
@@ -42,10 +46,22 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
       handlers.setIsDetecting(false);
     }
     if (msg.type === "FULL_PAGE_DETECT_PROGRESS") {
+      // AUTH-UI-INV-15 reconciliation: a running full-page scan reported by
+      // its own tab claims the cross-surface owner record, recovering any
+      // START whose owner mark was missed. This is a recovery path only —
+      // the START itself must still establish the owner first.
+      if (origin?.tabId != null) {
+        void reconcileProtectedWorkOwnerFromRuntime("fullPage", origin.tabId);
+      }
       handlers.setIsFullPageScan(true);
       handlers.setScanProgress(mapFullPageProgressMessage(msg));
     }
     if (msg.type === "FULL_PAGE_DETECT_DONE") {
+      // Natural completion: clear the owner so a later auth loss never sends
+      // a stale CANCEL at the finished tab.
+      if (origin?.tabId != null) {
+        void clearProtectedWorkOwner("fullPage", origin.tabId);
+      }
       handlers.setIsFullPageScan(false);
       handlers.setScanProgress(null);
       const blocks = (msg.candidates as QuestionBlock[]) ?? [];
@@ -53,10 +69,18 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
       handlers.setExpandedIds({});
     }
     if (msg.type === "AUTO_SOLVE_PROGRESS") {
-      handlers.setIsAutoSolving(Boolean(msg.running));
+      const running = Boolean(msg.running);
+      // Reconciliation for the auto-solve owner, same contract as above.
+      if (running && origin?.tabId != null) {
+        void reconcileProtectedWorkOwnerFromRuntime("autoSolve", origin.tabId);
+      }
+      handlers.setIsAutoSolving(running);
       handlers.setAutoSolveProgress(mapAutoSolveProgressMessage(msg));
     }
     if (msg.type === "AUTO_SOLVE_DONE") {
+      if (origin?.tabId != null) {
+        void clearProtectedWorkOwner("autoSolve", origin.tabId);
+      }
       handlers.setIsAutoSolving(false);
       handlers.setAutoSolveProgress(null);
       handlers.setFillFeedback(mapAutoSolveDoneFeedback(msg));
