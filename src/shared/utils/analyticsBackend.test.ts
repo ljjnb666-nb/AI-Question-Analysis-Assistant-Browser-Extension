@@ -34,4 +34,28 @@ describe("analyticsBackend", () => {
       extensionVersion: "0.2.0",
     });
   });
+
+  it("KEY_11_ANALYTICS_HAS_NO_API_KEY keeps only providerId for api_key_set", () => {
+    const fakeApiKey = ["fake", "secret", "api", "key"].join("-");
+    const fakeAuthToken = ["fake", "secret", "auth", "token"].join("-");
+    const payload = buildAnalyticsUploadPayload(
+      {
+        ...DEFAULT_SETTINGS,
+        enableAnalytics: true,
+        deviceId: "dev-1",
+        analyticsConsentVersion: 1,
+        apiKey: fakeApiKey,
+        authToken: fakeAuthToken,
+      },
+      "api_key_set",
+      456,
+      "0.2.0",
+      undefined,
+      { providerId: "anthropic", apiKey: fakeApiKey, authToken: fakeAuthToken },
+    );
+
+    expect(payload.data).toEqual({ providerId: "anthropic" });
+    expect(JSON.stringify(payload)).not.toContain(fakeApiKey);
+    expect(JSON.stringify(payload)).not.toContain(fakeAuthToken);
+  });
 });

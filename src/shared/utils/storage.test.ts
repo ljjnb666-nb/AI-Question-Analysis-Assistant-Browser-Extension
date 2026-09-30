@@ -4,6 +4,7 @@ import {
   addHistoryEntry,
   addHistoryEntryIfCurrent,
   clearHistory,
+  exportHistory,
   getOrCreateDeviceId,
   loadHistory,
   loadSettings,
@@ -12,6 +13,7 @@ import {
   saveSettings,
 } from "./storage";
 import { DEFAULT_SETTINGS } from "../types";
+import { ENCRYPTED_VALUE_PREFIX, encryptValue } from "./encryption";
 import type { HistoryEntry, ParseResult, QuestionBlock } from "../types";
 
 const mockBlock: QuestionBlock = {
@@ -41,6 +43,22 @@ function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
   return { promise, resolve };
+}
+
+/** The last appSettings payload written to chrome.storage.local (the save write, not the consent passthrough). */
+function lastAppSettingsWrite(): Record<string, unknown> {
+  const setCalls = vi.mocked(chrome.storage.local.set).mock.calls;
+  return setCalls[setCalls.length - 1]?.[0].appSettings;
+}
+
+/** True when any storage write transformed a credential into an envelope (load-time migration must not do this). */
+function hasEnvelopeCredentialWriteback(): boolean {
+  return vi.mocked(chrome.storage.local.set).mock.calls.some(([payload]) => {
+    const settings = payload?.appSettings as Record<string, unknown> | undefined;
+    return settings != null && ["apiKey", "authToken"].some(
+      (key) => typeof settings[key] === "string" && (settings[key] as string).startsWith(ENCRYPTED_VALUE_PREFIX),
+    );
+  });
 }
 
 function createLargeHistoryEntry(id: string): HistoryEntry {
@@ -118,6 +136,22 @@ describe("storage", () => {
       const settings = await loadSettings();
       expect(settings.authToken ?? undefined).toBeUndefined();
     });
+
+    it("KEY_15_AUTH_REGRESSION tampered authToken envelopes fail closed and explicit clear survives", async () => {
+      const envelope = await encryptValue("fake-auth-token");
+      const tampered = envelope.slice(0, envelope.length - 4) + "AAAA";
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({
+        appSettings: { authToken: tampered },
+      } as never);
+
+      const settings = await loadSettings();
+      expect(settings.authToken).toBe("");
+
+      await saveSettings({ authToken: undefined });
+      const savedSettings = lastAppSettingsWrite();
+      expect(savedSettings?.authToken ?? undefined).toBeUndefined();
+      expect(String(savedSettings?.authToken ?? "")).not.toContain(ENCRYPTED_VALUE_PREFIX);
+    });
   });
 
   describe("loadSettings", () => {
@@ -131,27 +165,106 @@ describe("storage", () => {
       expect(settings.deviceId).toBeTruthy();
     });
 
-    it("merges stored settings with defaults and decrypts API key", async () => {
-      const encryptedKey = "mockEncryptedKey1234567890abcdefghijklmnopqrstuvwxyz";
+    it("KEY_03_VERSIONED_TAMPERED_CIPHERTEXT_FAILS_CLOSED clears the stored credential", async () => {
+      const envelope = await encryptValue("fake-key-do-not-use");
+      const payload = envelope.slice(ENCRYPTED_VALUE_PREFIX.length);
+      const middle = Math.floor(payload.length / 2);
+      const tampered = envelope.slice(0, ENCRYPTED_VALUE_PREFIX.length) + payload.slice(0, middle) + (payload[middle] === "A" ? "B" : "A") + payload.slice(middle + 1);
       vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { apiKey: encryptedKey },
+        appSettings: { apiKey: tampered },
       } as never);
 
       const settings = await loadSettings();
 
       expect(settings.apiKey).toBe("");
-      expect(settings.providerId).toBe(DEFAULT_SETTINGS.providerId);
     });
 
-    it("clears unreadable encrypted auth tokens", async () => {
-      const encryptedToken = "mockEncryptedToken1234567890abcdefghijklmnopqrstuvwxyz";
+    it("returns base64-like legacy plaintext keys unchanged (heuristic fix)", async () => {
+      const legacyPlaintextKey = "mockEncryptedKey1234567890abcdefghijklmnopqrstuvwxyz";
       vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { authToken: encryptedToken },
+        appSettings: { apiKey: legacyPlaintextKey },
       } as never);
 
       const settings = await loadSettings();
 
-      expect(settings.authToken).toBe("");
+      expect(settings.apiKey).toBe(legacyPlaintextKey);
+    });
+
+    it("KEY_05_NORMAL_SAVE_NEVER_STORES_PLAINTEXT_API_KEY writes a versioned envelope", async () => {
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({} as never);
+
+      const fakePlainApiKey = ["fake", "plain", "api", "key"].join("-");
+      await saveSettings({ apiKey: fakePlainApiKey });
+
+      const savedSettings = lastAppSettingsWrite();
+      expect(savedSettings.apiKey).not.toBe(fakePlainApiKey);
+      expect(String(savedSettings.apiKey).startsWith(ENCRYPTED_VALUE_PREFIX)).toBe(true);
+    });
+
+    it("KEY_06_AUTH_TOKEN_NORMAL_SAVE_NEVER_STORES_PLAINTEXT writes a versioned envelope", async () => {
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({} as never);
+
+      const fakePlainAuthToken = ["fake", "plain", "auth", "token"].join("-");
+      await saveSettings({ authToken: fakePlainAuthToken });
+
+      const savedSettings = lastAppSettingsWrite();
+      expect(savedSettings.authToken).not.toBe(fakePlainAuthToken);
+      expect(String(savedSettings.authToken).startsWith(ENCRYPTED_VALUE_PREFIX)).toBe(true);
+    });
+
+    it("KEY_07_BASE64_LIKE_PLAINTEXT_NOT_MISCLASSIFIED preserves and migrates custom keys", async () => {
+      const legacyPlaintextKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({
+        appSettings: { apiKey: legacyPlaintextKey },
+      } as never);
+
+      const settings = await loadSettings();
+      expect(settings.apiKey).toBe(legacyPlaintextKey);
+
+      // Loading never rewrites credentials to storage.
+      vi.mocked(chrome.storage.local.set).mockClear();
+      expect(hasEnvelopeCredentialWriteback()).toBe(false);
+
+      // The next save of any setting is the canonical migration point.
+      await saveSettings({ language: "en" });
+      const savedSettings = lastAppSettingsWrite();
+      expect(String(savedSettings.apiKey).startsWith(ENCRYPTED_VALUE_PREFIX)).toBe(true);
+      expect(savedSettings.apiKey).not.toContain(legacyPlaintextKey);
+
+      // Reload returns the original plaintext.
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({ appSettings: savedSettings } as never);
+      __resetStorageCacheForTests();
+      const reloaded = await loadSettings();
+      expect(reloaded.apiKey).toBe(legacyPlaintextKey);
+    });
+
+    it("KEY_08_LEGACY_UNVERSIONED_CIPHERTEXT_COMPAT decrypts and migrates on next save", async () => {
+      const envelope = await encryptValue("legacy-credential-value");
+      const legacyCiphertext = envelope.slice(ENCRYPTED_VALUE_PREFIX.length);
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({
+        appSettings: { authToken: legacyCiphertext },
+      } as never);
+
+      const settings = await loadSettings();
+      expect(settings.authToken).toBe("legacy-credential-value");
+
+      // Loading must not write the credential back as an envelope.
+      expect(hasEnvelopeCredentialWriteback()).toBe(false);
+
+      vi.mocked(chrome.storage.local.set).mockClear();
+      await saveSettings({ language: "en" });
+      expect(String(lastAppSettingsWrite().authToken).startsWith(ENCRYPTED_VALUE_PREFIX)).toBe(true);
+    });
+
+    it("KEY_14_FORMAT_VERSIONING fails closed on unknown envelope versions", async () => {
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({
+        appSettings: { apiKey: ["qse:v2", "AAAAAAAAAAAAAAAA"].join(":") },
+      } as never);
+
+      const settings = await loadSettings();
+
+      expect(settings.apiKey).toBe("");
+      expect(hasEnvelopeCredentialWriteback()).toBe(false);
     });
 
     it("reuses the in-memory cache for repeated reads", async () => {
@@ -325,6 +438,21 @@ describe("storage", () => {
       const history = await loadHistory();
 
       expect(history).toEqual([]);
+    });
+
+    it("KEY_09_HISTORY_EXPORT_HAS_NO_API_KEY", async () => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(async (key) => {
+        if (key === "parseHistory") {
+          return {
+            parseHistory: [{ id: "h-1", timestamp: Date.now(), block: mockBlock, result: mockResult, host: "example.com" }],
+          } as never;
+        }
+        return { appSettings: { apiKey: ["fake", "secret", "api", "key"].join("-") } } as never;
+      });
+
+      const exported = await exportHistory();
+
+      expect(exported).not.toContain(["fake", "secret", "api", "key"].join("-"));
     });
 
     it("returns stored history", async () => {

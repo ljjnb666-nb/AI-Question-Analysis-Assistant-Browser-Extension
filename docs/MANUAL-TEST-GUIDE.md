@@ -31,14 +31,15 @@
 // 在浏览器控制台执行
 chrome.storage.local.get('appSettings', (result) => {
   console.log('Stored API Key:', result.appSettings.apiKey);
-  // 应该看到加密后的 base64 字符串，而不是明文
+  // 应该看到 qse:v1:<base64> 格式的密文，而不是明文
 });
 ```
 
 **预期结果：**
-- ✅ API Key 以加密形式存储（长 base64 字符串）
+- ✅ API Key 以 `qse:v1:<base64>` 形式存储（版本化密文 envelope）
 - ✅ 重新打开设置页面，API Key 正确解密显示
 - ✅ 不会看到明文 `sk-test-key-12345`
+- ℹ️ 这是本地 encrypted-at-rest 表示，用于防止意外看到明文；不是 OS 级秘密保险库（详见 [API-KEY-SECURITY.md](./API-KEY-SECURITY.md)）
 
 ---
 
