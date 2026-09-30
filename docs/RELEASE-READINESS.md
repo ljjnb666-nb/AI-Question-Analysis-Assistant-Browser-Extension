@@ -1,8 +1,8 @@
 # Release Readiness
 
-This is the authoritative status summary for the Release Hardening effort. Umbrella tracking issue: **Issue #18** ("Release hardening: security, privacy, CI and permission gate"). Phase-specific records live in their merged PRs and the issue history; this document is the single entry point for release status and must stay consistent with the frozen behavior of the `main` branch.
+This is the authoritative release-readiness entry point. The durable completion rule for the final documentation gate is defined here; the exact completion evidence is the final Issue #18 completion record and post-merge CI. Umbrella tracking issue: **Issue #18** ("Release hardening: security, privacy, CI and permission gate"). Phase-specific records live in their merged PRs and the issue history; this document must stay consistent with the frozen behavior of the `main` branch.
 
-Status entries here describe merged, frozen behavior. This document deliberately does not pin a "current main SHA" as a long-term truth; consult the repository history and the post-merge CI runs for exact SHAs.
+Status entries describe merged, frozen behavior. This document deliberately does not pin a "current main SHA" as a long-term truth, and it does not hold a live auto-updating status feed; consult the repository history, the CI runs, and the Issue #18 completion record for exact SHAs and final evidence.
 
 ## Phase status
 
@@ -16,9 +16,9 @@ Status entries here describe merged, frozen behavior. This document deliberately
 | REL-AUTH-01 | Auth hardening (server-authoritative sessions, expiry, revocation, startup validation UI) | COMPLETE |
 | REL-RATE-01 | Rate limiter resource bounding (per-process, bounded per namespace) | COMPLETE |
 | REL-KEY-01 | Local credential storage versioning (`qse:v1` envelope, legacy semantics) | COMPLETE |
-| REL-DOC-01 | Documentation finalization (this phase) | IN REVIEW — pending merge and post-merge verification |
+| REL-DOC-01 | Documentation finalization | FINAL GATE — complete only when this document is on main, exact merge-SHA CI passes, and Issue #18 contains the final completion record |
 
-Issue #18 remains OPEN until REL-DOC-01 merges, post-merge CI on the exact merge SHA passes, and the final completion record is added to the issue.
+REL-DOC-01 is the final documentation gate. Before that gate is satisfied, REL-DOC-01 is in review. After Issue #18 is closed with the final completion record — which records the merge SHA and the passing post-merge CI run on that exact SHA — the gate is satisfied and REL-DOC-01 is complete. Issue #18 remains OPEN until then.
 
 ## Frozen release invariants
 
@@ -38,7 +38,7 @@ These invariants are frozen release behavior. Release hardening work must not we
 
 ## Known safe limitations
 
-These limitations are known, tested, and fail safe. They are recorded rather than hidden, and none of them is claimed as supported.
+These known safe limitations and unverified browser boundaries are explicitly recorded rather than hidden, and none of them is claimed as supported. Where automated evidence exists, it is cited below; unverified cases remain marked NOT RUN rather than being presented as proven.
 
 1. **Portal/teleport controls without proven ownership** — controls rendered outside the question owner have no proven ownership, so they fail closed: no option keys are inferred and no fill is issued (COMPAT-14).
 2. **Pointerdown-driven custom widgets** — a widget that commits a choice on `pointerdown` can produce a partial mutation whose effect cannot be proven; automation stops safely instead of claiming success (COMPAT-15).
