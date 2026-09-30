@@ -1,7 +1,14 @@
 import type { FloatingWindowState, AppSettings, HistoryEntry, ParseResult, QuestionBlock } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { logError } from "./errorLogger";
-import { decryptValue, encryptValue, isEncrypted } from "./encryption";
+import {
+  decryptValue,
+  encryptValue,
+  isCredentialEnvelope,
+  isEncrypted,
+  tryDecryptLegacyValue,
+  UnsupportedCredentialFormatError,
+} from "./encryption";
 import { sanitizeQuestionBlockForSerialization } from "./mediaSerialization";
 import { flushAnalyticsWork, invalidateAnalyticsConsent } from "./analyticsState";
 
@@ -116,14 +123,32 @@ async function readSettingsFromStorage(): Promise<AppSettings> {
     }
   }
 
+  // Credential read path. `qse:v1:` envelopes decrypt and fail closed on
+  // tampering; unknown `qse:*` versions fail closed as well; legacy strings
+  // (no marker) are decoded leniently and never cleared. Loading never
+  // writes credentials back to storage: migration to the current envelope
+  // happens on the next saveSettings call.
   for (const key of SENSITIVE_SETTINGS_KEYS) {
     const value = stored[key];
-    if (!value || !isEncrypted(value)) continue;
-    try {
-      stored[key] = await decryptValue(value);
-    } catch (err) {
-      logError(`Failed to decrypt ${key}`, err, "loadSettings");
+    if (!value) continue;
+    if (isEncrypted(value)) {
+      try {
+        stored[key] = await decryptValue(value);
+      } catch (err) {
+        logError(`Failed to decrypt ${key}`, err, "loadSettings");
+        stored[key] = "";
+      }
+    } else if (isCredentialEnvelope(value)) {
+      logError(
+        `Failed to decrypt ${key}`,
+        new UnsupportedCredentialFormatError(
+          `Stored ${key} uses an envelope version this build cannot decode`,
+        ),
+        "loadSettings",
+      );
       stored[key] = "";
+    } else {
+      stored[key] = (await tryDecryptLegacyValue(value)).plaintext;
     }
   }
 
@@ -155,9 +180,15 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<void
   merged.deviceId = merged.deviceId || existing.deviceId || createDeviceIdValue();
   merged.analyticsBaseUrl = normalizeBaseUrl(merged.analyticsBaseUrl);
 
+  // saveSettings receives plaintext domain values: loadSettings returns
+  // plaintext, chrome.storage.local stores the envelope. Every non-empty
+  // sensitive value is (re-)encrypted here, which also makes the next save
+  // the canonical migration point for legacy plaintext and legacy
+  // unversioned ciphertext. undefined/null/"" keep the explicit-clear
+  // contract and are never encrypted.
   for (const key of SENSITIVE_SETTINGS_KEYS) {
     const value = merged[key];
-    if (!value || isEncrypted(value)) continue;
+    if (!value) continue;
     try {
       merged[key] = await encryptValue(value);
     } catch (err) {
