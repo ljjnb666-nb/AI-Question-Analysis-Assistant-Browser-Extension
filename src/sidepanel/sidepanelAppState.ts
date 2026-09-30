@@ -18,8 +18,11 @@ export type AutoSolveProgressState = {
 
 export type SidePanelAppState = {
   uiLang: UILang;
+  /** Server-validated session status; never derived from local storage. */
+  authStatus: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
   isAuthenticated: boolean;
   userEmail: string;
+  sessionRejected: boolean;
   tab: SidePanelTabId;
   candidates: DetectedCandidate[];
   isDetecting: boolean;
@@ -37,8 +40,10 @@ export type SidePanelAppState = {
 
 export const initialSidePanelAppState: SidePanelAppState = {
   uiLang: "zh",
+  authStatus: "loading",
   isAuthenticated: false,
   userEmail: "",
+  sessionRejected: false,
   tab: "candidates",
   candidates: [],
   isDetecting: false,

@@ -90,6 +90,28 @@ describe("auth", () => {
       await expect(loginWithEmail("test@example.com", "wrong")).rejects.toThrow("Invalid credentials");
     });
 
+    it("AUTH_UI_LOGIN_MALFORMED_SUCCESS fails closed when the success payload lacks credentials", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        deviceId: "device-123",
+        analyticsBaseUrl: "https://api.example.com",
+      } as any);
+
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          user: { userId: "", email: "test@example.com" },
+          authToken: "",
+        }),
+      } as Response);
+
+      await expect(loginWithEmail("test@example.com", "password123")).rejects.toThrow("AUTH_MALFORMED_RESPONSE");
+      // Nothing may be persisted: a malformed success must not seed the
+      // local session candidate.
+      expect(storage.saveSettings).not.toHaveBeenCalled();
+    });
+
     it("uses default analytics URL when not configured", async () => {
       vi.mocked(storage.loadSettings).mockResolvedValue({
         deviceId: "device-123",
@@ -165,20 +187,55 @@ describe("auth", () => {
       );
     });
 
-    it("throws error when code sending fails", async () => {
+    it("AUTH_UI_SEND_CODE_RATE_LIMITED maps 429 to the stable rate-limit error", async () => {
       vi.mocked(storage.loadSettings).mockResolvedValue({
         analyticsBaseUrl: "https://api.example.com",
       } as any);
 
       vi.mocked(global.fetch).mockResolvedValue({
         ok: false,
+        status: 429,
         json: async () => ({
           ok: false,
-          error: "Rate limit exceeded",
+          error: "rate limit exceeded; retry after 42s",
+        }),
+      } as unknown as Response);
+
+      await expect(sendEmailVerificationCode("test@example.com")).rejects.toThrow("AUTH_RATE_LIMITED");
+    });
+
+    it("AUTH_UI_SEND_CODE_SMTP_UNAVAILABLE never surfaces SMTP configuration names", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        analyticsBaseUrl: "https://api.example.com",
+      } as any);
+
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({
+          ok: false,
+          error: "EMAIL_SERVICE_UNAVAILABLE",
         }),
       } as Response);
 
-      await expect(sendEmailVerificationCode("test@example.com")).rejects.toThrow("Rate limit exceeded");
+      await expect(sendEmailVerificationCode("test@example.com")).rejects.toThrow("EMAIL_SERVICE_UNAVAILABLE");
+    });
+
+    it("AUTH_UI_SEND_CODE_INTERNAL_MESSAGE_SANITIZED collapses raw server messages to a stable failure", async () => {
+      vi.mocked(storage.loadSettings).mockResolvedValue({
+        analyticsBaseUrl: "https://api.example.com",
+      } as any);
+
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: async () => ({
+          ok: false,
+          error: "mailer is not configured; set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM",
+        }),
+      } as Response);
+
+      await expect(sendEmailVerificationCode("test@example.com")).rejects.toThrow("AUTH_SEND_CODE_FAILED");
     });
   });
 
@@ -431,6 +488,82 @@ describe("auth", () => {
         userEmail: undefined,
         authToken: undefined,
       });
+    });
+
+    it("AUTH_UI_13_STALE_401 does not clear credentials replaced by a newer login mid-flight", async () => {
+      // First read (validation start) sees the stale token; the re-read on
+      // 401 sees the fresh session the user logged in with in the meantime.
+      vi.mocked(storage.loadSettings)
+        .mockResolvedValueOnce({
+          userId: "usr-stale",
+          userEmail: "stale@example.com",
+          authToken: MOCK_TOKEN_FORGED,
+          analyticsBaseUrl: "https://api.example.com",
+        } as any)
+        .mockResolvedValue({
+          userId: "usr-fresh",
+          userEmail: "fresh@example.com",
+          authToken: MOCK_TOKEN_NEXT,
+          analyticsBaseUrl: "https://api.example.com",
+        } as any);
+      vi.mocked(storage.saveSettings).mockResolvedValue(undefined);
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ ok: false, error: "AUTH_SESSION_INVALID" }),
+      } as unknown as Response);
+
+      const result = await validateAuthSession();
+
+      // The stale validation result itself is still "unauthenticated" (the
+      // coordinator's generation guard discards it), but the fresh
+      // credentials must survive in storage.
+      expect(result.status).toBe("unauthenticated");
+      expect(storage.saveSettings).not.toHaveBeenCalledWith({
+        userId: undefined,
+        userEmail: undefined,
+        authToken: undefined,
+      });
+    });
+
+    it("AUTH_UI_44_STALE_SUCCESS_DOES_NOT_OVERWRITE_NEW_LOGIN old validation identity never replaces a newer login", async () => {
+      // First read (validation start) sees user A / token A; by the time the
+      // success response lands, a newer login has written user B / token B.
+      vi.mocked(storage.loadSettings)
+        .mockResolvedValueOnce({
+          userId: "user-A",
+          userEmail: "a@example.com",
+          authToken: MOCK_TOKEN_LEGACY,
+          analyticsBaseUrl: "https://api.example.com",
+        } as any)
+        .mockResolvedValue({
+          userId: "user-B",
+          userEmail: "b@example.com",
+          authToken: MOCK_TOKEN_NEXT,
+          analyticsBaseUrl: "https://api.example.com",
+        } as any);
+      vi.mocked(storage.saveSettings).mockResolvedValue(undefined);
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          user: { userId: "user-A", email: "a@example.com" },
+          expiresAt: 4102444800000,
+        }),
+      } as Response);
+
+      const result = await validateAuthSession();
+
+      // The stale validation still reports its own identity to the caller
+      // (the coordinator's generation guard decides what wins), but the
+      // newer login in storage must be left untouched.
+      expect(result.status).toBe("authenticated");
+      expect(storage.saveSettings).not.toHaveBeenCalledWith({
+        userId: "user-A",
+        userEmail: "a@example.com",
+      });
+      expect(storage.saveSettings).not.toHaveBeenCalled();
     });
 
     it("keeps credentials and reports server_unavailable on network failure", async () => {

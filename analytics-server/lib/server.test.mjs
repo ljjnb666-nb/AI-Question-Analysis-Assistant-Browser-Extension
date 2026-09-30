@@ -251,6 +251,43 @@ describe("analytics handler", () => {
     expect(createEmailVerificationCodeImpl).toHaveBeenCalledTimes(3);
   });
 
+  it("AUTH_UI_SERVER_SMTP_UNCONFIGURED returns a safe opaque error without SMTP variable names", async () => {
+    const handler = createHandler({ isMailerConfigured: () => false });
+
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/auth/send-verification-code",
+      body: JSON.stringify({ email: "user@example.com" }),
+    });
+
+    expect(res.statusCode).toBe(503);
+    expect(parsePayload(res)).toEqual({ ok: false, error: "EMAIL_SERVICE_UNAVAILABLE" });
+    for (const secretName of ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "mailer is not configured"]) {
+      expect(res.payload).not.toContain(secretName);
+    }
+  });
+
+  it("AUTH_UI_SERVER_SMTP_FAILURE keeps transport errors internal and returns EMAIL_SERVICE_UNAVAILABLE", async () => {
+    const sendVerificationCodeEmail = vi.fn().mockRejectedValue(
+      Object.assign(new Error("connect ECONNREFUSED 10.0.0.8:587"), { code: "ECONNREFUSED" }),
+    );
+    const handler = createHandler({
+      isMailerConfigured: () => true,
+      sendVerificationCodeEmail,
+    });
+
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/auth/send-verification-code",
+      body: JSON.stringify({ email: "user@example.com" }),
+    });
+
+    expect(res.statusCode).toBe(503);
+    expect(parsePayload(res)).toEqual({ ok: false, error: "EMAIL_SERVICE_UNAVAILABLE" });
+    expect(res.payload).not.toContain("ECONNREFUSED");
+    expect(res.payload).not.toContain("10.0.0.8");
+  });
+
   it("rejects browser requests from non-extension origins", async () => {
     const handler = createAnalyticsHandler({
       adminToken: "admin-token",

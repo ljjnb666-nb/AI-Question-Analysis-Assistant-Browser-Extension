@@ -21,6 +21,11 @@ type AuthText = {
   logout: string;
   showPassword: string;
   hidePassword: string;
+  validatingSession: string;
+  sessionUnavailable: string;
+  sessionUnavailableHint: string;
+  retrySession: string;
+  sessionExpired: string;
 };
 
 type SettingsAuthController = {
@@ -33,11 +38,17 @@ type SettingsAuthController = {
   handleLogout: () => Promise<void>;
   handleRegister: () => Promise<void>;
   handleSendCode: () => Promise<void>;
+  isAuthenticated: boolean;
+  isSessionPending: boolean;
+  isServerUnavailable: boolean;
   password: string;
+  retryValidation: () => Promise<void>;
+  sessionRejected: boolean;
   setEmail: (value: string) => void;
   setPassword: (value: string) => void;
   setVerificationCode: (value: string) => void;
   showPassword: boolean;
+  status: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
   switchView: (view: "register" | "login") => void;
   togglePasswordVisibility: () => void;
   userEmail: string;
@@ -97,7 +108,8 @@ export const SettingsAccountSection: React.FC<{
   auth: SettingsAuthController;
   authText: AuthText;
   isEn: boolean;
-}> = ({ auth, authText, isEn }) => (
+  rejectedSessionHint?: boolean;
+}> = ({ auth, authText, isEn, rejectedSessionHint = false }) => (
   <SectionCard
     title={isEn ? "Plugin Access Account" : "插件访问账号"}
     description={
@@ -106,7 +118,7 @@ export const SettingsAccountSection: React.FC<{
         : "注册页和登录页已经拆开，注册需要真实邮箱验证码。"
     }
   >
-    {auth.userId ? (
+    {auth.isAuthenticated ? (
       <div
         style={{
           display: "grid",
@@ -125,6 +137,35 @@ export const SettingsAccountSection: React.FC<{
         <UiButton danger onClick={() => void auth.handleLogout()} disabled={auth.authBusy === "logout"}>
           {auth.authBusy === "logout" ? authText.loggingOut : authText.logout}
         </UiButton>
+      </div>
+    ) : auth.isSessionPending ? (
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ ...hintStyle, color: "#a5b4fc" }}>{authText.validatingSession}</div>
+      </div>
+    ) : auth.isServerUnavailable ? (
+      <div
+        style={{
+          display: "grid",
+          gap: 10,
+          padding: 12,
+          borderRadius: 14,
+          border: "1px solid rgba(245, 158, 11, 0.25)",
+          background: "linear-gradient(180deg, rgba(66, 50, 24, 0.7), rgba(45, 35, 18, 0.65))",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#fbbf24" }}>{authText.sessionUnavailable}</div>
+          <div style={hintStyle}>{authText.sessionUnavailableHint}</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <UiButton primary onClick={() => void auth.retryValidation()}>
+            {authText.retrySession}
+          </UiButton>
+          <UiButton danger onClick={() => void auth.handleLogout()} disabled={auth.authBusy === "logout"}>
+            {auth.authBusy === "logout" ? authText.loggingOut : authText.logout}
+          </UiButton>
+        </div>
+        {auth.feedback ? <div style={hintStyle}>{auth.feedback}</div> : null}
       </div>
     ) : (
       <div style={{ display: "grid", gap: 8 }}>
@@ -197,14 +238,14 @@ export const SettingsAccountSection: React.FC<{
           </>
         )}
 
-        {auth.feedback ? (
+        {auth.feedback || auth.sessionRejected || rejectedSessionHint ? (
           <div
             style={{
               ...hintStyle,
               color: /success|succeeded|logged out|sent|成功|已退出/.test(auth.feedback) ? "#9ffff6" : "#ff9fda",
             }}
           >
-            {auth.feedback}
+            {auth.feedback || authText.sessionExpired}
           </div>
         ) : null}
       </div>

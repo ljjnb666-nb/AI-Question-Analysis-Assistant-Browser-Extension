@@ -1,20 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { loadSettings } from "@/shared/utils/storage";
 import {
   loginWithEmail,
   logoutAccount,
   registerWithEmailCode,
   sendEmailVerificationCode,
 } from "@/shared/utils/auth";
+import { classifyAuthError } from "./authErrorContract";
+import { useAuthSession } from "./useAuthSession";
 import { getAuthText, type AuthCopyVariant, type AuthLang } from "./authText";
 
 type AuthView = "register" | "login";
 type AuthBusy = "send-code" | "register" | "login" | "logout" | null;
-
-type IdentityState = {
-  userId: string;
-  userEmail: string;
-};
 
 type UseAuthControllerOptions = {
   lang: AuthLang;
@@ -27,6 +23,8 @@ export function useAuthController(options: UseAuthControllerOptions) {
     () => getAuthText(options.lang, options.variant),
     [options.lang, options.variant],
   );
+  const session = useAuthSession();
+  const sessionState = session.getState();
   const [view, setView] = useState<AuthView>("register");
   const [authBusy, setAuthBusy] = useState<AuthBusy>(null);
   const [feedback, setFeedback] = useState("");
@@ -36,7 +34,6 @@ export function useAuthController(options: UseAuthControllerOptions) {
   const [showPassword, setShowPassword] = useState(false);
   const [codeCooldown, setCodeCooldown] = useState(0);
   const [codeSent, setCodeSent] = useState(false);
-  const [identity, setIdentity] = useState<IdentityState>({ userId: "", userEmail: "" });
 
   useEffect(() => {
     if (codeCooldown <= 0) return;
@@ -46,17 +43,12 @@ export function useAuthController(options: UseAuthControllerOptions) {
     return () => window.clearTimeout(timer);
   }, [codeCooldown]);
 
-  const isAuthenticated = Boolean(identity.userId && identity.userEmail);
-
-  const refreshIdentity = async () => {
-    const settings = await loadSettings();
-    const nextIdentity = {
-      userId: settings.userId ?? "",
-      userEmail: settings.userEmail ?? "",
-    };
-    setIdentity(nextIdentity);
-    return nextIdentity;
-  };
+  // The only authority for protected UI is the server-validated session
+  // status. Local storage values never unlock anything by themselves.
+  const status = sessionState.status;
+  const isAuthenticated = status === "authenticated";
+  const isSessionPending = status === "loading" || status === "validating";
+  const isServerUnavailable = status === "server_unavailable";
 
   const runBeforeAction = async () => {
     await options.beforeAction?.();
@@ -82,13 +74,20 @@ export function useAuthController(options: UseAuthControllerOptions) {
       await runBeforeAction();
       setAuthBusy("register");
       setFeedback("");
-      await registerWithEmailCode(normalizedEmail, password, verificationCode.trim());
-      await refreshIdentity();
-      setPassword("");
-      setVerificationCode("");
-      setFeedback(copy.registerSuccess);
+      const result = await registerWithEmailCode(normalizedEmail, password, verificationCode.trim());
+      if (!result?.user?.userId) {
+        // Malformed success response: fail closed instead of trusting the
+        // credentials that may have been persisted.
+        session.applyLoggedOut();
+        setFeedback(copy.authFailureMessage("generic"));
+      } else {
+        await session.applyAuthenticatedSession(result.user.userId, result.user.email);
+        setPassword("");
+        setVerificationCode("");
+        setFeedback(copy.registerSuccess);
+      }
     } catch (error) {
-      setFeedback(copy.authFailed(String(error)));
+      setFeedback(copy.authFailureMessage(classifyAuthError(error)));
     } finally {
       setAuthBusy(null);
     }
@@ -105,12 +104,17 @@ export function useAuthController(options: UseAuthControllerOptions) {
       await runBeforeAction();
       setAuthBusy("login");
       setFeedback("");
-      await loginWithEmail(normalizedEmail, password);
-      await refreshIdentity();
-      setPassword("");
-      setFeedback(copy.loginSuccess);
+      const result = await loginWithEmail(normalizedEmail, password);
+      if (!result?.user?.userId) {
+        session.applyLoggedOut();
+        setFeedback(copy.authFailureMessage("generic"));
+      } else {
+        await session.applyAuthenticatedSession(result.user.userId, result.user.email);
+        setPassword("");
+        setFeedback(copy.loginSuccess);
+      }
     } catch (error) {
-      setFeedback(copy.authFailed(String(error)));
+      setFeedback(copy.authFailureMessage(classifyAuthError(error)));
     } finally {
       setAuthBusy(null);
     }
@@ -132,7 +136,7 @@ export function useAuthController(options: UseAuthControllerOptions) {
       setCodeSent(true);
       setFeedback(copy.codeSent);
     } catch (error) {
-      setFeedback(copy.sendFailed(String(error)));
+      setFeedback(copy.sendCodeFailureMessage(classifyAuthError(error)));
     } finally {
       setAuthBusy(null);
     }
@@ -140,16 +144,28 @@ export function useAuthController(options: UseAuthControllerOptions) {
 
   const handleLogout = async () => {
     try {
-      await runBeforeAction();
       setAuthBusy("logout");
-      await logoutAccount();
-      await refreshIdentity();
+      // AUTH-UI-INV-14: local logout is IMMEDIATE and must not wait for any
+      // async preparation — beforeAction (settings persistence), network, or
+      // anything else. The coordinator (and via the storage clear inside
+      // logoutAccount, every other surface) drops to unauthenticated right
+      // away; the server revoke is a best-effort follow-up whose outcome
+      // only shapes the final hint. beforeAuthRequest-style persistence
+      // stays wired to login/register/send-code only.
+      session.applyLoggedOut();
       setView("login");
       setEmail("");
       setPassword("");
       setVerificationCode("");
       setCodeSent(false);
-      setFeedback(copy.loggedOut);
+      let serverUncertain = true;
+      try {
+        const result = await logoutAccount();
+        serverUncertain = !result.serverRevoked && result.serverStatus !== "no_local_credentials";
+      } catch {
+        serverUncertain = true;
+      }
+      setFeedback(serverUncertain ? copy.loggedOutServerUncertain : copy.loggedOut);
     } finally {
       setAuthBusy(null);
     }
@@ -166,19 +182,25 @@ export function useAuthController(options: UseAuthControllerOptions) {
     handleRegister,
     handleSendCode,
     isAuthenticated,
+    isSessionPending,
+    isServerUnavailable,
     password,
-    refreshIdentity,
+    retryValidation: () => session.retryValidation(),
+    session,
+    sessionRejected: sessionState.sessionRejected,
     setEmail,
     setFeedback,
-    setIdentity,
     setPassword,
     setVerificationCode,
     showPassword,
+    status,
     switchView,
-    userEmail: identity.userEmail,
-    userId: identity.userId,
+    userEmail: sessionState.userEmail,
+    userId: sessionState.userId,
     verificationCode,
     view,
     togglePasswordVisibility: () => setShowPassword((previous) => !previous),
   };
 }
+
+export type AuthControllerValue = ReturnType<typeof useAuthController>;

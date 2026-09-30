@@ -1046,8 +1046,12 @@ export function createAnalyticsHandler(options = {}) {
       if (req.method === "POST" && url.pathname === "/auth/send-verification-code") {
         ensureTrustedBrowserOrigin(req);
         enforceRateLimit(rateLimiter, `send-code:ip:${ip}`, 10, 15 * 60 * 1000);
+        // Mailer availability is a service-level condition, not client
+        // diagnostics: the response stays a stable opaque code so internal
+        // configuration (SMTP_* variable names, transport errors) never
+        // reaches the client.
         if (!isMailerConfigured()) {
-          throw new HttpError(400, "mailer is not configured; set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM");
+          throw new HttpError(503, "EMAIL_SERVICE_UNAVAILABLE");
         }
         const body = await readJsonBody(req);
         const email = String(body.email || "").trim().toLowerCase();
@@ -1056,7 +1060,15 @@ export function createAnalyticsHandler(options = {}) {
         }
         enforceRateLimit(rateLimiter, `send-code:email:${email}`, 3, 10 * 60 * 1000);
         const { code, expiresAt } = createEmailVerificationCodeImpl(email);
-        await sendVerificationCodeEmail(email, code);
+        try {
+          await sendVerificationCodeEmail(email, code);
+        } catch (err) {
+          // Internal reason stays server-side; the client only gets the
+          // stable contract code. Only the transport error class is logged,
+          // never message payloads or credentials.
+          console.error("[analytics-server] verification email delivery failed", err && err.code ? err.code : "");
+          throw new HttpError(503, "EMAIL_SERVICE_UNAVAILABLE");
+        }
         sendJson(req, res, 200, { ok: true, expiresAt });
         return;
       }

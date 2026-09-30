@@ -1,12 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import { sendToActiveTab } from "@/shared/utils/messaging";
+import {
+  isInjectablePageUrl,
+  sendToActiveTab,
+  sendToTabWithBootstrap,
+} from "@/shared/utils/messaging";
+import type { ExtMessage } from "@/shared/types";
 import { getProviderShortName } from "@/shared/ai/providers";
 import { logEvent } from "@/shared/utils/analytics";
 import { loadSettings } from "@/shared/utils/storage";
 import { getAuthText } from "@/shared/auth/authText";
 import { useAuthController } from "@/shared/auth/useAuthController";
+import {
+  clearProtectedWorkOwner,
+  markProtectedWorkOwner,
+  terminateRecordedProtectedWork,
+  type ProtectedWorkKind,
+} from "@/shared/auth/protectedWorkOwner";
+import { createPopupAuthority } from "./popupAuthority";
 import {
   SHARED_FONT_FAMILY,
   primaryButtonStyle,
@@ -18,6 +30,7 @@ import {
   PopupActionsCard,
   PopupAuthCard,
   PopupHeroCard,
+  PopupSessionGateCard,
   PopupStatusCard,
   PopupWorkspaceCard,
 } from "./popupSections";
@@ -52,12 +65,37 @@ export const PopupApp: React.FC = () => {
   const copy = POPUP_COPY[lang];
   const authText = getAuthText(lang, "popup");
   const auth = useAuthController({ lang, variant: "popup" });
-  const { isAuthenticated } = auth;
-  const authRef = useRef(auth);
+  const { isAuthenticated, isSessionPending, isServerUnavailable } = auth;
+  // Handler-level authority reads the coordinator's CURRENT state directly,
+  // not an effect-lagged ref or a render snapshot (AUTH-UI-INV-09).
+  const authority = createPopupAuthority(auth.session);
+  const isAuthenticatedNow = authority.isAuthenticatedNow;
 
+  // AUTH-UI-INV-11 + INV-15 (popup side): when this surface observes the
+  // session leave `authenticated`, any long-running protected work recorded
+  // in the cross-surface owner store — Popup- or Side-Panel-started — is
+  // terminated at its recorded owner tab.
+  const sessionRef = useRef(auth.session);
   useEffect(() => {
-    authRef.current = auth;
-  }, [auth]);
+    sessionRef.current = auth.session;
+  }, [auth.session]);
+  useEffect(() => {
+    let wasAuthenticated: boolean | null = null;
+    const applySessionState = () => {
+      const nowAuthenticated = sessionRef.current.getState().status === "authenticated";
+      if (wasAuthenticated === true && !nowAuthenticated) {
+        void terminateRecordedProtectedWork((tabId, message) =>
+          sendToTabWithBootstrap(tabId, message as ExtMessage),
+        );
+      }
+      wasAuthenticated = nowAuthenticated;
+    };
+    applySessionState();
+    const unsubscribe = sessionRef.current.subscribe(applySessionState);
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -70,10 +108,6 @@ export const PopupApp: React.FC = () => {
       setProviderId(nextProviderId);
       setProviderName(getProviderShortName(nextProviderId));
       setLang(nextLang);
-      authRef.current.setIdentity({
-        userId: settings.userId ?? "",
-        userEmail: settings.userEmail ?? "",
-      });
       setLoaded(true);
     });
     return () => {
@@ -156,7 +190,7 @@ export const PopupApp: React.FC = () => {
               ? "0 16px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12)"
               : isAction
                 ? "0 12px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.08)"
-                : "0 16px 32px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255,255,255,0.1)",
+                : "0 16px 32px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.1)",
             duration: 0.2,
             ease: "power2.out",
           });
@@ -209,22 +243,96 @@ export const PopupApp: React.FC = () => {
       | "START_AUTO_SOLVE_ALL",
     openPanel = false,
   ) => {
+    // Handler-level fail closed: the button being visible is not authority.
+    // Only a server-validated session may dispatch protected runtime actions.
+    if (!isAuthenticatedNow()) {
+      setStatus(
+        lang === "en"
+          ? "Sign in with a verified session before using this action."
+          : "请先通过登录验证后再使用该功能。",
+      );
+      setActiveFeature(null);
+      return;
+    }
+    // AUTH-UI-INV-15: long-running protected work records its cross-surface
+    // owner BEFORE dispatch, with the exact target tab, so an auth loss on
+    // any surface can find and terminate the real owner. Hoisted so the
+    // failure path can clear a half-built record.
+    const longRunningKind: ProtectedWorkKind | null =
+      messageType === "START_AUTO_SOLVE_ALL"
+        ? "autoSolve"
+        : messageType === "START_FULL_PAGE_DETECT"
+          ? "fullPage"
+          : null;
+    let ownerTabId: number | undefined;
     try {
       setActiveFeature(feature);
       setStatus(startText);
       if (openPanel) await openSidePanelDirect();
-      await sendToActiveTab({ type: messageType });
+      // Last-responsible-moment recheck: opening the panel awaited, so the
+      // session may have lapsed since the entry gate (AUTH-UI-INV-12).
+      if (!isAuthenticatedNow()) {
+        setStatus(
+          lang === "en"
+            ? "Sign-in verification ended. The action was not started."
+            : "登录验证已失效，该操作未开始。",
+        );
+        setActiveFeature(null);
+        return;
+      }
+      if (longRunningKind) {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id || !isInjectablePageUrl(tab.url)) {
+          setStatus(errorText);
+          setActiveFeature(null);
+          return;
+        }
+        ownerTabId = tab.id;
+        await markProtectedWorkOwner(longRunningKind, ownerTabId);
+        if (!isAuthenticatedNow()) {
+          await clearProtectedWorkOwner(longRunningKind, ownerTabId);
+          setStatus(
+            lang === "en"
+              ? "Sign-in verification ended. The action was not started."
+              : "登录验证已失效，该操作未开始。",
+          );
+          setActiveFeature(null);
+          return;
+        }
+        // Dispatch to the exact recorded owner tab (guard re-checks at every
+        // await boundary inside the messaging chain).
+        await sendToTabWithBootstrap(ownerTabId, { type: messageType }, isAuthenticatedNow);
+      } else {
+        await sendToActiveTab({ type: messageType }, isAuthenticatedNow);
+      }
       window.close();
     } catch {
+      // A failed dispatch must not leave an owner record behind.
+      if (ownerTabId != null && longRunningKind) {
+        void clearProtectedWorkOwner(longRunningKind, ownerTabId);
+      }
       setStatus(errorText);
       setActiveFeature(null);
     }
   };
 
   const handleOpenSidePanel = async () => {
+    if (!isAuthenticatedNow()) {
+      setStatus(
+        lang === "en"
+          ? "Sign in with a verified session before opening the workspace."
+          : "请先通过登录验证后再打开工作台。",
+      );
+      return;
+    }
     await openSidePanelDirect();
     window.close();
   };
+
+  // The retry gate is only for indeterminate states (pending validation or
+  // unreachable server). A server-REJECTED session converges to the auth form
+  // with a generic "sign in again" hint.
+  const sessionGateVisible = isSessionPending || isServerUnavailable;
 
   return (
     <div ref={scopeRef} style={shellStyle}>
@@ -235,10 +343,22 @@ export const PopupApp: React.FC = () => {
         isRuntimeConfigured={isRuntimeConfigured}
         loaded={loaded}
         providerName={providerName}
+        sessionStatus={auth.status}
+        validatingSessionText={authText.validatingSession}
         view={auth.view}
       />
 
-      {!isAuthenticated ? (
+      {isAuthenticated ? (
+        <PopupActionsCard activeFeature={activeFeature} copy={copy} onRunAction={(...args) => void runAction(...args)} />
+      ) : sessionGateVisible ? (
+        <PopupSessionGateCard
+          authText={authText}
+          isBusy={isSessionPending}
+          isServerUnavailable={isServerUnavailable}
+          onRetry={() => void auth.retryValidation()}
+          onLogout={() => void auth.handleLogout()}
+        />
+      ) : (
         <PopupAuthCard
           auth={auth}
           authText={authText}
@@ -247,8 +367,6 @@ export const PopupApp: React.FC = () => {
           primaryGateButtonStyle={primaryGateButtonStyle}
           secondaryGateButtonStyle={secondaryGateButtonStyle}
         />
-      ) : (
-        <PopupActionsCard activeFeature={activeFeature} copy={copy} onRunAction={(...args) => void runAction(...args)} />
       )}
 
       <PopupWorkspaceCard
