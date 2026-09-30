@@ -12,7 +12,11 @@ import {
   validateUserSessionInStorage,
   RegistrationError,
 } from "./store.mjs";
-import { createFixedWindowRateLimiter, normalizeIpAddress } from "./security.mjs";
+import {
+  createFixedWindowRateLimiter,
+  DEFAULT_RATE_LIMIT_MAX_BUCKETS,
+  normalizeIpAddress,
+} from "./security.mjs";
 import { normalizeRemoteAnalyticsEvent } from "./telemetry.mjs";
 import { ADMIN_SESSION_MAX_COUNT, ADMIN_SESSION_TTL_MS, createAdminSessionStore } from "./admin-sessions.mjs";
 
@@ -916,10 +920,12 @@ function redirect(res, location, cookie) {
   res.end();
 }
 
-function enforceRateLimit(rateLimiter, key, limit, windowMs) {
+function enforceRateLimit(rateLimiter, key, limit, windowMs, nowImpl = () => Date.now()) {
   const result = rateLimiter.consume(key, limit, windowMs);
   if (!result.allowed) {
-    const retryAfter = Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000));
+    // Retry-After must use the same clock the limiter consumed its window
+    // with, so fake-clock tests stay deterministic.
+    const retryAfter = Math.max(1, Math.ceil((result.resetAt - nowImpl()) / 1000));
     throw new HttpError(429, `rate limit exceeded; retry after ${retryAfter}s`);
   }
 }
@@ -932,7 +938,7 @@ export function createAnalyticsHandler(options = {}) {
     loadDbImpl = loadDb,
     loginUserImpl = loginUserInStorage,
     publicBaseUrl = process.env.PUBLIC_BASE_URL || "http://127.0.0.1:8787",
-    rateLimiter = createFixedWindowRateLimiter(),
+    rateLimitMaxBuckets = DEFAULT_RATE_LIMIT_MAX_BUCKETS,
     nowImpl = () => Date.now(),
     adminSessionTtlMs = ADMIN_SESSION_TTL_MS,
     adminSessionMaxCount = ADMIN_SESSION_MAX_COUNT,
@@ -957,6 +963,26 @@ export function createAnalyticsHandler(options = {}) {
     now: nowImpl,
     ttlMs: adminSessionTtlMs,
   });
+
+  // One bounded limiter per namespace: isolation is structural (separate Maps),
+  // so exhausting one namespace's bucket capacity can never consume another
+  // namespace's. These are per-process authorities; the authoritative
+  // deployment is a single Node process, and horizontal replicas would need a
+  // shared/external limiter instead.
+  const createNamespaceLimiter = () =>
+    createFixedWindowRateLimiter({ now: nowImpl, maxBuckets: rateLimitMaxBuckets });
+  const rateLimiters = {
+    adminLogin: createNamespaceLimiter(),
+    sendCodeIp: createNamespaceLimiter(),
+    sendCodeEmail: createNamespaceLimiter(),
+    registerIp: createNamespaceLimiter(),
+    loginIp: createNamespaceLimiter(),
+    sessionIp: createNamespaceLimiter(),
+    logoutIp: createNamespaceLimiter(),
+    eventsIp: createNamespaceLimiter(),
+    summaryIp: createNamespaceLimiter(),
+    timeseriesIp: createNamespaceLimiter(),
+  };
 
   return async function analyticsHandler(req, res) {
     if (!req.url) {
@@ -1005,7 +1031,7 @@ export function createAnalyticsHandler(options = {}) {
 
       if (req.method === "POST" && url.pathname === "/admin/login") {
         const normalizedAdminToken = requireConfiguredAdminToken(adminToken);
-        enforceRateLimit(rateLimiter, `admin-login:ip:${ip}`, ADMIN_LOGIN_LIMIT, ADMIN_LOGIN_WINDOW_MS);
+        enforceRateLimit(rateLimiters.adminLogin, `admin-login:ip:${ip}`, ADMIN_LOGIN_LIMIT, ADMIN_LOGIN_WINDOW_MS, nowImpl);
         const submittedToken = await readAdminLoginBody(req);
         if (!submittedToken || !adminTokensMatch(submittedToken, normalizedAdminToken)) {
           sendHtml(req, res, 401, "<!doctype html><title>Unauthorized</title><p>Admin authentication failed.</p>");
@@ -1045,7 +1071,7 @@ export function createAnalyticsHandler(options = {}) {
 
       if (req.method === "POST" && url.pathname === "/auth/send-verification-code") {
         ensureTrustedBrowserOrigin(req);
-        enforceRateLimit(rateLimiter, `send-code:ip:${ip}`, 10, 15 * 60 * 1000);
+        enforceRateLimit(rateLimiters.sendCodeIp, `send-code:ip:${ip}`, 10, 15 * 60 * 1000, nowImpl);
         // Mailer availability is a service-level condition, not client
         // diagnostics: the response stays a stable opaque code so internal
         // configuration (SMTP_* variable names, transport errors) never
@@ -1058,7 +1084,7 @@ export function createAnalyticsHandler(options = {}) {
         if (!email) {
           throw new HttpError(400, "email is required");
         }
-        enforceRateLimit(rateLimiter, `send-code:email:${email}`, 3, 10 * 60 * 1000);
+        enforceRateLimit(rateLimiters.sendCodeEmail, `send-code:email:${email}`, 3, 10 * 60 * 1000, nowImpl);
         const { code, expiresAt } = createEmailVerificationCodeImpl(email);
         try {
           await sendVerificationCodeEmail(email, code);
@@ -1075,7 +1101,7 @@ export function createAnalyticsHandler(options = {}) {
 
       if (req.method === "POST" && url.pathname === "/auth/register") {
         ensureTrustedBrowserOrigin(req);
-        enforceRateLimit(rateLimiter, `register:ip:${ip}`, 20, 15 * 60 * 1000);
+        enforceRateLimit(rateLimiters.registerIp, `register:ip:${ip}`, 20, 15 * 60 * 1000, nowImpl);
         const body = await readJsonBody(req);
         // One authoritative primitive performs validation, code verification,
         // the duplicate check, creation, and code consumption atomically, so a
@@ -1101,7 +1127,7 @@ export function createAnalyticsHandler(options = {}) {
 
       if (req.method === "POST" && url.pathname === "/auth/login") {
         ensureTrustedBrowserOrigin(req);
-        enforceRateLimit(rateLimiter, `login:ip:${ip}`, 30, 15 * 60 * 1000);
+        enforceRateLimit(rateLimiters.loginIp, `login:ip:${ip}`, 30, 15 * 60 * 1000, nowImpl);
         const body = await readJsonBody(req);
         // Unknown account and wrong password share one stable response so the
         // login endpoint never discloses whether an email is registered.
@@ -1129,7 +1155,7 @@ export function createAnalyticsHandler(options = {}) {
       // callers cannot distinguish missing users from bad or expired tokens.
       if (req.method === "POST" && url.pathname === "/auth/session") {
         ensureTrustedBrowserOrigin(req);
-        enforceRateLimit(rateLimiter, `session:ip:${ip}`, 120, 5 * 60 * 1000);
+        enforceRateLimit(rateLimiters.sessionIp, `session:ip:${ip}`, 120, 5 * 60 * 1000, nowImpl);
         const body = await readJsonBody(req);
         let session;
         try {
@@ -1150,7 +1176,7 @@ export function createAnalyticsHandler(options = {}) {
       // proven; a correct userId alone never revokes anything.
       if (req.method === "POST" && url.pathname === "/auth/logout") {
         ensureTrustedBrowserOrigin(req);
-        enforceRateLimit(rateLimiter, `logout:ip:${ip}`, 30, 15 * 60 * 1000);
+        enforceRateLimit(rateLimiters.logoutIp, `logout:ip:${ip}`, 30, 15 * 60 * 1000, nowImpl);
         const body = await readJsonBody(req);
         let revoked;
         try {
@@ -1165,7 +1191,7 @@ export function createAnalyticsHandler(options = {}) {
 
       if (req.method === "POST" && url.pathname === "/analytics/events") {
         ensureTrustedBrowserOrigin(req);
-        enforceRateLimit(rateLimiter, `events:ip:${ip}`, 240, 5 * 60 * 1000);
+        enforceRateLimit(rateLimiters.eventsIp, `events:ip:${ip}`, 240, 5 * 60 * 1000, nowImpl);
         const body = await readJsonBody(req);
         const safePayload = normalizeRemoteAnalyticsEvent(body);
         if (!safePayload) throw new HttpError(400, "invalid analytics event");
@@ -1179,7 +1205,7 @@ export function createAnalyticsHandler(options = {}) {
         if (!hasAdminAuthority(req, normalizedAdminToken, adminSessions, true)) {
           throw new HttpError(401, "admin authorization required");
         }
-        enforceRateLimit(rateLimiter, `summary:ip:${ip}`, 60, 5 * 60 * 1000);
+        enforceRateLimit(rateLimiters.summaryIp, `summary:ip:${ip}`, 60, 5 * 60 * 1000, nowImpl);
         const db = loadDbImpl();
         sendJson(req, res, 200, { ok: true, summary: buildAnalyticsSummary(db) });
         return;
@@ -1190,7 +1216,7 @@ export function createAnalyticsHandler(options = {}) {
         if (!hasAdminAuthority(req, normalizedAdminToken, adminSessions, true)) {
           throw new HttpError(401, "admin authorization required");
         }
-        enforceRateLimit(rateLimiter, `timeseries:ip:${ip}`, 60, 5 * 60 * 1000);
+        enforceRateLimit(rateLimiters.timeseriesIp, `timeseries:ip:${ip}`, 60, 5 * 60 * 1000, nowImpl);
         const days = Math.max(1, Math.min(90, Number(url.searchParams.get("days") || "14")));
         const db = loadDbImpl();
         sendJson(req, res, 200, { ok: true, series: buildTimeSeries(db, days) });

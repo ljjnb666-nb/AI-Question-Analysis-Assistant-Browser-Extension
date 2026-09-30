@@ -849,3 +849,130 @@ describe("auth core enumeration safety", () => {
     }
   });
 });
+
+describe("rate limiter resource bounds server wiring (REL-RATE-01)", () => {
+  const SESSION_USER = { userId: "usr-rate-1", email: "rate@example.com" };
+  const SESSION_TOKEN = ["tok", "rate"].join("_");
+
+  function adminLoginAttempt(handler, remoteAddress) {
+    return invoke(handler, {
+      method: "POST",
+      url: "/admin/login",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: formBody("wrong-secret"),
+      socket: { remoteAddress },
+    });
+  }
+
+  it("RATE_11_TRUSTED_PROXY_IDENTITY_REGRESSION: direct clients share one bucket regardless of forwarded headers", async () => {
+    const handler = createHandler();
+    let last;
+    for (let attempt = 1; attempt <= 11; attempt += 1) {
+      last = await invoke(handler, {
+        method: "POST",
+        url: "/admin/login",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "x-forwarded-for": `10.0.0.${attempt}`,
+          "x-real-ip": `10.9.9.${attempt}`,
+        },
+        body: formBody("wrong-secret"),
+        socket: { remoteAddress: "203.0.113.77" },
+      });
+      expect(last.res.statusCode).toBe(attempt === 11 ? 429 : 401);
+    }
+  });
+
+  it("RATE_12_ADMIN_LOGIN_RATE_LIMIT_REGRESSION: 10/15min limit, deterministic Retry-After, and window reset", async () => {
+    let now = 1_000_000;
+    const handler = createHandler({ nowImpl: () => now });
+    let last;
+    for (let attempt = 0; attempt < 11; attempt += 1) last = await adminLoginAttempt(handler, "127.0.0.1");
+
+    expect(last.res.statusCode).toBe(429);
+    expect(last.res.headers["Set-Cookie"]).toBeUndefined();
+    expect(last.res.payload).toContain("retry after 900s");
+
+    now += 15 * 60 * 1000;
+    const recovered = await adminLoginAttempt(handler, "127.0.0.1");
+    expect(recovered.res.statusCode).toBe(401);
+  });
+
+  it("RATE_13_SEND_CODE_IP_AND_EMAIL_LIMIT_REGRESSION: ip and email buckets stay independent fixed windows", async () => {
+    let now = 1_000_000;
+    const createEmailVerificationCodeImpl = vi.fn(() => ({ code: "123456", expiresAt: now + 600_000 }));
+    const sendVerificationCodeEmail = vi.fn();
+    const handler = createHandler({
+      nowImpl: () => now,
+      isMailerConfigured: () => true,
+      createEmailVerificationCodeImpl,
+      sendVerificationCodeEmail,
+    });
+    const sendCode = (email) =>
+      invoke(handler, {
+        method: "POST",
+        url: "/auth/send-verification-code",
+        body: JSON.stringify({ email }),
+      });
+
+    for (const email of ["a@example.com", "b@example.com", "c@example.com"]) {
+      expect((await sendCode(email)).res.statusCode).toBe(200);
+    }
+
+    let last;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      last = await sendCode("repeat@example.com");
+    }
+    expect(last.res.statusCode).toBe(429);
+
+    const otherEmail = await sendCode("other@example.com");
+    expect(otherEmail.res.statusCode).toBe(200);
+
+    expect(sendVerificationCodeEmail).toHaveBeenCalledTimes(7);
+    expect(createEmailVerificationCodeImpl).toHaveBeenCalledTimes(7);
+  });
+
+  it("RATE_14_AUTH_SESSION_LIMIT_REGRESSION: 120/5min limit still resets after the window", async () => {
+    let now = 1_000_000;
+    const validateUserSessionImpl = vi.fn(() => ({ user: SESSION_USER, expiresAt: 4102444800000 }));
+    const handler = createHandler({ nowImpl: () => now, validateUserSessionImpl });
+    const sessionRequest = () =>
+      invoke(handler, {
+        method: "POST",
+        url: "/auth/session",
+        headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+        body: JSON.stringify({ userId: SESSION_USER.userId }),
+      });
+
+    let last;
+    for (let attempt = 0; attempt < 121; attempt += 1) last = await sessionRequest();
+    expect(last.res.statusCode).toBe(429);
+    expect(validateUserSessionImpl).toHaveBeenCalledTimes(120);
+
+    now += 5 * 60 * 1000;
+    const recovered = await sessionRequest();
+    expect(recovered.res.statusCode).toBe(200);
+    expect(validateUserSessionImpl).toHaveBeenCalledTimes(121);
+  });
+
+  it("RATE_15_NAMESPACE_CAPACITY_ISOLATION_SERVER_LEVEL: a saturated admin-login namespace cannot starve session validation", async () => {
+    const validateUserSessionImpl = vi.fn(() => ({ user: SESSION_USER, expiresAt: 4102444800000 }));
+    const handler = createHandler({ rateLimitMaxBuckets: 2, validateUserSessionImpl });
+
+    expect((await adminLoginAttempt(handler, "203.0.113.1")).res.statusCode).toBe(401);
+    expect((await adminLoginAttempt(handler, "203.0.113.2")).res.statusCode).toBe(401);
+
+    const saturated = await adminLoginAttempt(handler, "203.0.113.3");
+    expect(saturated.res.statusCode).toBe(429);
+
+    const session = await invoke(handler, {
+      method: "POST",
+      url: "/auth/session",
+      headers: { authorization: `Bearer ${SESSION_TOKEN}` },
+      body: JSON.stringify({ userId: SESSION_USER.userId }),
+      socket: { remoteAddress: "203.0.113.9" },
+    });
+    expect(session.res.statusCode).toBe(200);
+    expect(validateUserSessionImpl).toHaveBeenCalled();
+  });
+});
