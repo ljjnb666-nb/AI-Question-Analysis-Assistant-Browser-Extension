@@ -221,7 +221,19 @@ export const PopupApp: React.FC = () => {
       setActiveFeature(feature);
       setStatus(startText);
       if (openPanel) await openSidePanelDirect();
-      await sendToActiveTab({ type: messageType });
+      // Last-responsible-moment recheck: opening the panel awaited, so the
+      // session may have lapsed since the entry gate (AUTH-UI-INV-12). The
+      // guard also re-checks after any bootstrap/injection retry.
+      if (!isAuthenticatedNow()) {
+        setStatus(
+          lang === "en"
+            ? "Sign-in verification ended. The action was not started."
+            : "登录验证已失效，该操作未开始。",
+        );
+        setActiveFeature(null);
+        return;
+      }
+      await sendToActiveTab({ type: messageType }, isAuthenticatedNow);
       window.close();
     } catch {
       setStatus(errorText);

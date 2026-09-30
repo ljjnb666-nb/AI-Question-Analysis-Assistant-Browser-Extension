@@ -104,12 +104,24 @@ export const SidePanelApp: React.FC = () => {
   // never unlock the workspace.
   const session = useAuthSession();
 
-  // Latest committed state for non-render consumers (the auth-loss watchdog
-  // runs from coordinator notifications, outside React's render cycle).
+  // Latest committed state for non-render consumers.
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  // AUTH-UI-INV-13: synchronous registry of long-running protected runtime
+  // work. It is flipped synchronously in useSidePanelActions around the
+  // START/STOP/CANCEL dispatch — never via a passive-effect snapshot — so an
+  // auth loss can never miss an active run whose React state has not yet
+  // been committed.
+  const protectedWorkRef = useRef({ autoSolve: false, fullPage: false });
+  const markProtectedWork = useCallback(
+    (kind: "autoSolve" | "fullPage", active: boolean) => {
+      protectedWorkRef.current[kind] = active;
+    },
+    [],
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -129,12 +141,18 @@ export const SidePanelApp: React.FC = () => {
       if (snapshot.status === "unauthenticated") {
         setTab("settings");
       }
-      // AUTH-UI-INV-11: leaving `authenticated` must terminate protected
-      // work already dispatched to the content script and reset the
-      // transient protected-work flags, best-effort. The in-flight flags are
-      // read from the latest committed state.
+      // AUTH-UI-INV-11 + INV-13: leaving `authenticated` must terminate
+      // protected work already dispatched to the content script and reset
+      // the transient protected-work flags, best-effort. Termination
+      // authority reads the synchronous protected-work registry, not the
+      // effect-lagged state snapshot.
       if (wasAuthenticated === true && !nowAuthenticated) {
-        const plan = planAuthLossStop(stateRef.current);
+        const plan = planAuthLossStop({
+          isAutoSolving: protectedWorkRef.current.autoSolve,
+          isFullPageScan: protectedWorkRef.current.fullPage,
+        });
+        protectedWorkRef.current.autoSolve = false;
+        protectedWorkRef.current.fullPage = false;
         void (async () => {
           try {
             if (!plan.stopAutoSolve && !plan.cancelFullPage) return;
@@ -241,6 +259,7 @@ export const SidePanelApp: React.FC = () => {
     candidates: state.candidates,
     isBatchParsing: state.isBatchParsing,
     isAuthenticatedNow: () => session.getState().status === "authenticated",
+    markProtectedWork,
     setCandidates,
     setExpandedIds,
     setFillFeedback,

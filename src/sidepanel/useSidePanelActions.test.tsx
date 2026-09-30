@@ -1,19 +1,44 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type React from "react";
 import { renderHook } from "@testing-library/react";
 import type { DetectedCandidate } from "@/shared/types";
 import { useSidePanelActions } from "./useSidePanelActions";
 
 const sentMessages: Array<{ tabId: number; type: string }> = [];
 
+// Controllable handles for deterministic TOCTOU tests: when armed, the next
+// getBestActionTab / isCandidateResultAuthorityCurrent call parks on a
+// promise the test resolves explicitly.
+let parkNextTabLookup = false;
+const deferredTabResolvers: Array<(tab: chrome.tabs.Tab | null) => void> = [];
+let parkNextCandidateAuthority = false;
+const deferredCandidateResolvers: Array<(current: boolean) => void> = [];
+
 vi.mock("./tabActions", () => ({
-  getBestActionTab: vi.fn(async () => ({ id: 7 }) as chrome.tabs.Tab | null),
+  getBestActionTab: vi.fn(() => {
+    if (parkNextTabLookup) {
+      parkNextTabLookup = false;
+      return new Promise<chrome.tabs.Tab | null>((resolve) => deferredTabResolvers.push(resolve));
+    }
+    return Promise.resolve({ id: 7 } as chrome.tabs.Tab | null);
+  }),
   sendTabMessageWithBootstrap: vi.fn(async (tabId: number, message: { type: string }) => {
+    sentMessages.push({ tabId, type: message.type });
+    return {};
+  }),
+  sendProtectedTabMessageWithBootstrap: vi.fn(async (tabId: number, message: { type: string }) => {
     sentMessages.push({ tabId, type: message.type });
     return {};
   }),
   requestBlockImage: vi.fn(),
   sendFillMessageWithVerify: vi.fn(),
-  isCandidateResultAuthorityCurrent: vi.fn(async () => true),
+  isCandidateResultAuthorityCurrent: vi.fn(() => {
+    if (parkNextCandidateAuthority) {
+      parkNextCandidateAuthority = false;
+      return new Promise<boolean>((resolve) => deferredCandidateResolvers.push(resolve));
+    }
+    return Promise.resolve(true);
+  }),
 }));
 
 vi.mock("./batchOperations", () => ({
@@ -58,6 +83,7 @@ function makeOptions(overrides: Partial<HookOptions> = {}): HookOptions {
     candidates,
     isBatchParsing: false,
     isAuthenticatedNow: () => authenticated,
+    markProtectedWork: vi.fn(),
     setCandidates: vi.fn(),
     setExpandedIds: vi.fn(),
     setFillFeedback: vi.fn(),
@@ -81,6 +107,10 @@ let authenticated = false;
 beforeEach(() => {
   sentMessages.length = 0;
   authenticated = false;
+  parkNextTabLookup = false;
+  parkNextCandidateAuthority = false;
+  deferredTabResolvers.length = 0;
+  deferredCandidateResolvers.length = 0;
   vi.clearAllMocks();
 });
 
@@ -173,5 +203,105 @@ describe("useSidePanelActions authority gate", () => {
     sentMessages.length = 0;
     await result.current.handleCancelFullPage();
     expect(sentMessages).toEqual([{ tabId: 7, type: "FULL_PAGE_DETECT_CANCELLED" }]);
+  });
+
+  // AUTH-UI-INV-12: the entry gate is necessary but not sufficient — the
+  // authority must also hold after the tab lookup await, immediately before
+  // the protected dispatch.
+  it("AUTH_UI_28_START_AUTO_SOLVE_TOCTOU no START when auth is lost during the tab lookup", async () => {
+    authenticated = true;
+    parkNextTabLookup = true;
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions(),
+    });
+
+    const running = result.current.handleStartAutoSolve();
+    expect(deferredTabResolvers.length).toBe(1);
+    // Auth is lost while the tab lookup is still pending.
+    authenticated = false;
+    deferredTabResolvers[0]({ id: 7 } as chrome.tabs.Tab);
+    await running;
+
+    expect(sentMessages).toEqual([]);
+  });
+
+  it("AUTH_UI_29_FULL_PAGE_START_TOCTOU no full-page START when auth is lost during the tab lookup", async () => {
+    authenticated = true;
+    parkNextTabLookup = true;
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions(),
+    });
+
+    const running = result.current.handleFullPageDetect();
+    authenticated = false;
+    deferredTabResolvers[0]({ id: 7 } as chrome.tabs.Tab);
+    await running;
+
+    expect(sentMessages).toEqual([]);
+  });
+
+  it("AUTH_UI_30_DETECT_FLASH_SELECTION_TOCTOU detect dispatches nothing after mid-flight auth loss", async () => {
+    authenticated = true;
+    parkNextTabLookup = true;
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions(),
+    });
+    const running = result.current.handleDetect();
+    authenticated = false;
+    deferredTabResolvers[0]?.({ id: 7 } as chrome.tabs.Tab);
+    await running;
+    expect(sentMessages).toEqual([]);
+  });
+
+  it("AUTH_UI_30_DETECT_FLASH_SELECTION_TOCTOU highlight dispatches nothing after mid-flight auth loss", async () => {
+    authenticated = true;
+    parkNextTabLookup = true;
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions(),
+    });
+    const running = result.current.handleFlash("block-1");
+    authenticated = false;
+    deferredTabResolvers[0]?.({ id: 7 } as chrome.tabs.Tab);
+    await running;
+    expect(sentMessages).toEqual([]);
+  });
+
+  it("AUTH_UI_30_DETECT_FLASH_SELECTION_TOCTOU selection sync dispatches nothing after mid-flight auth loss", async () => {
+    authenticated = true;
+    parkNextTabLookup = true;
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({
+        setCandidates: vi.fn(((updater: (prev: DetectedCandidate[]) => DetectedCandidate[]) =>
+          updater([])) as React.Dispatch<React.SetStateAction<DetectedCandidate[]>>),
+      }),
+    });
+    result.current.toggleSelect("block-1");
+    authenticated = false;
+    deferredTabResolvers[0]?.({ id: 7 } as chrome.tabs.Tab);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sentMessages).toEqual([]);
+  });
+
+  it("AUTH_UI_31_CANDIDATE_AUTHORITY_TOCTOU commit authority flips false when auth is lost mid-check", async () => {
+    const { runBatchFill } = await import("./batchOperations");
+    authenticated = true;
+    parkNextCandidateAuthority = true;
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions(),
+    });
+
+    await result.current.handleBatchFill();
+    const deps = vi.mocked(runBatchFill).mock.calls[0][1];
+    const candidate = makeCandidate();
+
+    // AUTH holds while the candidate authority check is issued, then is
+    // lost while it is pending, and the underlying check would have said
+    // "current". The commit authority must still end up false.
+    const authority = deps.isCandidateCurrent(candidate);
+    authenticated = false;
+    deferredCandidateResolvers[0](true);
+    expect(await authority).toBe(false);
+    // With no runtime dispatch authority, no fill side effect may follow.
+    expect(sentMessages.filter((m) => m.type === "FILL_PARSED_ANSWER")).toEqual([]);
   });
 });

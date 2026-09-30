@@ -30,6 +30,10 @@ vi.mock("./tabActions", () => ({
     (sentMessages[message.type] ??= []).push({ tabId, type: message.type });
     return {};
   }),
+  sendProtectedTabMessageWithBootstrap: vi.fn(async (tabId: number, message: { type: string }) => {
+    (sentMessages[message.type] ??= []).push({ tabId, type: message.type });
+    return {};
+  }),
   isCandidateResultAuthorityCurrent: vi.fn(async () => true),
   requestBlockImage: vi.fn(),
   sendFillMessageWithVerify: vi.fn(),
@@ -189,6 +193,27 @@ describe("SidePanelApp auth-loss watchdog", () => {
     // the in-flight run must have gone out through the watchdog.
     await transitionSessionStatus("unauthenticated");
 
+    await waitFor(() =>
+      expect(sentMessages.STOP_AUTO_SOLVE_ALL?.length ?? 0).toBeGreaterThanOrEqual(1),
+    { timeout: UI_TIMEOUT });
+  });
+
+  it("AUTH_UI_33_WATCHDOG_NO_EFFECT_LAG_GAP termination fires without waiting for the passive stateRef refresh", async () => {
+    render(<SidePanelApp />);
+    const autoSolve = await findButton("Auto Solve");
+    // START the run, then IMMEDIATELY (same tick, no sleeps, no waiting for
+    // React to commit the isAutoSolving flag through the passive effect)
+    // lose the session. The synchronous protected-work registry — not the
+    // effect-lagged snapshot — is what the watchdog reads, so STOP must go
+    // out regardless.
+    await act(async () => {
+      fireEvent.click(autoSolve);
+    });
+    await transitionSessionStatus("validating");
+
+    await waitFor(() =>
+      expect(sentMessages.START_AUTO_SOLVE_ALL?.length ?? 0).toBe(1),
+    { timeout: UI_TIMEOUT });
     await waitFor(() =>
       expect(sentMessages.STOP_AUTO_SOLVE_ALL?.length ?? 0).toBeGreaterThanOrEqual(1),
     { timeout: UI_TIMEOUT });

@@ -31,6 +31,7 @@ import {
   isCandidateResultAuthorityCurrent,
   requestBlockImage,
   sendFillMessageWithVerify,
+  sendProtectedTabMessageWithBootstrap,
   sendTabMessageWithBootstrap,
 } from "./tabActions";
 import type { UILang } from "./displayUtils";
@@ -42,9 +43,18 @@ type UseSidePanelActionsOptions = {
    * Synchronous authority check against the live session coordinator —
    * never a React render snapshot, which would leave a stale-closure
    * window. Protected handlers must fail closed before any state mutation
-   * or runtime/tab dispatch (AUTH-UI-INV-09).
+   * or runtime/tab dispatch (AUTH-UI-INV-09), and again after every await
+   * immediately before a dispatch (AUTH-UI-INV-12).
    */
   isAuthenticatedNow: () => boolean;
+  /**
+   * Synchronous registry of long-running protected runtime work, updated
+   * synchronously when a START is dispatched and when termination/completion
+   * happens. The auth-loss watchdog reads this instead of a passive-effect
+   * state snapshot so termination authority cannot miss an active run
+   * (AUTH-UI-INV-13).
+   */
+  markProtectedWork: (kind: "autoSolve" | "fullPage", active: boolean) => void;
   setCandidates: React.Dispatch<React.SetStateAction<DetectedCandidate[]>>;
   setExpandedIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   setFillFeedback: React.Dispatch<React.SetStateAction<string>>;
@@ -76,18 +86,28 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       // retry, and fill results must not re-enter committed UI state or hit
       // the page after the session stopped being server-validated.
       if (!options.isAuthenticatedNow()) return false;
-      return isCandidateResultAuthorityCurrent(candidate.origin, candidate.block);
+      const candidateCurrent = await isCandidateResultAuthorityCurrent(candidate.origin, candidate.block);
+      // Last-responsible-moment recheck: the authority check itself awaits,
+      // so the session can lapse mid-flight (AUTH-UI-INV-12).
+      if (!options.isAuthenticatedNow()) return false;
+      return candidateCurrent;
     },
     [options],
   );
   const syncSelection = useCallback(
     async (payload: { blockId?: string; selected?: boolean; selectAll?: boolean }) => {
       const activeTab = await getBestActionTab();
-      if (activeTab?.id) {
-        await sendTabMessageWithBootstrap(activeTab.id, { type: "UPDATE_CANDIDATE_SELECTION", ...payload });
-      }
+      if (!activeTab?.id) return;
+      // Last-responsible-moment recheck: selection sync reaches the content
+      // runtime, so the authority must hold after the tab lookup awaited.
+      if (!options.isAuthenticatedNow()) return;
+      await sendProtectedTabMessageWithBootstrap(
+        activeTab.id,
+        { type: "UPDATE_CANDIDATE_SELECTION", ...payload },
+        options.isAuthenticatedNow,
+      );
     },
-    [],
+    [options],
   );
 
   const applyDetectState = useCallback(
@@ -104,27 +124,44 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
 
   const handleDetect = useCallback(async () => {
     if (!requireAuthenticatedAction()) return;
-    applyDetectState(resetDetectState());
     const activeTab = await getBestActionTab();
-    if (activeTab?.id) {
-      await sendTabMessageWithBootstrap(activeTab.id, { type: "START_AUTO_DETECT" });
-    }
-  }, [applyDetectState, requireAuthenticatedAction]);
+    if (!activeTab?.id) return;
+    // Last-responsible-moment recheck after the tab lookup await.
+    if (!options.isAuthenticatedNow()) return;
+    await sendProtectedTabMessageWithBootstrap(
+      activeTab.id,
+      { type: "START_AUTO_DETECT" },
+      options.isAuthenticatedNow,
+    );
+    applyDetectState(resetDetectState());
+  }, [applyDetectState, options, requireAuthenticatedAction]);
 
   const handleFullPageDetect = useCallback(async () => {
     if (!requireAuthenticatedAction()) return;
-    applyDetectState(startFullPageDetectState());
     const activeTab = await getBestActionTab();
-    if (activeTab?.id) {
-      await sendTabMessageWithBootstrap(activeTab.id, { type: "START_FULL_PAGE_DETECT" });
+    if (!activeTab?.id) return;
+    // Last-responsible-moment recheck after the tab lookup await. A full
+    // page scan is long-running protected work: the synchronous work marker
+    // is set before the START so the auth-loss watchdog can always see it.
+    if (!options.isAuthenticatedNow()) return;
+    options.markProtectedWork("fullPage", true);
+    const response = await sendProtectedTabMessageWithBootstrap(
+      activeTab.id,
+      { type: "START_FULL_PAGE_DETECT" },
+      options.isAuthenticatedNow,
+    );
+    if (response.ok === false && response.error === "AUTHORITY_LOST") {
+      options.markProtectedWork("fullPage", false);
     }
-  }, [applyDetectState, requireAuthenticatedAction]);
+    applyDetectState(startFullPageDetectState());
+  }, [applyDetectState, options, requireAuthenticatedAction]);
 
   const handleCancelFullPage = useCallback(async () => {
     const activeTab = await getBestActionTab();
     if (activeTab?.id) {
       await sendTabMessageWithBootstrap(activeTab.id, { type: "FULL_PAGE_DETECT_CANCELLED" });
     }
+    options.markProtectedWork("fullPage", false);
     options.setIsFullPageScan(false);
     options.setScanProgress(null);
   }, [options]);
@@ -145,10 +182,15 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   const handleFlash = useCallback(async (blockId: string) => {
     if (!requireAuthenticatedAction()) return;
     const activeTab = await getBestActionTab();
-    if (activeTab?.id) {
-      await sendTabMessageWithBootstrap(activeTab.id, { type: "HIGHLIGHT_CANDIDATE", blockId });
-    }
-  }, [requireAuthenticatedAction]);
+    if (!activeTab?.id) return;
+    // Last-responsible-moment recheck after the tab lookup await.
+    if (!options.isAuthenticatedNow()) return;
+    await sendProtectedTabMessageWithBootstrap(
+      activeTab.id,
+      { type: "HIGHLIGHT_CANDIDATE", blockId },
+      options.isAuthenticatedNow,
+    );
+  }, [options, requireAuthenticatedAction]);
 
   const toggleDetails = useCallback((id: string) => {
     options.setExpandedIds((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -266,10 +308,26 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     if (!requireAuthenticatedAction()) return;
     const activeTab = await getBestActionTab();
     if (!activeTab?.id) return;
+    // Last-responsible-moment recheck after the tab lookup await: an auth
+    // loss while the lookup was pending must never resurrect the workflow
+    // after the watchdog already sent STOP.
+    if (!options.isAuthenticatedNow()) return;
     options.setFillFeedback("");
     options.setIsAutoSolving(true);
     options.setAutoSolveProgress(buildAutoSolveStartingState(options.uiLang));
-    await sendTabMessageWithBootstrap(activeTab.id, { type: "START_AUTO_SOLVE_ALL" });
+    // Synchronous work marker, set before the START so the auth-loss
+    // watchdog cannot miss the active run (AUTH-UI-INV-13).
+    options.markProtectedWork("autoSolve", true);
+    const response = await sendProtectedTabMessageWithBootstrap(
+      activeTab.id,
+      { type: "START_AUTO_SOLVE_ALL" },
+      options.isAuthenticatedNow,
+    );
+    if (response.ok === false && response.error === "AUTHORITY_LOST") {
+      options.markProtectedWork("autoSolve", false);
+      options.setIsAutoSolving(false);
+      options.setAutoSolveProgress(null);
+    }
   }, [options, requireAuthenticatedAction]);
 
   // STOP / CANCEL are deliberately NOT auth-gated: after an auth loss they
@@ -278,7 +336,8 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     const activeTab = await getBestActionTab();
     if (!activeTab?.id) return;
     await sendTabMessageWithBootstrap(activeTab.id, { type: "STOP_AUTO_SOLVE_ALL" });
-  }, []);
+    options.markProtectedWork("autoSolve", false);
+  }, [options]);
 
   const handleClearSelection = useCallback(() => {
     if (!requireAuthenticatedAction()) return;

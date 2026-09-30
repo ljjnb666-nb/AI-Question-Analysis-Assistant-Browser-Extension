@@ -146,6 +146,16 @@ export function useAuthController(options: UseAuthControllerOptions) {
     try {
       await runBeforeAction();
       setAuthBusy("logout");
+      // AUTH-UI-INV-14: local logout is IMMEDIATE. The coordinator (and via
+      // the storage clear inside logoutAccount, every other surface) drops
+      // to unauthenticated right away; the server revoke is a best-effort
+      // follow-up whose outcome only shapes the final hint.
+      session.applyLoggedOut();
+      setView("login");
+      setEmail("");
+      setPassword("");
+      setVerificationCode("");
+      setCodeSent(false);
       let serverUncertain = true;
       try {
         const result = await logoutAccount();
@@ -153,13 +163,6 @@ export function useAuthController(options: UseAuthControllerOptions) {
       } catch {
         serverUncertain = true;
       }
-      // Logout always converges to unauthenticated, whatever the server did.
-      session.applyLoggedOut();
-      setView("login");
-      setEmail("");
-      setPassword("");
-      setVerificationCode("");
-      setCodeSent(false);
       setFeedback(serverUncertain ? copy.loggedOutServerUncertain : copy.loggedOut);
     } finally {
       setAuthBusy(null);

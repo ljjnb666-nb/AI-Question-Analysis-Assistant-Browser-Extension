@@ -220,8 +220,11 @@ test("AUTH_UI_03_POPUP_STARTUP_INVALID no authenticated flash, converges unauthe
     });
     const popup = await context.newPage();
     await popup.goto(POPUP_URL(extensionId));
-    // First frame must be validating/locked, never authenticated.
-    expect(await isAuthFormVisible(popup) || (await isValidating(popup))).toBe(true);
+    // First frame must be validating/locked, never authenticated. Poll
+    // instead of sampling once: goto resolves before React's first commit.
+    await expect(async () => {
+      expect(await isAuthFormVisible(popup) || (await isValidating(popup))).toBe(true);
+    }).toPass({ timeout: 10_000 });
     await expect(popup.getByText(/(准备开始|Ready to Work)/)).toHaveCount(0, { timeout: 5_000 });
     await expectEventually(popup, () => isAuthFormVisible(popup), { timeout: 25_000 });
     expect(await readExtensionSettings(popup).then((s) => !s.authToken)).toBe(true);
@@ -835,6 +838,72 @@ test("AUTH_UI_26_HISTORY_LOCKED_WHILE_VALIDATING history never renders during th
     }
   } finally {
     await hanging.close();
+    await closeExtensionContext(context);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// AUTH_UI_34..35 — explicit logout is IMMEDIATE local fail-closed. The
+// server revoke is best-effort and must never delay the local authority
+// drop, nor resurrect the authenticated state when it fails.
+// ---------------------------------------------------------------------------
+test("AUTH_UI_34_LOGOUT_IMMEDIATE_LOCAL_FAIL_CLOSED logout drops local authority instantly even when revoke fails", async () => {
+  test.setTimeout(150_000);
+  const context = await launchExtensionContext();
+  try {
+    const extensionId = await resolveExtensionId(context);
+    // A real, server-validated session first; accountD's only other uses are
+    // read-only validations in earlier tests.
+    await seedValidSession(context, extensionId, accountD);
+    const popup = await context.newPage();
+    await popup.goto(POPUP_URL(extensionId));
+    const sidepanel = await context.newPage();
+    await sidepanel.goto(SIDEPANEL_URL(extensionId));
+    await expectEventually(popup, () => isUnlocked(popup), { timeout: 30_000 });
+    // Let the identity-refresh echo of the first validation settle: an
+    // in-flight saveSettings would otherwise re-write its stale
+    // analyticsBaseUrl right over the unreachable-backend seed below.
+    await popup.waitForTimeout(1_500);
+
+    // Make the auth backend unreachable: the popup converges to the
+    // server_unavailable gate, which exposes the logout control (the popup
+    // controller has no beforeAction settings write, keeping the logout
+    // fingerprint story clean).
+    const closedBase = await getClosedPortBaseUrl();
+    await seedExtensionSettings(context, extensionId, { analyticsBaseUrl: closedBase });
+    await expectEventually(
+      popup,
+      () => popup.getByText(/(暂时无法验证登录状态|Can't verify sign-in)/).first().isVisible(),
+      { timeout: 30_000 },
+    );
+
+    const logoutStarted = Date.now();
+    await popup
+      .getByRole("button", { name: /^(重置|Reset|退出登录|Logout)$/ })
+      .first()
+      .click({ timeout: 10_000 });
+
+    // The local authority must drop LONG before any network timeout, and the
+    // revoke result arrives instantly (connection refused = not confirmed).
+    await expectEventually(popup, () => isAuthFormVisible(popup), { timeout: 5_000 });
+    await expectEventually(sidepanel, () => isAuthFormVisible(sidepanel), { timeout: 10_000 });
+    const settings = await readExtensionSettings(sidepanel);
+    expect(!settings.userId).toBe(true);
+    expect(!settings.userEmail).toBe(true);
+    expect(!settings.authToken).toBe(true);
+    const elapsed = Date.now() - logoutStarted;
+    expect(elapsed).toBeLessThan(5_000);
+
+    // AUTH_UI_35: the revoke could not be confirmed; the popup auth form
+    // surfaces the honest hint and NEITHER surface returns to authenticated.
+    await expectEventually(
+      popup,
+      () => popup.getByText(/(服务器会话吊销未确认|revoke couldn't be confirmed)/i).first().isVisible(),
+      { timeout: 10_000 },
+    );
+    await expectEventually(popup, () => isAuthFormVisible(popup), { timeout: 5_000 });
+    await expectEventually(sidepanel, () => isAuthFormVisible(sidepanel), { timeout: 5_000 });
+  } finally {
     await closeExtensionContext(context);
   }
 });

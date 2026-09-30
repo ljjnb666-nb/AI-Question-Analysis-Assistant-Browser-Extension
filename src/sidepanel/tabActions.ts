@@ -54,6 +54,29 @@ export async function sendTabMessageWithBootstrap<T = unknown>(
   return sendRawTabMessage<T>(tabId, message);
 }
 
+/**
+ * Protected variant for AUTH-gated dispatches: the guard is re-checked after
+ * the bootstrap/injection await, immediately before the retry send, closing
+ * the AUTH PASS → await → DISPATCH TOCTOU inside the bootstrap path. STOP /
+ * FULL_PAGE_CANCEL callers must use the plain variant so termination stays
+ * executable after an auth loss.
+ */
+export async function sendProtectedTabMessageWithBootstrap<T = unknown>(
+  tabId: number,
+  message: ExtMessage,
+  isAuthenticatedNow: () => boolean,
+): Promise<{ ok: boolean; response?: T; error?: string }> {
+  const first = await sendRawTabMessage<T>(tabId, message);
+  if (first.ok || !shouldBootstrapContentScript(first.error)) return first;
+  if (!isAuthenticatedNow()) return { ok: false, error: "AUTHORITY_LOST" };
+
+  const injected = await injectContentScriptIntoTab(tabId);
+  if (!injected) return first;
+  if (!isAuthenticatedNow()) return { ok: false, error: "AUTHORITY_LOST" };
+
+  return sendRawTabMessage<T>(tabId, message);
+}
+
 export async function getBestActionTab(): Promise<chrome.tabs.Tab | null> {
   const tabs = await chrome.tabs.query({ currentWindow: true });
   const pageTabs = tabs.filter((tab) => tab.id && /^https?:/i.test(String(tab.url || "")));

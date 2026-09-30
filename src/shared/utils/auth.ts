@@ -221,7 +221,13 @@ export async function validateAuthSession(): Promise<AuthSessionValidationResult
     if (payload?.ok && payload.user?.userId) {
       const serverUserId = String(payload.user.userId);
       const serverUserEmail = String(payload.user.email || "");
-      await saveSettings({ userId: serverUserId, userEmail: serverUserEmail });
+      // Identity refresh writes only when the server identity actually
+      // differs from the cached one. An unconditional read-merge-write here
+      // would resurrect this context's stale settings snapshot over any
+      // concurrent change (e.g. another surface switching analyticsBaseUrl).
+      if (serverUserId !== localUserId || serverUserEmail !== String(settings.userEmail || "")) {
+        await saveSettings({ userId: serverUserId, userEmail: serverUserEmail });
+      }
       return {
         status: "authenticated",
         userId: serverUserId,
@@ -235,15 +241,22 @@ export async function validateAuthSession(): Promise<AuthSessionValidationResult
 }
 
 export async function logoutAccount(): Promise<AuthLogoutResult> {
+  // AUTH-UI-INV-14: local authority is revoked IMMEDIATELY — the server
+  // revoke is a best-effort follow-up. Snapshot the credentials first, clear
+  // local storage, then use the snapshot (never a re-read) for the network
+  // call so a hanging server cannot keep the machine logged in.
   const settings = await loadSettings();
   const userId = String(settings.userId || "").trim();
   const authToken = String(settings.authToken || "");
+  const analyticsBaseUrl = resolveBaseUrl(settings.analyticsBaseUrl);
+
+  await saveSettings({ userId: undefined, userEmail: undefined, authToken: undefined });
+  logEvent("auth_logged_out");
 
   let serverStatus: AuthLogoutServerStatus = "no_local_credentials";
   if (userId && authToken) {
     try {
-      const baseUrl = resolveBaseUrl(settings.analyticsBaseUrl);
-      const response = await fetchJsonWithTimeout(`${baseUrl}/auth/logout`, {
+      const response = await fetchJsonWithTimeout(`${analyticsBaseUrl}/auth/logout`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -257,9 +270,5 @@ export async function logoutAccount(): Promise<AuthLogoutResult> {
     }
   }
 
-  // Local credentials are cleared no matter how the server call ended: a
-  // failed revoke must not leave a session that still looks locally valid.
-  await saveSettings({ userId: undefined, userEmail: undefined, authToken: undefined });
-  logEvent("auth_logged_out");
   return { serverRevoked: serverStatus === "revoked", serverStatus };
 }
