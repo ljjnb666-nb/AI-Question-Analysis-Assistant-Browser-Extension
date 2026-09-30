@@ -16,9 +16,9 @@ Because analytics is opt-in, installation and usage metrics describe only device
 
 ## Account service
 
-Registration, verification, and sign-in use the configured account service independently of the analytics choice. Registration and verification send an email address, password or verification code, and device ID. The default account service uses HTTPS. Remote custom endpoints should use HTTPS. The service stores the email address, a salted password hash, a hashed authentication token, and account/device associations. Sign-out clears credentials in the extension locally; it does not call the server to revoke the token. Analytics event records are not associated with the account token or account ID, though the shared device ID can link analytics and account/device records as described above.
+Registration, verification, and sign-in use the configured account service independently of the analytics choice. Registration and verification send an email address, password or verification code, and device ID. The default account service uses HTTPS. Remote custom endpoints should use HTTPS. The service stores the email address, a salted password hash, a hashed authentication token, and account/device associations. Sign-out clears the extension's locally stored credentials and calls the auth service logout endpoint, which validates the bearer session and revokes the stored token server-side; the local sign-out completes even if the service is unreachable. Server-issued auth sessions expire after a server-defined period, and the server authoritatively validates and revokes them. Analytics event records are not associated with the account token or account ID, though the shared device ID can link analytics and account/device records as described above.
 
-Turning analytics off does not disable account requests or delete an account. This release does not add account deletion, server-side sign-out revocation, or a general account retention period; account data follows the existing account-service lifecycle. Server-side sign-out revocation and token expiry belong to REL-AUTH-01 and are outside this release.
+Turning analytics off does not disable account requests or delete an account. This release does not add account deletion or a general account retention period; account data follows the existing account-service lifecycle.
 
 ## AI providers
 

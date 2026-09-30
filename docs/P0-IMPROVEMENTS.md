@@ -1,5 +1,8 @@
 # P0 优先级改进完成报告
 
+> **历史工程记录（Historical engineering record）。**
+> 本文档记录早期一轮 P0 改进工作。文中所有计数（测试数量、覆盖率等）反映的是该工作当时完成时的状态，**不是当前仓库的 release 指标**。当前质量门禁以 `npm run check` 与 CI 为准（见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [RELEASE-READINESS.md](./RELEASE-READINESS.md)）。
+
 ## 概述
 
 已完成所有 P0 优先级的关键改进，显著提升了项目的代码质量、安全性和可维护性。
@@ -185,21 +188,23 @@ console.log(settings.apiKey); // "sk-test-key" (明文)
 
 ---
 
-## 🎯 下一步建议
+## 🎯 历史建议（Historical recommendations）
 
-### P1 优先级（短期）
+以下是当时（P0 改进完成时）提出的后续建议，仅作为历史记录保留。其中部分工作（如 CI/CD 与严格 release CI）**此后已经落地**（`.github/workflows/ci.yml` 的 `check` / `build_artifact` / `e2e` 门禁），不应据此重新开启已完成的任务；尚未实施的项目不代表当前活跃 TODO，是否启动以后续规划为准。
+
+### P1 优先级（短期，当时建议）
 1. 添加 ESLint + Prettier
 2. 添加 Git hooks (Husky + lint-staged)
 3. 完善类型安全（移除 `any`）
 4. 添加请求缓存/去重
 
-### P2 优先级（中期）
+### P2 优先级（中期，当时建议）
 5. 性能优化（虚拟滚动、图片压缩）
 6. 添加 i18n 框架
 7. 完善文档（API、架构）
-8. 添加 CI/CD
+8. 添加 CI/CD —— **已完成**：仓库现已有 CI 质量门禁与 release 构建/权限/E2E 校验
 
-### P3 优先级（长期）
+### P3 优先级（长期，当时建议）
 9. 错误监控（Sentry）
 10. 性能监控（Web Vitals）
 11. 离线支持（PWA）

@@ -1,6 +1,6 @@
 # Extension permission contract
 
-This document records the production authority in the REL-PERM-01 release candidate. Source and built manifests are checked against the same explicit set by `npm run verify:permissions` and `npm run verify:artifact`.
+This document records the release-hardened production permission contract (the REL-PERM-01 work is frozen and merged). Source and built manifests are checked against the same explicit set by `npm run verify:permissions` and `npm run verify:artifact`.
 
 | Permission / host authority | Status | Required by | Why weaker authority is insufficient | User-facing capability | Security consequence |
 | --- | --- | --- | --- | --- | --- |
