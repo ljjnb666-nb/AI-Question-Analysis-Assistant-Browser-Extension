@@ -52,9 +52,16 @@ type UseSidePanelActionsOptions = {
    * synchronously when a START is dispatched and when termination/completion
    * happens. The auth-loss watchdog reads this instead of a passive-effect
    * state snapshot so termination authority cannot miss an active run
-   * (AUTH-UI-INV-13).
+   * (AUTH-UI-INV-13). The registry records the owner tab: STOP/CANCEL target
+   * the recorded owner, never a re-guessed best tab.
    */
-  markProtectedWork: (kind: "autoSolve" | "fullPage", active: boolean) => void;
+  markProtectedWork: (kind: "autoSolve" | "fullPage", active: boolean, tabId?: number) => void;
+  protectedWork?: {
+    current: {
+      autoSolve: { active: boolean; tabId?: number };
+      fullPage: { active: boolean; tabId?: number };
+    };
+  };
   setCandidates: React.Dispatch<React.SetStateAction<DetectedCandidate[]>>;
   setExpandedIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   setFillFeedback: React.Dispatch<React.SetStateAction<string>>;
@@ -128,11 +135,14 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     if (!activeTab?.id) return;
     // Last-responsible-moment recheck after the tab lookup await.
     if (!options.isAuthenticatedNow()) return;
-    await sendProtectedTabMessageWithBootstrap(
+    const response = await sendProtectedTabMessageWithBootstrap(
       activeTab.id,
       { type: "START_AUTO_DETECT" },
       options.isAuthenticatedNow,
     );
+    // A rejected/authority-lost START must not flip the UI into a stale
+    // running state (AUTH-UI-INV-12/13).
+    if (response.ok === false) return;
     applyDetectState(resetDetectState());
   }, [applyDetectState, options, requireAuthenticatedAction]);
 
@@ -144,20 +154,29 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     // page scan is long-running protected work: the synchronous work marker
     // is set before the START so the auth-loss watchdog can always see it.
     if (!options.isAuthenticatedNow()) return;
-    options.markProtectedWork("fullPage", true);
+    if (!options.isAuthenticatedNow()) return;
+    // Record the owner tab with the START: auth-loss termination must go to
+    // the tab that actually runs the scan, never to a re-guessed best tab.
+    options.markProtectedWork("fullPage", true, activeTab.id);
     const response = await sendProtectedTabMessageWithBootstrap(
       activeTab.id,
       { type: "START_FULL_PAGE_DETECT" },
       options.isAuthenticatedNow,
     );
-    if (response.ok === false && response.error === "AUTHORITY_LOST") {
+    // Running UI state only after a confirmed transport dispatch with the
+    // authority still holding (AUTH-UI-INV-12/13).
+    if (response.ok === false || !options.isAuthenticatedNow()) {
       options.markProtectedWork("fullPage", false);
+      return;
     }
     applyDetectState(startFullPageDetectState());
   }, [applyDetectState, options, requireAuthenticatedAction]);
 
   const handleCancelFullPage = useCallback(async () => {
-    const activeTab = await getBestActionTab();
+    // Prefer the recorded owner tab; fall back to the current best tab only
+    // for runs started before this registry existed.
+    const ownerTabId = options.protectedWork?.current.fullPage.tabId;
+    const activeTab = ownerTabId != null ? { id: ownerTabId } as chrome.tabs.Tab : await getBestActionTab();
     if (activeTab?.id) {
       await sendTabMessageWithBootstrap(activeTab.id, { type: "FULL_PAGE_DETECT_CANCELLED" });
     }
@@ -312,28 +331,33 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     // loss while the lookup was pending must never resurrect the workflow
     // after the watchdog already sent STOP.
     if (!options.isAuthenticatedNow()) return;
-    options.setFillFeedback("");
-    options.setIsAutoSolving(true);
-    options.setAutoSolveProgress(buildAutoSolveStartingState(options.uiLang));
-    // Synchronous work marker, set before the START so the auth-loss
-    // watchdog cannot miss the active run (AUTH-UI-INV-13).
-    options.markProtectedWork("autoSolve", true);
+    // Record the owner tab with the START: auth-loss termination must go to
+    // the tab that actually runs the workflow, never to a re-guessed best
+    // tab. Running UI state only flips on after a confirmed transport
+    // dispatch with the authority still holding (AUTH-UI-INV-12/13).
+    options.markProtectedWork("autoSolve", true, activeTab.id);
     const response = await sendProtectedTabMessageWithBootstrap(
       activeTab.id,
       { type: "START_AUTO_SOLVE_ALL" },
       options.isAuthenticatedNow,
     );
-    if (response.ok === false && response.error === "AUTHORITY_LOST") {
+    if (response.ok === false || !options.isAuthenticatedNow()) {
       options.markProtectedWork("autoSolve", false);
-      options.setIsAutoSolving(false);
-      options.setAutoSolveProgress(null);
+      return;
     }
+    options.setFillFeedback("");
+    options.setIsAutoSolving(true);
+    options.setAutoSolveProgress(buildAutoSolveStartingState(options.uiLang));
   }, [options, requireAuthenticatedAction]);
 
   // STOP / CANCEL are deliberately NOT auth-gated: after an auth loss they
   // are the only way to terminate an already-started protected workflow.
+  // They target the RECORDED owner tab so stopping still works — and only
+  // works — on the tab that actually runs the workflow, even after the user
+  // switched tabs.
   const handleStopAutoSolve = useCallback(async () => {
-    const activeTab = await getBestActionTab();
+    const ownerTabId = options.protectedWork?.current.autoSolve.tabId;
+    const activeTab = ownerTabId != null ? { id: ownerTabId } as chrome.tabs.Tab : await getBestActionTab();
     if (!activeTab?.id) return;
     await sendTabMessageWithBootstrap(activeTab.id, { type: "STOP_AUTO_SOLVE_ALL" });
     options.markProtectedWork("autoSolve", false);

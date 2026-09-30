@@ -23,9 +23,12 @@ vi.mock("@/shared/utils/storage", () => ({
 
 const sentMessages: Record<string, Array<{ tabId: number; type: string }>> = {};
 let hasActiveTab = true;
+// Simulates the user switching tabs: what getBestActionTab considers "best"
+// changes AFTER a protected workflow already runs on its original tab.
+let currentBestTabId = 7;
 
 vi.mock("./tabActions", () => ({
-  getBestActionTab: vi.fn(async () => (hasActiveTab ? ({ id: 7 } as chrome.tabs.Tab) : null)),
+  getBestActionTab: vi.fn(async () => (hasActiveTab ? ({ id: currentBestTabId } as chrome.tabs.Tab) : null)),
   sendTabMessageWithBootstrap: vi.fn(async (tabId: number, message: { type: string }) => {
     (sentMessages[message.type] ??= []).push({ tabId, type: message.type });
     return {};
@@ -98,6 +101,7 @@ import { SidePanelApp } from "./SidePanelApp";
 beforeEach(() => {
   for (const key of Object.keys(sentMessages)) delete sentMessages[key as keyof typeof sentMessages];
   hasActiveTab = true;
+  currentBestTabId = 7;
   sessionState.status = "authenticated";
   sessionState.sessionRejected = false;
   sessionListeners.clear();
@@ -196,6 +200,71 @@ describe("SidePanelApp auth-loss watchdog", () => {
     await waitFor(() =>
       expect(sentMessages.STOP_AUTO_SOLVE_ALL?.length ?? 0).toBeGreaterThanOrEqual(1),
     { timeout: UI_TIMEOUT });
+  });
+
+  it("AUTH_UI_38_AUTO_SOLVE_STOP_OWNER_TAB auth-loss STOP goes to the recorded owner tab, never the new best tab", async () => {
+    render(<SidePanelApp />);
+    const autoSolve = await findButton("Auto Solve");
+    await act(async () => {
+      fireEvent.click(autoSolve);
+    });
+    await waitForButton("Stop Auto Solve");
+    expect(sentMessages.START_AUTO_SOLVE_ALL?.[0]?.tabId).toBe(7);
+
+    // The user switches tabs: the "best" tab becomes 8 while auto solve is
+    // still running on tab 7.
+    currentBestTabId = 8;
+    await transitionSessionStatus("server_unavailable");
+
+    await waitFor(() =>
+      expect(sentMessages.STOP_AUTO_SOLVE_ALL?.length ?? 0).toBeGreaterThanOrEqual(1),
+    { timeout: UI_TIMEOUT });
+    expect(sentMessages.STOP_AUTO_SOLVE_ALL?.[0]?.tabId).toBe(7);
+    expect(sentMessages.STOP_AUTO_SOLVE_ALL?.some((m) => m.tabId === 8)).toBe(false);
+  });
+
+  it("AUTH_UI_39_FULL_PAGE_CANCEL_OWNER_TAB auth-loss CANCEL goes to the recorded owner tab", async () => {
+    render(<SidePanelApp />);
+    const fullPage = await findButton("Full Page");
+    await act(async () => {
+      fireEvent.click(fullPage);
+    });
+    await waitForButton("Stop Scan");
+    expect(sentMessages.START_FULL_PAGE_DETECT?.[0]?.tabId).toBe(7);
+
+    currentBestTabId = 8;
+    await transitionSessionStatus("unauthenticated");
+
+    await waitFor(() =>
+      expect(sentMessages.FULL_PAGE_DETECT_CANCELLED?.length ?? 0).toBeGreaterThanOrEqual(1),
+    { timeout: UI_TIMEOUT });
+    expect(sentMessages.FULL_PAGE_DETECT_CANCELLED?.[0]?.tabId).toBe(7);
+    expect(sentMessages.FULL_PAGE_DETECT_CANCELLED?.some((m) => m.tabId === 8)).toBe(false);
+  });
+
+  it("AUTH_UI_40_MANUAL_STOP_OWNER_TAB an explicit Stop after switching tabs still stops the original owner", async () => {
+    render(<SidePanelApp />);
+    const autoSolve = await findButton("Auto Solve");
+    await act(async () => {
+      fireEvent.click(autoSolve);
+    });
+    await waitForButton("Stop Auto Solve");
+    expect(sentMessages.START_AUTO_SOLVE_ALL?.[0]?.tabId).toBe(7);
+
+    // User switches tabs, then clicks Stop themselves.
+    currentBestTabId = 8;
+    const stop = await findButton("Stop Auto Solve");
+    await act(async () => {
+      fireEvent.click(stop);
+    });
+
+    await waitFor(() =>
+      expect(sentMessages.STOP_AUTO_SOLVE_ALL?.length ?? 0).toBeGreaterThanOrEqual(1),
+    { timeout: UI_TIMEOUT });
+    expect(sentMessages.STOP_AUTO_SOLVE_ALL?.[0]?.tabId).toBe(7);
+    expect(sentMessages.STOP_AUTO_SOLVE_ALL?.some((m) => m.tabId === 8)).toBe(false);
+    // Clearing the running UI is the content completion callback's job; the
+    // manual stop's contract is the correctly-targeted STOP dispatch.
   });
 
   it("AUTH_UI_33_WATCHDOG_NO_EFFECT_LAG_GAP termination fires without waiting for the passive stateRef refresh", async () => {

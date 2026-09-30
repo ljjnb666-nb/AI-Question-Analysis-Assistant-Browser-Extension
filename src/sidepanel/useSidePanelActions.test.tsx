@@ -282,6 +282,48 @@ describe("useSidePanelActions authority gate", () => {
     expect(sentMessages).toEqual([]);
   });
 
+  it("AUTH_UI_42_FULL_PAGE_AUTHORITY_LOST_AFTER_BOOTSTRAP a rejected START never enters running UI state", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    authenticated = true;
+    vi.mocked(sendProtectedTabMessageWithBootstrap).mockResolvedValueOnce({
+      ok: false,
+      error: "AUTHORITY_LOST_DURING_RETRY",
+    });
+    const setIsFullPageScan = vi.fn();
+    const setScanProgress = vi.fn();
+    const markProtectedWork = vi.fn();
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({ setIsFullPageScan, setScanProgress, markProtectedWork }),
+    });
+
+    await result.current.handleFullPageDetect();
+
+    // The dispatch was blocked after bootstrap: no running UI state, no
+    // progress, and the protected-work registry is cleared again.
+    expect(setIsFullPageScan).not.toHaveBeenCalledWith(true);
+    expect(setScanProgress).not.toHaveBeenCalledWith(expect.objectContaining({ progress: expect.anything() }));
+    expect(markProtectedWork).toHaveBeenLastCalledWith("fullPage", false);
+    expect(sentMessages).toEqual([]);
+  });
+
+  it("AUTH_UI_43_DETECT_AUTHORITY_LOST_AFTER_BOOTSTRAP a blocked detect leaves no stale running state", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    authenticated = true;
+    vi.mocked(sendProtectedTabMessageWithBootstrap).mockResolvedValueOnce({
+      ok: false,
+      error: "AUTHORITY_LOST_DURING_RETRY",
+    });
+    const setIsDetecting = vi.fn();
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({ setIsDetecting }),
+    });
+
+    await result.current.handleDetect();
+
+    expect(setIsDetecting).not.toHaveBeenCalledWith(true);
+    expect(sentMessages).toEqual([]);
+  });
+
   it("AUTH_UI_31_CANDIDATE_AUTHORITY_TOCTOU commit authority flips false when auth is lost mid-check", async () => {
     const { runBatchFill } = await import("./batchOperations");
     authenticated = true;

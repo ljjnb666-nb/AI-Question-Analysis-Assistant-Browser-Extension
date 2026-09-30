@@ -225,7 +225,17 @@ export async function validateAuthSession(): Promise<AuthSessionValidationResult
       // differs from the cached one. An unconditional read-merge-write here
       // would resurrect this context's stale settings snapshot over any
       // concurrent change (e.g. another surface switching analyticsBaseUrl).
-      if (serverUserId !== localUserId || serverUserEmail !== String(settings.userEmail || "")) {
+      // And symmetric with the stale-401 contract: this validation may only
+      // update identity if the CURRENT credentials are still the pair it
+      // validated — a newer login must never be overwritten by an older
+      // validation's corrected identity.
+      const current = await loadSettings();
+      const currentUserId = String(current.userId || "").trim();
+      const currentAuthToken = String(current.authToken || "");
+      const sameCredentials = currentUserId === localUserId && currentAuthToken === localAuthToken;
+      const identityChanged =
+        serverUserId !== localUserId || serverUserEmail !== String(settings.userEmail || "");
+      if (sameCredentials && identityChanged) {
         await saveSettings({ userId: serverUserId, userEmail: serverUserEmail });
       }
       return {

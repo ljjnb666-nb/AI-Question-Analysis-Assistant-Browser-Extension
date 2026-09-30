@@ -144,12 +144,14 @@ export function useAuthController(options: UseAuthControllerOptions) {
 
   const handleLogout = async () => {
     try {
-      await runBeforeAction();
       setAuthBusy("logout");
-      // AUTH-UI-INV-14: local logout is IMMEDIATE. The coordinator (and via
-      // the storage clear inside logoutAccount, every other surface) drops
-      // to unauthenticated right away; the server revoke is a best-effort
-      // follow-up whose outcome only shapes the final hint.
+      // AUTH-UI-INV-14: local logout is IMMEDIATE and must not wait for any
+      // async preparation — beforeAction (settings persistence), network, or
+      // anything else. The coordinator (and via the storage clear inside
+      // logoutAccount, every other surface) drops to unauthenticated right
+      // away; the server revoke is a best-effort follow-up whose outcome
+      // only shapes the final hint. beforeAuthRequest-style persistence
+      // stays wired to login/register/send-code only.
       session.applyLoggedOut();
       setView("login");
       setEmail("");

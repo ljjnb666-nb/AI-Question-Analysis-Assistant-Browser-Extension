@@ -526,6 +526,46 @@ describe("auth", () => {
       });
     });
 
+    it("AUTH_UI_44_STALE_SUCCESS_DOES_NOT_OVERWRITE_NEW_LOGIN old validation identity never replaces a newer login", async () => {
+      // First read (validation start) sees user A / token A; by the time the
+      // success response lands, a newer login has written user B / token B.
+      vi.mocked(storage.loadSettings)
+        .mockResolvedValueOnce({
+          userId: "user-A",
+          userEmail: "a@example.com",
+          authToken: MOCK_TOKEN_LEGACY,
+          analyticsBaseUrl: "https://api.example.com",
+        } as any)
+        .mockResolvedValue({
+          userId: "user-B",
+          userEmail: "b@example.com",
+          authToken: MOCK_TOKEN_NEXT,
+          analyticsBaseUrl: "https://api.example.com",
+        } as any);
+      vi.mocked(storage.saveSettings).mockResolvedValue(undefined);
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          user: { userId: "user-A", email: "a@example.com" },
+          expiresAt: 4102444800000,
+        }),
+      } as Response);
+
+      const result = await validateAuthSession();
+
+      // The stale validation still reports its own identity to the caller
+      // (the coordinator's generation guard decides what wins), but the
+      // newer login in storage must be left untouched.
+      expect(result.status).toBe("authenticated");
+      expect(storage.saveSettings).not.toHaveBeenCalledWith({
+        userId: "user-A",
+        userEmail: "a@example.com",
+      });
+      expect(storage.saveSettings).not.toHaveBeenCalled();
+    });
+
     it("keeps credentials and reports server_unavailable on network failure", async () => {
       vi.mocked(storage.loadSettings).mockResolvedValue({
         userId: "user-456",

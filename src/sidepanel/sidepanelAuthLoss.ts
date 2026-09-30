@@ -1,13 +1,17 @@
 export type AuthLossWorkState = {
-  /** An auto-solve run is active and needs STOP_AUTO_SOLVE_ALL. */
+  /** An auto-solve run is active, owned by this content tab. */
   isAutoSolving: boolean;
-  /** A full-page scan is active and needs FULL_PAGE_DETECT_CANCELLED. */
+  autoSolveTabId?: number;
+  /** A full-page scan is active, owned by this content tab. */
   isFullPageScan: boolean;
+  fullPageTabId?: number;
 };
 
 export type AuthLossStopPlan = {
   stopAutoSolve: boolean;
+  autoSolveTabId?: number;
   cancelFullPage: boolean;
+  fullPageTabId?: number;
 };
 
 /**
@@ -15,12 +19,15 @@ export type AuthLossStopPlan = {
  * protected work is in flight. Hiding the UI does not stop work already
  * dispatched to the content script, so the transition out of
  * `authenticated` must terminate it best-effort and reset the transient
- * protected-work flags. The work state comes from the synchronous
- * protected-work registry, not a passive-effect snapshot.
+ * protected-work flags. Termination targets the RECORDED owner tab — the
+ * watchdog must never guess a runtime owner from the current best tab,
+ * which may have changed since the START.
  */
 export function planAuthLossStop(work: AuthLossWorkState): AuthLossStopPlan {
   return {
     stopAutoSolve: work.isAutoSolving,
+    autoSolveTabId: work.autoSolveTabId,
     cancelFullPage: work.isFullPageScan,
+    fullPageTabId: work.fullPageTabId,
   };
 }

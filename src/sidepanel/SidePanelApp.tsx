@@ -11,7 +11,7 @@ import { registerSidePanelRuntimeListeners } from "./sidepanelMessageBridge";
 import { computeCandidateMetrics, type CandidateViewFilter } from "./sidepanelCandidateMetrics";
 import { planAuthLossStop } from "./sidepanelAuthLoss";
 import { CandidatesTab } from "./CandidatesTab";
-import { getBestActionTab, sendTabMessageWithBootstrap } from "./tabActions";
+import { sendTabMessageWithBootstrap } from "./tabActions";
 import {
   APP_SHELL_STYLE,
   PANEL_BODY_STYLE,
@@ -114,11 +114,16 @@ export const SidePanelApp: React.FC = () => {
   // work. It is flipped synchronously in useSidePanelActions around the
   // START/STOP/CANCEL dispatch — never via a passive-effect snapshot — so an
   // auth loss can never miss an active run whose React state has not yet
-  // been committed.
-  const protectedWorkRef = useRef({ autoSolve: false, fullPage: false });
+  // been committed. The registry records the OWNER tab so termination is
+  // sent to the tab that actually runs the workflow, never to whatever tab
+  // currently looks "best".
+  const protectedWorkRef = useRef<{
+    autoSolve: { active: boolean; tabId?: number };
+    fullPage: { active: boolean; tabId?: number };
+  }>({ autoSolve: { active: false }, fullPage: { active: false } });
   const markProtectedWork = useCallback(
-    (kind: "autoSolve" | "fullPage", active: boolean) => {
-      protectedWorkRef.current[kind] = active;
+    (kind: "autoSolve" | "fullPage", active: boolean, tabId?: number) => {
+      protectedWorkRef.current[kind] = { active, tabId: active ? tabId : undefined };
     },
     [],
   );
@@ -148,24 +153,27 @@ export const SidePanelApp: React.FC = () => {
       // effect-lagged state snapshot.
       if (wasAuthenticated === true && !nowAuthenticated) {
         const plan = planAuthLossStop({
-          isAutoSolving: protectedWorkRef.current.autoSolve,
-          isFullPageScan: protectedWorkRef.current.fullPage,
+          isAutoSolving: protectedWorkRef.current.autoSolve.active,
+          autoSolveTabId: protectedWorkRef.current.autoSolve.tabId,
+          isFullPageScan: protectedWorkRef.current.fullPage.active,
+          fullPageTabId: protectedWorkRef.current.fullPage.tabId,
         });
-        protectedWorkRef.current.autoSolve = false;
-        protectedWorkRef.current.fullPage = false;
+        protectedWorkRef.current.autoSolve = { active: false };
+        protectedWorkRef.current.fullPage = { active: false };
         void (async () => {
           try {
             if (!plan.stopAutoSolve && !plan.cancelFullPage) return;
-            const activeTab = await getBestActionTab();
-            if (!activeTab?.id) return;
-            if (plan.stopAutoSolve) {
-              await sendTabMessageWithBootstrap(activeTab.id, { type: "STOP_AUTO_SOLVE_ALL" });
+            // Termination targets the RECORDED owner tab: the current "best"
+            // tab may have changed since the START, and sending STOP there
+            // would both miss the run and touch an unrelated tab.
+            if (plan.stopAutoSolve && plan.autoSolveTabId != null) {
+              await sendTabMessageWithBootstrap(plan.autoSolveTabId, { type: "STOP_AUTO_SOLVE_ALL" });
             }
-            if (plan.cancelFullPage) {
-              await sendTabMessageWithBootstrap(activeTab.id, { type: "FULL_PAGE_DETECT_CANCELLED" });
+            if (plan.cancelFullPage && plan.fullPageTabId != null) {
+              await sendTabMessageWithBootstrap(plan.fullPageTabId, { type: "FULL_PAGE_DETECT_CANCELLED" });
             }
           } catch {
-            // Best-effort termination; the flags are reset regardless.
+            // Best-effort termination; the registry is cleared regardless.
           }
         })();
         setIsAutoSolving(false);
@@ -260,6 +268,7 @@ export const SidePanelApp: React.FC = () => {
     isBatchParsing: state.isBatchParsing,
     isAuthenticatedNow: () => session.getState().status === "authenticated",
     markProtectedWork,
+    protectedWork: protectedWorkRef,
     setCandidates,
     setExpandedIds,
     setFillFeedback,
