@@ -111,8 +111,11 @@
 3. **安全特性**
    - ⚠️ 使用扩展 ID 作为密钥派生基础：扩展 ID 是公开值，这提供的是稳定的本地存储混淆，不是秘密保险库（详见 [API-KEY-SECURITY.md](./API-KEY-SECURITY.md)）
    - ✅ 每次加密使用随机 IV（防止密文重复）
-   - ✅ AES-GCM 提供认证加密（`qse:v1:` 版本化密文防篡改，fail closed）
-   - ✅ 解密失败时返回空字符串（安全降级）
+   - ✅ AES-GCM 提供认证加密
+   - 失败语义按存储形态区分：
+     - versioned `qse:v1:` ciphertext：篡改/解密失败 fail closed，凭据置空
+     - unknown `qse:*` envelope（未来版本）：fail closed，凭据置空
+     - legacy 无版本存储值：旧格式无法区分"密文被篡改"与"base64 样明文"，legacy 解密失败时**按 legacy 明文原样保留**（兼容优先，不做完整 fail-closed 保证）
 
 4. **加密流程**
    ```
@@ -144,7 +147,7 @@
 | 测试文件数 | 0 | 4 | +4 |
 | 测试用例数 | 0 | 37 | +37 |
 | 空 catch 块 | 12 | 0 | -100% |
-| API Key 落盘形态 | 明文存储 | `qse:v1:` 版本化 AES-GCM 密文（本地混淆，非秘密保险库） | ✅ |
+| API Key 落盘形态 | 明文存储 | 新保存/完成迁移后的凭据：`qse:v1:` 版本化 AES-GCM 密文（本地混淆，非秘密保险库；既有 legacy 明文/旧密文保留下次保存时迁移） | ✅ |
 | 错误可追踪性 | ❌ | ✅ | 100% |
 
 ---
@@ -214,7 +217,7 @@ console.log(settings.apiKey); // "sk-test-key" (明文)
 2. **向后兼容**
    - 旧的无版本凭据（明文或旧格式密文）仍可读取
    - 下一次保存设置时会迁移为当前版本 envelope（`qse:v1:`）
-   - 解密失败时安全降级为空字符串
+   - 失败语义：`qse:v1:` 密文与 unknown `qse:*` envelope 解密失败 fail closed 置空；legacy 无版本值解密失败按 legacy 明文原样保留（旧格式无标记，无法与任意明文区分）
    - 不会破坏现有用户数据
 
 3. **性能影响**
