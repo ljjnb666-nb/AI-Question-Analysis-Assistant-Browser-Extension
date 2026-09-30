@@ -210,7 +210,7 @@ describe("PopupApp protected work ownership", () => {
     // registry now shows the popup-established owner.
     expect(sentTabTargets).toEqual([{ tabId: 5, type: "START_AUTO_SOLVE_ALL" }]);
     const owners = await readProtectedWorkOwners();
-    expect(owners.autoSolve).toEqual({ active: true, tabId: 5 });
+    expect(owners.autoSolve).toEqual([{ tabId: 5 }]);
   });
 
   it("AUTH_UI_46_POPUP_FULL_PAGE_OWNER popup START records the full-page owner tab", async () => {
@@ -226,6 +226,6 @@ describe("PopupApp protected work ownership", () => {
     });
     expect(sentTabTargets).toEqual([{ tabId: 5, type: "START_FULL_PAGE_DETECT" }]);
     const owners = await readProtectedWorkOwners();
-    expect(owners.fullPage).toEqual({ active: true, tabId: 5 });
+    expect(owners.fullPage).toEqual([{ tabId: 5 }]);
   });
 });

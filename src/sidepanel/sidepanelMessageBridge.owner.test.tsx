@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  clearAllProtectedWorkOwners,
   readProtectedWorkOwners,
   terminateRecordedProtectedWork,
 } from "@/shared/auth/protectedWorkOwner";
@@ -77,15 +76,15 @@ describe("runtime reconciliation of protected-work owners", () => {
     // A run on tab 7 reports progress, then finishes.
     dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", running: true }, 7);
     await vi.waitFor(
-      () => expect(sessionStore.has("protectedWorkOwner:autoSolve")).toBe(true),
+      () => expect(sessionStore.has("protectedWorkOwner:autoSolve:7")).toBe(true),
       { timeout: 2000, interval: 20 },
     );
     const owners = await readProtectedWorkOwners();
-    expect(owners.autoSolve).toEqual({ active: true, tabId: 7 });
+    expect(owners.autoSolve).toEqual([{ tabId: 7 }]);
 
     dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", ok: true, solved: 3, filled: 3, total: 3, message: "done" }, 7);
     await vi.waitFor(async () => {
-      expect((await readProtectedWorkOwners()).autoSolve.active).toBe(false);
+      expect((await readProtectedWorkOwners()).autoSolve).toEqual([]);
     }, { timeout: 2000, interval: 20 });
 
     // A later auth loss must NOT send a stale STOP at the finished tab.
@@ -112,12 +111,12 @@ describe("runtime reconciliation of protected-work owners", () => {
 
     dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_PROGRESS", progress: 50, found: 2 }, 9);
     await vi.waitFor(async () => {
-      expect((await readProtectedWorkOwners()).fullPage).toEqual({ active: true, tabId: 9 });
+      expect((await readProtectedWorkOwners()).fullPage).toEqual([{ tabId: 9 }]);
     }, { timeout: 2000, interval: 20 });
 
     dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_DONE", candidates: [] }, 9);
     await vi.waitFor(async () => {
-      expect((await readProtectedWorkOwners()).fullPage.active).toBe(false);
+      expect((await readProtectedWorkOwners()).fullPage).toEqual([]);
     }, { timeout: 2000, interval: 20 });
 
     await terminateRecordedProtectedWork(async (tabId, message) => {
@@ -145,16 +144,16 @@ describe("runtime reconciliation of protected-work owners", () => {
     // the owner from its own progress reporting.
     dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", running: true }, 7);
     await vi.waitFor(async () => {
-      expect((await readProtectedWorkOwners()).autoSolve).toEqual({ active: true, tabId: 7 });
+      expect((await readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
     }, { timeout: 2000, interval: 20 });
 
     // And a full-page scan running on a different tab owns that tab.
     dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_PROGRESS", progress: 10, found: 0 }, 8);
     await vi.waitFor(async () => {
-      expect((await readProtectedWorkOwners()).fullPage).toEqual({ active: true, tabId: 8 });
+      expect((await readProtectedWorkOwners()).fullPage).toEqual([{ tabId: 8 }]);
     }, { timeout: 2000, interval: 20 });
 
-    await clearAllProtectedWorkOwners();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
   it("AUTH_UI_50_RUNTIME_PROGRESS_RECONCILES_OWNER a non-running progress report does not claim ownership", async () => {
@@ -173,6 +172,6 @@ describe("runtime reconciliation of protected-work owners", () => {
 
     dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", running: false }, 7);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect((await readProtectedWorkOwners()).autoSolve.active).toBe(false);
+    expect((await readProtectedWorkOwners()).autoSolve).toEqual([]);
   });
 });

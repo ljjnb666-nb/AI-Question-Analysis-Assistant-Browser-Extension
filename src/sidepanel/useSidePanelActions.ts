@@ -3,7 +3,7 @@ import type { DetectedCandidate } from "@/shared/types";
 import { addHistoryEntryIfCurrent, loadSettings } from "@/shared/utils/storage";
 import { getProvider, hasSufficientPreviewText, parseQuestion } from "@/shared/utils/parseRouter";
 import { logEvent } from "@/shared/utils/analytics";
-import { readProtectedWorkOwners } from "@/shared/auth/protectedWorkOwner";
+import { readProtectedWorkOwners, clearProtectedWorkOwner } from "@/shared/auth/protectedWorkOwner";
 import {
   isChoiceLikeResult,
   isRiskyCandidate,
@@ -175,21 +175,31 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   }, [applyDetectState, options, requireAuthenticatedAction]);
 
   const handleCancelFullPage = useCallback(async () => {
-    // AUTH-UI-INV-15: resolve the owner across surfaces — this surface's
-    // zero-lag sync registry first, then the cross-surface owner store (a
-    // Popup-started scan), and only fall back to the current best tab when
-    // no owner record exists (legacy runs).
+    // AUTH-UI-INV-16: cancel EVERY recorded full-page owner — this surface's
+    // zero-lag sync registry first, then the cross-surface owner set (a
+    // Popup-started scan, or scans on several tabs) — each exactly once.
+    // Legacy best-tab fallback only when no owner record exists at all.
+    const cancelTabs = new Set<number>();
     const localTabId = options.protectedWork?.current.fullPage.tabId;
-    const ownerTabId =
-      localTabId ?? (await readProtectedWorkOwners()).fullPage.tabId ?? undefined;
-    const activeTab =
-      ownerTabId != null ? ({ id: ownerTabId } as chrome.tabs.Tab) : await getBestActionTab();
-    if (activeTab?.id) {
-      await sendTabMessageWithBootstrap(activeTab.id, { type: "FULL_PAGE_DETECT_CANCELLED" });
+    if (localTabId != null) cancelTabs.add(localTabId);
+    for (const entry of (await readProtectedWorkOwners()).fullPage) cancelTabs.add(entry.tabId);
+
+    if (cancelTabs.size === 0) {
+      const best = await getBestActionTab();
+      if (best?.id) {
+        await sendTabMessageWithBootstrap(best.id, { type: "FULL_PAGE_DETECT_CANCELLED" });
+      }
+    } else {
+      await Promise.all(
+        [...cancelTabs].map((tabId) =>
+          sendTabMessageWithBootstrap(tabId, { type: "FULL_PAGE_DETECT_CANCELLED" }).catch(() => undefined),
+        ),
+      );
     }
-    options.markProtectedWork("fullPage", false);
+    if (localTabId != null) options.markProtectedWork("fullPage", false, localTabId);
     options.setIsFullPageScan(false);
     options.setScanProgress(null);
+    for (const tabId of cancelTabs) void clearProtectedWorkOwner("fullPage", tabId);
   }, [options]);
 
   const toggleSelect = useCallback(
@@ -359,19 +369,30 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
 
   // STOP / CANCEL are deliberately NOT auth-gated: after an auth loss they
   // are the only way to terminate an already-started protected workflow.
-  // They resolve the owner across surfaces (sync registry → cross-surface
-  // owner store) and target the RECORDED owner tab, so stopping still works
-  // — and only works — on the tab that actually runs the workflow, even
-  // after the user switched tabs or the run started from the Popup.
+  // AUTH-UI-INV-16: several tabs may run the same kind, so Stop resolves
+  // EVERY recorded owner (this surface's sync registry, then the
+  // cross-surface set) and sends one STOP per tab — never just the newest,
+  // never a re-guessed best tab. Legacy best-tab fallback only when no
+  // owner record exists at all.
   const handleStopAutoSolve = useCallback(async () => {
+    const stopTabs = new Set<number>();
     const localTabId = options.protectedWork?.current.autoSolve.tabId;
-    const ownerTabId =
-      localTabId ?? (await readProtectedWorkOwners()).autoSolve.tabId ?? undefined;
-    const activeTab =
-      ownerTabId != null ? ({ id: ownerTabId } as chrome.tabs.Tab) : await getBestActionTab();
-    if (!activeTab?.id) return;
-    await sendTabMessageWithBootstrap(activeTab.id, { type: "STOP_AUTO_SOLVE_ALL" });
-    options.markProtectedWork("autoSolve", false);
+    if (localTabId != null) stopTabs.add(localTabId);
+    for (const entry of (await readProtectedWorkOwners()).autoSolve) stopTabs.add(entry.tabId);
+
+    if (stopTabs.size === 0) {
+      const best = await getBestActionTab();
+      if (!best?.id) return;
+      await sendTabMessageWithBootstrap(best.id, { type: "STOP_AUTO_SOLVE_ALL" });
+    } else {
+      await Promise.all(
+        [...stopTabs].map((tabId) =>
+          sendTabMessageWithBootstrap(tabId, { type: "STOP_AUTO_SOLVE_ALL" }).catch(() => undefined),
+        ),
+      );
+    }
+    if (localTabId != null) options.markProtectedWork("autoSolve", false, localTabId);
+    for (const tabId of stopTabs) void clearProtectedWorkOwner("autoSolve", tabId);
   }, [options]);
 
   const handleClearSelection = useCallback(() => {
