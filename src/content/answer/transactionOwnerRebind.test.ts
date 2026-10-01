@@ -14,7 +14,7 @@ const trappedEvents = ["pointerover", "pointerenter", "pointerdown", "mouseover"
 let originalUrl = "";
 
 function multiChoiceResult(): ParseResult {
-  return { blockId: "owner-rebind-question", questionType: "multi_choice", answer: "A,B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
+  return { blockId: "owner-rebind-question", questionType: "multi_choice", answer: "A,B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text", resultSource: "provider" };
 }
 
 function makeOwnerBlock(owner: Element, root = { rootKey: TOP_ROOT_KEY, rootGeneration: TOP_ROOT_GENERATION, kind: "top-document" as const }): QuestionBlock {

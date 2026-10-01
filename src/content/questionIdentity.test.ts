@@ -36,7 +36,7 @@ describe("Question Model V2 stable identity", () => {
       timestamp: 1,
       host: "example.com",
       block: { ...current, id: "runtime-old" },
-      result: { blockId: "runtime-old", questionType: "single_choice" as const, answer: "A", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: current.previewText, routeUsed: "text" as const, optionSelections: { A: true } },
+      result: { blockId: "runtime-old", questionType: "single_choice" as const, answer: "A", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: current.previewText, routeUsed: "text" as const, optionSelections: { A: true }, resultSource: "provider" as const },
     };
     expect(findReusableHistoryEntry([stableEntry], current, "example.com")).toBe(stableEntry);
     expect(findReusableHistoryEntry([stableEntry], current, "other.example")).toBeNull();
@@ -53,7 +53,7 @@ describe("Question Model V2 stable identity", () => {
       timestamp: 1,
       host: "example.com",
       block: { ...current, identity: { ...current.identity!, contentFingerprint: "cf_v1_stale" } },
-      result: { blockId: "runtime-current", questionType: "single_choice" as const, answer: "A", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: current.previewText, routeUsed: "text" as const, optionSelections: { A: true } },
+      result: { blockId: "runtime-current", questionType: "single_choice" as const, answer: "A", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: current.previewText, routeUsed: "text" as const, optionSelections: { A: true }, resultSource: "provider" as const },
     };
     const entries = [staleIdentityEntry];
     expect(findReusableHistoryEntry(entries, current, "example.com")).toBeNull();
@@ -81,6 +81,7 @@ describe("Question Model V2 stable identity", () => {
       recognizedText: "",
       routeUsed: "text" as const,
       optionSelections: { [answer]: true },
+      resultSource: "provider" as const,
     });
     const baseBlock = {
       id: "q-12",
@@ -182,7 +183,7 @@ describe("Question Model V2 stable identity", () => {
   it("fails closed when two V2 identities have different stable ids despite matching content", () => {
     const q4 = attachQuestionIdentity({ id: "runtime-q4", bbox: { x: 0, y: 0, width: 700, height: 200 }, previewText: input().text, hasImage: false, questionTypeGuess: "single_choice", confidence: 1, source: "auto_dom" });
     const q7 = attachQuestionIdentity({ ...q4, id: "runtime-q7", previewText: "7. Which answer is correct? A. one B. two C. three D. four" });
-    const entry = { id: "history-q4", timestamp: 1, host: "example.com", block: q4, result: { blockId: q4.id, questionType: "single_choice" as const, answer: "A", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: q4.previewText, routeUsed: "text" as const, optionSelections: { A: true } } };
+    const entry = { id: "history-q4", timestamp: 1, host: "example.com", block: q4, result: { blockId: q4.id, questionType: "single_choice" as const, answer: "A", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: q4.previewText, routeUsed: "text" as const, optionSelections: { A: true }, resultSource: "provider" as const } };
     expect(q4.identity.contentFingerprint).toBe(q7.identity.contentFingerprint);
     expect(q4.identity.stableId).not.toBe(q7.identity.stableId);
     expect(findReusableHistoryEntry([entry], q7, "example.com")).toBeNull();
@@ -241,7 +242,7 @@ describe("Question Model V2 stable identity", () => {
     native.setAttribute("data-question-id", "1");
     const questionA = attachQuestionIdentity({ id: "assignment-100", bbox: { x: 0, y: 0, width: 700, height: 200 }, previewText: "1. What is 1+1? A. 1 B. 2 C. 3 D. 4", hasImage: false, questionTypeGuess: "single_choice", confidence: 1, source: "auto_dom" }, native);
     const questionB = attachQuestionIdentity({ id: "assignment-200", bbox: { x: 0, y: 0, width: 700, height: 200 }, previewText: "1. What is the capital of France? A. Paris B. Rome C. Berlin D. Madrid", hasImage: false, questionTypeGuess: "single_choice", confidence: 1, source: "auto_dom" }, native);
-    const entry = { id: "history-assignment-100", timestamp: 1, host: "example.com", block: questionA, result: { blockId: questionA.id, questionType: "single_choice" as const, answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: questionA.previewText, routeUsed: "text" as const, optionSelections: { B: true } } };
+    const entry = { id: "history-assignment-100", timestamp: 1, host: "example.com", block: questionA, result: { blockId: questionA.id, questionType: "single_choice" as const, answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: questionA.previewText, routeUsed: "text" as const, optionSelections: { B: true }, resultSource: "provider" as const } };
     expect(questionA.identity.stableId).not.toBe(questionB.identity.stableId);
     expect(findReusableHistoryEntry([entry], questionB, "example.com")).toBeNull();
     const equivalent = attachQuestionIdentity({ ...questionA, id: "assignment-100-rerender" }, native);

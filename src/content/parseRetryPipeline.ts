@@ -1,7 +1,7 @@
 import type { AppSettings, ParseResult, QuestionBlock } from "@/shared/types";
 import type { AnalyticsEvent } from "@/shared/utils/analytics";
 import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
-import { isStaleQuestionRevisionError } from "@/shared/utils/parseAttemptErrors";
+import { isProviderNotConfiguredError, isStaleQuestionRevisionError } from "@/shared/utils/parseAttemptErrors";
 
 type StreamCallback = (partial: string) => void;
 
@@ -116,6 +116,8 @@ export async function parseWithTieredRetries(
     } catch (err) {
       lastErr = err;
       if (isStaleQuestionRevisionError(err)) throw err;
+      // UI-00A: retrying cannot fix a missing API Key — surface it immediately.
+      if (isProviderNotConfiguredError(err)) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       deps.logEvent("manual_parse_attempt_failed", {
         blockId: block.id,

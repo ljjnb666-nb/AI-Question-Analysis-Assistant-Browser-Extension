@@ -101,6 +101,7 @@ function parseResult(block: QuestionBlock, answer = "B"): ParseResult {
     detailedExplanation: "",
     recognizedText: "",
     routeUsed: "text",
+    resultSource: "provider",
   };
 }
 

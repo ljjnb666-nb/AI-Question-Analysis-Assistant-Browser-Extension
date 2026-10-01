@@ -3,7 +3,7 @@ import type { ParseResult, QuestionBlock } from "@/shared/types";
 import { handleContentMessage } from "./contentMessageRouter";
 
 const block = { id: "route-authority-question" } as QuestionBlock;
-const result = { answer: "A" } as ParseResult;
+const result = { answer: "A", resultSource: "provider" } as ParseResult;
 let originalUrl = "";
 
 function makeDeps() {

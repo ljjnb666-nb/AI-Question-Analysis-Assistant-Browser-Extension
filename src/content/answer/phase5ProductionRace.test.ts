@@ -4,7 +4,7 @@ import { captureSolveStartControlState, fillParsedAnswerInPage } from "../answer
 import { observeLiveQuestion } from "../liveQuestionObservation";
 import { attachRuntimeRoot, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "../roots/rootContext";
 
-const result: ParseResult = { blockId: "q1", questionType: "single_choice", answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
+const result: ParseResult = { blockId: "q1", questionType: "single_choice", answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text", resultSource: "provider" };
 function base(): QuestionBlock { return { id: "q1", bbox: { x: 0, y: 0, width: 800, height: 300 }, previewText: "1. diagram A. a B. b", questionTypeGuess: "single_choice", hasImage: true, confidence: 1, source: "auto_dom" }; }
 function preparedBlock(owner: Element) {
   const block = observeLiveQuestion(base(), owner);

@@ -28,7 +28,7 @@ describe("answerFiller", () => {
     document.elementsFromPoint = (() => [owner]) as typeof document.elementsFromPoint;
     const observed = observeLiveQuestion({ id: "q-mode", bbox: { x: 0, y: 0, width: 500, height: 240 }, previewText: "1. prompt A. a B. b", questionTypeGuess: "single_choice", hasImage: false, confidence: 1, source: "auto_dom" }, owner);
     const block = attachRuntimeRoot(observed, { rootKey: TOP_ROOT_KEY, rootGeneration: TOP_ROOT_GENERATION, kind: "top-document" }, owner);
-    const result: ParseResult = { blockId: block.id, questionType: "single_choice", answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
+    const result: ParseResult = { blockId: block.id, questionType: "single_choice", answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text", resultSource: "provider" };
     let clicks = 0;
     document.getElementById("b")!.addEventListener("click", () => clicks++);
 
@@ -98,6 +98,7 @@ describe("answerFiller", () => {
       detailedExplanation: "",
       recognizedText: "",
       routeUsed: "vision",
+      resultSource: "provider",
     };
 
     const filled = await fillAnswerIntoScope(scope, bbox, result);
@@ -130,6 +131,7 @@ describe("answerFiller", () => {
       detailedExplanation: "",
       recognizedText: "",
       routeUsed: "vision",
+      resultSource: "provider",
     };
 
     const filled = await fillAnswerIntoScope(scope, bbox, result);
@@ -169,6 +171,7 @@ describe("answerFiller", () => {
       detailedExplanation: "",
       recognizedText: "",
       routeUsed: "vision",
+      resultSource: "provider",
     };
 
     const filled = await fillAnswerIntoScope(question, bbox, result);
@@ -211,6 +214,7 @@ describe("answerFiller", () => {
       detailedExplanation: "",
       recognizedText: "4、单选题 阅读课本“实现共产主义是历史发展的必然”回答问题。下面关于共产主义社会说法错误的是（ ） A. 现实的社会主义事业每向前一步，也就是向着共产主义走进一步 B. 实现共产主义是广大人民群众的共同愿望 C. 无产阶级的解放与全人类的解放是完全一致的 D. 社会发展的规律是独立于人的社会活动的",
       routeUsed: "vision",
+      resultSource: "provider",
     };
 
     const filled = await fillParsedAnswerInPage({
@@ -268,6 +272,7 @@ describe("answerFiller", () => {
       detailedExplanation: "",
       recognizedText: "",
       routeUsed: "vision",
+      resultSource: "provider",
     };
 
     const filled = await fillAnswerIntoScope(question, bbox, result);
@@ -325,6 +330,7 @@ describe("answerFiller", () => {
       detailedExplanation: "",
       recognizedText: "",
       routeUsed: "vision",
+      resultSource: "provider",
     };
 
     const filled = await fillParsedAnswerInPage({
@@ -372,6 +378,7 @@ describe("answerFiller", () => {
       detailedExplanation: "",
       recognizedText: "",
       routeUsed: "vision",
+      resultSource: "provider",
     };
 
     const filled = await fillAnswerIntoScope(question, bbox, result);
@@ -408,6 +415,7 @@ describe("answerFiller", () => {
       detailedExplanation: "",
       recognizedText: "",
       routeUsed: "vision",
+      resultSource: "provider",
     };
 
     const verify = verifyAnswerInScope(question, bbox, result);
@@ -440,6 +448,7 @@ describe("answerFiller", () => {
       detailedExplanation: "因为题干信息不完整，所以建议按小问分点作答。",
       recognizedText: "",
       routeUsed: "vision",
+      resultSource: "provider",
     };
 
     const filled = await fillAnswerIntoScope(scope, bbox, result);

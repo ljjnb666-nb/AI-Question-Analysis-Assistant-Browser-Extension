@@ -1,4 +1,5 @@
 import type { DetectedCandidate, QuestionDisplaySegment, QuestionType } from "@/shared/types";
+import { isParseResultFillAuthoritative } from "@/shared/ai/parseResultAuthority";
 import { formatQuestionTextForDisplay, isStructuredAnswerExtractionFailed, renderMathText, resolveResultAnswerForDisplay, type UILang } from "./displayUtils";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -483,6 +484,10 @@ export const CandidateResultPanel: React.FC<{
 }> = ({ cand, answerSummary, isExpanded, lang, onFill, onRetryVision, onToggleDetails }) => {
   if (cand.status !== "success" || !cand.result) return null;
   const extractionFailed = isStructuredAnswerExtractionFailed(cand.result);
+  // UI-00A: only provable provider results may offer Fill in the UI; mock or
+  // legacy-unproven results stay viewable but never fillable.
+  const notFillAuthoritative = !isParseResultFillAuthoritative(cand.result);
+  const fillUnavailable = extractionFailed || notFillAuthoritative;
   const displayAnswer = resolveResultAnswerForDisplay(cand.result, cand.block.questionTypeGuess, cand.block.previewText || cand.result.recognizedText || "");
 
   return (
@@ -525,12 +530,12 @@ export const CandidateResultPanel: React.FC<{
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (!extractionFailed) onFill();
+              if (!fillUnavailable) onFill();
             }}
-            disabled={extractionFailed}
+            disabled={fillUnavailable}
             style={{
               border: "1px solid rgba(255, 255, 255, 0.1)",
-              background: extractionFailed
+              background: fillUnavailable
                 ? "linear-gradient(180deg, rgba(148, 163, 184, 0.5), rgba(100, 116, 139, 0.38))"
                 : "linear-gradient(135deg, #10b981 0%, #059669 100%)",
               color: "#ffffff",
@@ -538,15 +543,19 @@ export const CandidateResultPanel: React.FC<{
               fontSize: 11,
               fontWeight: 700,
               padding: "6px 10px",
-              cursor: extractionFailed ? "not-allowed" : "pointer",
-              opacity: extractionFailed ? 0.75 : 1,
+              cursor: fillUnavailable ? "not-allowed" : "pointer",
+              opacity: fillUnavailable ? 0.75 : 1,
               transition: "transform 0.2s ease, box-shadow 0.2s ease",
             }}
             title={extractionFailed
               ? (lang === "en" ? "Cannot fill because no stable structured answer was extracted" : "未提取到稳定结构化答案，暂不支持直接填写")
-              : undefined}
+              : notFillAuthoritative
+                ? (lang === "en"
+                  ? "Demo results and legacy results of unknown origin cannot be filled. Parse again with a configured provider."
+                  : "演示结果与来源未知的历史结果不能直接填写，请配置 AI 服务后重新解析。")
+                : undefined}
           >
-            {extractionFailed
+            {fillUnavailable
               ? (lang === "en" ? "Fill unavailable" : "暂不可填写")
               : (lang === "en" ? "Fill answer" : "填写答案")}
           </button>

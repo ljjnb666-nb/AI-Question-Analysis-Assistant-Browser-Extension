@@ -1,4 +1,5 @@
 import type { AppSettings, CandidateOrigin, DetectedCandidate, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
+import { getUnfillableResultCode, isParseResultFillAuthoritative } from "@/shared/ai/parseResultAuthority";
 import type { FillAnswerCode } from "@/content/answerTypes";
 import type { CandidateAttemptLease, CandidateAttemptRegistry } from "./candidateAuthority";
 import { candidateMatchesBlockAndOrigin } from "./candidateAuthority";
@@ -257,6 +258,12 @@ export async function runFillCandidate(
   deps: FillDeps,
 ): Promise<{ ok?: boolean; filledCount?: number; message?: string; code?: FillAnswerCode } | null> {
   if (!candidate.result) return null;
+  // UI-00A: mock and legacy-unproven results are rejected before any tab
+  // dispatch — no message is crafted for a result that may not fill.
+  if (!isParseResultFillAuthoritative(candidate.result)) {
+    const code = getUnfillableResultCode(candidate.result);
+    return { ok: false, filledCount: 0, code, message: code };
+  }
   if (!candidate.origin?.tabId || !candidate.origin.url || !await deps.isCandidateCurrent(candidate)) {
     clearFilledCandidateResult(candidate, deps.setCandidates);
     return { ok: false, filledCount: 0, code: "STALE_QUESTION_REVISION", message: STALE_CANDIDATE_RESULT };
@@ -270,10 +277,17 @@ export async function runBatchFill(
   candidates: DetectedCandidate[],
   deps: FillDeps,
 ): Promise<{ totalFilled: number; totalQuestions: number }> {
-  const targets = candidates.filter((candidate) => candidate.selected && candidate.status === "success" && candidate.result);
+  // UI-00A: batch fill processes only fill-authoritative provider results.
+  // A single demo/legacy candidate among the selection is skipped, never filled.
+  const targets = candidates.filter((candidate) =>
+    candidate.selected
+    && candidate.status === "success"
+    && candidate.result
+    && isParseResultFillAuthoritative(candidate.result));
   let totalFilled = 0;
   let totalQuestions = 0;
   for (const candidate of targets) {
+    if (!candidate.result || !isParseResultFillAuthoritative(candidate.result)) continue;
     if (!candidate.origin?.tabId || !candidate.origin.url || !await deps.isCandidateCurrent(candidate)) {
       clearFilledCandidateResult(candidate, deps.setCandidates);
       break;

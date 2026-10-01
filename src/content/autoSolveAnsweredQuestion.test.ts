@@ -29,6 +29,7 @@ function makeResult(overrides: Partial<ParseResult> = {}): ParseResult {
     detailedExplanation: "",
     recognizedText: "",
     routeUsed: "vision",
+    resultSource: "provider",
     ...overrides,
   };
 }

@@ -1,6 +1,10 @@
 import { useCallback, useRef } from "react";
 import type { DetectedCandidate } from "@/shared/types";
 import { addHistoryEntryIfCurrent, loadSettings } from "@/shared/utils/storage";
+import {
+  getAutoSolveNotConfiguredMessage,
+  isProviderRuntimeConfigured,
+} from "@/shared/ai/parseResultAuthority";
 import { getProvider, hasSufficientPreviewText, parseQuestion } from "@/shared/utils/parseRouter";
 import { logEvent } from "@/shared/utils/analytics";
 import { readProtectedWorkOwners, clearProtectedWorkOwner } from "@/shared/auth/protectedWorkOwner";
@@ -23,7 +27,7 @@ import {
   runRetryVision,
   selectRiskyCandidates,
 } from "./batchOperations";
-import { getBatchFillFeedback, getSingleFillFeedback } from "./sidepanelActionMessages";
+import { getBatchFillFeedback, getFillActionFeedback } from "./sidepanelActionMessages";
 import { buildAutoSolveStartingState, resetDetectState, startFullPageDetectState, type AutoSolveProgressState, type ScanProgressState } from "./sidepanelStateSync";
 import { clearCandidateSelection, selectAllCandidates, toggleCandidateSelection } from "./sidepanelSelectionSync";
 import { createCandidateAttemptRegistry } from "./candidateAuthority";
@@ -330,7 +334,8 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       sendFillMessageWithVerify: (tabId, block, result, expectedUrl) =>
         sendFillMessageWithVerify(tabId, block, result, expectedUrl, isChoiceLikeResult),
     });
-    options.setFillFeedback(getSingleFillFeedback(options.uiLang, !!response?.ok, response?.message));
+    // UI-00A: provenance rejections surface as natural hints, not machine codes.
+    options.setFillFeedback(getFillActionFeedback(options.uiLang, response));
     window.setTimeout(() => options.setFillFeedback(""), 2200);
   }, [options, isCandidateCurrent, requireAuthenticatedAction]);
 
@@ -350,6 +355,16 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
 
   const handleStartAutoSolve = useCallback(async () => {
     if (!requireAuthenticatedAction()) return;
+    // UI-00A entry guard: Auto Solve is a protected real-page workflow and
+    // must not start (and never fall back to demo answers) without a usable
+    // provider. The content-side entry guard and the fill-core provenance
+    // gate remain as the second and third layers.
+    const settings = await loadSettings();
+    if (!isProviderRuntimeConfigured(getProvider(settings.providerId ?? "anthropic"), settings)) {
+      options.setFillFeedback(getAutoSolveNotConfiguredMessage(settings.language));
+      window.setTimeout(() => options.setFillFeedback(""), 3200);
+      return;
+    }
     const activeTab = await getBestActionTab();
     if (!activeTab?.id) return;
     // Last-responsible-moment recheck after the tab lookup await: an auth

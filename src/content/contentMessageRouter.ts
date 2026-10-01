@@ -1,4 +1,5 @@
 import type { BoundingBox, ExtMessage, ParseResult, QuestionBlock, UpdateCandidateSelectionMsg } from "@/shared/types";
+import { getUnfillableResultCode, isParseResultFillAuthoritative } from "@/shared/ai/parseResultAuthority";
 
 type MessageResponse = (response: unknown) => void;
 
@@ -100,6 +101,13 @@ export function handleContentMessage(
     case "FILL_PARSED_ANSWER":
       if (!("block" in message) || !("result" in message) || !message.block || !message.result) {
         sendResponse({ ok: false, error: "Missing fill payload" });
+        return false;
+      }
+      // UI-00A message-boundary gate: mock or legacy-unproven results are
+      // rejected before the fill core is even reached.
+      if (!isParseResultFillAuthoritative(message.result as ParseResult)) {
+        const code = getUnfillableResultCode(message.result as ParseResult);
+        sendResponse({ ok: false, filledCount: 0, code, message: code });
         return false;
       }
       if (message.expectedUrl !== undefined

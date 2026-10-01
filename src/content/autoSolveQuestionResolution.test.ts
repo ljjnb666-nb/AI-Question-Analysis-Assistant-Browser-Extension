@@ -34,6 +34,7 @@ function makeResult(overrides: Partial<ParseResult> = {}): ParseResult {
     recognizedText: "1. sample question",
     routeUsed: "text",
     optionSelections: {},
+    resultSource: "provider",
     ...overrides,
   };
 }

@@ -40,6 +40,7 @@ const makeResult = (overrides: Partial<ParseResult> = {}): ParseResult => ({
   detailedExplanation: "detail",
   recognizedText: "recognized",
   routeUsed: "vision",
+  resultSource: "provider",
   ...overrides,
 });
 
