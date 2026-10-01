@@ -118,4 +118,34 @@ describe("zero-fillable batch behavior (UI-00B PART E)", () => {
     expect(successfulQuestions).toBe(1);
     expect(withheldCount).toBe(0);
   });
+
+  it("RF02-02: a dispatch failure without a machine code keeps its real source, never STALE", async () => {
+    const deps = {
+      isCandidateCurrent: vi.fn(async () => true),
+      setCandidates: vi.fn(),
+      sendFillMessageWithVerify: vi.fn(async () => ({ ok: false, filledCount: 0, message: "Receiving end does not exist" })),
+    };
+
+    const outcome = await runBatchFill([makeCandidate("provider-1", providerResult)], deps);
+
+    expect(outcome.failureCode).toBeUndefined();
+    expect(outcome.failureMessage).toBe("Receiving end does not exist");
+    expect(outcome.successfulQuestions).toBe(0);
+    expect(outcome.attemptedQuestions).toBe(1);
+  });
+
+  it("RF02-03: an ok fill whose post-fill fence was lost is recorded as stale", async () => {
+    const deps = {
+      isCandidateCurrent: vi.fn()
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false),
+      setCandidates: vi.fn(),
+      sendFillMessageWithVerify: vi.fn(async () => ({ ok: true, filledCount: 2 })),
+    };
+
+    const outcome = await runBatchFill([makeCandidate("provider-1", providerResult)], deps);
+
+    expect(outcome.failureCode).toBe("STALE_QUESTION_REVISION");
+    expect(outcome.successfulQuestions).toBe(1);
+  });
 });

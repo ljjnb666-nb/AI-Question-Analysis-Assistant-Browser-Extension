@@ -344,15 +344,15 @@ describe("Side Panel result commit authority", () => {
     });
 
     expect(sendFillMessageWithVerify).not.toHaveBeenCalled();
-    // Both fill-ready candidates were withheld by the stale-origin fence, so
-    // the run reports them as withheld rather than silently dropping them.
+    // Review fix 02 CASE A: the pre-dispatch stale fence is a definite stale
+    // failure — recorded, not silently skipped.
     expect(result).toEqual({
       attemptedQuestions: 0,
       successfulQuestions: 0,
       totalFilled: 0,
       withheldCount: 2,
-      failureCode: undefined,
-      failureMessage: undefined,
+      failureCode: "STALE_QUESTION_REVISION",
+      failureMessage: "STALE_QUESTION_REVISION",
     });
     expect(store.getState()[0].result).toBeUndefined();
     expect(store.getState()[1].result).toBeDefined();

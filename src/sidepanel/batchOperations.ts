@@ -308,6 +308,10 @@ export async function runBatchFill(
     if (!isCandidateFillReady(candidate)) continue;
     if (!candidate.origin?.tabId || !candidate.origin.url || !await deps.isCandidateCurrent(candidate)) {
       clearFilledCandidateResult(candidate, deps.setCandidates);
+      // Review fix 02 CASE A: a lost pre-dispatch authority is a definite
+      // stale failure — never a silent "skip".
+      failureCode = "STALE_QUESTION_REVISION";
+      failureMessage = STALE_CANDIDATE_RESULT;
       break;
     }
     attemptedQuestions += 1;
@@ -325,8 +329,20 @@ export async function runBatchFill(
     // A failed transaction or a lost origin fence ends this batch path. Never
     // repeat or advance to another candidate after an uncertain fill result.
     if (!response?.ok || !stillCurrent) {
-      failureCode = response?.code ?? "STALE_QUESTION_REVISION";
-      failureMessage = response?.message;
+      if (!response?.ok) {
+        // Review fix 02 CASE C: the dispatch itself failed. Keep the
+        // response's own machine code when it has one; never fabricate
+        // STALE_QUESTION_REVISION for transport/provider failures without
+        // one — the handler classifies the raw message instead.
+        failureCode = response?.code;
+        failureMessage = response?.message;
+      } else {
+        // Review fix 02 CASE D: the fill reported ok but the post-fill
+        // authority fence was lost — a definite stale, not a transport
+        // failure.
+        failureCode = "STALE_QUESTION_REVISION";
+        failureMessage = response?.message;
+      }
       break;
     }
   }

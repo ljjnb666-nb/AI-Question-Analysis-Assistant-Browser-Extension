@@ -208,4 +208,82 @@ describe("batch fill zero-fillable guard (UI00B-12, UI-00B PART E)", () => {
     expect(feedback?.tone).toBe("success");
     expect(feedback?.message).toBe("已填写 2 题（3 个控件）。");
   });
+
+  it("RF02-01: a pre-dispatch stale stop shows the localized stale copy with a non-success tone", async () => {
+    vi.mocked(runBatchFill).mockResolvedValueOnce({
+      attemptedQuestions: 0,
+      successfulQuestions: 0,
+      totalFilled: 0,
+      withheldCount: 2,
+      failureCode: "STALE_QUESTION_REVISION",
+      failureMessage: "STALE_QUESTION_REVISION",
+    });
+    const setFillFeedback = vi.fn();
+    const { result } = renderHook((options: Parameters<typeof useSidePanelActions>[0]) => useSidePanelActions(options), {
+      initialProps: makeOptions({
+        candidates: [makeCandidate("p-1", providerResult), makeCandidate("p-2", providerResult)],
+        setFillFeedback,
+      }),
+    });
+
+    await result.current.handleBatchFill();
+
+    const feedback = setFillFeedback.mock.calls[0]?.[0];
+    expect(feedback?.tone).not.toBe("success");
+    expect(feedback?.message).toBe("页面中的题目已经发生变化，请重新识别后再填写。");
+    expect(feedback?.message).not.toContain("STALE_QUESTION_REVISION");
+  });
+
+  it("RF02-02: a code-less transport failure maps to the safe page-connection copy", async () => {
+    vi.mocked(runBatchFill).mockResolvedValueOnce({
+      attemptedQuestions: 1,
+      successfulQuestions: 0,
+      totalFilled: 0,
+      withheldCount: 0,
+      failureCode: undefined,
+      failureMessage: "Receiving end does not exist",
+    });
+    const setFillFeedback = vi.fn();
+    const { result } = renderHook((options: Parameters<typeof useSidePanelActions>[0]) => useSidePanelActions(options), {
+      initialProps: makeOptions({
+        candidates: [makeCandidate("p-1", providerResult)],
+        setFillFeedback,
+      }),
+    });
+
+    await result.current.handleBatchFill();
+
+    const feedback = setFillFeedback.mock.calls[0]?.[0];
+    expect(feedback?.tone).toBe("error");
+    expect(feedback?.message).toBe("当前页面暂时无法连接插件，请刷新页面后重试。");
+    expect(feedback?.message).not.toContain("STALE_QUESTION_REVISION");
+    expect(feedback?.message).not.toContain("题目已经发生变化");
+    expect(feedback?.message).not.toContain("Receiving end");
+    expect(feedback?.technicalDetail).toContain("Receiving end does not exist");
+  });
+
+  it("RF02-03: an ok fill with a lost post-fill fence reads as a stale stop, not success", async () => {
+    vi.mocked(runBatchFill).mockResolvedValueOnce({
+      attemptedQuestions: 1,
+      successfulQuestions: 1,
+      totalFilled: 2,
+      withheldCount: 0,
+      failureCode: "STALE_QUESTION_REVISION",
+      failureMessage: "STALE_QUESTION_REVISION",
+    });
+    const setFillFeedback = vi.fn();
+    const { result } = renderHook((options: Parameters<typeof useSidePanelActions>[0]) => useSidePanelActions(options), {
+      initialProps: makeOptions({
+        candidates: [makeCandidate("p-1", providerResult)],
+        setFillFeedback,
+      }),
+    });
+
+    await result.current.handleBatchFill();
+
+    const feedback = setFillFeedback.mock.calls[0]?.[0];
+    expect(feedback?.tone).not.toBe("success");
+    expect(feedback?.message).toContain("已填写 1 题；");
+    expect(feedback?.message).toContain("页面中的题目已经发生变化，请重新识别后再填写。");
+  });
 });
