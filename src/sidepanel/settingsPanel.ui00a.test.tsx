@@ -126,4 +126,30 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
     await waitFor(() => expect(screen.getByText(/连接成功/)).toBeInTheDocument());
     expect(parseQuestion).toHaveBeenCalledTimes(1);
   });
+
+  it("UI00A-RF01: a required-key provider without a key shows the config hint, never mock-fallback copy", async () => {
+    mockStoredSettings("anthropic", "");
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(/此服务商需要 API Key 才能进行真实解析。/)).toBeInTheDocument());
+    expect(screen.getByText(/尚未填写 API Key。配置后才能进行 AI 解析和连接测试。/)).toBeInTheDocument();
+
+    // The removed silent-mock contract must not reappear in user copy.
+    expect(screen.queryByText(/Mock 演示数据/)).toBeNull();
+    expect(screen.queryByText(/回退/)).toBeNull();
+    expect(screen.queryByText(/mock demo data/i)).toBeNull();
+    expect(screen.queryByText(/demo or local mode/i)).toBeNull();
+    expect(screen.queryByText(/演示或本地模式/)).toBeNull();
+  });
+
+  it("UI00A-RF01: a key-optional provider is described as usable without a key and shows no missing-key hint", async () => {
+    mockStoredSettings("ollama", "");
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(/此服务商可以不填写 API Key。/)).toBeInTheDocument());
+
+    expect(screen.queryByText(/尚未填写 API Key/)).toBeNull();
+    expect(screen.queryByText(/Mock 演示数据/)).toBeNull();
+    expect(screen.queryByText(/mock demo data/i)).toBeNull();
+  });
 });

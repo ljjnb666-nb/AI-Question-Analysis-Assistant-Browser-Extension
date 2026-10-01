@@ -332,9 +332,16 @@ export const SettingsConfigSections: React.FC<{
       </div>
     </SectionCard>
 
-    <SectionCard title={provider.keyOptional ? "API Key" : "API Key *"} description={isEn ? "Leave empty only when the provider supports demo or local mode." : "仅在服务商支持演示或本地模式时可以留空。"}>
+    <SectionCard
+      title={provider.keyOptional ? "API Key" : "API Key *"}
+      description={
+        provider.keyOptional
+          ? (isEn ? "This provider can be used without an API key." : "此服务商可以不填写 API Key。")
+          : (isEn ? "This provider requires an API key for real AI parsing." : "此服务商需要 API Key 才能进行真实解析。")
+      }
+    >
       <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={provider.keyPlaceholder} style={uiInputStyle} />
-      {!provider.keyOptional && !apiKey ? <div style={hintStyle}>{isEn ? "If empty, the extension will fall back to mock demo data." : "未填写时，插件会回退到 Mock 演示数据。"}</div> : null}
+      {!provider.keyOptional && !apiKey ? <div style={hintStyle}>{isEn ? "No API key is configured yet. Add one before parsing or testing the connection." : "尚未填写 API Key。配置后才能进行 AI 解析和连接测试。"}</div> : null}
       {KEY_LINKS[providerId] ? (
         <a href={KEY_LINKS[providerId][0]} target="_blank" rel="noreferrer" style={linkStyle}>
           {isEn ? `Get key from ${KEY_LINKS[providerId][1]}` : `前往 ${KEY_LINKS[providerId][1]} 获取 Key`}

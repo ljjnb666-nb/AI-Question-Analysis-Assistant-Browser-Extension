@@ -52,7 +52,7 @@ export const POPUP_COPY = {
     finishSetup: "\u5b8c\u6210\u914d\u7f6e",
     readyToWork: "\u51c6\u5907\u5f00\u59cb",
     setupHint:
-      "\u5148\u5728\u8bbe\u7f6e\u91cc\u5b8c\u6210\u670d\u52a1\u5546\u548c API Key \u914d\u7f6e\uff0c\u518d\u4f7f\u7528\u622a\u56fe\u3001\u8bc6\u9898\u548c\u81ea\u52a8\u7b54\u9898\u3002",
+      "\u53ef\u4ee5\u5148\u8bc6\u522b\u9875\u9762\u9898\u76ee\uff1b\u914d\u7f6e AI \u670d\u52a1\u540e\u5373\u53ef\u8fdb\u884c\u89e3\u6790\u548c\u81ea\u52a8\u586b\u7b54\u3002",
     pending: "\u5f85\u914d\u7f6e",
     workspaceLocked: "\u5b8c\u6210\u90ae\u7bb1\u6ce8\u518c\u6216\u767b\u5f55\u540e\u624d\u4f1a\u89e3\u9501\u5de5\u4f5c\u53f0\u3002",
     continuePrompt: "\u6ce8\u518c\u6216\u767b\u5f55\u540e\u7ee7\u7eed\u4f7f\u7528\u3002",
@@ -106,7 +106,7 @@ export const POPUP_COPY = {
     finishSetup: "Finish Setup",
     readyToWork: "Ready to Work",
     setupHint:
-      "Add your provider and API key in Settings before using capture, detection, and solving.",
+      "You can detect questions first. Configure an AI provider to parse and fill answers.",
     pending: "Pending",
     workspaceLocked: "Workspace unlocks after email registration or login.",
     continuePrompt: "Register or login to continue.",
