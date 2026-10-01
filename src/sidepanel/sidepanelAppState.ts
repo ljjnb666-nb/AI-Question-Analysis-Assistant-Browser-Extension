@@ -1,21 +1,14 @@
 import type React from "react";
-import type { DetectedCandidate, QuestionBlock } from "@/shared/types";
+import type { DetectedCandidate } from "@/shared/types";
 import type { UserFeedback } from "@/shared/ui/userFeedback";
 import type { UILang } from "./displayUtils";
 import type { SidePanelTabId } from "./sidePanelShell";
 import type { CandidateViewFilter } from "./sidepanelCandidateMetrics";
+import type { AutoSolveProgressState, ScanProgressState } from "./sidepanelStateSync";
 
-export type ScanProgressState = { progress: number; found: number; step: number; total: number } | null;
-
-export type AutoSolveProgressState = {
-  solved: number;
-  filled: number;
-  total: number;
-  current: number;
-  statusText: string;
-  currentPreview?: string;
-  currentBlock?: QuestionBlock;
-} | null;
+// UI-00B review fix P2: single authoritative progress types (with the
+// statusCode/statusDetail contract) re-exported for this module's consumers.
+export type { AutoSolveProgressState, ScanProgressState };
 
 export type SidePanelAppState = {
   uiLang: UILang;

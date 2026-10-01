@@ -129,4 +129,83 @@ describe("batch fill zero-fillable guard (UI00B-12, UI-00B PART E)", () => {
     expect(runBatchFill).not.toHaveBeenCalled();
     expect(setFillFeedback).not.toHaveBeenCalled();
   });
+
+  it("review fix P1-02 A: a failed first attempt is never counted as filled and never reads success", async () => {
+    vi.mocked(runBatchFill).mockResolvedValueOnce({
+      attemptedQuestions: 1,
+      successfulQuestions: 0,
+      totalFilled: 0,
+      withheldCount: 0,
+      failureCode: "PARTIAL_MUTATION_UNPROVABLE",
+      failureMessage: "uncertain transaction",
+    });
+    const setFillFeedback = vi.fn();
+    const { result } = renderHook((options: Parameters<typeof useSidePanelActions>[0]) => useSidePanelActions(options), {
+      initialProps: makeOptions({
+        candidates: [makeCandidate("p-1", providerResult)],
+        setFillFeedback,
+      }),
+    });
+
+    await result.current.handleBatchFill();
+
+    const feedback = setFillFeedback.mock.calls[0]?.[0];
+    expect(feedback?.tone).not.toBe("success");
+    expect(feedback?.message).toContain("无法确认填写结果");
+    expect(feedback?.message).not.toContain("已填写 1 题");
+    expect(feedback?.code).toBe("PARTIAL_MUTATION_UNPROVABLE");
+  });
+
+  it("review fix P1-02 B: a mid-run safety stop states the filled count and the stop explicitly", async () => {
+    vi.mocked(runBatchFill).mockResolvedValueOnce({
+      attemptedQuestions: 2,
+      successfulQuestions: 1,
+      totalFilled: 2,
+      withheldCount: 1,
+      failureCode: "PARTIAL_MUTATION_UNPROVABLE",
+      failureMessage: "uncertain transaction",
+    });
+    const setFillFeedback = vi.fn();
+    const { result } = renderHook((options: Parameters<typeof useSidePanelActions>[0]) => useSidePanelActions(options), {
+      initialProps: makeOptions({
+        candidates: [
+          makeCandidate("p-1", providerResult),
+          makeCandidate("p-2", providerResult),
+          makeCandidate("p-3", providerResult),
+        ],
+        setFillFeedback,
+      }),
+    });
+
+    await result.current.handleBatchFill();
+
+    const feedback = setFillFeedback.mock.calls[0]?.[0];
+    expect(feedback?.tone).not.toBe("success");
+    expect(feedback?.message).toContain("已填写 1 题；");
+    expect(feedback?.message).toContain("无法确认填写结果");
+    // Unattempted candidates are a human-review stop, not a "re-parse" skip.
+    expect(feedback?.message).not.toContain("需要重新解析");
+  });
+
+  it("review fix P1-02 C: a fully successful run keeps the success tone", async () => {
+    vi.mocked(runBatchFill).mockResolvedValueOnce({
+      attemptedQuestions: 2,
+      successfulQuestions: 2,
+      totalFilled: 3,
+      withheldCount: 0,
+    });
+    const setFillFeedback = vi.fn();
+    const { result } = renderHook((options: Parameters<typeof useSidePanelActions>[0]) => useSidePanelActions(options), {
+      initialProps: makeOptions({
+        candidates: [makeCandidate("p-1", providerResult), makeCandidate("p-2", providerResult)],
+        setFillFeedback,
+      }),
+    });
+
+    await result.current.handleBatchFill();
+
+    const feedback = setFillFeedback.mock.calls[0]?.[0];
+    expect(feedback?.tone).toBe("success");
+    expect(feedback?.message).toBe("已填写 2 题（3 个控件）。");
+  });
 });

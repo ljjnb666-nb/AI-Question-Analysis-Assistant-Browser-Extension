@@ -89,15 +89,16 @@ describe("zero-fillable batch behavior (UI-00B PART E)", () => {
     const legacy: ParseResult = { ...providerResult };
     delete (legacy as Partial<ParseResult>).resultSource;
 
-    const { totalFilled, totalQuestions, skippedCount } = await runBatchFill([
+    const { successfulQuestions, totalFilled, attemptedQuestions, withheldCount } = await runBatchFill([
       makeCandidate("mock-1", { ...providerResult, resultSource: "mock" }),
       makeCandidate("legacy-2", legacy),
     ], deps);
 
     expect(deps.sendFillMessageWithVerify).not.toHaveBeenCalled();
-    expect(totalQuestions).toBe(0);
+    expect(attemptedQuestions).toBe(0);
+    expect(successfulQuestions).toBe(0);
     expect(totalFilled).toBe(0);
-    expect(skippedCount).toBe(0);
+    expect(withheldCount).toBe(0);
   });
 
   it("a partial selection reports only the actually-filled questions as filled", async () => {
@@ -107,13 +108,14 @@ describe("zero-fillable batch behavior (UI-00B PART E)", () => {
       sendFillMessageWithVerify: vi.fn(async () => ({ ok: true, filledCount: 2 })),
     };
 
-    const { totalQuestions, skippedCount } = await runBatchFill([
+    const { successfulQuestions, attemptedQuestions, withheldCount } = await runBatchFill([
       makeCandidate("provider-1", providerResult),
       makeCandidate("mock-2", { ...providerResult, resultSource: "mock" }),
     ], deps);
 
     expect(deps.sendFillMessageWithVerify).toHaveBeenCalledTimes(1);
-    expect(totalQuestions).toBe(1);
-    expect(skippedCount).toBe(0);
+    expect(attemptedQuestions).toBe(1);
+    expect(successfulQuestions).toBe(1);
+    expect(withheldCount).toBe(0);
   });
 });

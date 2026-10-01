@@ -1,4 +1,4 @@
-import { mapKnownCodeFeedback, userFeedback, type FeedbackLang, type UserFeedback } from "./userFeedback";
+import { mapKnownCodeFeedback, userFeedback, type FeedbackLang, type UserFeedback, type UserFeedbackTone } from "./userFeedback";
 
 /**
  * UI-00B Auto Solve status contract (PART F).
@@ -59,8 +59,23 @@ function fillTemplate(template: string, data: AutoSolveStatusData | undefined): 
 /** Localized primary copy for a runtime status code. */
 export function autoSolveStatusLabel(code: string, lang: FeedbackLang, data?: AutoSolveStatusData): string {
   const entry = AUTO_SOLVE_STATUS_COPY[code as AutoSolveStatusCode];
-  if (!entry) return lang === "en" ? "Working..." : "正在处理...";
+  if (!entry) return NEUTRAL_WORKING_COPY[lang];
   return fillTemplate(entry[lang], data);
+}
+
+const NEUTRAL_WORKING_COPY = {
+  zh: "正在处理...",
+  en: "Working...",
+};
+
+/**
+ * UI-00B review fix P1-03: the progress card visual follows the semantic
+ * state — safety stops and skips must never wear the success/running look.
+ */
+export function autoSolveStatusTone(code: string | undefined): UserFeedbackTone {
+  if (code === "FILL_STOPPED_SAFETY") return "error";
+  if (code && code.startsWith("SKIPPED_")) return "warning";
+  return "info";
 }
 
 /**
@@ -80,15 +95,16 @@ export function autoSolveStatusFeedback(
 }
 
 /**
- * Legacy progress payloads may still carry machine-only text such as
- * `SKIPPED_WITHHOLD-INCOMPLETE`; it must never reach the user. Returns a
- * safe localized replacement, or null when the text is fine to show as-is.
+ * UI-00B review fix P1-04: legacy `statusText` is untrusted UI input. Only
+ * explicitly recognized legacy machine states map to localized copy; every
+ * other payload (hardcoded runtime sentences, raw exceptions, unknown
+ * tokens) collapses to the neutral working copy. Never returns the input.
  */
-export function sanitizeLegacyAutoSolveStatusText(statusText: string, lang: FeedbackLang): string | null {
+export function sanitizeLegacyAutoSolveStatusText(statusText: string, lang: FeedbackLang): string {
   if (/^SKIPPED_WITHHOLD-INCOMPLETE$/i.test(statusText)) return autoSolveStatusLabel("SKIPPED_INCOMPLETE", lang);
   if (/^SKIPPED_WITHHOLD-UNKNOWN$/i.test(statusText)) return autoSolveStatusLabel("SKIPPED_UNKNOWN", lang);
-  if (/^SKIPPED_/i.test(statusText)) return autoSolveStatusLabel("SKIPPED_UNKNOWN", lang);
-  return null;
+  if (!statusText) return "";
+  return NEUTRAL_WORKING_COPY[lang];
 }
 
 /**

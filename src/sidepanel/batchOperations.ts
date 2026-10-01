@@ -277,34 +277,67 @@ export async function runFillCandidate(
   return response;
 }
 
+export type BatchFillOutcome = {
+  /** Candidates a fill message was actually dispatched for. */
+  attemptedQuestions: number;
+  /** Candidates whose fill reported ok — the only count that may read as "filled". */
+  successfulQuestions: number;
+  totalFilled: number;
+  /** Fill-ready candidates withheld after a stop (never attempted). */
+  withheldCount: number;
+  /** Safety-stop / failure code of the candidate that ended the run. */
+  failureCode?: FillAnswerCode;
+  /** Raw failure detail for diagnostics only. */
+  failureMessage?: string;
+};
+
 export async function runBatchFill(
   candidates: DetectedCandidate[],
   deps: FillDeps,
-): Promise<{ totalFilled: number; totalQuestions: number; skippedCount: number }> {
+): Promise<BatchFillOutcome> {
   // UI-00B PART D/E: batch fill processes exactly the fill-ready selection
-  // (shared predicate), skips the rest, and reports how many were skipped.
+  // (shared predicate), skips the rest, and reports what happened.
   const targets = candidates.filter(isCandidateFillReady);
   const fillableCount = targets.length;
+  let attemptedQuestions = 0;
+  let successfulQuestions = 0;
   let totalFilled = 0;
-  let totalQuestions = 0;
+  let failureCode: FillAnswerCode | undefined;
+  let failureMessage: string | undefined;
   for (const candidate of targets) {
     if (!isCandidateFillReady(candidate)) continue;
     if (!candidate.origin?.tabId || !candidate.origin.url || !await deps.isCandidateCurrent(candidate)) {
       clearFilledCandidateResult(candidate, deps.setCandidates);
       break;
     }
+    attemptedQuestions += 1;
     const response = await deps.sendFillMessageWithVerify(candidate.origin.tabId, candidate.block, candidate.result!, candidate.origin.url);
-    totalQuestions += 1;
-    if (response?.ok) totalFilled += response.filledCount ?? 0;
+    // UI-00B review fix P1-02: only an ok response may count as a filled
+    // question — a failed transaction is never "filled".
+    if (response?.ok) {
+      successfulQuestions += 1;
+      totalFilled += response.filledCount ?? 0;
+    }
     const stillCurrent = await deps.isCandidateCurrent(candidate);
     if (response?.message === STALE_CANDIDATE_RESULT || !stillCurrent) {
       clearFilledCandidateResult(candidate, deps.setCandidates);
     }
     // A failed transaction or a lost origin fence ends this batch path. Never
     // repeat or advance to another candidate after an uncertain fill result.
-    if (!response?.ok || !stillCurrent) break;
+    if (!response?.ok || !stillCurrent) {
+      failureCode = response?.code ?? "STALE_QUESTION_REVISION";
+      failureMessage = response?.message;
+      break;
+    }
   }
-  return { totalFilled, totalQuestions, skippedCount: fillableCount - totalQuestions };
+  return {
+    attemptedQuestions,
+    successfulQuestions,
+    totalFilled,
+    withheldCount: fillableCount - attemptedQuestions,
+    failureCode,
+    failureMessage,
+  };
 }
 
 async function isAuthorized(candidate: DetectedCandidate, lease: CandidateAttemptLease, deps: AttemptDeps): Promise<boolean> {

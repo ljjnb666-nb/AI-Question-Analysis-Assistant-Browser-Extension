@@ -83,9 +83,9 @@ describe("side panel fill provenance gate (UI-00A)", () => {
     const providerCandidate = { ...makeCandidate("prov-1", makeResult({ resultSource: "provider" })), selected: true };
     const mockCandidate = makeCandidate("mock-2", makeResult({ resultSource: "mock" }));
 
-    const { totalFilled, totalQuestions } = await runBatchFill([providerCandidate, mockCandidate], deps);
+    const { successfulQuestions, totalFilled } = await runBatchFill([providerCandidate, mockCandidate], deps);
 
-    expect(totalQuestions).toBe(1);
+    expect(successfulQuestions).toBe(1);
     expect(totalFilled).toBe(1);
     expect(deps.sendFillMessageWithVerify).toHaveBeenCalledTimes(1);
     expect(deps.sendFillMessageWithVerify).toHaveBeenCalledWith(
@@ -101,12 +101,12 @@ describe("side panel fill provenance gate (UI-00A)", () => {
     const legacyResult = makeResult();
     delete (legacyResult as Partial<ParseResult>).resultSource;
 
-    const { totalFilled, totalQuestions } = await runBatchFill([
+    const { successfulQuestions, totalFilled } = await runBatchFill([
       makeCandidate("mock-1", makeResult({ resultSource: "mock" })),
       makeCandidate("legacy-2", legacyResult),
     ], deps);
 
-    expect(totalQuestions).toBe(0);
+    expect(successfulQuestions).toBe(0);
     expect(totalFilled).toBe(0);
     expect(deps.sendFillMessageWithVerify).not.toHaveBeenCalled();
   });

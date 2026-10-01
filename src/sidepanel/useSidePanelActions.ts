@@ -369,18 +369,39 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       return;
     }
     options.setIsBatchFilling(true);
-    const { totalFilled, totalQuestions, skippedCount } = await runBatchFill(options.candidates, {
+    const { successfulQuestions, totalFilled, withheldCount, failureCode, failureMessage } = await runBatchFill(options.candidates, {
       isCandidateCurrent,
       setCandidates: options.setCandidates,
       sendFillMessageWithVerify: (tabId, block, result, expectedUrl) =>
         sendFillMessageWithVerify(tabId, block, result, expectedUrl, isChoiceLikeResult),
     });
     options.setIsBatchFilling(false);
+    // UI-00B review fix P1-02: only successful fills read as "filled"; a
+    // safety stop routes through the central error mapping with its own
+    // severity, never through the success copy.
+    if (failureCode) {
+      const known = mapKnownCodeFeedback(failureCode, options.uiLang);
+      const stopCopy = known ?? userFeedback("error",
+        options.uiLang === "en"
+          ? "Filling stopped because the page state could not be confirmed. Review the question manually."
+          : "后续填写已因页面状态无法确认而停止，请人工检查。",
+        { code: failureCode },
+      );
+      const prefix = successfulQuestions > 0
+        ? (options.uiLang === "en" ? `Filled ${successfulQuestions} question(s); ` : `已填写 ${successfulQuestions} 题；`)
+        : "";
+      options.setFillFeedback({
+        ...stopCopy,
+        message: `${prefix}${stopCopy.message}`,
+        technicalDetail: failureMessage || stopCopy.technicalDetail,
+      });
+      window.setTimeout(() => options.setFillFeedback(null), 4000);
+      return;
+    }
     // UI-00B PART E: skipped = selected-but-unfillable results (mock, legacy,
-    // extraction-failed) plus any fill-ready candidates the run could not
-    // attempt, so a partial run never implies the skipped items succeeded.
+    // extraction-failed) plus fill-ready candidates the run could not attempt.
     const unfillableSelected = selectedCount - fillableCount;
-    options.setFillFeedback(getBatchFillFeedback(options.uiLang, totalQuestions, totalFilled, unfillableSelected + skippedCount));
+    options.setFillFeedback(getBatchFillFeedback(options.uiLang, successfulQuestions, totalFilled, unfillableSelected + withheldCount));
     window.setTimeout(() => options.setFillFeedback(null), 2600);
   }, [options, isCandidateCurrent, requireAuthenticatedAction]);
 

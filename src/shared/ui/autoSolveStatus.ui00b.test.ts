@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   autoSolveStatusLabel,
   autoSolveStatusFeedback,
+  autoSolveStatusTone,
   mapAutoSolveDoneFeedback,
   sanitizeLegacyAutoSolveStatusText,
 } from "./autoSolveStatus";
@@ -22,9 +23,28 @@ describe("autoSolveStatus contract (UI-00B PART F/G)", () => {
       .toBe("暂时无法确认题目是否完整，本次已跳过。");
     expect(autoSolveStatusLabel("SKIPPED_UNKNOWN", "en"))
       .toBe("Could not confirm this question is complete, so it was skipped.");
-    // Any future SKIPPED_* machine state fails closed to the safe copy.
-    expect(sanitizeLegacyAutoSolveStatusText("SKIPPED_SOMETHING_NEW", "en"))
-      .toBe("Could not confirm this question is complete, so it was skipped.");
+  });
+
+  it("review fix P1-04: unrecognized legacy status text collapses to the neutral working copy", () => {
+    // Hardcoded runtime sentence: never rendered as-is.
+    expect(sanitizeLegacyAutoSolveStatusText("正在重新解析本题...", "en")).toBe("Working...");
+    expect(sanitizeLegacyAutoSolveStatusText("正在重新解析本题...", "en")).not.toMatch(/[\u4e00-\u9fff]/);
+    expect(sanitizeLegacyAutoSolveStatusText("正在重新解析本题...", "zh")).toBe("正在处理...");
+    // Raw exception: never rendered.
+    expect(sanitizeLegacyAutoSolveStatusText("TypeError: boom", "en")).toBe("Working...");
+    expect(sanitizeLegacyAutoSolveStatusText("TypeError: boom", "en")).not.toContain("TypeError");
+    // Unknown future machine token: neutral copy, not the raw token.
+    expect(sanitizeLegacyAutoSolveStatusText("SKIPPED_SOMETHING_NEW", "en")).toBe("Working...");
+    expect(sanitizeLegacyAutoSolveStatusText("", "zh")).toBe("");
+  });
+
+  it("review fix P1-03: status tones separate safety stops from running states", () => {
+    expect(autoSolveStatusTone("FILL_STOPPED_SAFETY")).toBe("error");
+    expect(autoSolveStatusTone("SKIPPED_INCOMPLETE")).toBe("warning");
+    expect(autoSolveStatusTone("SKIPPED_UNSTABLE")).toBe("warning");
+    expect(autoSolveStatusTone("PARSING")).toBe("info");
+    expect(autoSolveStatusTone("STARTING")).toBe("info");
+    expect(autoSolveStatusTone(undefined)).toBe("info");
   });
 
   it("UI00B-15: English UI never renders the hardcoded Chinese runtime statuses", () => {

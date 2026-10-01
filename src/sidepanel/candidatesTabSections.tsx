@@ -1,7 +1,7 @@
 import React from "react";
 import { UiButton } from "@/shared/ui/extensionUi";
 import type { QuestionBlock } from "@/shared/types";
-import { autoSolveStatusLabel, sanitizeLegacyAutoSolveStatusText, autoSolveStatusFeedback } from "@/shared/ui/autoSolveStatus";
+import { autoSolveStatusLabel, autoSolveStatusFeedback, autoSolveStatusTone, sanitizeLegacyAutoSolveStatusText } from "@/shared/ui/autoSolveStatus";
 import type { UserFeedback } from "@/shared/ui/userFeedback";
 import { AutoSolvePreviewCard } from "./candidateViews";
 import type { CandidateViewFilter } from "./sidepanelCandidateMetrics";
@@ -311,8 +311,10 @@ export const CandidateAutoSolveCard: React.FC<{
   lang: UILang;
 }> = ({ autoSolveProgress, lang }) => {
   if (!autoSolveProgress) return null;
-  // UI-00B PART F: the stable status code owns the user-visible copy for the
-  // active UI language; legacy machine text is sanitized, never shown raw.
+  // UI-00B PART F + review fix P1-03/P1-04: the stable status code owns the
+  // user-visible copy AND the card's semantic tone — a safety stop never
+  // renders in the running/success look. Legacy statusText is untrusted
+  // input and only ever collapses to a recognized or neutral copy.
   const statusData = {
     current: autoSolveProgress.current,
     solved: autoSolveProgress.solved,
@@ -324,34 +326,35 @@ export const CandidateAutoSolveCard: React.FC<{
     ? autoSolveStatusFeedback(autoSolveProgress.statusCode, lang, statusData)
     : null;
   const statusLine = statusFeedback?.detail
-    ? `${statusFeedback.detail.message}`
+    ? statusFeedback.detail.message
     : autoSolveProgress.statusCode
       ? statusFeedback!.label
-      : (sanitizeLegacyAutoSolveStatusText(autoSolveProgress.statusText, lang)
-        ?? autoSolveProgress.statusText);
+      : sanitizeLegacyAutoSolveStatusText(autoSolveProgress.statusText, lang);
+  const tone = FEEDBACK_TONE_STYLES[autoSolveStatusTone(autoSolveProgress.statusCode)];
   return (
     <div
       className="cand-section"
+      data-status-tone={autoSolveStatusTone(autoSolveProgress.statusCode)}
       style={{
         ...sidePanelCardStyle,
         padding: 12,
         marginBottom: 10,
-        borderColor: "rgba(16, 185, 129, 0.18)",
-        background: "linear-gradient(180deg, rgba(6, 40, 28, 0.8), rgba(5, 28, 20, 0.75))",
+        borderColor: tone.border,
+        background: tone.background,
         position: "relative",
         overflow: "hidden",
       }}
     >
-      <PanelChrome glow="rgba(16, 185, 129, 0.16)" />
+      <PanelChrome glow={tone.glow} />
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 8, fontSize: 12 }}>
-        <span style={{ color: "#34d399", fontWeight: 700 }}>{lang === "en" ? "Auto Solve" : "自动答题"}</span>
-        <span style={{ color: "#6ee7b7" }}>
+        <span style={{ color: tone.text, fontWeight: 700 }}>{lang === "en" ? "Auto Solve" : "自动答题"}</span>
+        <span style={{ color: "#94a3b8" }}>
           {lang === "en"
             ? `Solved ${autoSolveProgress.solved}${autoSolveProgress.total ? ` / ${autoSolveProgress.total}` : ""}, filled ${autoSolveProgress.filled}`
             : `已解析 ${autoSolveProgress.solved}${autoSolveProgress.total ? ` / ${autoSolveProgress.total}` : ""}，已填写 ${autoSolveProgress.filled}`}
         </span>
       </div>
-      <div style={{ fontSize: 12, color: "#d1fae5", lineHeight: 1.6 }}>{statusLine}</div>
+      <div style={{ fontSize: 12, color: tone.text, lineHeight: 1.6 }}>{statusLine}</div>
       {(autoSolveProgress.currentBlock || autoSolveProgress.currentPreview) && (
         <AutoSolvePreviewCard previewText={autoSolveProgress.currentPreview || ""} block={autoSolveProgress.currentBlock} lang={lang} />
       )}
