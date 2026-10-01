@@ -377,8 +377,25 @@ describe("useSidePanelActions authority gate", () => {
     const { runBatchFill } = await import("./batchOperations");
     authenticated = true;
     parkNextCandidateAuthority = true;
+    // UI-00B PART E gates zero-fillable selections before runBatchFill; this
+    // TOCTOU exercises the authority check inside the fill run, so the
+    // candidate must be fill-ready.
+    const fillReady = makeCandidate({
+      status: "success",
+      result: {
+        blockId: "block-1",
+        questionType: "single_choice",
+        answer: "B",
+        confidence: 0.9,
+        briefExplanation: "",
+        detailedExplanation: "",
+        recognizedText: "",
+        routeUsed: "text",
+        resultSource: "provider",
+      },
+    });
     const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
-      initialProps: makeOptions(),
+      initialProps: makeOptions({ candidates: [fillReady] }),
     });
 
     await result.current.handleBatchFill();

@@ -14,6 +14,7 @@ import {
 } from "./candidatesTabSections";
 import type { CandidateViewFilter } from "./sidepanelCandidateMetrics";
 import type { UILang } from "./displayUtils";
+import type { UserFeedback } from "@/shared/ui/userFeedback";
 import type { CandidateAutoSolveProgress, CandidateScanProgress } from "./candidatesTabSections";
 
 gsap.registerPlugin(useGSAP);
@@ -24,7 +25,7 @@ export const CandidatesTab: React.FC<{
   candidates: DetectedCandidate[];
   doneCount: number;
   expandedIds: Record<string, boolean>;
-  fillFeedback: string;
+  fillFeedback: UserFeedback | null;
   filteredCandidates: DetectedCandidate[];
   isAutoSolving: boolean;
   isBatchFilling: boolean;

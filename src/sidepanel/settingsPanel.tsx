@@ -5,6 +5,7 @@ import type { QuestionBlock } from "@/shared/types";
 import { DEFAULT_ANALYTICS_BASE_URL } from "@/shared/constants/analytics";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { getConnectionTestNotConfiguredMessage, isProviderRuntimeConfigured } from "@/shared/ai/parseResultAuthority";
+import { mapUserFacingError, userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
 import { getProvider, parseQuestion } from "@/shared/utils/parseRouter";
 import { logEvent } from "@/shared/utils/analytics";
 import { getAuthText } from "@/shared/auth/authText";
@@ -36,7 +37,7 @@ export const SettingsTab: React.FC<{
   const [lang, setLang] = useState<"zh" | "en">(initialLang);
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<UserFeedback | null>(null);
   const [deviceId, setDeviceId] = useState("");
   const auth = useAuthController({
     lang,
@@ -169,7 +170,7 @@ export const SettingsTab: React.FC<{
       // successful connection (the old path silently returned a mock result).
       // key-optional providers such as Ollama keep testing normally.
       if (!isProviderRuntimeConfigured(currentProvider, { apiKey: apiKey.trim() })) {
-        setTestResult(getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"));
+        setTestResult(userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), { code: "PROVIDER_NOT_CONFIGURED" }));
         setTesting(false);
         return;
       }
@@ -207,16 +208,17 @@ export const SettingsTab: React.FC<{
             : isEn
               ? "hybrid"
               : "混合";
-      setTestResult(
+      setTestResult(userFeedback(
+        "success",
         isEn
           ? `Connection success | route: ${routeLabel} | answer: ${result.answer} | confidence ${Math.round(result.confidence * 100)}%`
           : `连接成功 | 路由：${routeLabel} | 答案：${result.answer} | 置信度 ${Math.round(result.confidence * 100)}%`,
-      );
+        { code: "CONNECTION_TEST_OK" },
+      ));
     } catch (error) {
-      const errorMsg = String(error);
-      const match = errorMsg.match(/"message":"([^"]+)"/);
-      const displayError = match ? match[1] : errorMsg.slice(0, 140);
-      setTestResult(isEn ? `Failed: ${displayError}` : `测试失败：${displayError}`);
+      // UI-00B PART H: classified, safe copy; the raw provider text only
+      // survives as technical detail and is not displayed by default.
+      setTestResult(mapUserFacingError(error, isEn ? "en" : "zh", { context: "connection-test" }));
     }
     setTesting(false);
   };

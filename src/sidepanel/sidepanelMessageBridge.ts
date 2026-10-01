@@ -1,11 +1,12 @@
 import type { CandidateSnapshot, DetectedCandidate, QuestionBlock } from "@/shared/types";
+import { mapAutoSolveDoneFeedback } from "@/shared/ui/autoSolveStatus";
+import type { UserFeedback } from "@/shared/ui/userFeedback";
 import {
   clearProtectedWorkOwner,
   reconcileProtectedWorkOwnerFromRuntime,
 } from "@/shared/auth/protectedWorkOwner";
 import type { AutoSolveProgressState, ScanProgressState } from "./sidepanelStateSync";
 import {
-  mapAutoSolveDoneFeedback,
   mapAutoSolveProgressMessage,
   mapFullPageDoneCandidates,
   mapFullPageProgressMessage,
@@ -24,7 +25,7 @@ export type SidePanelRuntimeHandlers = {
   setExpandedIds: (next: Record<string, boolean>) => void;
   setIsAutoSolving: (next: boolean) => void;
   setAutoSolveProgress: (next: AutoSolveProgressState) => void;
-  setFillFeedback: (next: string) => void;
+  setFillFeedback: (next: UserFeedback | null) => void;
 };
 
 export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHandlers): () => void {
@@ -83,8 +84,12 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
       }
       handlers.setIsAutoSolving(false);
       handlers.setAutoSolveProgress(null);
-      handlers.setFillFeedback(mapAutoSolveDoneFeedback(msg));
-      window.setTimeout(() => handlers.setFillFeedback(""), 3200);
+      // UI-00B PART G: typed, localized done feedback; the raw runtime
+      // message only survives as technical detail.
+      void handlers.loadLanguage().then((lang) => {
+        handlers.setFillFeedback(mapAutoSolveDoneFeedback(msg, lang));
+        window.setTimeout(() => handlers.setFillFeedback(null), 3200);
+      });
     }
   };
 

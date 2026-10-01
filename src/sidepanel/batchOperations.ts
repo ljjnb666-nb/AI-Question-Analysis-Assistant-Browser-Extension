@@ -3,6 +3,7 @@ import { getUnfillableResultCode, isParseResultFillAuthoritative } from "@/share
 import type { FillAnswerCode } from "@/content/answerTypes";
 import type { CandidateAttemptLease, CandidateAttemptRegistry } from "./candidateAuthority";
 import { candidateMatchesBlockAndOrigin } from "./candidateAuthority";
+import { isCandidateFillReady } from "./sidepanelCandidateMetrics";
 
 type UpdateCandidates = (updater: (prev: DetectedCandidate[]) => DetectedCandidate[]) => void;
 type IsCandidateCurrent = (candidate: DetectedCandidate) => Promise<boolean>;
@@ -258,10 +259,13 @@ export async function runFillCandidate(
   deps: FillDeps,
 ): Promise<{ ok?: boolean; filledCount?: number; message?: string; code?: FillAnswerCode } | null> {
   if (!candidate.result) return null;
-  // UI-00A: mock and legacy-unproven results are rejected before any tab
-  // dispatch — no message is crafted for a result that may not fill.
-  if (!isParseResultFillAuthoritative(candidate.result)) {
-    const code = getUnfillableResultCode(candidate.result);
+  // UI-00A/00B: mock, legacy-unproven, and extraction-failed results are
+  // rejected before any tab dispatch — the same predicate as the Fill button
+  // and the fillable count.
+  if (!isCandidateFillReady({ ...candidate, selected: true })) {
+    const code = isParseResultFillAuthoritative(candidate.result)
+      ? "ANSWER_NOT_FILLABLE"
+      : getUnfillableResultCode(candidate.result);
     return { ok: false, filledCount: 0, code, message: code };
   }
   if (!candidate.origin?.tabId || !candidate.origin.url || !await deps.isCandidateCurrent(candidate)) {
@@ -276,18 +280,15 @@ export async function runFillCandidate(
 export async function runBatchFill(
   candidates: DetectedCandidate[],
   deps: FillDeps,
-): Promise<{ totalFilled: number; totalQuestions: number }> {
-  // UI-00A: batch fill processes only fill-authoritative provider results.
-  // A single demo/legacy candidate among the selection is skipped, never filled.
-  const targets = candidates.filter((candidate) =>
-    candidate.selected
-    && candidate.status === "success"
-    && candidate.result
-    && isParseResultFillAuthoritative(candidate.result));
+): Promise<{ totalFilled: number; totalQuestions: number; skippedCount: number }> {
+  // UI-00B PART D/E: batch fill processes exactly the fill-ready selection
+  // (shared predicate), skips the rest, and reports how many were skipped.
+  const targets = candidates.filter(isCandidateFillReady);
+  const fillableCount = targets.length;
   let totalFilled = 0;
   let totalQuestions = 0;
   for (const candidate of targets) {
-    if (!candidate.result || !isParseResultFillAuthoritative(candidate.result)) continue;
+    if (!isCandidateFillReady(candidate)) continue;
     if (!candidate.origin?.tabId || !candidate.origin.url || !await deps.isCandidateCurrent(candidate)) {
       clearFilledCandidateResult(candidate, deps.setCandidates);
       break;
@@ -303,7 +304,7 @@ export async function runBatchFill(
     // repeat or advance to another candidate after an uncertain fill result.
     if (!response?.ok || !stillCurrent) break;
   }
-  return { totalFilled, totalQuestions };
+  return { totalFilled, totalQuestions, skippedCount: fillableCount - totalQuestions };
 }
 
 async function isAuthorized(candidate: DetectedCandidate, lease: CandidateAttemptLease, deps: AttemptDeps): Promise<boolean> {

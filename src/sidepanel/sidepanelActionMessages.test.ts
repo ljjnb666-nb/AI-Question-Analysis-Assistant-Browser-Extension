@@ -1,21 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { getBatchFillFeedback, getSingleFillFeedback } from "./sidepanelActionMessages";
+import { getBatchFillFeedback, getFillActionFeedback } from "./sidepanelActionMessages";
 
-describe("sidepanelActionMessages", () => {
-  it("prefers explicit backend messages for single fill feedback", () => {
-    expect(getSingleFillFeedback("zh", true, "自定义消息")).toBe("自定义消息");
-    expect(getSingleFillFeedback("en", false, "Custom message")).toBe("Custom message");
+describe("sidepanelActionMessages (UI-00B typed feedback)", () => {
+  it("UI00B-06: a successful fill surfaces success tone with the machine code demoted", () => {
+    const feedback = getFillActionFeedback("zh", { ok: true, message: "FILLED_VERIFIED", code: "FILLED_VERIFIED" });
+    expect(feedback.tone).toBe("success");
+    expect(feedback.message).toBe("填写完成");
+    expect(feedback.message).not.toContain("FILLED_VERIFIED");
+    expect(feedback.code).toBe("FILLED_VERIFIED");
   });
 
-  it("falls back to localized single fill feedback", () => {
-    expect(getSingleFillFeedback("zh", true)).toBe("填写完成");
-    expect(getSingleFillFeedback("zh", false)).toBe("填写失败");
-    expect(getSingleFillFeedback("en", true)).toBe("Fill completed");
-    expect(getSingleFillFeedback("en", false)).toBe("Fill failed");
+  it("UI00B-07: a failed fill surfaces error tone and never the raw message", () => {
+    const feedback = getFillActionFeedback("zh", { ok: false, message: "CONTROL_MAPPING_AMBIGUOUS", code: "CONTROL_MAPPING_AMBIGUOUS" });
+    expect(feedback.tone).toBe("error");
+    expect(feedback.message).not.toContain("CONTROL_MAPPING_AMBIGUOUS");
+    expect(feedback.technicalDetail).toContain("CONTROL_MAPPING_AMBIGUOUS");
   });
 
-  it("builds localized batch fill feedback", () => {
-    expect(getBatchFillFeedback("zh", 3, 2)).toBe("已在 2 题中填写 3 个控件");
-    expect(getBatchFillFeedback("en", 3, 2)).toBe("Filled 3 fields across 2 question(s)");
+  it("maps known fill codes through the central contract", () => {
+    expect(getFillActionFeedback("zh", { ok: false, code: "DEMO_RESULT_NOT_FILLABLE" }).message)
+      .toBe("演示结果不能填入真实页面，请先配置 AI 服务并重新解析。");
+    expect(getFillActionFeedback("en", { ok: false, code: "PARTIAL_MUTATION_UNPROVABLE" }).tone).toBe("error");
+  });
+
+  it("builds typed batch feedback with an explicit skipped count", () => {
+    const clean = getBatchFillFeedback("zh", 3, 2);
+    expect(clean.tone).toBe("success");
+    expect(clean.message).toBe("已填写 3 题（2 个控件）。");
+
+    const partial = getBatchFillFeedback("en", 2, 1, 1);
+    expect(partial.tone).toBe("warning");
+    expect(partial.message).toContain("1 more need to be re-parsed");
   });
 });

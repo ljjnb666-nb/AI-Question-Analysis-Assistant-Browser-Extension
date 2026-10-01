@@ -122,6 +122,10 @@ export function sendAutoSolveProgress(
     total: number;
     current: number;
     statusText: string;
+    /** UI-00B: stable status code; the Side Panel owns the user-visible copy. */
+    statusCode?: string;
+    /** Stable sub-code behind the status (e.g. a fill result code). */
+    statusDetail?: string;
     currentQuestionId?: string;
     currentPreview?: string;
     currentBlock?: QuestionBlock;

@@ -9,6 +9,8 @@ type ProgressPayload = {
   total: number;
   current: number;
   statusText: string;
+  statusCode?: string;
+  statusDetail?: string;
   currentQuestionId?: string;
   currentPreview?: string;
   currentBlock?: QuestionBlock;
@@ -105,6 +107,7 @@ export async function prepareAutoSolveIteration(
           total: options.total,
           current: options.solved + 1,
           statusText: "未发现题目，等待页面内容出现...",
+          statusCode: "WAITING_FOR_QUESTIONS",
         });
         return {
           kind: "done-retry",
@@ -167,6 +170,7 @@ export async function prepareAutoSolveIteration(
     statusText: repeatedSameQuestion
       ? `第 ${options.solved + 1} 题仍未完成，正在重试...`
       : `正在解析第 ${options.solved + 1} 题...`,
+    statusCode: repeatedSameQuestion ? "RETRYING_PARSE" : "PARSING",
     currentQuestionId: currentBlock.id,
     currentPreview: currentBlock.previewText,
     currentBlock: options.toProgressBlock(currentBlock),

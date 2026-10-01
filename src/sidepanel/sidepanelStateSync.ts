@@ -10,6 +10,10 @@ export type AutoSolveProgressState = {
   total: number;
   current: number;
   statusText: string;
+  /** UI-00B: stable status code; user copy is localized from this. */
+  statusCode?: string;
+  /** Stable sub-code behind the status (e.g. a fill result code). */
+  statusDetail?: string;
   currentPreview?: string;
   currentBlock?: QuestionBlock;
 } | null;
@@ -55,13 +59,13 @@ export function mapAutoSolveProgressMessage(msg: Record<string, unknown>) {
     total: Number(msg.total ?? 0),
     current: Number(msg.current ?? 0),
     statusText: String(msg.statusText ?? ""),
+    // UI-00B: stable status code + detail; the UI localizes from these and
+    // only falls back to statusText for legacy payloads.
+    statusCode: typeof msg.statusCode === "string" ? msg.statusCode : "",
+    statusDetail: typeof msg.statusDetail === "string" ? msg.statusDetail : "",
     currentPreview: typeof msg.currentPreview === "string" ? msg.currentPreview : "",
     currentBlock: (msg.currentBlock as QuestionBlock | undefined) ?? undefined,
   };
-}
-
-export function mapAutoSolveDoneFeedback(msg: Record<string, unknown>) {
-  return String(msg.message || (msg.ok ? "自动答题完成" : "自动答题失败"));
 }
 
 export function buildAutoSolveStartingState(uiLang: UILang) {
@@ -71,6 +75,8 @@ export function buildAutoSolveStartingState(uiLang: UILang) {
     total: 0,
     current: 0,
     statusText: uiLang === "en" ? "Starting auto solve..." : "开始自动答题...",
+    statusCode: "STARTING",
+    statusDetail: "",
   };
 }
 

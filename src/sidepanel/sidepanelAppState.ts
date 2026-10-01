@@ -1,5 +1,6 @@
 import type React from "react";
 import type { DetectedCandidate, QuestionBlock } from "@/shared/types";
+import type { UserFeedback } from "@/shared/ui/userFeedback";
 import type { UILang } from "./displayUtils";
 import type { SidePanelTabId } from "./sidePanelShell";
 import type { CandidateViewFilter } from "./sidepanelCandidateMetrics";
@@ -33,7 +34,8 @@ export type SidePanelAppState = {
   isRetryingRisky: boolean;
   expandedIds: Record<string, boolean>;
   candidateViewFilter: CandidateViewFilter;
-  fillFeedback: string;
+  /** UI-00B: typed feedback; `null` clears it. */
+  fillFeedback: UserFeedback | null;
   isAutoSolving: boolean;
   autoSolveProgress: AutoSolveProgressState;
 };
@@ -54,7 +56,7 @@ export const initialSidePanelAppState: SidePanelAppState = {
   isRetryingRisky: false,
   expandedIds: {},
   candidateViewFilter: "all",
-  fillFeedback: "",
+  fillFeedback: null,
   isAutoSolving: false,
   autoSolveProgress: null,
 };

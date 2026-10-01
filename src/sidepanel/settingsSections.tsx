@@ -2,6 +2,7 @@ import React from "react";
 import { AuthPasswordField, AuthVerificationCodeInput } from "@/shared/auth/AuthFields";
 import { DEFAULT_ANALYTICS_BASE_URL } from "@/shared/constants/analytics";
 import { SectionCard, UiButton, sectionSurfaceStyle, uiInputStyle } from "@/shared/ui/extensionUi";
+import type { UserFeedback } from "@/shared/ui/userFeedback";
 import { PROVIDERS } from "@/shared/utils/parseRouter";
 import type { ProviderId } from "@/shared/utils/parseRouter";
 import type { UILang } from "./displayUtils";
@@ -456,9 +457,35 @@ export const SettingsActionsSection: React.FC<{
   onSave: () => void;
   onTest: () => void;
   saved: boolean;
-  testResult: string | null;
+  testResult: UserFeedback | null;
   testing: boolean;
-}> = ({ isEn, onSave, onTest, saved, testResult, testing }) => (
+}> = ({ isEn, onSave, onTest, saved, testResult, testing }) => {
+  // UI-00B PART H: the tone owns the visual; success and failure no longer
+  // guess from the text content.
+  const toneStyles: Record<string, { border: string; background: string; color: string }> = {
+    success: {
+      border: "rgba(220, 250, 230, 0.12)",
+      background: "linear-gradient(180deg, rgba(36, 59, 45, 0.8), rgba(28, 47, 36, 0.72))",
+      color: "#cffff0",
+    },
+    info: {
+      border: "rgba(99, 102, 241, 0.2)",
+      background: "linear-gradient(180deg, rgba(26, 32, 56, 0.85), rgba(20, 25, 44, 0.78))",
+      color: "#c7d2fe",
+    },
+    warning: {
+      border: "rgba(245, 158, 11, 0.22)",
+      background: "linear-gradient(180deg, rgba(67, 40, 15, 0.82), rgba(45, 25, 10, 0.74))",
+      color: "#fde68a",
+    },
+    error: {
+      border: "rgba(255, 220, 220, 0.12)",
+      background: "linear-gradient(180deg, rgba(74, 44, 49, 0.82), rgba(55, 33, 37, 0.74))",
+      color: "#ffb4c0",
+    },
+  };
+  const tone = toneStyles[testResult?.tone ?? "info"] ?? toneStyles.info;
+  return (
   <>
     <div
       className="settings-card settings-action"
@@ -480,17 +507,16 @@ export const SettingsActionsSection: React.FC<{
       </UiButton>
     </div>
 
-    {testResult ? (
+    {testResult?.message ? (
       <div
         className="settings-card settings-action"
+        data-test-tone={testResult.tone}
         style={{
           ...sectionSurfaceStyle,
           padding: "11px 12px",
-          borderColor: /^(连接成功|Connection success)/.test(testResult) ? "rgba(220, 250, 230, 0.12)" : "rgba(255, 220, 220, 0.12)",
-          background: /^(连接成功|Connection success)/.test(testResult)
-            ? "linear-gradient(180deg, rgba(36, 59, 45, 0.8), rgba(28, 47, 36, 0.72))"
-            : "linear-gradient(180deg, rgba(74, 44, 49, 0.82), rgba(55, 33, 37, 0.74))",
-          color: /^(连接成功|Connection success)/.test(testResult) ? "#cffff0" : "#ff8dd1",
+          borderColor: tone.border,
+          background: tone.background,
+          color: tone.color,
           fontSize: 12,
           lineHeight: 1.6,
           wordBreak: "break-word",
@@ -498,8 +524,9 @@ export const SettingsActionsSection: React.FC<{
           overflow: "hidden",
         }}
       >
-        {testResult}
+        {testResult.message}
       </div>
     ) : null}
   </>
-);
+  );
+};

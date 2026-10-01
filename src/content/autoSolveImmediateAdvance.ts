@@ -11,6 +11,7 @@ type AdvanceOptions = {
   lastFingerprint: string;
   solved: number;
   statusText: string;
+  statusCode?: string;
   total: number;
 };
 
@@ -33,6 +34,7 @@ type AdvanceDeps = {
     questionPreview: string;
     solved: number;
     statusText: string;
+    statusCode?: string;
     total: number;
   }) => void;
   toProgressBlock: (block: QuestionBlock) => QuestionBlock;
@@ -50,6 +52,7 @@ export async function reportSolvedQuestionAndAdvance(
     questionId: options.currentBlock.id,
     questionPreview: options.currentBlock.previewText,
     statusText: options.statusText,
+    statusCode: options.statusCode ?? "ADVANCING",
   });
 
   const advanceResult = await deps.advanceAfterSolvedQuestion({
