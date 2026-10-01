@@ -836,7 +836,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
         const response = await chrome.tabs.sendMessage(tab.id, {
           type: "FILL_PARSED_ANSWER",
           block: frameCandidate,
-          result: { blockId: frameCandidate.id, questionType: "single_choice", answer: "B", confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" },
+          result: { blockId: frameCandidate.id, questionType: "single_choice", answer: "B", confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text", resultSource: "provider" },
         });
         return {
           handle: frameCandidate.runtimeQuestionHandle,
@@ -896,7 +896,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
         return chrome.tabs.sendMessage(tab.id, {
           type: "FILL_PARSED_ANSWER",
           block: shadowCandidate,
-          result: { blockId: shadowCandidate.id, questionType: "single_choice", answer: "B", confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" },
+          result: { blockId: shadowCandidate.id, questionType: "single_choice", answer: "B", confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text", resultSource: "provider" },
         });
       }, server.origin);
       expect((result as { ok?: boolean }).ok).toBe(true);
@@ -930,7 +930,7 @@ test.describe("Phase 7 accessible roots E2E", () => {
         return chrome.tabs.sendMessage(tab.id, {
           type: "FILL_PARSED_ANSWER",
           block: candidate,
-          result: { blockId: candidate.id, questionType: "single_choice", answer: "B", confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" },
+          result: { blockId: candidate.id, questionType: "single_choice", answer: "B", confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text", resultSource: "provider" },
         });
       }, server.origin);
       expect((result as { ok?: boolean }).ok).toBe(true);

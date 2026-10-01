@@ -253,6 +253,7 @@ function parseResultFor(block: ReturnType<typeof detectCandidatesAcrossRoots>[nu
     detailedExplanation: "",
     recognizedText: block.previewText,
     routeUsed: "text",
+    resultSource: "provider",
   };
 }
 

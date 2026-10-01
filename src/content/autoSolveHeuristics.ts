@@ -1,5 +1,6 @@
 import type { HistoryEntry, ParseResult, QuestionBlock, QuestionType } from "@/shared/types";
 import { hasHighCoveragePreviewText, inferVisualNeed, looksFormulaOrDiagramHeavy } from "@/shared/ai/routeDecision";
+import { isParseResultFillAuthoritative } from "@/shared/ai/parseResultAuthority";
 import { getProvider } from "@/shared/utils/parseRouter";
 import type { parseQuestion } from "@/shared/utils/parseRouter";
 import { splitAnswerParts } from "./answerText";
@@ -311,6 +312,10 @@ export function findReusableHistoryEntry(
   for (const entry of history) {
     if (entry.host && entry.host !== hostname) continue;
     if (!shouldPersistAutoSolveParseResult(entry.result)) continue;
+    // UI-00A: Auto Solve must never reuse a mock or legacy-unproven history
+    // entry as a fill answer. The entry stays readable in History; it just
+    // cannot gain fill authority without a fresh provider parse.
+    if (!isParseResultFillAuthoritative(entry.result)) continue;
     if (blockStableId && blockFingerprint) {
       // An identity-bearing current question may only reuse history that is
       // proven to belong to the exact same content revision. Legacy entries

@@ -80,6 +80,7 @@ function makeChoiceQuestion(mode: ChoiceMode) {
     detailedExplanation: "",
     recognizedText: "",
     routeUsed: "text",
+    resultSource: "provider",
   };
   return { block, owner, selected, clicks, result };
 }
@@ -132,6 +133,7 @@ function makeBlankQuestion() {
     detailedExplanation: "",
     recognizedText: "",
     routeUsed: "text",
+    resultSource: "provider",
   };
   return { block, owner, values, mutations, result };
 }

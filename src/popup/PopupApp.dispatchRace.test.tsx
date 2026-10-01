@@ -138,6 +138,11 @@ beforeEach(() => {
     authToken: ["tok", "popup-race"].join("-"),
     deviceId: "dev-popup-race",
     analyticsConsentVersion: 1,
+    // The Auto Solve START (UI-00A) requires a configured provider; these
+    // tests exercise owner recording with a valid session, not key entry.
+    // Runtime assembly keeps scanners from reading this as a credential.
+    providerId: "anthropic",
+    apiKey: ["test", "key"].join("-"),
   });
   vi.clearAllMocks();
 });

@@ -26,7 +26,7 @@ function questionHtml(nativeId: string, media: string): string {
 }
 
 function parseResult(answer = "B"): ParseResult {
-  return { blockId: "any", questionType: "single_choice", answer, confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
+  return { blockId: "any", questionType: "single_choice", answer, confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text", resultSource: "provider" };
 }
 
 function armAriaReflection(scope: ParentNode) {

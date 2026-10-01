@@ -1,4 +1,8 @@
 import type { BoundingBox } from "@/shared/types";
+import type {
+  DEMO_RESULT_NOT_FILLABLE,
+  UNVERIFIED_RESULT_SOURCE,
+} from "@/shared/ai/parseResultAuthority";
 
 export interface FillAnswerResult {
   ok: boolean;
@@ -30,7 +34,11 @@ export type FillAnswerCode =
   | "INVALID_ANSWER_OPTION"
   | "INVALID_SINGLE_CHOICE_CARDINALITY"
   | "ANSWER_BLANK_COUNT_MISMATCH"
-  | "UNSUPPORTED_QUESTION_TYPE";
+  | "UNSUPPORTED_QUESTION_TYPE"
+  // UI-00A provenance rejections: a result whose source is demo or unproven
+  // must never reach page mutation, even via a hand-crafted message.
+  | typeof DEMO_RESULT_NOT_FILLABLE
+  | typeof UNVERIFIED_RESULT_SOURCE;
 
 export interface VerifyAnswerResult {
   ok: boolean;

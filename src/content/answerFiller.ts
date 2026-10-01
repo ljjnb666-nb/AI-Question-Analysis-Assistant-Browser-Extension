@@ -38,6 +38,7 @@ import { buildValidatedAnswerPlan } from "./answer/answerPlanValidator";
 import { buildControlMapping } from "./answer/controlMapping";
 import { buildActionPlan, executeTransaction, readSelectedOptionKeys, snapshotControls, verifyAnswerPlan, type CurrentTransactionAuthority } from "./answer/transactionalExecutor";
 import { observeLiveQuestion } from "./liveQuestionObservation";
+import { getUnfillableResultCode, isParseResultFillAuthoritative } from "@/shared/ai/parseResultAuthority";
 import { clearQuestionRevisionAttemptForBlock, hasQuestionRevisionAttempt, isCurrentQuestionRevisionBlock, STALE_QUESTION_REVISION, STALE_ROOT_CONTEXT } from "./revision/questionRevisionRuntime";
 import { routeFingerprintForLocation } from "./revision/questionRevisionRegistry";
 import { readRuntimeQuestionHandle, rootAttachmentOf, TOP_ROOT_GENERATION, TOP_ROOT_KEY } from "./roots/rootContext";
@@ -212,6 +213,14 @@ export async function fillParsedAnswerInPage(
   result: ParseResult,
   options: { mode?: "auto" | "manual"; expectedUrl?: string; isRuntimeCurrent?: () => boolean } = {},
 ): Promise<FillAnswerResult> {
+  // UI-00A provenance gate, first and DOM-free: a result that cannot prove a
+  // real provider execution must not mutate the page, even when every later
+  // authority guard is bypassed with a hand-crafted message. This backs up —
+  // never replaces — the message-router and Side Panel checks.
+  if (!isParseResultFillAuthoritative(result)) {
+    const code = getUnfillableResultCode(result);
+    return { ok: false, filledCount: 0, code, message: code };
+  }
   const isRuntimeCurrent = options.isRuntimeCurrent ?? (() => true);
   if (!isRuntimeCurrent()) {
     return { ok: false, filledCount: 0, code: STALE_QUESTION_REVISION, message: STALE_QUESTION_REVISION };
@@ -392,6 +401,11 @@ function verifyVerifiedAnswerInScope(scope: Element, block: QuestionBlock, resul
 }
 
 export async function fillAnswerIntoScope(scope: Element, bbox: BoundingBox, result: ParseResult): Promise<FillAnswerResult> {
+  // UI-00A: every direct mutation entry carries the same provenance gate.
+  if (!isParseResultFillAuthoritative(result)) {
+    const code = getUnfillableResultCode(result);
+    return { ok: false, filledCount: 0, code, message: code };
+  }
   const domInferredType = inferTypeFromAnswerCore(
     scope,
     result.answer,

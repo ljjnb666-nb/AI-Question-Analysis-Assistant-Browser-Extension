@@ -9,16 +9,33 @@ import { buildResult } from "../ai/parseResult";
 import { callAnthropic, callGemini, callOpenAICompat } from "../ai/providerClients";
 import { decideRoute, hasSufficientPreviewText } from "../ai/routeDecision";
 import { mockParse } from "../ai/mockParse";
+import {
+  getProviderNotConfiguredMessage,
+  isParseResultFillAuthoritative,
+  isProviderRuntimeConfigured,
+} from "../ai/parseResultAuthority";
 import { classifyAnalyticsFailure, logEvent } from "./analytics";
 import { detectVisualKeywords } from "./ocr";
 import type { SolverQuestionPackage } from "../ai/questionPackage";
 import type { QuestionScreenshotFallback } from "../ai/questionPackage";
 import { buildSolverQuestionPackage } from "../../content/solver/questionPackageBuilder";
 import { prepareQuestionPackageForProvider } from "../ai/providerMediaPreparation";
-import { StaleQuestionRevisionError } from "./parseAttemptErrors";
+import { ProviderNotConfiguredError, StaleQuestionRevisionError } from "./parseAttemptErrors";
 
-export { PROVIDERS, getProvider, decideRoute, hasSufficientPreviewText, buildResult, mockParse };
+export {
+  PROVIDERS,
+  getProvider,
+  decideRoute,
+  hasSufficientPreviewText,
+  buildResult,
+  mockParse,
+  isProviderRuntimeConfigured,
+  isParseResultFillAuthoritative,
+  getProviderNotConfiguredMessage,
+};
 export type { ProviderConfig, ProviderId };
+export { getParseResultAuthority, getUnfillableResultCode } from "../ai/parseResultAuthority";
+export { PROVIDER_NOT_CONFIGURED, ProviderNotConfiguredError, isProviderNotConfiguredError } from "./parseAttemptErrors";
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1_000;
@@ -28,6 +45,12 @@ export type ParseQuestionRuntimeContext = {
   isQuestionRevisionCurrent?: (identity: { questionId: string; contentFingerprint: string }) => boolean;
   /** Let the owning workflow report success only after its result commit fence. */
   deferSuccessTelemetry?: boolean;
+  /**
+   * UI-00A: demo/mock output requires an explicit opt-in. Normal production
+   * parses (Side Panel, Batch Parse, Auto Solve, connection tests) must never
+   * set this; an unconfigured required-key provider fails closed instead.
+   */
+  allowDemo?: boolean;
 };
 
 export async function parseQuestion(
@@ -103,13 +126,18 @@ async function parseQuestionCore(
 
   logEvent(`route_used_${route}` as "route_used_text", { blockId: block.id, provider: provider.id });
 
-  if (!settings.apiKey && !provider.keyOptional) {
-    const result = await mockParse(block, route);
-    if (isRuntimeContextStale(block, runtimeContext, questionPackage)) {
-      logEvent("provider_result_discarded_stale", { blockId: block.id, source: "mock" });
-      throw new StaleQuestionRevisionError();
+  // UI-00A: an unconfigured required-key provider fails explicitly. Mock
+  // output exists only behind an explicit demo opt-in and is stamped as such.
+  if (!isProviderRuntimeConfigured(provider, settings)) {
+    if (runtimeContext?.allowDemo === true) {
+      const result = await mockParse(block, route);
+      if (isRuntimeContextStale(block, runtimeContext, questionPackage)) {
+        logEvent("provider_result_discarded_stale", { blockId: block.id, source: "mock" });
+        throw new StaleQuestionRevisionError();
+      }
+      return result;
     }
-    return result;
+    throw new ProviderNotConfiguredError(getProviderNotConfiguredMessage(settings.language));
   }
 
   const startTime = Date.now();
@@ -135,6 +163,10 @@ async function parseQuestionCore(
       } else {
         result = await callOpenAICompat(block, route, settings, provider, onStream, questionPackage);
       }
+      // UI-00A single provenance boundary: only a result that survived a real
+      // provider execution becomes fill-authoritative. Adapters never stamp
+      // this themselves.
+      result = { ...result, resultSource: "provider" };
       providerResultAvailable = true;
       if (isRuntimeContextStale(block, runtimeContext, questionPackage)) {
         logEvent("provider_result_discarded_stale", { blockId: block.id, route, provider: provider.id });

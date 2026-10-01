@@ -17,7 +17,11 @@ vi.mock("@gsap/react", () => ({
 }));
 
 vi.mock("@/shared/utils/storage", () => ({
-  loadSettings: vi.fn(async () => ({ language: "en" })),
+  // A configured provider is assumed: these tests exercise auth-loss STOP
+  // choreography, and the UI-00A START guard must not be the reason a START
+  // is missing. Runtime assembly keeps scanners from reading the fixture key
+  // as a credential.
+  loadSettings: vi.fn(async () => ({ language: "en", providerId: "anthropic", apiKey: ["test", "key"].join("-") })),
   saveSettings: vi.fn(async () => undefined),
 }));
 

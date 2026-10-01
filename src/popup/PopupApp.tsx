@@ -7,7 +7,8 @@ import {
   sendToTabWithBootstrap,
 } from "@/shared/utils/messaging";
 import type { ExtMessage } from "@/shared/types";
-import { getProviderShortName } from "@/shared/ai/providers";
+import { getProvider, getProviderShortName } from "@/shared/ai/providers";
+import { isProviderRuntimeConfigured } from "@/shared/ai/parseResultAuthority";
 import { logEvent } from "@/shared/utils/analytics";
 import { loadSettings } from "@/shared/utils/storage";
 import { getAuthText } from "@/shared/auth/authText";
@@ -119,7 +120,9 @@ export const PopupApp: React.FC = () => {
     logEvent("popup_opened");
   }, []);
 
-  const hasApiKey = apiKey.length > 0 || providerId === "ollama";
+  // UI-00A: the shared provider-contract check replaces the local
+  // `key present or ollama` copy so every surface agrees on "configured".
+  const hasApiKey = isProviderRuntimeConfigured(getProvider(providerId), { apiKey });
   const isRuntimeConfigured = isAuthenticated && hasApiKey;
 
   useGSAP(
@@ -250,6 +253,18 @@ export const PopupApp: React.FC = () => {
         lang === "en"
           ? "Sign in with a verified session before using this action."
           : "请先通过登录验证后再使用该功能。",
+      );
+      setActiveFeature(null);
+      return;
+    }
+    // UI-00A minimal P0 gate: Auto Solve drives real page mutations, so it
+    // must not start without a configured provider. Detection / manual
+    // capture stay available — they produce no provider answers.
+    if (messageType === "START_AUTO_SOLVE_ALL" && !hasApiKey) {
+      setStatus(
+        lang === "en"
+          ? "Configure an AI provider in Settings before starting Auto Solve."
+          : "请先在设置中配置 AI 服务，再启动自动答题。",
       );
       setActiveFeature(null);
       return;

@@ -4,6 +4,7 @@ import { useGSAP } from "@gsap/react";
 import type { QuestionBlock } from "@/shared/types";
 import { DEFAULT_ANALYTICS_BASE_URL } from "@/shared/constants/analytics";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
+import { getConnectionTestNotConfiguredMessage, isProviderRuntimeConfigured } from "@/shared/ai/parseResultAuthority";
 import { getProvider, parseQuestion } from "@/shared/utils/parseRouter";
 import { logEvent } from "@/shared/utils/analytics";
 import { getAuthText } from "@/shared/auth/authText";
@@ -164,6 +165,14 @@ export const SettingsTab: React.FC<{
     setTestResult(null);
     try {
       const currentProvider = getProvider(providerId);
+      // UI-00A: a required-key provider without a key must never report a
+      // successful connection (the old path silently returned a mock result).
+      // key-optional providers such as Ollama keep testing normally.
+      if (!isProviderRuntimeConfigured(currentProvider, { apiKey: apiKey.trim() })) {
+        setTestResult(getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"));
+        setTesting(false);
+        return;
+      }
       const settings = await loadSettings();
       const testBlock: QuestionBlock = {
         id: "test",

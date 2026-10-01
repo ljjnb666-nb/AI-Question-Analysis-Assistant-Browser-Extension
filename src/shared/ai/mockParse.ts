@@ -13,5 +13,8 @@ export async function mockParse(block: QuestionBlock, route: RouteUsed = "text")
     routeUsed: route,
     ocrQualityScore: 0.85,
     warning: undefined,
+    // UI-00A: demo output must be identifiable forever — a mock result can
+    // never be mistaken for (or upgraded to) a provider result later.
+    resultSource: "mock",
   };
 }

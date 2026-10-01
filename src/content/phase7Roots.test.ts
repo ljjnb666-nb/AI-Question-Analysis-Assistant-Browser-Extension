@@ -26,7 +26,7 @@ function stubRect(el: Element, rect: { left: number; top: number; width: number;
 const QUESTION_HTML = '<div class="question-item" data-question-id="12"><p class="stem">12. Which value equals 2 + 2? Choose one.</p><img src="http://img.test/diagram-a.png" alt="figure"><ul><li><button class="option">A. 3</button></li><li><button class="option" id="opt-b">B. 4</button></li><li><button class="option">C. 5</button></li><li><button class="option">D. 6</button></li></ul></div>';
 
 function parseResult(answer = "B"): ParseResult {
-  return { blockId: "any", questionType: "single_choice", answer, confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
+  return { blockId: "any", questionType: "single_choice", answer, confidence: 0.99, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text", resultSource: "provider" };
 }
 
 /** Reflects choice state like a real ARIA pattern so transactional fills can verify. */

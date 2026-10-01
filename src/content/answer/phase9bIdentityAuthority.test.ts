@@ -57,6 +57,7 @@ function parseResult(block: QuestionBlock, answer = "B"): ParseResult {
     detailedExplanation: "",
     recognizedText: block.previewText,
     routeUsed: "text",
+    resultSource: "provider",
   };
 }
 

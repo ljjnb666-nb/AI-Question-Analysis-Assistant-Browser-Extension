@@ -25,11 +25,11 @@ function createBlock(owner: Element, type: "single_choice" | "fill_blank", previ
 }
 
 function choiceResult(): ParseResult {
-  return { blockId: "event-boundary-question", questionType: "single_choice", answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
+  return { blockId: "event-boundary-question", questionType: "single_choice", answer: "B", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text", resultSource: "provider" };
 }
 
 function blankResult(): ParseResult {
-  return { blockId: "event-boundary-question", questionType: "fill_blank", answer: "(1) alpha", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" };
+  return { blockId: "event-boundary-question", questionType: "fill_blank", answer: "(1) alpha", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text", resultSource: "provider" };
 }
 
 function installChoiceQuestion(rerenderAtPointerdown: boolean, routeChangeAtPointerdown = false) {

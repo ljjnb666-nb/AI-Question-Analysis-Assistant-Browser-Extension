@@ -4,7 +4,7 @@ import { buildValidatedAnswerPlan } from "./answerPlanValidator";
 import { buildControlMapping } from "./controlMapping";
 
 const block = (type: QuestionBlock["questionTypeGuess"] = "single_choice", previewText = "Q A. one B. two C. three") => ({ id: "q12", bbox: { x: 0, y: 0, width: 800, height: 400 }, previewText, questionTypeGuess: type, hasImage: false, confidence: 1, source: "auto_dom" } satisfies QuestionBlock);
-const result = (questionType: ParseResult["questionType"], answer: string): ParseResult => ({ blockId: "q12", questionType, answer, confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text" });
+const result = (questionType: ParseResult["questionType"], answer: string): ParseResult => ({ blockId: "q12", questionType, answer, confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "", routeUsed: "text", resultSource: "provider" });
 
 describe("Phase 5 safety gates", () => {
   it("AMB1 mapping is read-only and duplicate semantic controls abstain", () => {

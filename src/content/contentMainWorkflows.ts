@@ -1,6 +1,10 @@
 import type { BoundingBox, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import { cropScreenshot } from "@/shared/utils/cropImage";
-import { getProvider } from "@/shared/utils/parseRouter";
+import {
+  getProvider,
+  getProviderNotConfiguredMessage,
+  isProviderRuntimeConfigured,
+} from "@/shared/utils/parseRouter";
 import { addHistoryEntry, loadHistory, loadSettings } from "@/shared/utils/storage";
 import { logEvent } from "@/shared/utils/analytics";
 import type { ActiveDetectMode } from "./contentRuntimeState";
@@ -265,6 +269,20 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
   }
 
   async function handleAutoSolveAll() {
+    // UI-00A entry guard (layer 1): refuse to start the workflow without a
+    // usable provider. Even if this guard is bypassed, the fill core's
+    // provenance gate keeps real-page mutation at zero.
+    const autoSolveSettings = await loadSettings();
+    if (!isProviderRuntimeConfigured(getProvider(autoSolveSettings.providerId ?? "anthropic"), autoSolveSettings)) {
+      options.sendAutoSolveDone({
+        ok: false,
+        solved: 0,
+        filled: 0,
+        total: 0,
+        message: getProviderNotConfiguredMessage(autoSolveSettings.language),
+      });
+      return;
+    }
     await runAutoSolveAll(
       {
         isRunning: options.runtimeState.getAutoSolveRunning,
