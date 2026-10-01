@@ -6,6 +6,7 @@ import {
   isProviderRuntimeConfigured,
 } from "@/shared/ai/parseResultAuthority";
 import { getProvider, hasSufficientPreviewText, parseQuestion } from "@/shared/utils/parseRouter";
+import { mapKnownCodeFeedback, mapUserFacingError, userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
 import { logEvent } from "@/shared/utils/analytics";
 import { readProtectedWorkOwners, clearProtectedWorkOwner } from "@/shared/auth/protectedWorkOwner";
 import {
@@ -28,6 +29,7 @@ import {
   selectRiskyCandidates,
 } from "./batchOperations";
 import { getBatchFillFeedback, getFillActionFeedback } from "./sidepanelActionMessages";
+import { isCandidateFillReady } from "./sidepanelCandidateMetrics";
 import { buildAutoSolveStartingState, resetDetectState, startFullPageDetectState, type AutoSolveProgressState, type ScanProgressState } from "./sidepanelStateSync";
 import { clearCandidateSelection, selectAllCandidates, toggleCandidateSelection } from "./sidepanelSelectionSync";
 import { createCandidateAttemptRegistry } from "./candidateAuthority";
@@ -72,7 +74,7 @@ type UseSidePanelActionsOptions = {
   };
   setCandidates: React.Dispatch<React.SetStateAction<DetectedCandidate[]>>;
   setExpandedIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-  setFillFeedback: React.Dispatch<React.SetStateAction<string>>;
+  setFillFeedback: React.Dispatch<React.SetStateAction<UserFeedback | null>>;
   setIsAutoSolving: React.Dispatch<React.SetStateAction<boolean>>;
   setIsBatchFilling: React.Dispatch<React.SetStateAction<boolean>>;
   setIsBatchParsing: React.Dispatch<React.SetStateAction<boolean>>;
@@ -89,9 +91,13 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   const requireAuthenticatedAction = useCallback((): boolean => {
     if (options.isAuthenticatedNow()) return true;
     options.setFillFeedback(
-      options.uiLang === "en"
-        ? "Sign-in verification required. Please check your session in Settings."
-        : "需要登录验证，请在设置中确认登录状态。",
+      userFeedback(
+        "warning",
+        options.uiLang === "en"
+          ? "Sign-in verification required. Please check your session in Settings."
+          : "需要登录验证，请在设置中确认登录状态。",
+        { code: "AUTHORITY_LOST" },
+      ),
     );
     return false;
   }, [options]);
@@ -334,23 +340,65 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       sendFillMessageWithVerify: (tabId, block, result, expectedUrl) =>
         sendFillMessageWithVerify(tabId, block, result, expectedUrl, isChoiceLikeResult),
     });
-    // UI-00A: provenance rejections surface as natural hints, not machine codes.
+    // UI-00B: typed feedback; provenance rejections surface as natural hints
+    // with the machine code demoted to `code`.
     options.setFillFeedback(getFillActionFeedback(options.uiLang, response));
-    window.setTimeout(() => options.setFillFeedback(""), 2200);
+    window.setTimeout(() => options.setFillFeedback(null), 2200);
   }, [options, isCandidateCurrent, requireAuthenticatedAction]);
 
   const handleBatchFill = useCallback(async () => {
     if (!requireAuthenticatedAction()) return;
+    // UI-00B PART E: a selection with no fillable result never starts a batch
+    // mutation and never reports a misleading "0 of 0" outcome. With nothing
+    // selected at all the ordinary no-selection state stands — no error, no
+    // empty success banner.
+    const selectedCount = options.candidates.filter((candidate) => candidate.selected).length;
+    const fillableCount = options.candidates.filter(isCandidateFillReady).length;
+    if (selectedCount === 0) return;
+    if (fillableCount === 0) {
+      options.setFillFeedback(
+        userFeedback(
+          "warning",
+          options.uiLang === "en"
+            ? "None of the selected questions has a fillable result. Parse them again first."
+            : "选中的题目没有可填写的有效解析结果，请重新解析后再试。",
+          { code: "BATCH_FILL_NOTHING_FILLABLE" },
+        ),
+      );
+      window.setTimeout(() => options.setFillFeedback(null), 3200);
+      return;
+    }
     options.setIsBatchFilling(true);
-    const { totalFilled, totalQuestions } = await runBatchFill(options.candidates, {
+    const { successfulQuestions, attemptedQuestions, totalFilled, withheldCount, failureCode, failureMessage } = await runBatchFill(options.candidates, {
       isCandidateCurrent,
       setCandidates: options.setCandidates,
       sendFillMessageWithVerify: (tabId, block, result, expectedUrl) =>
         sendFillMessageWithVerify(tabId, block, result, expectedUrl, isChoiceLikeResult),
     });
     options.setIsBatchFilling(false);
-    options.setFillFeedback(getBatchFillFeedback(options.uiLang, totalFilled, totalQuestions));
-    window.setTimeout(() => options.setFillFeedback(""), 2600);
+    // UI-00B review fix 02: a run failed when a failure was recorded or a
+    // dispatched fill did not succeed — a missing machine code is still a
+    // failure. The failure copy always comes from the authoritative central
+    // mapper (known codes and transport shapes included); the handler never
+    // reclassifies by itself.
+    const failed = failureCode !== undefined || failureMessage !== undefined || attemptedQuestions > successfulQuestions;
+    if (failed) {
+      const mapped = mapUserFacingError(failureMessage ?? failureCode, options.uiLang, { code: failureCode });
+      const prefix = successfulQuestions > 0
+        ? (options.uiLang === "en" ? `Filled ${successfulQuestions} question(s); ` : `已填写 ${successfulQuestions} 题；`)
+        : "";
+      options.setFillFeedback({
+        ...mapped,
+        message: `${prefix}${mapped.message}`,
+      });
+      window.setTimeout(() => options.setFillFeedback(null), 4000);
+      return;
+    }
+    // UI-00B PART E: skipped = selected-but-unfillable results (mock, legacy,
+    // extraction-failed) plus fill-ready candidates the run could not attempt.
+    const unfillableSelected = selectedCount - fillableCount;
+    options.setFillFeedback(getBatchFillFeedback(options.uiLang, successfulQuestions, totalFilled, unfillableSelected + withheldCount));
+    window.setTimeout(() => options.setFillFeedback(null), 2600);
   }, [options, isCandidateCurrent, requireAuthenticatedAction]);
 
   const handleStartAutoSolve = useCallback(async () => {
@@ -361,8 +409,11 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     // gate remain as the second and third layers.
     const settings = await loadSettings();
     if (!isProviderRuntimeConfigured(getProvider(settings.providerId ?? "anthropic"), settings)) {
-      options.setFillFeedback(getAutoSolveNotConfiguredMessage(settings.language));
-      window.setTimeout(() => options.setFillFeedback(""), 3200);
+      options.setFillFeedback(
+        mapKnownCodeFeedback("PROVIDER_NOT_CONFIGURED", options.uiLang)
+        ?? userFeedback("warning", getAutoSolveNotConfiguredMessage(settings.language)),
+      );
+      window.setTimeout(() => options.setFillFeedback(null), 3200);
       return;
     }
     const activeTab = await getBestActionTab();
@@ -391,7 +442,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       await options.markProtectedWork("autoSolve", false, activeTab.id);
       return;
     }
-    options.setFillFeedback("");
+    options.setFillFeedback(null);
     options.setIsAutoSolving(true);
     options.setAutoSolveProgress(buildAutoSolveStartingState(options.uiLang));
   }, [options, requireAuthenticatedAction]);

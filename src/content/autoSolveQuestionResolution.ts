@@ -8,6 +8,8 @@ type AutoSolveProgressPayload = {
   filled: number;
   solved: number;
   statusText: string;
+  statusCode?: string;
+  statusDetail?: string;
   total: number;
 };
 
@@ -41,6 +43,10 @@ type ResolveQuestionDeps = {
 type ResolveQuestionResult = {
   filledDelta: number;
   progressMessage: string;
+  /** UI-00B: stable status code so the Side Panel can localize. */
+  progressCode?: string;
+  /** Stable sub-code (e.g. a fill result code) behind the progress message. */
+  progressDetail?: string;
   questionCompleted: boolean;
   stale?: boolean;
   stopAutomation?: true;
@@ -57,6 +63,7 @@ export async function resolveAutoSolveQuestion(
   captureSolveStartControlState(options.currentBlock);
   let questionCompleted = false;
   let progressMessage: string;
+  let progressCode: string | undefined;
   let filledDelta = 0;
   const staleResult = (): ResolveQuestionResult => ({
     filledDelta: 0,
@@ -66,7 +73,12 @@ export async function resolveAutoSolveQuestion(
   });
 
   if (options.currentBlock.completeness?.state === "incomplete" || options.currentBlock.completeness?.state === "unknown") {
-    return { filledDelta: 0, questionCompleted: true, progressMessage: "INCOMPLETE_QUESTION: automatic solver withheld this candidate." };
+    return {
+      filledDelta: 0,
+      progressMessage: "INCOMPLETE_QUESTION: automatic solver withheld this candidate.",
+      progressCode: options.currentBlock.completeness?.state === "incomplete" ? "SKIPPED_INCOMPLETE" : "SKIPPED_UNKNOWN",
+      questionCompleted: true,
+    };
   }
 
   try {
@@ -90,6 +102,7 @@ export async function resolveAutoSolveQuestion(
         total: options.total,
         currentBlock: deps.toProgressBlock(options.currentBlock),
         statusText: `Auto-solve parse looks unstable. Retrying (${parseRetryCount + 1}/${MAX_AUTO_SOLVE_PARSE_ATTEMPTS})...`,
+        statusCode: "RETRYING_PARSE",
       });
       parsed = await parseOnce();
       if (deps.isCurrentAutoSolveResult && !deps.isCurrentAutoSolveResult(options.currentBlock, parsed)) return staleResult();
@@ -116,14 +129,20 @@ export async function resolveAutoSolveQuestion(
           : options.needsQuickAnsweredChoiceReview
             ? `Quick review complete. Verifying question ${options.solved + 1}: ${parsed.answer || "-"}`
             : `Filling question ${options.solved + 1}: ${parsed.answer || "-"}`,
+      statusCode: !stableParsed
+        ? "SKIPPED_UNSTABLE"
+        : options.needsHistoryReview || options.needsQuickAnsweredChoiceReview
+          ? "REVIEWING_ANSWERED"
+          : "PARSING",
     });
 
     if (!stableParsed) {
       progressMessage = options.needsQuickAnsweredChoiceReview || options.answerStateComplete
         ? `Auto-solve parse remained unstable after ${MAX_AUTO_SOLVE_PARSE_ATTEMPTS} attempts. Keeping the current answer and continuing.`
         : `Auto-solve parse remained unstable after ${MAX_AUTO_SOLVE_PARSE_ATTEMPTS} attempts. Skipping this question.`;
+      progressCode = "SKIPPED_UNSTABLE";
       questionCompleted = true;
-      return { filledDelta, progressMessage, questionCompleted };
+      return { filledDelta, progressMessage, progressCode, questionCompleted };
     }
 
     if (deps.isCurrentAutoSolveResult && !deps.isCurrentAutoSolveResult(options.currentBlock, parsed)) return staleResult();
@@ -153,19 +172,21 @@ export async function resolveAutoSolveQuestion(
     progressMessage = fillResult.ok
       ? `Fill stopped after fresh verification failed: ${verifyResult.message}`
       : `Fill stopped for safety: ${stopReason}`;
-    return { filledDelta: 0, progressMessage, questionCompleted: false, stopAutomation: true, stopReason };
+    return { filledDelta: 0, progressMessage, progressCode: "FILL_STOPPED_SAFETY", progressDetail: stopReason, questionCompleted: false, stopAutomation: true, stopReason };
   } catch (err) {
     if (isStaleQuestionRevisionError(err)) return staleResult();
     const errMsg = err instanceof Error ? err.message : String(err);
     if (options.needsQuickAnsweredChoiceReview) {
       progressMessage = `Quick review failed. Keeping the current answer and continuing: ${errMsg}`;
+      progressCode = "ANSWERED_KEEP";
       questionCompleted = true;
     } else {
       progressMessage = options.answerStateComplete
         ? `Review failed. Keeping the current answer: ${errMsg}`
         : `Parse failed. Skipping this question: ${errMsg}`;
+      progressCode = options.answerStateComplete ? "ANSWERED_KEEP" : "SKIPPED_UNSTABLE";
     }
   }
 
-  return { filledDelta, progressMessage, questionCompleted };
+  return { filledDelta, progressMessage, progressCode, questionCompleted };
 }

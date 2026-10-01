@@ -10,6 +10,7 @@ import {
 } from "@/shared/auth/protectedWorkOwner";
 import type { UILang } from "./displayUtils";
 import { isRiskyCandidate } from "./batchParseHeuristics";
+import type { UserFeedback } from "@/shared/ui/userFeedback";
 import { HistoryTab } from "./HistoryTab";
 import { SettingsTab } from "./settingsPanel";
 import { registerSidePanelRuntimeListeners } from "./sidepanelMessageBridge";
@@ -91,7 +92,7 @@ export const SidePanelApp: React.FC = () => {
     [],
   );
   const setFillFeedback = useCallback(
-    (updater: React.SetStateAction<string>) => dispatch({ type: "fillFeedback", updater }),
+    (updater: React.SetStateAction<UserFeedback | null>) => dispatch({ type: "fillFeedback", updater }),
     [],
   );
   const setIsAutoSolving = useCallback(

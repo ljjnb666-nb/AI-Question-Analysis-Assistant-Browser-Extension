@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { CandidateOrigin, CandidateSnapshot, DetectedCandidate, QuestionBlock } from "@/shared/types";
+import { mapAutoSolveDoneFeedback } from "@/shared/ui/autoSolveStatus";
 import {
   buildAutoSolveStartingState,
-  mapAutoSolveDoneFeedback,
   mapAutoSolveProgressMessage,
   mapFullPageDoneCandidates,
   mapFullPageProgressMessage,
@@ -145,14 +145,24 @@ describe("sidepanelStateSync", () => {
       total: 3,
       current: 1,
       statusText: "working",
+      statusCode: "",
+      statusDetail: "",
       currentPreview: "",
       currentBlock: undefined,
     });
 
-    expect(mapAutoSolveDoneFeedback({ ok: true })).toBe("自动答题完成");
-    expect(mapAutoSolveDoneFeedback({ ok: false })).toBe("自动答题失败");
+    // UI-00B: done feedback is typed and localized; raw runtime text is
+    // demoted to technical detail.
+    const doneOk = mapAutoSolveDoneFeedback({ ok: true, solved: 5, filled: 4, message: "自动答题完成，共处理 5 题" }, "zh");
+    expect(doneOk.tone).toBe("success");
+    expect(doneOk.message).toContain("自动解析并填答完成");
+    const doneFailed = mapAutoSolveDoneFeedback({ ok: false, solved: 0, filled: 0, message: "Provider exploded: raw-http-500" }, "en");
+    expect(doneFailed.tone).toBe("error");
+    expect(doneFailed.message).not.toContain("raw-http-500");
+    expect(doneFailed.technicalDetail).toContain("raw-http-500");
     expect(buildAutoSolveStartingState("zh").statusText).toBe("开始自动答题...");
     expect(buildAutoSolveStartingState("en").statusText).toBe("Starting auto solve...");
+    expect(buildAutoSolveStartingState("zh").statusCode).toBe("STARTING");
   });
 
   it("builds detect reset state", () => {

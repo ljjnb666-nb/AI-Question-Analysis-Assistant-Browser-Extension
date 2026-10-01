@@ -1,6 +1,8 @@
 import React from "react";
 import { UiButton } from "@/shared/ui/extensionUi";
 import type { QuestionBlock } from "@/shared/types";
+import { autoSolveStatusLabel, autoSolveStatusFeedback, autoSolveStatusTone, sanitizeLegacyAutoSolveStatusText } from "@/shared/ui/autoSolveStatus";
+import type { UserFeedback } from "@/shared/ui/userFeedback";
 import { AutoSolvePreviewCard } from "./candidateViews";
 import type { CandidateViewFilter } from "./sidepanelCandidateMetrics";
 import { PanelChrome, sidePanelCardStyle } from "./sidepanelTheme";
@@ -12,6 +14,8 @@ export type CandidateAutoSolveProgress = {
   total: number;
   current: number;
   statusText: string;
+  statusCode?: string;
+  statusDetail?: string;
   currentPreview?: string;
   currentBlock?: QuestionBlock;
 } | null;
@@ -243,60 +247,120 @@ export const CandidateQuickActionsCard: React.FC<{
   </div>
 );
 
-export const CandidateFeedbackCard: React.FC<{ fillFeedback: string }> = ({ fillFeedback }) =>
-  fillFeedback ? (
+/**
+ * UI-00B PART C: minimal semantic tone styles. Success, info, warning, and
+ * error no longer share the success visual; this is a semantic correction,
+ * not a redesign.
+ */
+const FEEDBACK_TONE_STYLES: Record<UserFeedback["tone"], { border: string; background: string; text: string; glow: string }> = {
+  success: {
+    border: "rgba(16, 185, 129, 0.18)",
+    background: "linear-gradient(180deg, rgba(6, 40, 28, 0.8), rgba(5, 28, 20, 0.75))",
+    text: "#a7f3d0",
+    glow: "rgba(16, 185, 129, 0.16)",
+  },
+  info: {
+    border: "rgba(99, 102, 241, 0.2)",
+    background: "linear-gradient(180deg, rgba(17, 24, 46, 0.85), rgba(12, 17, 34, 0.8))",
+    text: "#c7d2fe",
+    glow: "rgba(99, 102, 241, 0.16)",
+  },
+  warning: {
+    border: "rgba(245, 158, 11, 0.22)",
+    background: "linear-gradient(180deg, rgba(67, 40, 15, 0.8), rgba(45, 25, 10, 0.75))",
+    text: "#fde68a",
+    glow: "rgba(245, 158, 11, 0.16)",
+  },
+  error: {
+    border: "rgba(239, 68, 68, 0.24)",
+    background: "linear-gradient(180deg, rgba(69, 26, 26, 0.85), rgba(45, 15, 15, 0.8))",
+    text: "#fecaca",
+    glow: "rgba(239, 68, 68, 0.16)",
+  },
+};
+
+export const CandidateFeedbackCard: React.FC<{ fillFeedback: UserFeedback | null }> = ({ fillFeedback }) => {
+  if (!fillFeedback?.message) return null;
+  const tone = FEEDBACK_TONE_STYLES[fillFeedback.tone] ?? FEEDBACK_TONE_STYLES.info;
+  return (
     <div
       className="cand-section"
+      role="status"
+      data-feedback-tone={fillFeedback.tone}
       style={{
         ...sidePanelCardStyle,
         padding: "11px 12px",
         marginBottom: 10,
-        borderColor: "rgba(16, 185, 129, 0.18)",
-        background: "linear-gradient(180deg, rgba(6, 40, 28, 0.8), rgba(5, 28, 20, 0.75))",
-        color: "#a7f3d0",
+        borderColor: tone.border,
+        background: tone.background,
+        color: tone.text,
         fontSize: 12,
         lineHeight: 1.6,
         position: "relative",
         overflow: "hidden",
       }}
     >
-      <PanelChrome glow="rgba(16, 185, 129, 0.16)" />
-      {fillFeedback}
+      <PanelChrome glow={tone.glow} />
+      {fillFeedback.message}
     </div>
-  ) : null;
+  );
+};
 
 export const CandidateAutoSolveCard: React.FC<{
   autoSolveProgress: CandidateAutoSolveProgress;
   lang: UILang;
-}> = ({ autoSolveProgress, lang }) =>
-  autoSolveProgress ? (
+}> = ({ autoSolveProgress, lang }) => {
+  if (!autoSolveProgress) return null;
+  // UI-00B PART F + review fix P1-03/P1-04: the stable status code owns the
+  // user-visible copy AND the card's semantic tone — a safety stop never
+  // renders in the running/success look. Legacy statusText is untrusted
+  // input and only ever collapses to a recognized or neutral copy.
+  const statusData = {
+    current: autoSolveProgress.current,
+    solved: autoSolveProgress.solved,
+    filled: autoSolveProgress.filled,
+    total: autoSolveProgress.total,
+    detail: autoSolveProgress.statusDetail || undefined,
+  };
+  const statusFeedback = autoSolveProgress.statusCode
+    ? autoSolveStatusFeedback(autoSolveProgress.statusCode, lang, statusData)
+    : null;
+  const statusLine = statusFeedback?.detail
+    ? statusFeedback.detail.message
+    : autoSolveProgress.statusCode
+      ? statusFeedback!.label
+      : sanitizeLegacyAutoSolveStatusText(autoSolveProgress.statusText, lang);
+  const tone = FEEDBACK_TONE_STYLES[autoSolveStatusTone(autoSolveProgress.statusCode)];
+  return (
     <div
       className="cand-section"
+      data-status-tone={autoSolveStatusTone(autoSolveProgress.statusCode)}
       style={{
         ...sidePanelCardStyle,
         padding: 12,
         marginBottom: 10,
-        borderColor: "rgba(16, 185, 129, 0.18)",
-        background: "linear-gradient(180deg, rgba(6, 40, 28, 0.8), rgba(5, 28, 20, 0.75))",
+        borderColor: tone.border,
+        background: tone.background,
         position: "relative",
         overflow: "hidden",
       }}
     >
-      <PanelChrome glow="rgba(16, 185, 129, 0.16)" />
+      <PanelChrome glow={tone.glow} />
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 8, fontSize: 12 }}>
-        <span style={{ color: "#34d399", fontWeight: 700 }}>{lang === "en" ? "Auto Solve" : "自动答题"}</span>
-        <span style={{ color: "#6ee7b7" }}>
+        <span style={{ color: tone.text, fontWeight: 700 }}>{lang === "en" ? "Auto Solve" : "自动答题"}</span>
+        <span style={{ color: "#94a3b8" }}>
           {lang === "en"
             ? `Solved ${autoSolveProgress.solved}${autoSolveProgress.total ? ` / ${autoSolveProgress.total}` : ""}, filled ${autoSolveProgress.filled}`
             : `已解析 ${autoSolveProgress.solved}${autoSolveProgress.total ? ` / ${autoSolveProgress.total}` : ""}，已填写 ${autoSolveProgress.filled}`}
         </span>
       </div>
-      <div style={{ fontSize: 12, color: "#d1fae5", lineHeight: 1.6 }}>{autoSolveProgress.statusText}</div>
+      <div style={{ fontSize: 12, color: tone.text, lineHeight: 1.6 }}>{statusLine}</div>
       {(autoSolveProgress.currentBlock || autoSolveProgress.currentPreview) && (
         <AutoSolvePreviewCard previewText={autoSolveProgress.currentPreview || ""} block={autoSolveProgress.currentBlock} lang={lang} />
       )}
     </div>
-  ) : null;
+  );
+};
 
 export const CandidateScanProgressCard: React.FC<{
   isEn: boolean;

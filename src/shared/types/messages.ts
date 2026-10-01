@@ -214,7 +214,12 @@ export interface AutoSolveProgressMsg extends BaseMessage {
   filled: number;
   total: number;
   current: number;
+  /** Legacy debug/compat text; the Side Panel localizes from statusCode. */
   statusText: string;
+  /** UI-00B: stable status code; the Side Panel owns the user-visible copy. */
+  statusCode?: string;
+  /** Stable sub-code behind the status (e.g. a fill result code). */
+  statusDetail?: string;
   currentQuestionId?: string;
   currentPreview?: string;
   currentBlock?: QuestionBlock;
@@ -227,6 +232,7 @@ export interface AutoSolveDoneMsg extends BaseMessage {
   solved: number;
   filled: number;
   total: number;
+  /** Legacy debug/compat text; the Side Panel localizes from ok/stopped. */
   message: string;
 }
 

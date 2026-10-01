@@ -3,6 +3,7 @@ import { getUnfillableResultCode, isParseResultFillAuthoritative } from "@/share
 import type { FillAnswerCode } from "@/content/answerTypes";
 import type { CandidateAttemptLease, CandidateAttemptRegistry } from "./candidateAuthority";
 import { candidateMatchesBlockAndOrigin } from "./candidateAuthority";
+import { isCandidateFillReady } from "./sidepanelCandidateMetrics";
 
 type UpdateCandidates = (updater: (prev: DetectedCandidate[]) => DetectedCandidate[]) => void;
 type IsCandidateCurrent = (candidate: DetectedCandidate) => Promise<boolean>;
@@ -258,10 +259,13 @@ export async function runFillCandidate(
   deps: FillDeps,
 ): Promise<{ ok?: boolean; filledCount?: number; message?: string; code?: FillAnswerCode } | null> {
   if (!candidate.result) return null;
-  // UI-00A: mock and legacy-unproven results are rejected before any tab
-  // dispatch — no message is crafted for a result that may not fill.
-  if (!isParseResultFillAuthoritative(candidate.result)) {
-    const code = getUnfillableResultCode(candidate.result);
+  // UI-00A/00B: mock, legacy-unproven, and extraction-failed results are
+  // rejected before any tab dispatch — the same predicate as the Fill button
+  // and the fillable count.
+  if (!isCandidateFillReady({ ...candidate, selected: true })) {
+    const code = isParseResultFillAuthoritative(candidate.result)
+      ? "ANSWER_NOT_FILLABLE"
+      : getUnfillableResultCode(candidate.result);
     return { ok: false, filledCount: 0, code, message: code };
   }
   if (!candidate.origin?.tabId || !candidate.origin.url || !await deps.isCandidateCurrent(candidate)) {
@@ -273,37 +277,83 @@ export async function runFillCandidate(
   return response;
 }
 
+export type BatchFillOutcome = {
+  /** Candidates a fill message was actually dispatched for. */
+  attemptedQuestions: number;
+  /** Candidates whose fill reported ok — the only count that may read as "filled". */
+  successfulQuestions: number;
+  totalFilled: number;
+  /** Fill-ready candidates withheld after a stop (never attempted). */
+  withheldCount: number;
+  /** Safety-stop / failure code of the candidate that ended the run. */
+  failureCode?: FillAnswerCode;
+  /** Raw failure detail for diagnostics only. */
+  failureMessage?: string;
+};
+
 export async function runBatchFill(
   candidates: DetectedCandidate[],
   deps: FillDeps,
-): Promise<{ totalFilled: number; totalQuestions: number }> {
-  // UI-00A: batch fill processes only fill-authoritative provider results.
-  // A single demo/legacy candidate among the selection is skipped, never filled.
-  const targets = candidates.filter((candidate) =>
-    candidate.selected
-    && candidate.status === "success"
-    && candidate.result
-    && isParseResultFillAuthoritative(candidate.result));
+): Promise<BatchFillOutcome> {
+  // UI-00B PART D/E: batch fill processes exactly the fill-ready selection
+  // (shared predicate), skips the rest, and reports what happened.
+  const targets = candidates.filter(isCandidateFillReady);
+  const fillableCount = targets.length;
+  let attemptedQuestions = 0;
+  let successfulQuestions = 0;
   let totalFilled = 0;
-  let totalQuestions = 0;
+  let failureCode: FillAnswerCode | undefined;
+  let failureMessage: string | undefined;
   for (const candidate of targets) {
-    if (!candidate.result || !isParseResultFillAuthoritative(candidate.result)) continue;
+    if (!isCandidateFillReady(candidate)) continue;
     if (!candidate.origin?.tabId || !candidate.origin.url || !await deps.isCandidateCurrent(candidate)) {
       clearFilledCandidateResult(candidate, deps.setCandidates);
+      // Review fix 02 CASE A: a lost pre-dispatch authority is a definite
+      // stale failure — never a silent "skip".
+      failureCode = "STALE_QUESTION_REVISION";
+      failureMessage = STALE_CANDIDATE_RESULT;
       break;
     }
+    attemptedQuestions += 1;
     const response = await deps.sendFillMessageWithVerify(candidate.origin.tabId, candidate.block, candidate.result!, candidate.origin.url);
-    totalQuestions += 1;
-    if (response?.ok) totalFilled += response.filledCount ?? 0;
+    // UI-00B review fix P1-02: only an ok response may count as a filled
+    // question — a failed transaction is never "filled".
+    if (response?.ok) {
+      successfulQuestions += 1;
+      totalFilled += response.filledCount ?? 0;
+    }
     const stillCurrent = await deps.isCandidateCurrent(candidate);
     if (response?.message === STALE_CANDIDATE_RESULT || !stillCurrent) {
       clearFilledCandidateResult(candidate, deps.setCandidates);
     }
     // A failed transaction or a lost origin fence ends this batch path. Never
     // repeat or advance to another candidate after an uncertain fill result.
-    if (!response?.ok || !stillCurrent) break;
+    if (!response?.ok || !stillCurrent) {
+      if (!response?.ok) {
+        // Review fix 02 CASE C: the dispatch itself failed. Keep the
+        // response's own machine code when it has one; never fabricate
+        // STALE_QUESTION_REVISION for transport/provider failures without
+        // one — the handler classifies the raw message instead.
+        failureCode = response?.code;
+        failureMessage = response?.message;
+      } else {
+        // Review fix 02 CASE D: the fill reported ok but the post-fill
+        // authority fence was lost — a definite stale, not a transport
+        // failure.
+        failureCode = "STALE_QUESTION_REVISION";
+        failureMessage = response?.message;
+      }
+      break;
+    }
   }
-  return { totalFilled, totalQuestions };
+  return {
+    attemptedQuestions,
+    successfulQuestions,
+    totalFilled,
+    withheldCount: fillableCount - attemptedQuestions,
+    failureCode,
+    failureMessage,
+  };
 }
 
 async function isAuthorized(candidate: DetectedCandidate, lease: CandidateAttemptLease, deps: AttemptDeps): Promise<boolean> {

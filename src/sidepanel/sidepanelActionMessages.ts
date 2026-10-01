@@ -1,38 +1,52 @@
 import type { FillAnswerCode } from "@/content/answerTypes";
-import { DEMO_RESULT_NOT_FILLABLE, UNVERIFIED_RESULT_SOURCE } from "@/shared/ai/parseResultAuthority";
+import { mapKnownCodeFeedback, mapUserFacingError, userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
 import type { UILang } from "./displayUtils";
 
-export const getSingleFillFeedback = (lang: UILang, success: boolean, message?: string) => {
-  if (message) return message;
-  if (lang === "en") return success ? "Fill completed" : "Fill failed";
-  return success ? "填写完成" : "填写失败";
-};
-
 /**
- * UI-00A: machine rejection codes are translated into natural user hints
- * instead of being surfaced as raw codes.
+ * UI-00B: every fill action surfaces typed feedback. Success and failure no
+ * longer share copy paths, machine result codes are demoted to `code`, and
+ * raw failure text is demoted to `technicalDetail`.
  */
-const FILL_CODE_FEEDBACK: Partial<Record<FillAnswerCode, (lang: UILang) => string>> = {
-  [DEMO_RESULT_NOT_FILLABLE]: (lang) => lang === "en"
-    ? "Demo results cannot be filled into the page. Configure an AI provider and parse again."
-    : "演示结果不能填入真实页面，请先配置 AI 服务并重新解析。",
-  [UNVERIFIED_RESULT_SOURCE]: (lang) => lang === "en"
-    ? "This result's source cannot be verified. Parse again to obtain a fillable result."
-    : "该结果来源无法验证，请重新解析后再填写。",
-};
-
 export const getFillActionFeedback = (
   lang: UILang,
   response: { ok?: boolean; message?: string; code?: FillAnswerCode } | null | undefined,
-): string => {
-  const hint = response?.code ? FILL_CODE_FEEDBACK[response.code] : undefined;
-  if (hint) return hint(lang);
-  return getSingleFillFeedback(lang, !!response?.ok, response?.message);
+): UserFeedback => {
+  if (!response) {
+    return userFeedback("error", lang === "en" ? "Fill failed" : "填写失败");
+  }
+  if (response.ok) {
+    return userFeedback("success", lang === "en" ? "Fill completed" : "填写完成", { code: response.code });
+  }
+  if (response.code || response.message) {
+    return mapUserFacingError(response.message || response.code, lang, { code: response.code });
+  }
+  return userFeedback("error", lang === "en" ? "Fill failed" : "填写失败");
 };
 
-export const getBatchFillFeedback = (lang: UILang, totalFilled: number, totalQuestions: number) => {
-  if (lang === "en") {
-    return `Filled ${totalFilled} fields across ${totalQuestions} question(s)`;
+/**
+ * Batch fill result feedback. `filledQuestions` counts only candidates that
+ * actually filled; `skippedCount` counts fill-ready selections that could not
+ * be attempted, so a partial run never implies the skipped items succeeded.
+ */
+export const getBatchFillFeedback = (
+  lang: UILang,
+  filledQuestions: number,
+  controlCount: number,
+  skippedCount = 0,
+): UserFeedback => {
+  if (skippedCount > 0) {
+    return userFeedback(
+      "warning",
+      lang === "en"
+        ? `Filled ${filledQuestions} question(s); ${skippedCount} more need to be re-parsed.`
+        : `已填写 ${filledQuestions} 题；另外 ${skippedCount} 题需要重新解析。`,
+      { code: "BATCH_FILL_PARTIAL" },
+    );
   }
-  return `已在 ${totalQuestions} 题中填写 ${totalFilled} 个控件`;
+  return userFeedback(
+    "success",
+    lang === "en"
+      ? `Filled ${controlCount} fields across ${filledQuestions} question(s).`
+      : `已填写 ${filledQuestions} 题（${controlCount} 个控件）。`,
+  );
 };

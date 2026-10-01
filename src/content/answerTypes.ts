@@ -38,7 +38,10 @@ export type FillAnswerCode =
   // UI-00A provenance rejections: a result whose source is demo or unproven
   // must never reach page mutation, even via a hand-crafted message.
   | typeof DEMO_RESULT_NOT_FILLABLE
-  | typeof UNVERIFIED_RESULT_SOURCE;
+  | typeof UNVERIFIED_RESULT_SOURCE
+  // UI-00B: the result is provider-proven but carries no fillable structured
+  // answer (structured extraction failed).
+  | "ANSWER_NOT_FILLABLE";
 
 export interface VerifyAnswerResult {
   ok: boolean;

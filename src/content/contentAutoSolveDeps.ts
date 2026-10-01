@@ -111,6 +111,7 @@ export function createReportSolvedQuestionAndAdvanceDeps(options: {
     total: number;
     current: number;
     statusText: string;
+    statusCode?: string;
     currentQuestionId?: string;
     currentPreview?: string;
     currentBlock?: QuestionBlock;
@@ -120,7 +121,7 @@ export function createReportSolvedQuestionAndAdvanceDeps(options: {
   return {
     advanceAfterSolvedQuestion: options.advanceAfterSolvedQuestion,
     incrementOrderedPlanCursor: options.incrementOrderedPlanCursor,
-    sendProgress: ({ currentBlock, filled, questionId, questionPreview, solved, statusText, total }) => {
+    sendProgress: ({ currentBlock, filled, questionId, questionPreview, solved, statusText, statusCode, total }) => {
       options.sendAutoSolveProgress({
         running: true,
         solved,
@@ -128,6 +129,7 @@ export function createReportSolvedQuestionAndAdvanceDeps(options: {
         total,
         current: solved,
         statusText,
+        statusCode,
         currentQuestionId: questionId,
         currentPreview: questionPreview,
         currentBlock,

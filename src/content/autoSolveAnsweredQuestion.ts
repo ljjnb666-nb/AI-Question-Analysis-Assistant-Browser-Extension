@@ -16,6 +16,8 @@ type ProgressPayload = {
   total: number;
   current: number;
   statusText: string;
+  statusCode?: string;
+  statusDetail?: string;
   currentQuestionId?: string;
   currentPreview?: string;
   currentBlock?: QuestionBlock;
@@ -51,6 +53,7 @@ type AnsweredQuestionDeps = {
     lastFingerprint: string;
     solved: number;
     statusText: string;
+    statusCode?: string;
     total: number;
   }) => Promise<AdvanceResult>;
   sendAutoSolveProgress: (payload: ProgressPayload) => void;
@@ -108,6 +111,7 @@ export async function handleAnsweredQuestionPhase(
       statusText: options.answerState.mode === "text"
         ? `检测到本题已填写 ${options.answerState.answeredCount}/${options.answerState.totalCount} 个答案，已跳过`
         : "检测到本题已作答，已跳过",
+      statusCode: "ANSWERED_SKIP",
       total: options.total,
     });
     return {
@@ -135,6 +139,7 @@ export async function handleAnsweredQuestionPhase(
       statusText: needsHistoryReview
         ? "本题已存在作答，复核仍未收敛，先保留当前选择并继续下一题"
         : "本题已存在作答，重复停留后保留当前选择并继续下一题",
+      statusCode: "ANSWERED_KEEP",
       total: options.total,
     });
     return {
@@ -157,6 +162,7 @@ export async function handleAnsweredQuestionPhase(
       total: options.total,
       current: solved + 1,
       statusText: `检测到本题已填写，但历史置信度仅 ${Math.round((historyEntry?.result.confidence ?? 0) * 100)}%，正在复核...`,
+      statusCode: "REVIEWING_HISTORY",
       currentQuestionId: options.currentBlock.id,
       currentPreview: options.currentBlock.previewText,
       currentBlock: deps.toProgressBlock(options.currentBlock),
@@ -177,6 +183,7 @@ export async function handleAnsweredQuestionPhase(
           : historyEntry
             ? "检测到本题已作答，正在校验已选答案并按需覆盖..."
             : "检测到本题已作答，正在重新解析并按需覆盖...",
+      statusCode: "REVIEWING_ANSWERED",
       currentQuestionId: options.currentBlock.id,
       currentPreview: options.currentBlock.previewText,
       currentBlock: deps.toProgressBlock(options.currentBlock),
@@ -191,6 +198,7 @@ export async function handleAnsweredQuestionPhase(
       total: options.total,
       current: solved + 1,
       statusText: `复用历史解析结果并填写第 ${solved + 1} 题...`,
+      statusCode: "REUSING_HISTORY",
       currentQuestionId: options.currentBlock.id,
       currentPreview: options.currentBlock.previewText,
       currentBlock: deps.toProgressBlock(options.currentBlock),
@@ -220,6 +228,8 @@ export async function handleAnsweredQuestionPhase(
         total: options.total,
         current: solved + 1,
         statusText: `Fill stopped for safety: ${stopReason}`,
+        statusCode: "FILL_STOPPED_SAFETY",
+        statusDetail: stopReason,
         currentQuestionId: options.currentBlock.id,
         currentPreview: options.currentBlock.previewText,
         currentBlock: deps.toProgressBlock(options.currentBlock),
@@ -254,6 +264,8 @@ export async function handleAnsweredQuestionPhase(
         : fillResult.ok
           ? `历史答案写入后校验失败：${verifyResult.message}，正在重新解析本题`
           : `历史答案未写入：${fillResult.message}，正在重新解析本题`,
+      statusCode: historyFillAccepted ? "REUSED_HISTORY" : "FILL_STOPPED_SAFETY",
+      statusDetail: historyFillAccepted ? undefined : (fillResult.ok ? "FILL_VERIFICATION_FAILED" : fillResult.code),
       currentQuestionId: options.currentBlock.id,
       currentPreview: options.currentBlock.previewText,
       currentBlock: deps.toProgressBlock(options.currentBlock),
@@ -269,6 +281,7 @@ export async function handleAnsweredQuestionPhase(
         lastFingerprint: options.lastFingerprint,
         solved,
         statusText: fillResult.ok ? `已复用历史答案：${fillResult.message}` : `已校验当前答案：${verifyResult.message}`,
+        statusCode: fillResult.ok ? "REUSED_HISTORY" : "REVIEWING_ANSWERED",
         total: options.total,
       });
       return {

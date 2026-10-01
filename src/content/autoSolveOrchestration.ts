@@ -107,6 +107,8 @@ type AutoSolveDeps = {
     total: number;
     current: number;
     statusText: string;
+    statusCode?: string;
+    statusDetail?: string;
     currentQuestionId?: string;
     currentPreview?: string;
     currentBlock?: QuestionBlock;
@@ -205,6 +207,7 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
       total,
       current: solved + 1,
       statusText: "开始自动答题...",
+      statusCode: "STARTING",
     });
 
     for (let round = 0; round < Math.max(fixedTotal || total || 0, 1) + 8; round += 1) {
@@ -249,7 +252,9 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
       const { currentBlock, currentOrder } = iteration;
       const eligibility = getAutomaticQuestionEligibility(currentBlock);
       if (eligibility !== "eligible") {
-        deps.sendAutoSolveProgress({ running: true, solved, filled, total, current: solved + 1, statusText: `SKIPPED_${eligibility.toUpperCase()}`, currentQuestionId: currentBlock.id, currentPreview: currentBlock.previewText, currentBlock: toProgressBlock(currentBlock) });
+        // UI-00B: the machine eligibility value stays out of user copy; the
+        // Side Panel localizes from statusCode.
+        deps.sendAutoSolveProgress({ running: true, solved, filled, total, current: solved + 1, statusText: eligibility === "withhold-incomplete" ? "题目尚未完整加载，本次已跳过。" : "暂时无法确认题目是否完整，本次已跳过。", statusCode: eligibility === "withhold-incomplete" ? "SKIPPED_INCOMPLETE" : "SKIPPED_UNKNOWN", currentQuestionId: currentBlock.id, currentPreview: currentBlock.previewText, currentBlock: toProgressBlock(currentBlock) });
         if (driveFromOrderedPlan) incrementOrderedPlanCursor(orderedPlanState);
         else {
           const advanceResult = await advanceAfterSolvedQuestion({ currentBlock, currentOrder, driveFromOrderedPlan, filled, fixedTotal, lastFingerprint, solved, total }, advanceAfterSolvedQuestionDeps);
@@ -315,7 +320,7 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
           parseBlockForAutoSolveReview: deps.parseBlockForAutoSolveReview,
           isCurrentAutoSolveResult: deps.isCurrentAutoSolveResult,
           recordAutoSolveHistory: deps.recordAutoSolveHistory,
-          sendProgress: ({ currentBlock: progressBlock, filled: progressFilled, solved: progressSolved, statusText, total: progressTotal }) => {
+          sendProgress: ({ currentBlock: progressBlock, filled: progressFilled, solved: progressSolved, statusText, total: progressTotal, statusCode, statusDetail }) => {
             deps.sendAutoSolveProgress({
               running: true,
               solved: progressSolved,
@@ -323,6 +328,8 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
               total: progressTotal,
               current: progressSolved + 1,
               statusText,
+              statusCode,
+              statusDetail,
               currentQuestionId: currentBlock.id,
               currentPreview: currentBlock.previewText,
               currentBlock: progressBlock,
@@ -350,6 +357,8 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
         total,
         current: questionCompleted ? solved : solved + 1,
         statusText: resolution.progressMessage,
+        statusCode: resolution.progressCode,
+        statusDetail: resolution.progressDetail,
         currentQuestionId: currentBlock.id,
         currentPreview: currentBlock.previewText,
         currentBlock: toProgressBlock(currentBlock),
@@ -365,6 +374,7 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
             total,
             current: solved,
             statusText: `第 ${solved} 题多次重试仍未完成，已跳过并继续下一题`,
+            statusCode: "SKIPPED_UNSTABLE",
             currentQuestionId: currentBlock.id,
             currentPreview: currentBlock.previewText,
             currentBlock: toProgressBlock(currentBlock),

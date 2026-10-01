@@ -321,7 +321,14 @@ describe("Side Panel result commit authority", () => {
 
     expect(sendFillMessageWithVerify).toHaveBeenNthCalledWith(1, firstOrigin.tabId, first.block, first.result, firstOrigin.url);
     expect(sendFillMessageWithVerify).toHaveBeenNthCalledWith(2, secondOrigin.tabId, second.block, second.result, secondOrigin.url);
-    expect(result).toEqual({ totalFilled: 2, totalQuestions: 2 });
+    expect(result).toEqual({
+      attemptedQuestions: 2,
+      successfulQuestions: 2,
+      totalFilled: 2,
+      withheldCount: 0,
+      failureCode: undefined,
+      failureMessage: undefined,
+    });
   });
 
   it("stops a batch when a candidate's origin is already stale", async () => {
@@ -337,7 +344,16 @@ describe("Side Panel result commit authority", () => {
     });
 
     expect(sendFillMessageWithVerify).not.toHaveBeenCalled();
-    expect(result).toEqual({ totalFilled: 0, totalQuestions: 0 });
+    // Review fix 02 CASE A: the pre-dispatch stale fence is a definite stale
+    // failure — recorded, not silently skipped.
+    expect(result).toEqual({
+      attemptedQuestions: 0,
+      successfulQuestions: 0,
+      totalFilled: 0,
+      withheldCount: 2,
+      failureCode: "STALE_QUESTION_REVISION",
+      failureMessage: "STALE_QUESTION_REVISION",
+    });
     expect(store.getState()[0].result).toBeUndefined();
     expect(store.getState()[1].result).toBeDefined();
   });
@@ -356,6 +372,13 @@ describe("Side Panel result commit authority", () => {
 
     expect(sendFillMessageWithVerify).toHaveBeenCalledOnce();
     expect(sendFillMessageWithVerify).toHaveBeenCalledWith(origin.tabId, first.block, first.result, origin.url);
-    expect(result).toEqual({ totalFilled: 0, totalQuestions: 1 });
+    expect(result).toEqual({
+      attemptedQuestions: 1,
+      successfulQuestions: 0,
+      totalFilled: 0,
+      withheldCount: 1,
+      failureCode: "PARTIAL_MUTATION_UNPROVABLE",
+      failureMessage: "uncertain transaction",
+    });
   });
 });

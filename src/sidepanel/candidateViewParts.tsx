@@ -1,5 +1,6 @@
 import type { DetectedCandidate, QuestionDisplaySegment, QuestionType } from "@/shared/types";
 import { isParseResultFillAuthoritative } from "@/shared/ai/parseResultAuthority";
+import { mapKnownCodeFeedback, mapUserFacingError } from "@/shared/ui/userFeedback";
 import { formatQuestionTextForDisplay, isStructuredAnswerExtractionFailed, renderMathText, resolveResultAnswerForDisplay, type UILang } from "./displayUtils";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -630,30 +631,44 @@ export const CandidateErrorPanel: React.FC<{
   error?: string;
   lang: UILang;
   onRetryVision: () => void;
-}> = ({ error, lang, onRetryVision }) => (
-  <div style={{ marginTop: 10, padding: "10px 11px", borderRadius: 12, background: "linear-gradient(180deg, rgba(69, 26, 26, 0.8), rgba(45, 15, 15, 0.75))", border: "1px solid rgba(239, 68, 68, 0.2)" }}>
-    <div style={{ fontSize: 11, color: "#fca5a5", whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.55 }}>{renderMathText(error?.slice(0, 160) || "")}</div>
-    <div style={{ marginTop: 8 }}>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onRetryVision();
-        }}
-        style={{
-          border: "1px solid rgba(255, 255, 255, 0.08)",
-          background: "linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02))",
-          backgroundColor: "transparent",
-          color: "#f1f5f9",
-          borderRadius: 10,
-          fontSize: 11,
-          fontWeight: 700,
-          padding: "6px 10px",
-          cursor: "pointer",
-          transition: "background 0.2s ease, border-color 0.2s ease",
-        }}
+}> = ({ error, lang, onRetryVision }) => {
+  // UI-00B review fix P1-01: candidate.error may hold a stable machine code
+  // or a raw runtime exception — neither may become primary UI copy. Known
+  // codes map to natural copy; anything else falls back to the generic safe
+  // message. The original string stays available only as debug detail.
+  const feedback = error
+    ? (mapKnownCodeFeedback(error, lang) ?? mapUserFacingError(error, lang))
+    : null;
+  return (
+    <div style={{ marginTop: 10, padding: "10px 11px", borderRadius: 12, background: "linear-gradient(180deg, rgba(69, 26, 26, 0.8), rgba(45, 15, 15, 0.75))", border: "1px solid rgba(239, 68, 68, 0.2)" }}>
+      <div
+        data-error-tone={feedback?.tone ?? "error"}
+        style={{ fontSize: 11, color: "#fca5a5", whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.55 }}
       >
-        {lang === "en" ? "Retry with Vision" : "视觉重试"}
-      </button>
+        {renderMathText(feedback?.message || (lang === "en" ? "The action failed. Please try again later." : "操作失败，请稍后重试。"))}
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetryVision();
+          }}
+          style={{
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+            background: "linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02))",
+            backgroundColor: "transparent",
+            color: "#f1f5f9",
+            borderRadius: 10,
+            fontSize: 11,
+            fontWeight: 700,
+            padding: "6px 10px",
+            cursor: "pointer",
+            transition: "background 0.2s ease, border-color 0.2s ease",
+          }}
+        >
+          {lang === "en" ? "Retry with Vision" : "视觉重试"}
+        </button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
