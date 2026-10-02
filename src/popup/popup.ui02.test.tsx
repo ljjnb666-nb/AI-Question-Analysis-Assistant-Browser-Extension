@@ -1,6 +1,6 @@
 import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { derivePopupViewState } from "./popupViewState";
 import { derivePopupActionReadiness } from "./popupActionReadiness";
 import { getRecoveryPlan } from "./popupRecovery";
@@ -139,6 +139,14 @@ beforeEach(() => {
     apiKey: "test-api-key",
   });
   vi.clearAllMocks();
+});
+
+afterEach(async () => {
+  storageListeners.length = 0;
+  __resetStorageCacheForTests();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  await new Promise((resolve) => setTimeout(resolve, 10));
 });
 
 describe("UI-02 Presentation State & Readiness Models", () => {
@@ -925,9 +933,23 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
       expect(screen.getByText("未登录")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /^登录$|^Sign In$/ })).toBeInTheDocument();
     });
+    // Drain pending asynchronous saveSettings from validation rejection
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
   });
 
   it("RF04-A03: retry validation from AUTHORITY_LOST shows server unavailable when endpoint fails", async () => {
+    store.set("appSettings", {
+      userId: "usr-1",
+      userEmail: "user@example.com",
+      authToken: "tok-ui02",
+      deviceId: "dev-ui02",
+      providerId: "anthropic",
+      apiKey: "test-api-key",
+    });
+    __resetStorageCacheForTests();
+
     const messaging = await import("@/shared/utils/messaging");
     const sendTabMock = vi.mocked(messaging.sendToTabWithBootstrap);
     sendTabMock.mockRejectedValueOnce({
