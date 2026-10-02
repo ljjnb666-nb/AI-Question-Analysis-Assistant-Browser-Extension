@@ -1,80 +1,77 @@
 import React from "react";
+import { orbitTokens, orbitColors, orbitSpacing, orbitRadius, orbitTypography } from "./orbitTokens";
+import { OrbitButton, type OrbitButtonVariant } from "./orbitPrimitives";
 
-export const SHARED_FONT_FAMILY =
-  '"Bahnschrift", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
+export * from "./orbitTokens";
+export * from "./orbitPrimitives";
+export * from "./orbitMotion";
+export * from "./orbitFocus";
+
+export const SHARED_FONT_FAMILY = orbitTypography.fontFamily;
 
 export const uiInputStyle: React.CSSProperties = {
   width: "100%",
-  padding: "10px 12px",
-  borderRadius: 12,
-  border: "1px solid rgba(255, 255, 255, 0.08)",
-  background: "rgba(15, 23, 42, 0.6)",
-  color: "#f8fafc",
-  fontSize: 13,
-  outline: "none",
+  padding: `${orbitSpacing[2]}px ${orbitSpacing[3]}px`,
+  borderRadius: orbitRadius.md,
+  border: `1px solid ${orbitColors.border.default}`,
+  background: orbitColors.bg.surfaceSubtle,
+  color: orbitColors.text.primary,
+  fontSize: orbitTypography.fontSize.md,
   boxSizing: "border-box",
   fontFamily: SHARED_FONT_FAMILY,
-  transition: "border-color 0.2s ease, box-shadow 0.2s ease",
+  transition: `border-color ${orbitTokens.motion.fast}, box-shadow ${orbitTokens.motion.fast}`,
 };
 
 export const sectionSurfaceStyle: React.CSSProperties = {
-  borderRadius: 16,
-  border: "1px solid rgba(255, 255, 255, 0.06)",
-  background: "linear-gradient(145deg, rgba(16, 22, 40, 0.75), rgba(10, 14, 28, 0.85))",
-  boxShadow:
-    "0 8px 32px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.08)",
-  backdropFilter: "blur(20px)",
+  borderRadius: orbitRadius.lg,
+  border: `1px solid ${orbitColors.border.subtle}`,
+  background: orbitColors.bg.surface,
+  boxShadow: orbitTokens.shadow.none,
 };
 
 export const primaryButtonStyle: React.CSSProperties = {
-  padding: "10px 14px",
-  borderRadius: 12,
-  border: "1px solid rgba(255, 255, 255, 0.1)",
-  background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
-  backgroundColor: "transparent",
-  color: "#ffffff",
-  fontSize: 12,
-  fontWeight: 600,
+  padding: "8px 14px",
+  borderRadius: orbitRadius.md,
+  border: `1px solid ${orbitColors.brand.hover}`,
+  background: orbitColors.brand.primary,
+  color: orbitColors.control.onAccent,
+  fontSize: orbitTypography.fontSize.sm,
+  fontWeight: orbitTypography.fontWeight.semibold,
   lineHeight: 1,
   cursor: "pointer",
-  boxShadow: "0 4px 12px rgba(99, 102, 241, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
   letterSpacing: -0.1,
   fontFamily: SHARED_FONT_FAMILY,
-  transition: "transform 0.2s ease, box-shadow 0.2s ease",
+  transition: `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}`,
 };
 
 export const secondaryButtonStyle: React.CSSProperties = {
-  padding: "10px 14px",
-  borderRadius: 12,
-  border: "1px solid rgba(255, 255, 255, 0.08)",
-  background: "linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)",
-  backgroundColor: "transparent",
-  color: "#e2e8f0",
-  fontSize: 12,
-  fontWeight: 600,
+  padding: "8px 14px",
+  borderRadius: orbitRadius.md,
+  border: `1px solid ${orbitColors.border.default}`,
+  background: orbitColors.bg.surfaceRaised,
+  color: orbitColors.text.primary,
+  fontSize: orbitTypography.fontSize.sm,
+  fontWeight: orbitTypography.fontWeight.semibold,
   lineHeight: 1,
   cursor: "pointer",
-  boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.05)",
   letterSpacing: -0.1,
   fontFamily: SHARED_FONT_FAMILY,
-  transition: "transform 0.2s ease, background 0.2s ease",
+  transition: `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}`,
 };
 
 export const dangerButtonStyle: React.CSSProperties = {
-  padding: "10px 14px",
-  borderRadius: 12,
-  border: "1px solid rgba(255, 255, 255, 0.1)",
-  background: "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)",
-  backgroundColor: "transparent",
-  color: "#ffffff",
-  fontSize: 12,
-  fontWeight: 600,
+  padding: "8px 14px",
+  borderRadius: orbitRadius.md,
+  border: `1px solid ${orbitColors.semantic.errorHover}`,
+  background: orbitColors.semantic.error,
+  color: orbitColors.control.onAccent,
+  fontSize: orbitTypography.fontSize.sm,
+  fontWeight: orbitTypography.fontWeight.semibold,
   lineHeight: 1,
   cursor: "pointer",
-  boxShadow: "0 4px 12px rgba(239, 68, 68, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
   letterSpacing: -0.1,
   fontFamily: SHARED_FONT_FAMILY,
-  transition: "transform 0.2s ease, box-shadow 0.2s ease",
+  transition: `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}`,
 };
 
 export const SectionCard: React.FC<{
@@ -84,33 +81,28 @@ export const SectionCard: React.FC<{
 }> = ({ title, description, children }) => (
   <section
     className="settings-card"
-    style={{ ...sectionSurfaceStyle, padding: 14, position: "relative", overflow: "hidden" }}
+    style={{
+      ...sectionSurfaceStyle,
+      padding: 14,
+      position: "relative",
+      boxSizing: "border-box",
+    }}
   >
     <div
       style={{
-        position: "absolute",
-        inset: 0,
-        background: "linear-gradient(180deg, rgba(99, 102, 241, 0.05), rgba(99, 102, 241, 0) 34%)",
-        pointerEvents: "none",
+        fontSize: orbitTypography.fontSize.md,
+        fontWeight: orbitTypography.fontWeight.semibold,
+        color: orbitColors.text.primary,
+        letterSpacing: -0.1,
       }}
-    />
-    <div
-      style={{
-        position: "absolute",
-        inset: 1,
-        borderRadius: 15,
-        border: "1px solid rgba(255,255,255,0.02)",
-        pointerEvents: "none",
-      }}
-    />
-    <div style={{ fontSize: 13, fontWeight: 600, color: "#f8fafc", letterSpacing: -0.1 }}>
+    >
       {title}
     </div>
     <div
       style={{
-        fontSize: 11,
-        lineHeight: 1.55,
-        color: "#94a3b8",
+        fontSize: orbitTypography.fontSize.xs,
+        lineHeight: orbitTypography.lineHeight.relaxed,
+        color: orbitColors.text.secondary,
         marginTop: 3,
         marginBottom: 10,
       }}
@@ -121,32 +113,40 @@ export const SectionCard: React.FC<{
   </section>
 );
 
-export const UiButton: React.FC<{
+export interface UiButtonProps {
   children: React.ReactNode;
-  onClick: () => void;
+  onClick: (e?: React.MouseEvent<HTMLButtonElement>) => void;
   primary?: boolean;
   danger?: boolean;
   disabled?: boolean;
-}> = ({ children, onClick, primary, danger, disabled }) => {
-  const baseStyle = danger
-    ? dangerButtonStyle
+  style?: React.CSSProperties;
+  className?: string;
+}
+
+export const UiButton: React.FC<UiButtonProps> = ({
+  children,
+  onClick,
+  primary,
+  danger,
+  disabled,
+  style,
+  className,
+}) => {
+  const variant: OrbitButtonVariant = danger
+    ? "danger"
     : primary
-      ? primaryButtonStyle
-      : secondaryButtonStyle;
+      ? "primary"
+      : "secondary";
+
   return (
-    <button
-      onClick={onClick}
+    <OrbitButton
+      variant={variant}
       disabled={disabled}
-      style={{
-        ...baseStyle,
-        background: disabled ? "rgba(66, 76, 94, 0.5)" : baseStyle.background,
-        backgroundColor: disabled ? "rgba(66, 76, 94, 0.5)" : (baseStyle.backgroundColor || "transparent"),
-        color: disabled ? "#93a0b1" : baseStyle.color,
-        cursor: disabled ? "not-allowed" : "pointer",
-        boxShadow: disabled ? "inset 0 1px 0 rgba(255,255,255,0.04)" : baseStyle.boxShadow,
-      }}
+      onClick={onClick}
+      style={style}
+      className={className}
     >
       {children}
-    </button>
+    </OrbitButton>
   );
 };
