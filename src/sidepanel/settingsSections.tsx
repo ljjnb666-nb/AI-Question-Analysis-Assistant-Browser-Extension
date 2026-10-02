@@ -12,6 +12,7 @@ type AuthText = {
   loginPage: string;
   emailPlaceholder: string;
   passwordPlaceholder: string;
+  verificationCodePlaceholder: string;
   sendCode: string;
   sendingCode: string;
   completeRegistration: string;
@@ -208,7 +209,12 @@ export const SettingsAccountSection: React.FC<{
             />
             {auth.codeSent ? (
               <>
-                <AuthVerificationCodeInput value={auth.verificationCode} onChange={auth.setVerificationCode} />
+                <AuthVerificationCodeInput
+                  value={auth.verificationCode}
+                  onChange={auth.setVerificationCode}
+                  ariaLabel={authText.verificationCodePlaceholder}
+                  lang={isEn ? "en" : "zh"}
+                />
                 <UiButton primary onClick={() => void auth.handleRegister()} disabled={!!auth.authBusy}>
                   {auth.authBusy === "register" ? authText.registering : authText.completeRegistration}
                 </UiButton>

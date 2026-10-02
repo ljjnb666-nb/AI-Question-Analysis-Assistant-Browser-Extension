@@ -201,11 +201,11 @@ describe("PopupApp protected dispatch authority", () => {
 describe("PopupApp protected work ownership", () => {
   it("AUTH_UI_45_POPUP_AUTO_SOLVE_OWNER popup START records the auto-solve owner tab", async () => {
     render(<PopupApp />);
-    // 定位真正的动作按钮：hero 提示与 workspace 快捷键文案也包含"自动答题"。
-    await screen.findByRole("button", { name: /自动答题|Auto Solve/ }, { timeout: 10_000 });
+    // 定位真正的动作按钮：支持旧称"自动答题"以及UI-02标准名称"解析并填答/Solve & Fill"。
+    await screen.findByRole("button", { name: /自动答题|Auto Solve|解析并填答|Solve & Fill/ }, { timeout: 10_000 });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /自动答题|Auto Solve/ }));
+      fireEvent.click(screen.getByRole("button", { name: /自动答题|Auto Solve|解析并填答|Solve & Fill/ }));
     });
 
     await waitFor(() => expect(sentRuntimeMessages).toEqual(["START_AUTO_SOLVE_ALL"]), {
