@@ -1,232 +1,611 @@
-import React from "react";
+import React, { useState } from "react";
+import {
+  OrbitButton,
+  OrbitSurface,
+  OrbitBadge,
+  OrbitStatus,
+  OrbitInput,
+  type OrbitBadgeVariant,
+} from "@/shared/ui/orbitPrimitives";
+import { orbitColors, orbitSpacing, orbitRadius, orbitTypography } from "@/shared/ui/orbitTokens";
 import { AuthPasswordField, AuthVerificationCodeInput } from "@/shared/auth/AuthFields";
-import type { PopupLang as _PopupLang } from "./popupCopy";
+import type { UserFeedback } from "@/shared/ui/userFeedback";
+import type { PopupCopy, PopupLang } from "./popupCopy";
+import type { PopupViewState } from "./popupViewState";
+import { derivePopupActionReadiness } from "./popupActionReadiness";
+import { getRecoveryPlan, type PopupRecoveryPlan } from "./popupRecovery";
 
-export const popupCardStyle: React.CSSProperties = {
-  borderRadius: 16,
-  border: "1px solid rgba(255, 255, 255, 0.06)",
-  background: "linear-gradient(180deg, rgba(16, 24, 48, 0.8), rgba(10, 15, 30, 0.85))",
-  boxShadow:
-    "0 4px 20px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06)",
-  backdropFilter: "blur(20px)",
-};
-
-type PopupCopy = {
+export interface PopupHeaderProps {
   appName: string;
-  connected: (providerName: string) => string;
-  demoMode: string;
-  loading: string;
-  provider: string;
-  version: string;
-  panel: string;
-  ready: string;
-  actions: string;
-  actionsDesc: string;
-  manualTitle: string;
-  manualSubtitle: string;
-  detectTitle: string;
-  detectSubtitle: string;
-  fullPageTitle: string;
-  fullPageSubtitle: string;
-  solveTitle: string;
-  solveSubtitle: string;
-  workspaceTitle: string;
-  workspaceDesc: string;
-  openPanel: string;
-  shortcuts: string;
-  capture: string;
-  autoDetect: string;
-  autoSolve: string;
-  startManual: string;
-  manualError: string;
-  startDetect: string;
-  detectError: string;
-  startFullPage: string;
-  fullPageError: string;
-  startSolve: string;
-  solveError: string;
-  locked: string;
-  registerAccount: string;
-  loginAccount: string;
-  registerHint: string;
-  loginHint: string;
-  registerPage: string;
-  loginPage: string;
-  registerDesc: string;
-  loginDesc: string;
-  backendHint: string;
-  finishSetup: string;
-  readyToWork: string;
-  setupHint: string;
-  pending: string;
-  workspaceLocked: string;
-  continuePrompt: string;
-  tagline: string;
-};
-
-type AuthText = {
-  registerTab: string;
-  loginTab: string;
-  emailPlaceholder: string;
-  passwordPlaceholder: string;
-  sendCode: string;
-  sendingCode: string;
-  completeRegistration: string;
-  registering: string;
-  login: string;
-  loggingIn: string;
-  showPassword: string;
-  hidePassword: string;
-  sessionExpired: string;
-};
-
-export const PopupHeroCard: React.FC<{
+  viewState: PopupViewState;
+  lang: PopupLang;
   copy: PopupCopy;
-  hasApiKey: boolean;
+  onOpenSettings: () => void;
+  onToggleLang: () => void;
+  onLogout?: () => void;
   isAuthenticated: boolean;
-  isRuntimeConfigured: boolean;
-  loaded: boolean;
-  providerName: string;
-  sessionStatus: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
-  validatingSessionText: string;
-  view: "register" | "login";
-}> = ({ copy, hasApiKey, isAuthenticated, isRuntimeConfigured, loaded, providerName, sessionStatus, validatingSessionText, view }) => (
-  <div
-    className="popup-hero"
-    style={{
-      ...popupCardStyle,
-      padding: "13px 13px 11px",
-      position: "relative",
-      overflow: "hidden",
-      background:
-        "linear-gradient(135deg, rgba(16, 22, 42, 0.95) 0%, rgba(10, 14, 28, 0.9) 56%, rgba(20, 12, 40, 0.85) 100%)",
-    }}
-  >
+}
+
+export const PopupHeader: React.FC<PopupHeaderProps> = ({
+  appName,
+  viewState,
+  lang,
+  copy,
+  onOpenSettings,
+  onToggleLang,
+  onLogout,
+  isAuthenticated,
+}) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Map viewState to badge variant and label
+  let badgeVariant: OrbitBadgeVariant;
+  let badgeLabel: string;
+
+  switch (viewState) {
+    case "checking_session":
+      badgeVariant = "info";
+      badgeLabel = copy.checking;
+      break;
+    case "signed_out":
+      badgeVariant = "neutral";
+      badgeLabel = copy.signedOut;
+      break;
+    case "service_unavailable":
+      badgeVariant = "error";
+      badgeLabel = copy.serviceUnavailable;
+      break;
+    case "page_unavailable":
+      badgeVariant = "warning";
+      badgeLabel = copy.pageUnavailable;
+      break;
+    case "running":
+      badgeVariant = "ai";
+      badgeLabel = copy.running;
+      break;
+    case "review_required":
+      badgeVariant = "warning";
+      badgeLabel = copy.reviewRequired;
+      break;
+    case "recoverable_error":
+      badgeVariant = "error";
+      badgeLabel = copy.serviceUnavailable;
+      break;
+    case "provider_setup_required":
+    case "detection_ready":
+      badgeVariant = "warning";
+      badgeLabel = copy.providerSetupRequired;
+      break;
+    case "ready":
+    default:
+      badgeVariant = "success";
+      badgeLabel = copy.ready;
+      break;
+  }
+
+  return (
     <div
-      className="popup-glow-a"
       style={{
-        position: "absolute",
-        width: 136,
-        height: 136,
-        borderRadius: 999,
-        background: "radial-gradient(circle, rgba(99,102,241,0.2) 0%, rgba(99,102,241,0) 70%)",
-        top: -36,
-        right: -18,
-        pointerEvents: "none",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        paddingBottom: orbitSpacing[2],
+        borderBottom: `1px solid ${orbitColors.border.subtle}`,
+        position: "relative",
       }}
-    />
-    <div
-      className="popup-glow-b"
-      style={{
-        position: "absolute",
-        width: 142,
-        height: 142,
-        borderRadius: 999,
-        background: "radial-gradient(circle, rgba(139,92,246,0.14) 0%, rgba(139,92,246,0) 70%)",
-        bottom: -52,
-        left: -26,
-        pointerEvents: "none",
-      }}
-    />
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        background: "linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%)",
-        pointerEvents: "none",
-      }}
-    />
-    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: orbitSpacing[2] }}>
+        <span
           style={{
-            fontSize: 10,
-            color: "#818cf8",
-            letterSpacing: 1.1,
-            textTransform: "uppercase",
-            fontWeight: 700,
+            fontSize: orbitTypography.fontSize.sm,
+            fontWeight: orbitTypography.fontWeight.semibold,
+            color: orbitColors.text.primary,
+            letterSpacing: -0.2,
           }}
         >
-          {copy.appName}
-        </div>
-        <div
-          style={{
-            fontSize: 22,
-            fontWeight: 700,
-            color: "#f8fafc",
-            lineHeight: 1.02,
-            marginTop: 4,
-            letterSpacing: -0.3,
-            textShadow: "0 0 18px rgba(99,102,241,0.2)",
-          }}
-        >
-          {sessionStatus === "loading" || sessionStatus === "validating"
-            ? validatingSessionText
-            : !isAuthenticated
-              ? view === "register"
-                ? copy.registerAccount
-                : copy.loginAccount
-              : isRuntimeConfigured
-                ? copy.readyToWork
-                : copy.finishSetup}
-        </div>
-        <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 5, lineHeight: 1.45, maxWidth: 220 }}>
-          {sessionStatus === "loading" || sessionStatus === "validating"
-            ? ""
-            : !isAuthenticated
-              ? view === "register"
-                ? copy.registerHint
-                : copy.loginHint
-              : isRuntimeConfigured
-                ? copy.tagline
-                : copy.setupHint}
-        </div>
+          {appName}
+        </span>
       </div>
-      <div
+
+      <div style={{ display: "flex", alignItems: "center", gap: orbitSpacing[2] }}>
+        <OrbitBadge variant={badgeVariant} dot>
+          {badgeLabel}
+        </OrbitBadge>
+
+        <button
+          type="button"
+          aria-label={lang === "zh" ? "产品菜单" : "Product Menu"}
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen(!menuOpen)}
+          style={{
+            background: "transparent",
+            border: `1px solid ${menuOpen ? orbitColors.border.strong : "transparent"}`,
+            borderRadius: orbitRadius.sm,
+            color: orbitColors.text.secondary,
+            padding: `2px ${orbitSpacing[2]}px`,
+            cursor: "pointer",
+            fontSize: orbitTypography.fontSize.sm,
+            lineHeight: 1,
+          }}
+        >
+          ⋯
+        </button>
+      </div>
+
+      {menuOpen ? (
+        <div
+          role="menu"
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: 0,
+            marginTop: orbitSpacing[1],
+            background: orbitColors.bg.surfaceRaised,
+            border: `1px solid ${orbitColors.border.default}`,
+            borderRadius: orbitRadius.md,
+            padding: orbitSpacing[1],
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            zIndex: 100,
+            minWidth: 140,
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenuOpen(false);
+              onOpenSettings();
+            }}
+            style={menuItemStyle}
+          >
+            {copy.menuSettings}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenuOpen(false);
+              onToggleLang();
+            }}
+            style={menuItemStyle}
+          >
+            {copy.menuSwitchLang}
+          </button>
+          {isAuthenticated && onLogout ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
+                onLogout();
+              }}
+              style={{ ...menuItemStyle, color: orbitColors.semantic.error }}
+            >
+              {copy.menuLogout}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const menuItemStyle: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  textAlign: "left",
+  padding: `${orbitSpacing[2]}px ${orbitSpacing[3]}px`,
+  color: orbitColors.text.primary,
+  fontSize: orbitTypography.fontSize.xs,
+  borderRadius: orbitRadius.sm,
+  cursor: "pointer",
+  fontFamily: orbitTypography.fontFamily,
+};
+
+export interface PopupContextLineProps {
+  isPageInjectable: boolean;
+  hasApiKey: boolean;
+  providerName: string;
+  copy: PopupCopy;
+}
+
+export const PopupContextLine: React.FC<PopupContextLineProps> = ({
+  isPageInjectable,
+  hasApiKey,
+  providerName,
+  copy,
+}) => {
+  const pageText = isPageInjectable ? copy.pageInjectable : copy.pageNotInjectable;
+  const providerText = hasApiKey ? copy.connected(providerName) : copy.demoMode;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        fontSize: orbitTypography.fontSize.xs,
+        color: orbitColors.text.muted,
+        padding: `${orbitSpacing[1]}px 0`,
+      }}
+    >
+      <span>{pageText}</span>
+      <span>·</span>
+      <span>{providerText}</span>
+    </div>
+  );
+};
+
+export interface PopupPrimaryCommandProps {
+  copy: PopupCopy;
+  lang: PopupLang;
+  isRunning: boolean;
+  activeFeature: string | null;
+  onSolve: () => void;
+  isAuthenticated: boolean;
+  isPageInjectable: boolean;
+  hasApiKey: boolean;
+}
+
+export const PopupPrimaryCommand: React.FC<PopupPrimaryCommandProps> = ({
+  copy,
+  lang,
+  isRunning,
+  activeFeature,
+  onSolve,
+  isAuthenticated,
+  isPageInjectable,
+  hasApiKey,
+}) => {
+  const readiness = derivePopupActionReadiness("solve_fill", {
+    isAuthenticated,
+    isPageInjectable,
+    hasApiKey,
+    isRunning,
+    lang,
+  });
+
+  const isSolving = isRunning && activeFeature === "solve";
+  const disabled = !readiness.enabled;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: orbitSpacing[2],
+        padding: `${orbitSpacing[2]}px 0`,
+      }}
+    >
+      <OrbitButton
+        variant="primary"
+        size="lg"
+        isLoading={isSolving}
+        disabled={disabled}
+        onClick={onSolve}
+        aria-label={`${copy.solveTitle} (自动答题)`}
         style={{
-          fontSize: 10,
-          fontWeight: 600,
-          padding: "6px 10px",
-          borderRadius: 999,
-          backgroundColor: isRuntimeConfigured
-            ? "rgba(16, 185, 129, 0.1)"
-            : sessionStatus === "loading" || sessionStatus === "validating"
-              ? "rgba(99, 102, 241, 0.12)"
-              : "rgba(245, 158, 11, 0.1)",
-          border: `1px solid ${
-            isRuntimeConfigured
-              ? "rgba(16, 185, 129, 0.2)"
-              : sessionStatus === "loading" || sessionStatus === "validating"
-                ? "rgba(99, 102, 241, 0.25)"
-                : "rgba(245, 158, 11, 0.18)"
-          }`,
-          color: isRuntimeConfigured ? "#34d399" : sessionStatus === "loading" || sessionStatus === "validating" ? "#a5b4fc" : "#fbbf24",
-          whiteSpace: "nowrap",
+          width: "100%",
+          height: 48,
+          fontSize: orbitTypography.fontSize.base,
+          fontWeight: orbitTypography.fontWeight.semibold,
         }}
       >
-        {sessionStatus === "loading" || sessionStatus === "validating"
-          ? validatingSessionText
-          : !isAuthenticated
-            ? copy.locked
-            : loaded
-              ? hasApiKey
-                ? copy.connected(providerName)
-                : copy.demoMode
-              : copy.loading}
+        {copy.solveTitle}
+      </OrbitButton>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          fontSize: orbitTypography.fontSize.xs,
+          lineHeight: 1.4,
+          padding: `0 ${orbitSpacing[1]}px`,
+        }}
+      >
+        <span style={{ color: orbitColors.text.secondary }}>
+          {copy.trustCopy}
+        </span>
+        {disabled && readiness.reason ? (
+          <span style={{ color: orbitColors.semantic.warning, fontSize: orbitTypography.fontSize.xs }}>
+            {readiness.reason}
+          </span>
+        ) : (
+          <span style={{ color: orbitColors.text.muted, fontSize: orbitTypography.fontSize.xs }}>
+            {copy.noAutoSubmitNotice}
+          </span>
+        )}
       </div>
     </div>
+  );
+};
 
-    {isAuthenticated ? (
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, marginTop: 10 }}>
-        <MetricCard label={copy.provider} value={isRuntimeConfigured ? providerName : copy.pending} />
-        <MetricCard label={copy.version} value="v0.2.0" />
-        <MetricCard label={copy.panel} value={isRuntimeConfigured ? copy.ready : copy.pending} />
+export interface PopupSecondaryCommandsProps {
+  copy: PopupCopy;
+  lang: PopupLang;
+  isRunning: boolean;
+  activeFeature: string | null;
+  onDetect: () => void;
+  onManualCapture: () => void;
+  onFullPageScan: () => void;
+  isAuthenticated: boolean;
+  isPageInjectable: boolean;
+  hasApiKey: boolean;
+}
+
+export const PopupSecondaryCommands: React.FC<PopupSecondaryCommandsProps> = ({
+  copy,
+  lang,
+  isRunning,
+  activeFeature,
+  onDetect,
+  onManualCapture,
+  onFullPageScan,
+  isAuthenticated,
+  isPageInjectable,
+  hasApiKey,
+}) => {
+  const detectReadiness = derivePopupActionReadiness("detect_current", {
+    isAuthenticated,
+    isPageInjectable,
+    hasApiKey,
+    isRunning,
+    lang,
+  });
+
+  const manualReadiness = derivePopupActionReadiness("manual_capture", {
+    isAuthenticated,
+    isPageInjectable,
+    hasApiKey,
+    isRunning,
+    lang,
+  });
+
+  const fullPageReadiness = derivePopupActionReadiness("scan_full_page", {
+    isAuthenticated,
+    isPageInjectable,
+    hasApiKey,
+    isRunning,
+    lang,
+  });
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gap: orbitSpacing[2],
+        padding: `${orbitSpacing[1]}px 0`,
+      }}
+    >
+      <button
+        type="button"
+        disabled={!detectReadiness.enabled}
+        onClick={onDetect}
+        title={detectReadiness.reason || copy.detectTitle}
+        aria-label={`${copy.detectTitle} ${copy.detectSubtitle}`}
+        style={secondaryCommandButtonStyle(!detectReadiness.enabled, activeFeature === "auto")}
+      >
+        <span style={secondaryCommandTitleStyle}>{copy.detectTitle}</span>
+        <span style={secondaryCommandSubtitleStyle}>{copy.detectSubtitle}</span>
+      </button>
+
+      <button
+        type="button"
+        disabled={!manualReadiness.enabled}
+        onClick={onManualCapture}
+        title={manualReadiness.reason || copy.manualTitle}
+        aria-label={`${copy.manualTitle} ${copy.manualSubtitle}`}
+        style={secondaryCommandButtonStyle(!manualReadiness.enabled, activeFeature === "manual")}
+      >
+        <span style={secondaryCommandTitleStyle}>{copy.manualTitle}</span>
+        <span style={secondaryCommandSubtitleStyle}>{copy.manualSubtitle}</span>
+      </button>
+
+      <button
+        type="button"
+        disabled={!fullPageReadiness.enabled}
+        onClick={onFullPageScan}
+        title={fullPageReadiness.reason || copy.fullPageTitle}
+        aria-label={`${copy.fullPageTitle} ${copy.fullPageSubtitle}`}
+        style={secondaryCommandButtonStyle(!fullPageReadiness.enabled, activeFeature === "fullpage")}
+      >
+        <span style={secondaryCommandTitleStyle}>{copy.fullPageTitle}</span>
+        <span style={secondaryCommandSubtitleStyle}>{copy.fullPageSubtitle}</span>
+      </button>
+    </div>
+  );
+};
+
+function secondaryCommandButtonStyle(disabled: boolean, active: boolean): React.CSSProperties {
+  return {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+    padding: `${orbitSpacing[2]}px ${orbitSpacing[1]}px`,
+    borderRadius: orbitRadius.md,
+    background: active ? orbitColors.brand.subtle : orbitColors.bg.surfaceRaised,
+    border: `1px solid ${active ? orbitColors.brand.border : orbitColors.border.default}`,
+    color: disabled ? orbitColors.control.disabledText : orbitColors.text.primary,
+    cursor: disabled ? "not-allowed" : "pointer",
+    textAlign: "center",
+    fontFamily: orbitTypography.fontFamily,
+    boxSizing: "border-box",
+    minHeight: 52,
+  };
+}
+
+const secondaryCommandTitleStyle: React.CSSProperties = {
+  fontSize: orbitTypography.fontSize.xs,
+  fontWeight: orbitTypography.fontWeight.medium,
+  lineHeight: 1.2,
+};
+
+const secondaryCommandSubtitleStyle: React.CSSProperties = {
+  fontSize: 10,
+  color: orbitColors.text.muted,
+  lineHeight: 1.1,
+};
+
+export interface PopupRecoverySectionProps {
+  viewState: PopupViewState;
+  lang: PopupLang;
+  onOpenSettings: () => void;
+  onOpenWorkspace: () => void;
+  onRefreshPage: () => void;
+  onReDetect: () => void;
+  onRetryValidation: () => void;
+  onLogout: () => void;
+}
+
+export const PopupRecoverySection: React.FC<PopupRecoverySectionProps> = ({
+  viewState,
+  lang,
+  onOpenSettings,
+  onOpenWorkspace,
+  onRefreshPage,
+  onReDetect,
+  onRetryValidation,
+  onLogout,
+}) => {
+  const plan: PopupRecoveryPlan | null = getRecoveryPlan(viewState, lang);
+  if (!plan) return null;
+
+  const handleAction = (kind: string) => {
+    switch (kind) {
+      case "open_settings":
+        onOpenSettings();
+        break;
+      case "open_workspace":
+        onOpenWorkspace();
+        break;
+      case "refresh_page":
+        onRefreshPage();
+        break;
+      case "re_detect":
+        onReDetect();
+        break;
+      case "retry":
+        onRetryValidation();
+        break;
+      case "logout":
+        onLogout();
+        break;
+    }
+  };
+
+  return (
+    <OrbitSurface
+      variant="default"
+      style={{
+        padding: orbitSpacing[3],
+        marginTop: orbitSpacing[2],
+        marginBottom: orbitSpacing[2],
+        border: `1px solid ${orbitColors.border.default}`,
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: orbitSpacing[2] }}>
+        <div>
+          <div
+            style={{
+              fontSize: orbitTypography.fontSize.xs,
+              fontWeight: orbitTypography.fontWeight.semibold,
+              color: orbitColors.semantic.warning,
+            }}
+          >
+            {plan.title}
+          </div>
+          <div
+            style={{
+              fontSize: orbitTypography.fontSize.xs,
+              color: orbitColors.text.secondary,
+              marginTop: 2,
+              lineHeight: 1.4,
+            }}
+          >
+            {plan.explanation}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: orbitSpacing[2] }}>
+          <OrbitButton
+            variant="secondary"
+            size="sm"
+            onClick={() => handleAction(plan.primaryActionKind)}
+          >
+            {plan.primaryActionLabel}
+          </OrbitButton>
+          {plan.secondaryActionKind && plan.secondaryActionLabel ? (
+            <OrbitButton
+              variant="ghost"
+              size="sm"
+              onClick={() => handleAction(plan.secondaryActionKind!)}
+            >
+              {plan.secondaryActionLabel}
+            </OrbitButton>
+          ) : null}
+        </div>
       </div>
-    ) : null}
-  </div>
-);
+    </OrbitSurface>
+  );
+};
 
-export const PopupAuthCard: React.FC<{
+export interface PopupFooterProps {
+  copy: PopupCopy;
+  onOpenWorkspace: () => void;
+  isAuthenticated: boolean;
+}
+
+export const PopupFooter: React.FC<PopupFooterProps> = ({
+  copy,
+  onOpenWorkspace,
+  isAuthenticated,
+}) => {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        paddingTop: orbitSpacing[2],
+        borderTop: `1px solid ${orbitColors.border.subtle}`,
+        marginTop: orbitSpacing[2],
+      }}
+    >
+      <OrbitButton
+        variant="secondary"
+        size="sm"
+        disabled={!isAuthenticated}
+        onClick={onOpenWorkspace}
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          height: 32,
+        }}
+      >
+        {copy.openPanel}
+      </OrbitButton>
+
+      <span
+        style={{
+          marginLeft: orbitSpacing[2],
+          fontSize: orbitTypography.fontSize.xs,
+          color: orbitColors.text.muted,
+          fontFamily: orbitTypography.codeFamily,
+        }}
+      >
+        {copy.shortcutKey}
+      </span>
+    </div>
+  );
+};
+
+export interface PopupAuthSectionProps {
   auth: {
     authBusy: "send-code" | "register" | "login" | "logout" | null;
     codeCooldown: number;
@@ -247,417 +626,313 @@ export const PopupAuthCard: React.FC<{
     verificationCode: string;
     view: "register" | "login";
   };
-  authText: AuthText;
   copy: PopupCopy;
-  gateInputStyle: React.CSSProperties;
-  primaryGateButtonStyle: React.CSSProperties;
-  secondaryGateButtonStyle: React.CSSProperties;
-}> = ({ auth, authText, copy, gateInputStyle, primaryGateButtonStyle, secondaryGateButtonStyle }) => (
-  <div className="popup-section" style={{ ...popupCardStyle, padding: 10 }}>
-    <div style={{ marginBottom: 8 }}>
-      <div style={{ fontSize: 13, fontWeight: 650, color: "#e9fbff", letterSpacing: 0.2 }}>
-        {auth.view === "register" ? copy.registerPage : copy.loginPage}
+}
+
+export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }) => {
+  const isRegister = auth.view === "register";
+
+  return (
+    <OrbitSurface
+      variant="default"
+      style={{
+        padding: orbitSpacing[3],
+        marginTop: orbitSpacing[2],
+        marginBottom: orbitSpacing[2],
+        display: "flex",
+        flexDirection: "column",
+        gap: orbitSpacing[3],
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span
+          style={{
+            fontSize: orbitTypography.fontSize.sm,
+            fontWeight: orbitTypography.fontWeight.semibold,
+            color: orbitColors.text.primary,
+          }}
+        >
+          {isRegister ? (copy.appName === "Quiz Solver" ? "Register Account" : "注册账号") : (copy.appName === "Quiz Solver" ? "Login Account" : "登录账号")}
+        </span>
+        <span style={{ fontSize: orbitTypography.fontSize.xs, color: orbitColors.text.muted }}>
+          {isRegister ? copy.registerHint : copy.loginHint}
+        </span>
       </div>
-      <div style={{ fontSize: 10, color: "#7ea4c3", marginTop: 3, lineHeight: 1.4 }}>
-        {auth.view === "register" ? copy.registerDesc : copy.loginDesc}
-      </div>
-    </div>
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-      <button
-        onClick={() => auth.switchView("register")}
+
+      <div
         style={{
-          ...(auth.view === "register" ? primaryGateButtonStyle : secondaryGateButtonStyle),
-          width: "100%",
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: orbitSpacing[1],
+          background: orbitColors.bg.surfaceRaised,
+          padding: 2,
+          borderRadius: orbitRadius.md,
+          border: `1px solid ${orbitColors.border.subtle}`,
         }}
       >
-        {authText.registerTab}
-      </button>
-      <button
-        onClick={() => auth.switchView("login")}
-        style={{
-          ...(auth.view === "login" ? primaryGateButtonStyle : secondaryGateButtonStyle),
-          width: "100%",
-        }}
-      >
-        {authText.loginTab}
-      </button>
-    </div>
-    <div style={{ display: "grid", gap: 8 }}>
-      {auth.view === "register" ? (
-        <>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
-            <input
-              type="email"
-              value={auth.email}
-              onChange={(event) => auth.setEmail(event.target.value)}
-              placeholder={authText.emailPlaceholder}
-              style={gateInputStyle}
-            />
-            <button
-              className="popup-action"
-              onClick={() => void auth.handleSendCode()}
+        <button
+          type="button"
+          aria-pressed={isRegister}
+          onClick={() => auth.switchView("register")}
+          style={{
+            background: isRegister ? orbitColors.bg.surfaceInteractive : "transparent",
+            color: isRegister ? orbitColors.text.primary : orbitColors.text.secondary,
+            border: isRegister ? `1px solid ${orbitColors.border.default}` : "1px solid transparent",
+            borderRadius: orbitRadius.sm,
+            padding: `${orbitSpacing[1]}px 0`,
+            fontSize: orbitTypography.fontSize.xs,
+            fontWeight: orbitTypography.fontWeight.medium,
+            cursor: "pointer",
+            fontFamily: orbitTypography.fontFamily,
+          }}
+        >
+          {copy.register}
+        </button>
+        <button
+          type="button"
+          aria-pressed={!isRegister}
+          onClick={() => auth.switchView("login")}
+          style={{
+            background: !isRegister ? orbitColors.bg.surfaceInteractive : "transparent",
+            color: !isRegister ? orbitColors.text.primary : orbitColors.text.secondary,
+            border: !isRegister ? `1px solid ${orbitColors.border.default}` : "1px solid transparent",
+            borderRadius: orbitRadius.sm,
+            padding: `${orbitSpacing[1]}px 0`,
+            fontSize: orbitTypography.fontSize.xs,
+            fontWeight: orbitTypography.fontWeight.medium,
+            cursor: "pointer",
+            fontFamily: orbitTypography.fontFamily,
+          }}
+        >
+          {copy.login}
+        </button>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: orbitSpacing[2] }}>
+        <OrbitInput
+          label={copy.emailLabel}
+          type="email"
+          value={auth.email}
+          onChange={(e) => auth.setEmail(e.target.value)}
+          placeholder={copy.emailPlaceholder}
+          autoComplete="email"
+        />
+
+        {isRegister ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: orbitSpacing[2], alignItems: "flex-end" }}>
+            <div style={{ flex: 1 }}>
+              <AuthPasswordField
+                id="popup-auth-password"
+                label={copy.passwordLabel}
+                value={auth.password}
+                onChange={auth.setPassword}
+                visible={auth.showPassword}
+                onToggleVisibility={auth.togglePasswordVisibility}
+                placeholder={copy.passwordPlaceholder}
+                showLabel={copy.showPassword}
+                hideLabel={copy.hidePassword}
+              />
+            </div>
+            <OrbitButton
+              variant="secondary"
+              size="md"
               disabled={!!auth.authBusy || auth.codeCooldown > 0}
-              style={{ ...secondaryGateButtonStyle, opacity: auth.authBusy ? 0.7 : 1, width: 104, minWidth: 104 }}
+              onClick={() => void auth.handleSendCode()}
+              style={{ minWidth: 90 }}
             >
               {auth.authBusy === "send-code"
-                ? authText.sendingCode
+                ? copy.sendingCode
                 : auth.codeCooldown > 0
                   ? `${auth.codeCooldown}s`
-                  : authText.sendCode}
-            </button>
+                  : copy.sendCode}
+            </OrbitButton>
           </div>
+        ) : (
           <AuthPasswordField
+            id="popup-auth-password"
+            label={copy.passwordLabel}
             value={auth.password}
             onChange={auth.setPassword}
             visible={auth.showPassword}
             onToggleVisibility={auth.togglePasswordVisibility}
-            placeholder={authText.passwordPlaceholder}
-            showLabel={authText.showPassword}
-            hideLabel={authText.hidePassword}
+            placeholder={copy.passwordPlaceholder}
+            showLabel={copy.showPassword}
+            hideLabel={copy.hidePassword}
           />
-          {auth.codeSent ? (
-            <>
-              <AuthVerificationCodeInput
-                value={auth.verificationCode}
-                onChange={auth.setVerificationCode}
-              />
-              <button
-                className="popup-action"
-                onClick={() => void auth.handleRegister()}
-                disabled={!!auth.authBusy}
-                style={{ ...primaryGateButtonStyle, opacity: auth.authBusy ? 0.7 : 1 }}
-              >
-                {auth.authBusy === "register" ? authText.registering : authText.completeRegistration}
-              </button>
-            </>
-          ) : null}
-        </>
-      ) : (
-        <>
-          <input
-            type="email"
-            value={auth.email}
-            onChange={(event) => auth.setEmail(event.target.value)}
-            placeholder={authText.emailPlaceholder}
-            style={gateInputStyle}
-          />
-          <AuthPasswordField
-            value={auth.password}
-            onChange={auth.setPassword}
-            visible={auth.showPassword}
-            onToggleVisibility={auth.togglePasswordVisibility}
-            placeholder={authText.passwordPlaceholder}
-            showLabel={authText.showPassword}
-            hideLabel={authText.hidePassword}
-          />
-          <button
-            className="popup-action"
-            onClick={() => void auth.handleLogin()}
-            disabled={!!auth.authBusy}
-            style={{ ...primaryGateButtonStyle, opacity: auth.authBusy ? 0.7 : 1 }}
-          >
-            {auth.authBusy === "login" ? authText.loggingIn : authText.login}
-          </button>
-        </>
-      )}
-    </div>
-    <div style={{ fontSize: 10, color: "#8ea8c6", marginTop: 8, lineHeight: 1.45 }}>
-      {auth.feedback || (auth.sessionRejected ? authText.sessionExpired : copy.backendHint)}
-    </div>
-  </div>
-);
+        )}
 
-const gateRetryButtonStyle: React.CSSProperties = {
-  padding: "9px 12px",
-  borderRadius: 10,
-  border: "1px solid rgba(99, 102, 241, 0.4)",
-  background: "linear-gradient(180deg, rgba(99, 102, 241, 0.28), rgba(139, 92, 246, 0.2))",
-  color: "#ffffff",
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: "pointer",
-  textAlign: "center",
-  fontFamily: "inherit",
+        {isRegister && auth.codeSent ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <label
+              style={{
+                fontSize: orbitTypography.fontSize.xs,
+                fontWeight: orbitTypography.fontWeight.medium,
+                color: orbitColors.text.secondary,
+              }}
+            >
+              {copy.verificationCodeLabel}
+            </label>
+            <AuthVerificationCodeInput
+              value={auth.verificationCode}
+              onChange={auth.setVerificationCode}
+              ariaLabel={copy.verificationCodeLabel}
+            />
+          </div>
+        ) : null}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: orbitSpacing[2] }}>
+        <OrbitButton
+          variant="primary"
+          size="md"
+          isLoading={auth.authBusy === "login" || auth.authBusy === "register"}
+          onClick={() => void (isRegister ? auth.handleRegister() : auth.handleLogin())}
+          style={{ width: "100%" }}
+        >
+          {isRegister
+            ? auth.authBusy === "register"
+              ? copy.registering
+              : copy.completeRegistration
+            : auth.authBusy === "login"
+              ? copy.loggingIn
+              : copy.login}
+        </OrbitButton>
+
+        <button
+          type="button"
+          onClick={() => auth.switchView(isRegister ? "login" : "register")}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: orbitColors.brand.primary,
+            fontSize: orbitTypography.fontSize.xs,
+            cursor: "pointer",
+            textAlign: "center",
+            padding: orbitSpacing[1],
+            fontFamily: orbitTypography.fontFamily,
+          }}
+        >
+          {isRegister ? copy.goToLogin : copy.goToRegister}
+        </button>
+      </div>
+
+      {auth.feedback || auth.sessionRejected ? (
+        <div style={{ fontSize: orbitTypography.fontSize.xs, color: orbitColors.semantic.warning }}>
+          {auth.feedback || copy.sessionExpired}
+        </div>
+      ) : null}
+    </OrbitSurface>
+  );
 };
 
-const gateSecondaryButtonStyle: React.CSSProperties = {
-  ...gateRetryButtonStyle,
-  border: "1px solid rgba(255, 255, 255, 0.12)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03))",
-  color: "#cbd5f5",
-};
-
-export const PopupSessionGateCard: React.FC<{
-  authText: {
-    validatingSession: string;
-    sessionUnavailable: string;
-    sessionUnavailableHint: string;
-    retrySession: string;
-    sessionExpired: string;
-    logout: string;
-    loggingOut: string;
-  };
-  isBusy: boolean;
+export interface PopupSessionGateProps {
+  copy: PopupCopy;
+  isSessionPending: boolean;
   isServerUnavailable: boolean;
   onRetry: () => void;
   onLogout: () => void;
-}> = ({ authText, isBusy, isServerUnavailable, onRetry, onLogout }) => (
-  <div className="popup-section" style={{ ...popupCardStyle, padding: 10 }}>
-    {isBusy ? (
-      <div style={{ fontSize: 11, color: "#a5b4fc", lineHeight: 1.5 }}>{authText.validatingSession}</div>
-    ) : (
-      <div style={{ display: "grid", gap: 8 }}>
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 650, color: "#fbbf24" }}>
-            {isServerUnavailable ? authText.sessionUnavailable : authText.sessionExpired}
-          </div>
-          {isServerUnavailable ? (
-            <div style={{ fontSize: 10, color: "#8ea8c6", marginTop: 3, lineHeight: 1.45 }}>
-              {authText.sessionUnavailableHint}
-            </div>
-          ) : null}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <button className="popup-action" onClick={onRetry} style={gateRetryButtonStyle}>
-            {authText.retrySession}
-          </button>
-          <button className="popup-action" onClick={onLogout} style={gateSecondaryButtonStyle}>
-            {authText.logout}
-          </button>
-        </div>
-      </div>
-    )}
-  </div>
-);
+}
 
-export const PopupActionsCard: React.FC<{
-  activeFeature: "manual" | "auto" | "fullpage" | "solve" | null;
-  copy: PopupCopy;
-  onRunAction: (
-    feature: "manual" | "auto" | "fullpage" | "solve",
-    startText: string,
-    errorText: string,
-    messageType:
-      | "START_MANUAL_CAPTURE"
-      | "START_AUTO_DETECT"
-      | "START_FULL_PAGE_DETECT"
-      | "START_AUTO_SOLVE_ALL",
-    openPanel?: boolean,
-  ) => void;
-}> = ({ activeFeature, copy, onRunAction }) => (
-  <div className="popup-section" style={{ ...popupCardStyle, padding: 10 }}>
-    <div style={{ marginBottom: 8 }}>
-      <div style={{ fontSize: 13, fontWeight: 650, color: "#e9fbff", letterSpacing: 0.2 }}>
-        {copy.actions}
-      </div>
-      <div style={{ fontSize: 10, color: "#7ea4c3", marginTop: 3, lineHeight: 1.4 }}>
-        {copy.actionsDesc}
-      </div>
-    </div>
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
-      <FeatureButton
-        className="popup-action"
-        title={copy.manualTitle}
-        subtitle={copy.manualSubtitle}
-        active={activeFeature === "manual"}
-        onClick={() => onRunAction("manual", copy.startManual, copy.manualError, "START_MANUAL_CAPTURE")}
-      />
-      <FeatureButton
-        className="popup-action"
-        title={copy.detectTitle}
-        subtitle={copy.detectSubtitle}
-        active={activeFeature === "auto"}
-        onClick={() => onRunAction("auto", copy.startDetect, copy.detectError, "START_AUTO_DETECT", true)}
-      />
-      <FeatureButton
-        className="popup-action"
-        title={copy.fullPageTitle}
-        subtitle={copy.fullPageSubtitle}
-        active={activeFeature === "fullpage"}
-        onClick={() =>
-          onRunAction("fullpage", copy.startFullPage, copy.fullPageError, "START_FULL_PAGE_DETECT", true)
-        }
-      />
-      <FeatureButton
-        className="popup-action"
-        title={copy.solveTitle}
-        subtitle={copy.solveSubtitle}
-        active={activeFeature === "solve"}
-        onClick={() => onRunAction("solve", copy.startSolve, copy.solveError, "START_AUTO_SOLVE_ALL", true)}
-      />
-    </div>
-  </div>
-);
-
-export const PopupWorkspaceCard: React.FC<{
-  copy: PopupCopy;
-  isAuthenticated: boolean;
-  feedback: string;
-  onOpenSidePanel: () => void;
-  secondaryActionStyle: React.CSSProperties;
-  userEmail: string;
-}> = ({ copy, isAuthenticated, feedback, onOpenSidePanel, secondaryActionStyle, userEmail }) => (
-  <div className="popup-section" style={{ ...popupCardStyle, padding: "10px 11px" }}>
-    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", alignItems: "start", gap: 10 }}>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 650, color: "#e9fbff", letterSpacing: 0.2 }}>
-          {copy.workspaceTitle}
-        </div>
-        <div style={{ fontSize: 10, color: "#90a8c4", marginTop: 3, lineHeight: 1.45 }}>
-          {isAuthenticated ? `${copy.workspaceDesc}${userEmail ? ` (${userEmail})` : ""}` : copy.workspaceLocked}
-        </div>
-      </div>
-      {isAuthenticated ? (
-        <button className="popup-open-panel" onClick={onOpenSidePanel} style={secondaryActionStyle}>
-          {copy.openPanel}
-        </button>
-      ) : null}
-    </div>
-    <div style={{ marginTop: 9, paddingTop: 8, borderTop: "1px solid rgba(255, 255, 255, 0.06)" }}>
-      {isAuthenticated ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 10, color: "#90a8c4" }}>
-          <span style={{ color: "#a8bdd3" }}>{copy.shortcuts}</span>
-          <KeyPill>Alt+Q</KeyPill>
-          <span>{copy.capture}</span>
-          <KeyPill>Alt+W</KeyPill>
-          <span>{copy.autoDetect}</span>
-          <span style={{ opacity: 0.5 }}>/</span>
-          <span>{copy.autoSolve}</span>
-        </div>
-      ) : (
-        <div style={{ fontSize: 10, color: "#90a8c4", lineHeight: 1.45 }}>
-          {feedback || copy.continuePrompt}
-        </div>
-      )}
-    </div>
-  </div>
-);
-
-export const PopupStatusCard: React.FC<{ status: string }> = ({ status }) =>
-  status ? (
-    <div
-      className="popup-section"
+export const PopupSessionGateSection: React.FC<PopupSessionGateProps> = ({
+  copy,
+  isSessionPending,
+  isServerUnavailable,
+  onRetry,
+  onLogout,
+}) => {
+  return (
+    <OrbitSurface
+      variant="default"
       style={{
-        ...popupCardStyle,
-        padding: "10px 12px",
-        color: "#fca5a5",
-        borderColor: "rgba(239, 68, 68, 0.2)",
-        background: "linear-gradient(180deg, rgba(69, 26, 26, 0.8), rgba(45, 15, 15, 0.75))",
-        fontSize: 11,
-        lineHeight: 1.5,
+        padding: orbitSpacing[4],
+        marginTop: orbitSpacing[2],
+        marginBottom: orbitSpacing[2],
+        textAlign: "center",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: orbitSpacing[3],
       }}
     >
-      {status}
-    </div>
-  ) : null;
+      {isSessionPending ? (
+        <OrbitStatus tone="info" label={copy.validatingSession} />
+      ) : isServerUnavailable ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: orbitSpacing[2], width: "100%" }}>
+          <OrbitStatus tone="error" label={copy.sessionUnavailable} secondaryText={copy.sessionUnavailableHint} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: orbitSpacing[2], marginTop: orbitSpacing[1] }}>
+            <OrbitButton variant="primary" size="sm" onClick={onRetry}>
+              {copy.retrySession}
+            </OrbitButton>
+            <OrbitButton variant="secondary" size="sm" onClick={onLogout}>
+              {copy.logout}
+            </OrbitButton>
+          </div>
+        </div>
+      ) : null}
+    </OrbitSurface>
+  );
+};
 
-const MetricCard: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div
-    className="popup-metric"
-    style={{
-      borderRadius: 12,
-      padding: "8px 9px 8px",
-      height: 68,
-      backgroundColor: "rgba(15, 23, 42, 0.6)",
-      border: "1px solid rgba(255, 255, 255, 0.06)",
-      backdropFilter: "blur(10px)",
-      transition: "transform 0.18s ease",
-      willChange: "transform",
-      display: "flex",
-      flexDirection: "column",
-      justifyContent: "space-between",
-      boxSizing: "border-box",
-    }}
-  >
+export interface PopupFeedbackBannerProps {
+  feedback: UserFeedback | null;
+}
+
+export const PopupFeedbackBanner: React.FC<PopupFeedbackBannerProps> = ({ feedback }) => {
+  if (!feedback) return null;
+
+  return (
     <div
+      role={feedback.tone === "error" ? "alert" : "status"}
       style={{
-        fontSize: 9,
-        color: "#94a3b8",
-        height: 12,
-        marginBottom: 5,
-        fontWeight: 600,
-        lineHeight: 1.1,
+        padding: `${orbitSpacing[2]}px ${orbitSpacing[3]}px`,
+        borderRadius: orbitRadius.md,
+        fontSize: orbitTypography.fontSize.xs,
+        lineHeight: 1.4,
+        marginTop: orbitSpacing[2],
         display: "flex",
         alignItems: "center",
+        justifyContent: "space-between",
+        gap: orbitSpacing[2],
+        background:
+          feedback.tone === "error"
+            ? orbitColors.semantic.errorSurface
+            : feedback.tone === "warning"
+              ? orbitColors.semantic.warningSurface
+              : feedback.tone === "success"
+                ? orbitColors.semantic.successSurface
+                : orbitColors.semantic.infoSurface,
+        border: `1px solid ${
+          feedback.tone === "error"
+            ? orbitColors.semantic.errorBorder
+            : feedback.tone === "warning"
+              ? orbitColors.semantic.warningBorder
+              : feedback.tone === "success"
+                ? orbitColors.semantic.successBorder
+                : orbitColors.semantic.infoBorder
+        }`,
+        color:
+          feedback.tone === "error"
+            ? orbitColors.semantic.error
+            : feedback.tone === "warning"
+              ? orbitColors.semantic.warning
+              : feedback.tone === "success"
+                ? orbitColors.semantic.success
+                : orbitColors.semantic.info,
       }}
     >
-      {label}
+      <span>{feedback.message}</span>
+      {feedback.code ? (
+        <span
+          style={{
+            fontSize: 10,
+            opacity: 0.7,
+            fontFamily: orbitTypography.codeFamily,
+            flexShrink: 0,
+          }}
+        >
+          {feedback.code}
+        </span>
+      ) : null}
     </div>
-    <div
-      style={{
-        fontSize: 12,
-        fontWeight: 650,
-        color: "#f8fafc",
-        lineHeight: 1.15,
-        height: 28,
-        display: "flex",
-        alignItems: "flex-end",
-        letterSpacing: -0.2,
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-      }}
-    >
-      <span
-        style={{
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          display: "block",
-          width: "100%",
-        }}
-      >
-        {value}
-      </span>
-    </div>
-  </div>
-);
-
-const FeatureButton: React.FC<{
-  className?: string;
-  title: string;
-  subtitle: string;
-  active?: boolean;
-  onClick: () => void;
-}> = ({ className, title, subtitle, active, onClick }) => (
-  <button
-    className={className}
-    onClick={onClick}
-    style={{
-      width: "100%",
-      minHeight: 76,
-      padding: "11px 11px 10px",
-      borderRadius: 12,
-      border: `1px solid ${active ? "rgba(99, 102, 241, 0.4)" : "rgba(255, 255, 255, 0.06)"}`,
-      background: active
-        ? "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.18))"
-        : "linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
-      color: active ? "#ffffff" : "#f1f5f9",
-      cursor: "pointer",
-      textAlign: "left",
-      fontFamily: "inherit",
-      transition: "transform 0.18s ease, border-color 0.18s ease, background 0.18s ease",
-      willChange: "transform",
-    }}
-  >
-    <div style={{ fontSize: 13, fontWeight: 650, letterSpacing: -0.1, lineHeight: 1.15 }}>{title}</div>
-    <div style={{ fontSize: 10, marginTop: 4, color: active ? "#a5b4fc" : "#94a3b8", lineHeight: 1.35 }}>
-      {subtitle}
-    </div>
-  </button>
-);
-
-const KeyPill: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <code
-    style={{
-      padding: "4px 8px",
-      borderRadius: 8,
-      backgroundColor: "rgba(15, 23, 42, 0.6)",
-      border: "1px solid rgba(255, 255, 255, 0.06)",
-      color: "#a5b4fc",
-      fontSize: 10,
-      fontWeight: 600,
-    }}
-  >
-    {children}
-  </code>
-);
+  );
+};

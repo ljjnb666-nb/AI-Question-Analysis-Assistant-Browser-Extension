@@ -55,7 +55,8 @@ const passwordToggleStyle: React.CSSProperties = {
 export const AuthVerificationCodeInput: React.FC<{
   value: string;
   onChange: (value: string) => void;
-}> = ({ value, onChange }) => {
+  ariaLabel?: string;
+}> = ({ value, onChange, ariaLabel = "验证码" }) => {
   const digits = value.padEnd(6, " ").slice(0, 6).split("");
 
   const handleValueChange = (index: number, raw: string) => {
@@ -75,12 +76,17 @@ export const AuthVerificationCodeInput: React.FC<{
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 6 }}>
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 6 }}
+    >
       {digits.map((digit, index) => (
         <input
           key={index}
           inputMode="numeric"
           maxLength={6}
+          aria-label={`${ariaLabel} 第 ${index + 1} 位`}
           value={digit.trim()}
           onChange={(event) => handleValueChange(index, event.target.value)}
           style={verificationSlotStyle}
@@ -98,22 +104,57 @@ export const AuthPasswordField: React.FC<{
   placeholder: string;
   showLabel: string;
   hideLabel: string;
-}> = ({ value, onChange, visible, onToggleVisibility, placeholder, showLabel, hideLabel }) => (
-  <div style={passwordFieldShellStyle}>
-    <input
-      type={visible ? "text" : "password"}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      style={passwordInputStyle}
-    />
-    {value ? (
-      <button type="button" onClick={onToggleVisibility} style={passwordToggleStyle}>
-        {visible ? hideLabel : showLabel}
-      </button>
-    ) : (
-      <span style={{ width: 28 }} />
-    )}
+  id?: string;
+  label?: string;
+  ariaLabel?: string;
+}> = ({
+  value,
+  onChange,
+  visible,
+  onToggleVisibility,
+  placeholder,
+  showLabel,
+  hideLabel,
+  id,
+  label,
+  ariaLabel,
+}) => (
+  <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
+    {label ? (
+      <label
+        htmlFor={id}
+        style={{
+          fontSize: 12,
+          fontWeight: 500,
+          color: "#94a3b8",
+        }}
+      >
+        {label}
+      </label>
+    ) : null}
+    <div style={passwordFieldShellStyle}>
+      <input
+        id={id}
+        type={visible ? "text" : "password"}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        aria-label={ariaLabel || label || placeholder}
+        style={passwordInputStyle}
+      />
+      {value ? (
+        <button
+          type="button"
+          onClick={onToggleVisibility}
+          aria-label={visible ? hideLabel : showLabel}
+          style={passwordToggleStyle}
+        >
+          {visible ? hideLabel : showLabel}
+        </button>
+      ) : (
+        <span style={{ width: 28 }} />
+      )}
+    </div>
   </div>
 );
 

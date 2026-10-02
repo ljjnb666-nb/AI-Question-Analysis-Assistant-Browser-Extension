@@ -1,6 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import gsap from "gsap";
-import { useGSAP } from "@gsap/react";
 import {
   isInjectablePageUrl,
   sendToActiveTab,
@@ -11,7 +9,6 @@ import { getProvider, getProviderShortName } from "@/shared/ai/providers";
 import { isProviderRuntimeConfigured } from "@/shared/ai/parseResultAuthority";
 import { logEvent } from "@/shared/utils/analytics";
 import { loadSettings } from "@/shared/utils/storage";
-import { getAuthText } from "@/shared/auth/authText";
 import { useAuthController } from "@/shared/auth/useAuthController";
 import {
   clearProtectedWorkOwner,
@@ -19,54 +16,52 @@ import {
   terminateRecordedProtectedWork,
   type ProtectedWorkKind,
 } from "@/shared/auth/protectedWorkOwner";
+import { userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
+import { orbitColors, orbitSpacing, orbitTypography } from "@/shared/ui/orbitTokens";
 import { createPopupAuthority } from "./popupAuthority";
-import {
-  SHARED_FONT_FAMILY,
-  primaryButtonStyle,
-  secondaryButtonStyle,
-  uiInputStyle,
-} from "@/shared/ui/extensionUi";
 import { POPUP_COPY, type PopupLang } from "./popupCopy";
+import { derivePopupViewState } from "./popupViewState";
 import {
-  PopupActionsCard,
-  PopupAuthCard,
-  PopupHeroCard,
-  PopupSessionGateCard,
-  PopupStatusCard,
-  PopupWorkspaceCard,
+  PopupAuthSection,
+  PopupContextLine,
+  PopupFeedbackBanner,
+  PopupFooter,
+  PopupHeader,
+  PopupPrimaryCommand,
+  PopupRecoverySection,
+  PopupSecondaryCommands,
+  PopupSessionGateSection,
 } from "./popupSections";
 
 type ActiveFeature = "manual" | "auto" | "fullpage" | "solve" | null;
 
-gsap.registerPlugin(useGSAP);
-
 const shellStyle: React.CSSProperties = {
-  padding: "10px",
+  padding: `${orbitSpacing[3]}px`,
   display: "flex",
   flexDirection: "column",
-  gap: 8,
   width: "100%",
   minWidth: 0,
   boxSizing: "border-box",
-  background:
-    "radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.14), transparent 30%), radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.1), transparent 30%), linear-gradient(180deg, #070913 0%, #0f111a 60%, #070913 100%)",
-  color: "#f8fafc",
-  fontFamily: SHARED_FONT_FAMILY,
+  background: orbitColors.bg.canvas,
+  color: orbitColors.text.primary,
+  fontFamily: orbitTypography.fontFamily,
 };
 
 export const PopupApp: React.FC = () => {
-  const scopeRef = useRef<HTMLDivElement | null>(null);
-  const [status, setStatus] = useState("");
+  const [feedback, setFeedback] = useState<UserFeedback | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [providerId, setProviderId] = useState("anthropic");
   const [providerName, setProviderName] = useState("Claude");
   const [lang, setLang] = useState<PopupLang>("zh");
-  const [loaded, setLoaded] = useState(false);
+  const [_loaded, setLoaded] = useState(false);
   const [activeFeature, setActiveFeature] = useState<ActiveFeature>(null);
+  const [isPageInjectable, setIsPageInjectable] = useState(true);
+  const [reviewReason, setReviewReason] = useState<string | null>(null);
+
   const copy = POPUP_COPY[lang];
-  const authText = getAuthText(lang, "popup");
   const auth = useAuthController({ lang, variant: "popup" });
   const { isAuthenticated, isSessionPending, isServerUnavailable } = auth;
+
   // Handler-level authority reads the coordinator's CURRENT state directly,
   // not an effect-lagged ref or a render snapshot (AUTH-UI-INV-09).
   const authority = createPopupAuthority(auth.session);
@@ -80,6 +75,7 @@ export const PopupApp: React.FC = () => {
   useEffect(() => {
     sessionRef.current = auth.session;
   }, [auth.session]);
+
   useEffect(() => {
     let wasAuthenticated: boolean | null = null;
     const applySessionState = () => {
@@ -120,111 +116,34 @@ export const PopupApp: React.FC = () => {
     logEvent("popup_opened");
   }, []);
 
-  // UI-00A: the shared provider-contract check replaces the local
-  // `key present or ollama` copy so every surface agrees on "configured".
+  // Check active tab injectable capability
+  useEffect(() => {
+    try {
+      if (typeof chrome !== "undefined" && chrome.tabs?.query) {
+        void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+          if (tab?.url) {
+            setIsPageInjectable(isInjectablePageUrl(tab.url));
+          }
+        });
+      }
+    } catch {
+      // Tab query unavailable in test mock without tabs
+    }
+  }, []);
+
+  // UI-00A: shared provider-contract check
   const hasApiKey = isProviderRuntimeConfigured(getProvider(providerId), { apiKey });
-  const isRuntimeConfigured = isAuthenticated && hasApiKey;
 
-  useGSAP(
-    () => {
-      gsap.fromTo(
-        ".popup-hero",
-        { y: 14, autoAlpha: 0 },
-        {
-          y: 0,
-          autoAlpha: 1,
-          duration: 0.6,
-          ease: "power2.out",
-          clearProps: "transform,opacity,visibility",
-        },
-      );
-      gsap.fromTo(
-        ".popup-section",
-        { y: 14, autoAlpha: 0 },
-        {
-          y: 0,
-          autoAlpha: 1,
-          duration: 0.45,
-          stagger: 0.08,
-          ease: "power2.out",
-          delay: 0.08,
-          clearProps: "transform,opacity,visibility",
-        },
-      );
-      gsap.fromTo(
-        ".popup-metric",
-        { y: 10, autoAlpha: 0 },
-        {
-          y: 0,
-          autoAlpha: 1,
-          duration: 0.38,
-          stagger: 0.05,
-          ease: "power2.out",
-          delay: 0.12,
-          clearProps: "transform,opacity,visibility",
-        },
-      );
-      gsap.fromTo(
-        ".popup-action",
-        { x: -10, autoAlpha: 0 },
-        {
-          x: 0,
-          autoAlpha: 1,
-          duration: 0.48,
-          stagger: 0.06,
-          ease: "power2.out",
-          delay: 0.16,
-          clearProps: "transform,opacity,visibility",
-        },
-      );
-
-      const hoverTargets = gsap.utils.toArray<HTMLElement>(
-        ".popup-hero, .popup-section, .popup-action, .popup-metric, .popup-open-panel",
-      );
-      const cleanups = hoverTargets.map((element) => {
-        const isAction = element.classList.contains("popup-action");
-        const isMetric = element.classList.contains("popup-metric");
-        const isHero = element.classList.contains("popup-hero");
-        const onEnter = () => {
-          gsap.to(element, {
-            y: isMetric ? 0 : isAction ? -2 : -3,
-            scale: isMetric ? 1.015 : 1,
-            boxShadow: isHero
-              ? "0 16px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12)"
-              : isAction
-                ? "0 12px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.08)"
-                : "0 16px 32px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.1)",
-            duration: 0.2,
-            ease: "power2.out",
-          });
-        };
-        const onLeave = () => {
-          gsap.to(element, {
-            y: 0,
-            scale: 1,
-            boxShadow: isMetric
-              ? "none"
-              : isAction
-                ? "none"
-                : "0 4px 20px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06)",
-            duration: 0.2,
-            ease: "power2.out",
-          });
-        };
-        element.addEventListener("mouseenter", onEnter);
-        element.addEventListener("mouseleave", onLeave);
-        return () => {
-          element.removeEventListener("mouseenter", onEnter);
-          element.removeEventListener("mouseleave", onLeave);
-        };
-      });
-
-      return () => {
-        cleanups.forEach((cleanup) => cleanup());
-      };
-    },
-    { scope: scopeRef },
-  );
+  const viewState = derivePopupViewState({
+    authStatus: auth.status,
+    isAuthenticated,
+    isSessionPending,
+    isServerUnavailable,
+    isPageInjectable,
+    hasApiKey,
+    activeFeature,
+    reviewReason,
+  });
 
   const openSidePanelDirect = async () => {
     try {
@@ -249,26 +168,28 @@ export const PopupApp: React.FC = () => {
     // Handler-level fail closed: the button being visible is not authority.
     // Only a server-validated session may dispatch protected runtime actions.
     if (!isAuthenticatedNow()) {
-      setStatus(
-        lang === "en"
-          ? "Sign in with a verified session before using this action."
-          : "请先通过登录验证后再使用该功能。",
+      setFeedback(
+        userFeedback("warning", copy.authRequiredWarning, {
+          code: "AUTH_REQUIRED",
+        }),
       );
       setActiveFeature(null);
       return;
     }
+
     // UI-00A minimal P0 gate: Auto Solve drives real page mutations, so it
     // must not start without a configured provider. Detection / manual
     // capture stay available — they produce no provider answers.
     if (messageType === "START_AUTO_SOLVE_ALL" && !hasApiKey) {
-      setStatus(
-        lang === "en"
-          ? "Configure an AI provider in Settings before starting Auto Solve."
-          : "请先在设置中配置 AI 服务，再启动自动答题。",
+      setFeedback(
+        userFeedback("warning", copy.providerMissingWarning, {
+          code: "PROVIDER_REQUIRED",
+        }),
       );
       setActiveFeature(null);
       return;
     }
+
     // AUTH-UI-INV-15: long-running protected work records its cross-surface
     // owner BEFORE dispatch, with the exact target tab, so an auth loss on
     // any surface can find and terminate the real owner. Hoisted so the
@@ -280,143 +201,227 @@ export const PopupApp: React.FC = () => {
           ? "fullPage"
           : null;
     let ownerTabId: number | undefined;
+
     try {
       setActiveFeature(feature);
-      setStatus(startText);
+      setFeedback(userFeedback("info", startText));
       if (openPanel) await openSidePanelDirect();
+
       // Last-responsible-moment recheck: opening the panel awaited, so the
       // session may have lapsed since the entry gate (AUTH-UI-INV-12).
       if (!isAuthenticatedNow()) {
-        setStatus(
-          lang === "en"
-            ? "Sign-in verification ended. The action was not started."
-            : "登录验证已失效，该操作未开始。",
+        setFeedback(
+          userFeedback("warning", copy.sessionExpiredNotice, {
+            code: "AUTHORITY_LOST",
+          }),
         );
         setActiveFeature(null);
         return;
       }
+
       if (longRunningKind) {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tab?.id || !isInjectablePageUrl(tab.url)) {
-          setStatus(errorText);
+          setFeedback(userFeedback("error", errorText, { code: "PAGE_INJECTION_FAILED" }));
           setActiveFeature(null);
           return;
         }
         ownerTabId = tab.id;
         await markProtectedWorkOwner(longRunningKind, ownerTabId);
+
         if (!isAuthenticatedNow()) {
           await clearProtectedWorkOwner(longRunningKind, ownerTabId);
-          setStatus(
-            lang === "en"
-              ? "Sign-in verification ended. The action was not started."
-              : "登录验证已失效，该操作未开始。",
+          setFeedback(
+            userFeedback("warning", copy.sessionExpiredNotice, {
+              code: "AUTHORITY_LOST",
+            }),
           );
           setActiveFeature(null);
           return;
         }
+
         // Dispatch to the exact recorded owner tab (guard re-checks at every
         // await boundary inside the messaging chain).
         await sendToTabWithBootstrap(ownerTabId, { type: messageType }, isAuthenticatedNow);
       } else {
         await sendToActiveTab({ type: messageType }, isAuthenticatedNow);
       }
-      window.close();
-    } catch {
+
+      if (typeof window !== "undefined" && window.close) {
+        window.close();
+      }
+    } catch (err) {
       // A failed dispatch must not leave an owner record behind.
       if (ownerTabId != null && longRunningKind) {
         void clearProtectedWorkOwner(longRunningKind, ownerTabId);
       }
-      setStatus(errorText);
+      const rawMsg = err instanceof Error ? err.message : String(err || "");
+      if (rawMsg.includes("STALE") || rawMsg.includes("AUTHORITY_LOST")) {
+        setReviewReason(rawMsg);
+        setFeedback(userFeedback("warning", copy.safetyCheckWarning, { code: rawMsg }));
+      } else {
+        setFeedback(
+          userFeedback("error", errorText, {
+            code: "DISPATCH_FAILED",
+            technicalDetail: rawMsg,
+          }),
+        );
+      }
       setActiveFeature(null);
     }
   };
 
   const handleOpenSidePanel = async () => {
     if (!isAuthenticatedNow()) {
-      setStatus(
-        lang === "en"
-          ? "Sign in with a verified session before opening the workspace."
-          : "请先通过登录验证后再打开工作台。",
+      setFeedback(
+        userFeedback("warning", copy.authRequiredWarning, {
+          code: "AUTH_REQUIRED",
+        }),
       );
       return;
     }
     await openSidePanelDirect();
-    window.close();
+    if (typeof window !== "undefined" && window.close) {
+      window.close();
+    }
   };
 
-  // The retry gate is only for indeterminate states (pending validation or
-  // unreachable server). A server-REJECTED session converges to the auth form
-  // with a generic "sign in again" hint.
+  const handleRefreshPage = () => {
+    try {
+      if (typeof chrome !== "undefined" && chrome.tabs?.reload) {
+        void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+          if (tab?.id) void chrome.tabs.reload(tab.id);
+        });
+      }
+    } catch {
+      // Ignore in test
+    }
+  };
+
+  const handleReDetect = () => {
+    setReviewReason(null);
+    void runAction("auto", copy.startDetect, copy.detectError, "START_AUTO_DETECT", true);
+  };
+
+  const toggleLang = () => {
+    setLang((prev) => (prev === "zh" ? "en" : "zh"));
+  };
+
   const sessionGateVisible = isSessionPending || isServerUnavailable;
 
   return (
-    <div ref={scopeRef} style={shellStyle}>
-      <PopupHeroCard
+    <div style={shellStyle}>
+      <PopupHeader
+        appName={copy.appName}
+        viewState={viewState}
+        lang={lang}
         copy={copy}
-        hasApiKey={hasApiKey}
+        onOpenSettings={() => void handleOpenSidePanel()}
+        onToggleLang={toggleLang}
+        onLogout={() => void auth.handleLogout()}
         isAuthenticated={isAuthenticated}
-        isRuntimeConfigured={isRuntimeConfigured}
-        loaded={loaded}
-        providerName={providerName}
-        sessionStatus={auth.status}
-        validatingSessionText={authText.validatingSession}
-        view={auth.view}
       />
 
       {isAuthenticated ? (
-        <PopupActionsCard activeFeature={activeFeature} copy={copy} onRunAction={(...args) => void runAction(...args)} />
+        <>
+          <PopupContextLine
+            isPageInjectable={isPageInjectable}
+            hasApiKey={hasApiKey}
+            providerName={providerName}
+            copy={copy}
+          />
+
+          <PopupPrimaryCommand
+            copy={copy}
+            lang={lang}
+            isRunning={activeFeature !== null}
+            activeFeature={activeFeature}
+            onSolve={() =>
+              void runAction(
+                "solve",
+                copy.startSolve,
+                copy.solveError,
+                "START_AUTO_SOLVE_ALL",
+                true,
+              )
+            }
+            isAuthenticated={isAuthenticated}
+            isPageInjectable={isPageInjectable}
+            hasApiKey={hasApiKey}
+          />
+
+          <PopupSecondaryCommands
+            copy={copy}
+            lang={lang}
+            isRunning={activeFeature !== null}
+            activeFeature={activeFeature}
+            onDetect={() =>
+              void runAction(
+                "auto",
+                copy.startDetect,
+                copy.detectError,
+                "START_AUTO_DETECT",
+                true,
+              )
+            }
+            onManualCapture={() =>
+              void runAction(
+                "manual",
+                copy.startManual,
+                copy.manualError,
+                "START_MANUAL_CAPTURE",
+                false,
+              )
+            }
+            onFullPageScan={() =>
+              void runAction(
+                "fullpage",
+                copy.startFullPage,
+                copy.fullPageError,
+                "START_FULL_PAGE_DETECT",
+                true,
+              )
+            }
+            isAuthenticated={isAuthenticated}
+            isPageInjectable={isPageInjectable}
+            hasApiKey={hasApiKey}
+          />
+
+          {viewState === "provider_setup_required" ||
+          viewState === "review_required" ||
+          viewState === "page_unavailable" ||
+          viewState === "recoverable_error" ? (
+            <PopupRecoverySection
+              viewState={viewState}
+              lang={lang}
+              onOpenSettings={() => void handleOpenSidePanel()}
+              onOpenWorkspace={() => void handleOpenSidePanel()}
+              onRefreshPage={handleRefreshPage}
+              onReDetect={handleReDetect}
+              onRetryValidation={() => void auth.retryValidation()}
+              onLogout={() => void auth.handleLogout()}
+            />
+          ) : null}
+
+          <PopupFooter
+            copy={copy}
+            onOpenWorkspace={() => void handleOpenSidePanel()}
+            isAuthenticated={isAuthenticated}
+          />
+        </>
       ) : sessionGateVisible ? (
-        <PopupSessionGateCard
-          authText={authText}
-          isBusy={isSessionPending}
+        <PopupSessionGateSection
+          copy={copy}
+          isSessionPending={isSessionPending}
           isServerUnavailable={isServerUnavailable}
           onRetry={() => void auth.retryValidation()}
           onLogout={() => void auth.handleLogout()}
         />
       ) : (
-        <PopupAuthCard
-          auth={auth}
-          authText={authText}
-          copy={copy}
-          gateInputStyle={gateInputStyle}
-          primaryGateButtonStyle={primaryGateButtonStyle}
-          secondaryGateButtonStyle={secondaryGateButtonStyle}
-        />
+        <PopupAuthSection auth={auth} copy={copy} />
       )}
 
-      <PopupWorkspaceCard
-        copy={copy}
-        feedback={auth.feedback}
-        isAuthenticated={isAuthenticated}
-        onOpenSidePanel={() => void handleOpenSidePanel()}
-        secondaryActionStyle={secondaryActionStyle}
-        userEmail={auth.userEmail}
-      />
-
-      <PopupStatusCard status={status} />
+      <PopupFeedbackBanner feedback={feedback} />
     </div>
   );
-};
-
-const secondaryActionStyle: React.CSSProperties = {
-  ...primaryButtonStyle,
-  padding: "9px 12px",
-  fontSize: 11,
-};
-
-const primaryGateButtonStyle: React.CSSProperties = {
-  ...primaryButtonStyle,
-  width: "100%",
-  textAlign: "center",
-};
-
-const secondaryGateButtonStyle: React.CSSProperties = {
-  ...secondaryButtonStyle,
-  width: "100%",
-  textAlign: "center",
-};
-
-const gateInputStyle: React.CSSProperties = {
-  ...uiInputStyle,
-  fontSize: 12,
 };
