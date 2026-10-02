@@ -179,7 +179,7 @@ export const OrbitButton = React.forwardRef<HTMLButtonElement, OrbitButtonProps>
               border: `${orbitComponent.spinner.borderWidth}px solid currentColor`,
               borderTopColor: "transparent",
               borderRadius: orbitRadius.pill,
-              animation: prefersReducedMotion ? "none" : "orbit-spin 0.8s linear infinite",
+              animation: prefersReducedMotion ? "none" : `orbit-spin ${orbitTokens.motion.spinner} infinite`,
             }}
           />
         ) : null}
@@ -678,6 +678,8 @@ export interface OrbitToggleProps {
   label?: string;
   disabled?: boolean;
   id?: string;
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
 }
 
 export const OrbitToggle: React.FC<OrbitToggleProps> = ({
@@ -686,12 +688,25 @@ export const OrbitToggle: React.FC<OrbitToggleProps> = ({
   label,
   disabled = false,
   id,
+  "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledBy,
 }) => {
   const generatedId = React.useId();
   const toggleId = id ?? generatedId;
+  const labelId = `${toggleId}-label`;
 
   const prefersReducedMotion = usePrefersReducedMotion();
   const { isFocusVisible, onFocus: handleFocusVisible, onBlur: handleBlurVisible } = useFocusVisible(disabled);
+
+  // Compute effective accessible labelling
+  const effectiveAriaLabelledBy = ariaLabelledBy ?? (label ? labelId : undefined);
+  const effectiveAriaLabel = effectiveAriaLabelledBy ? undefined : ariaLabel;
+
+  if (process.env.NODE_ENV !== "production") {
+    if (!label && !ariaLabel && !ariaLabelledBy) {
+      console.warn("OrbitToggle: Switch rendered without accessible name. Provide label, aria-label, or aria-labelledby.");
+    }
+  }
 
   const trackTransition = prefersReducedMotion
     ? "none"
@@ -700,6 +715,58 @@ export const OrbitToggle: React.FC<OrbitToggleProps> = ({
   const thumbTransition = prefersReducedMotion
     ? "none"
     : `transform ${orbitTokens.motion.fast}`;
+
+  const toggleContent = (
+    <button
+      id={toggleId}
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={effectiveAriaLabel}
+      aria-labelledby={effectiveAriaLabelledBy}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
+      onFocus={handleFocusVisible}
+      onBlur={handleBlurVisible}
+      style={{
+        width: orbitComponent.toggle.trackWidth,
+        height: orbitComponent.toggle.trackHeight,
+        borderRadius: orbitRadius.pill,
+        background: disabled
+          ? orbitColors.control.toggleDisabledBg
+          : checked
+            ? orbitColors.brand.primary
+            : orbitColors.bg.surfaceInteractive,
+        border: `1px solid ${isFocusVisible ? orbitColors.brand.primary : orbitColors.border.default}`,
+        position: "relative",
+        cursor: disabled ? "not-allowed" : "pointer",
+        padding: orbitComponent.toggle.trackPadding,
+        boxSizing: "border-box",
+        outline: isFocusVisible ? orbitTokens.focus.outline : "none",
+        outlineOffset: orbitTokens.focus.outlineOffset,
+        boxShadow: isFocusVisible ? orbitTokens.focus.focusRing : "none",
+        transition: trackTransition,
+      }}
+    >
+      <span
+        style={{
+          display: "block",
+          width: orbitComponent.toggle.thumbSize,
+          height: orbitComponent.toggle.thumbSize,
+          borderRadius: orbitRadius.pill,
+          background: disabled ? orbitColors.text.muted : orbitColors.control.onAccent,
+          transform: checked
+            ? `translateX(${orbitComponent.toggle.thumbTranslateX}px)`
+            : "translateX(0px)",
+          transition: thumbTransition,
+        }}
+      />
+    </button>
+  );
+
+  if (!label) {
+    return toggleContent;
+  }
 
   return (
     <label
@@ -713,59 +780,16 @@ export const OrbitToggle: React.FC<OrbitToggleProps> = ({
         fontFamily: orbitTypography.fontFamily,
       }}
     >
-      <button
-        id={toggleId}
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        disabled={disabled}
-        onClick={() => !disabled && onChange(!checked)}
-        onFocus={handleFocusVisible}
-        onBlur={handleBlurVisible}
+      {toggleContent}
+      <span
+        id={labelId}
         style={{
-          width: orbitComponent.toggle.trackWidth,
-          height: orbitComponent.toggle.trackHeight,
-          borderRadius: orbitRadius.pill,
-          background: disabled
-            ? orbitColors.control.toggleDisabledBg
-            : checked
-              ? orbitColors.brand.primary
-              : orbitColors.bg.surfaceInteractive,
-          border: `1px solid ${isFocusVisible ? orbitColors.brand.primary : orbitColors.border.default}`,
-          position: "relative",
-          cursor: disabled ? "not-allowed" : "pointer",
-          padding: orbitComponent.toggle.trackPadding,
-          boxSizing: "border-box",
-          outline: isFocusVisible ? orbitTokens.focus.outline : "none",
-          outlineOffset: orbitTokens.focus.outlineOffset,
-          boxShadow: isFocusVisible ? orbitTokens.focus.focusRing : "none",
-          transition: trackTransition,
+          fontSize: orbitTypography.fontSize.sm,
+          color: disabled ? orbitColors.text.muted : orbitColors.text.primary,
         }}
       >
-        <span
-          style={{
-            display: "block",
-            width: orbitComponent.toggle.thumbSize,
-            height: orbitComponent.toggle.thumbSize,
-            borderRadius: orbitRadius.pill,
-            background: disabled ? orbitColors.text.muted : orbitColors.control.onAccent,
-            transform: checked
-              ? `translateX(${orbitComponent.toggle.thumbTranslateX}px)`
-              : "translateX(0px)",
-            transition: thumbTransition,
-          }}
-        />
-      </button>
-      {label ? (
-        <span
-          style={{
-            fontSize: orbitTypography.fontSize.sm,
-            color: disabled ? orbitColors.text.muted : orbitColors.text.primary,
-          }}
-        >
-          {label}
-        </span>
-      ) : null}
+        {label}
+      </span>
     </label>
   );
 };

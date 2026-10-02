@@ -1,5 +1,6 @@
 import React from "react";
 import { orbitTokens, orbitColors, orbitSpacing, orbitRadius, orbitTypography } from "./orbitTokens";
+import { OrbitButton, type OrbitButtonVariant } from "./orbitPrimitives";
 
 export * from "./orbitTokens";
 export * from "./orbitPrimitives";
@@ -112,45 +113,40 @@ export const SectionCard: React.FC<{
   </section>
 );
 
-export const UiButton: React.FC<{
+export interface UiButtonProps {
   children: React.ReactNode;
-  onClick: () => void;
+  onClick: (e?: React.MouseEvent<HTMLButtonElement>) => void;
   primary?: boolean;
   danger?: boolean;
   disabled?: boolean;
-}> = ({ children, onClick, primary, danger, disabled }) => {
-  const [isFocused, setIsFocused] = React.useState(false);
-  const baseStyle = danger
-    ? dangerButtonStyle
-    : primary
-      ? primaryButtonStyle
-      : secondaryButtonStyle;
+  style?: React.CSSProperties;
+  className?: string;
+}
 
-  const focusStyle: React.CSSProperties = isFocused && !disabled
-    ? {
-        outline: orbitTokens.focus.outline,
-        outlineOffset: orbitTokens.focus.outlineOffset,
-        boxShadow: orbitTokens.focus.focusRing,
-      }
-    : {};
+export const UiButton: React.FC<UiButtonProps> = ({
+  children,
+  onClick,
+  primary,
+  danger,
+  disabled,
+  style,
+  className,
+}) => {
+  const variant: OrbitButtonVariant = danger
+    ? "danger"
+    : primary
+      ? "primary"
+      : "secondary";
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <OrbitButton
+      variant={variant}
       disabled={disabled}
-      onFocus={() => setIsFocused(true)}
-      onBlur={() => setIsFocused(false)}
-      style={{
-        ...baseStyle,
-        background: disabled ? orbitColors.control.disabledBg : baseStyle.background,
-        color: disabled ? orbitColors.text.muted : baseStyle.color,
-        border: disabled ? `1px solid ${orbitColors.border.subtle}` : baseStyle.border,
-        cursor: disabled ? "not-allowed" : "pointer",
-        ...focusStyle,
-      }}
+      onClick={onClick}
+      style={style}
+      className={className}
     >
       {children}
-    </button>
+    </OrbitButton>
   );
 };

@@ -32,6 +32,7 @@ import {
   setKeyboardModalityForTesting,
   getIsKeyboardModality,
 } from "./orbitFocus";
+import { UiButton } from "./extensionUi";
 import { userFeedback, mapKnownCodeFeedback, mapUserFacingError } from "./userFeedback";
 import { isParseResultFillAuthoritative } from "../ai/parseResultAuthority";
 import type { ParseResult } from "../types";
@@ -617,5 +618,102 @@ describe("Orbit Console Design System Foundation (UI-01 & RF-01)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Manual Trigger" }));
     expect(submitHandler).not.toHaveBeenCalled();
+  });
+
+  /* ==================================================
+   * REVIEW FIX 02 TEST SUITE (RF02-01 through RF02-08)
+   * ================================================== */
+
+  it("RF02-01: mouse focus UiButton does not display keyboard focus ring", () => {
+    render(<UiButton onClick={() => {}}>Legacy Action</UiButton>);
+    const btn = screen.getByRole("button", { name: "Legacy Action" });
+
+    setKeyboardModalityForTesting(false);
+    fireEvent.focus(btn);
+    expect(btn.style.outline).toContain("none");
+    expect(btn.style.boxShadow).toBe("");
+  });
+
+  it("RF02-02: keyboard focus UiButton displays visible focus ring", () => {
+    render(<UiButton onClick={() => {}} primary>Primary Legacy Action</UiButton>);
+    const btn = screen.getByRole("button", { name: "Primary Legacy Action" });
+
+    setKeyboardModalityForTesting(true);
+    fireEvent.focus(btn);
+    expect(btn.style.outline).toContain("solid");
+    expect(btn.style.boxShadow).toContain(orbitColors.brand.primary);
+
+    fireEvent.blur(btn);
+    expect(btn.style.outline).toContain("none");
+  });
+
+  it("RF02-03: reduced motion UiButton sets transition to none", () => {
+    const originalMatchMedia = window.matchMedia;
+    try {
+      window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+
+      render(<UiButton onClick={() => {}} danger>Danger Legacy Action</UiButton>);
+      const btn = screen.getByRole("button", { name: "Danger Legacy Action" });
+      expect(btn.style.transition).toBe("none");
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it("RF02-04: OrbitToggle with visible label sets correct accessible name", () => {
+    render(<OrbitToggle checked={false} onChange={() => {}} label="Auto Solve Enabled" />);
+    const switchEl = screen.getByRole("switch", { name: "Auto Solve Enabled" });
+    expect(switchEl).toBeDefined();
+    expect(switchEl.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("RF02-05: OrbitToggle with aria-label without visible label sets correct accessible name", () => {
+    render(<OrbitToggle checked={true} onChange={() => {}} aria-label="Stealth Mode" />);
+    const switchEl = screen.getByRole("switch", { name: "Stealth Mode" });
+    expect(switchEl).toBeDefined();
+    expect(switchEl.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("RF02-06: OrbitToggle with aria-labelledby correctly associates external heading/label", () => {
+    render(
+      <div>
+        <h4 id="settings-heading">Stream Answers</h4>
+        <OrbitToggle checked={true} onChange={() => {}} aria-labelledby="settings-heading" />
+      </div>
+    );
+    const switchEl = screen.getByRole("switch", { name: "Stream Answers" });
+    expect(switchEl).toBeDefined();
+    expect(switchEl.getAttribute("aria-labelledby")).toBe("settings-heading");
+  });
+
+  it("RF02-07: orbitPrimitives.tsx contains no hardcoded spinner duration or easing literals", () => {
+    const primitivesFile = fs.readFileSync(
+      path.resolve(__dirname, "orbitPrimitives.tsx"),
+      "utf-8"
+    );
+    expect(primitivesFile).not.toMatch(/0\.8s/);
+    expect(primitivesFile).not.toMatch(/800ms/);
+    expect(primitivesFile).not.toMatch(/linear\s+infinite/);
+
+    // Authoritative token reference
+    expect(orbitTokens.motion.duration.spinner).toBe(800);
+    expect(orbitTokens.motion.easing.linear).toBe("linear");
+    expect(orbitTokens.motion.spinner).toBe("800ms linear");
+  });
+
+  it("RF02-08: orbitFocus derives directly from color tokens without internal literal drift", () => {
+    expect(orbitTokens.focus.outline).toBe(`2px solid ${orbitColors.brand.primary}`);
+    expect(orbitTokens.focus.focusRing).toBe(
+      `0 0 0 2px ${orbitColors.bg.canvas}, 0 0 0 4px ${orbitColors.brand.primary}`
+    );
   });
 });

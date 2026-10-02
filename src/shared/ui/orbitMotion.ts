@@ -10,6 +10,7 @@ export const ORBIT_MOTION_DURATIONS = {
   microMs: orbitTokens.motion.duration.fast,
   normalMs: orbitTokens.motion.duration.normal,
   panelMs: orbitTokens.motion.duration.panel,
+  spinnerMs: orbitTokens.motion.duration.spinner,
 } as const;
 
 export const ORBIT_EASINGS = orbitTokens.motion.easing;
@@ -26,6 +27,7 @@ export function getPrefersReducedMotion(): boolean {
 
 /**
  * React hook that actively responds to prefers-reduced-motion media query changes.
+ * This is the AUTHORITATIVE runtime reduced-motion mechanism for Orbit primitives.
  */
 export function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState<boolean>(() => getPrefersReducedMotion());
@@ -85,7 +87,14 @@ export function ensureOrbitKeyframes(): void {
 }
 
 /**
- * CSS text for reduced motion support when injected into host documents or shadow DOM.
+ * ARCHITECTURAL CLARITY NOTE:
+ * This static CSS snippet is provided SOLELY for optional future injection into host documents,
+ * iframes, or isolated shadow DOM roots.
+ *
+ * Current Orbit primitives DO NOT depend on this stylesheet at runtime.
+ * The authoritative runtime reduced-motion behavior is entirely executed via the
+ * usePrefersReducedMotion() hook + design token bindings.
+ * Callers and host roots are NOT required to inject this CSS for Orbit primitives to work.
  */
 export const ORBIT_REDUCED_MOTION_CSS = `
 @media (prefers-reduced-motion: reduce) {

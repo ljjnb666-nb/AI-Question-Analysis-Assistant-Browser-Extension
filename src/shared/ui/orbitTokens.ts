@@ -12,6 +12,7 @@
  * - System typography with zero external downloads
  * - Accessible focus rings and reduced-motion compliance
  * - Single authoritative source of truth for motion, geometry, and tokens
+ * - No internal token drift: semantic aliases derive directly from base tokens
  */
 
 export const orbitColors = {
@@ -159,9 +160,12 @@ export const orbitShadow = {
   elevation: "0 8px 24px -4px rgba(0, 0, 0, 0.5)",
 } as const;
 
+/**
+ * Focus ring styles derived directly from authoritative color tokens without literal drift.
+ */
 export const orbitFocus = {
-  focusRing: "0 0 0 2px #0B0D11, 0 0 0 4px #2563EB",
-  outline: "2px solid #2563EB",
+  focusRing: `0 0 0 2px ${orbitColors.bg.canvas}, 0 0 0 4px ${orbitColors.brand.primary}`,
+  outline: `2px solid ${orbitColors.brand.primary}`,
   outlineOffset: "2px",
 } as const;
 
@@ -169,6 +173,7 @@ export const orbitMotionDurations = {
   fast: 140,
   normal: 180,
   panel: 220,
+  spinner: 800,
 } as const;
 
 export const orbitEasings = {
@@ -183,6 +188,7 @@ export const orbitMotion = {
   fast: `${orbitMotionDurations.fast}ms ${orbitEasings.default}`,
   normal: `${orbitMotionDurations.normal}ms ${orbitEasings.default}`,
   panel: `${orbitMotionDurations.panel}ms ${orbitEasings.default}`,
+  spinner: `${orbitMotionDurations.spinner}ms ${orbitEasings.linear}`,
   reducedMotionQuery: "@media (prefers-reduced-motion: reduce)",
 } as const;
 
@@ -236,6 +242,7 @@ export const orbitCssVariables: Record<string, string> = {
   "--oc-duration-fast": `${orbitMotionDurations.fast}ms`,
   "--oc-duration-normal": `${orbitMotionDurations.normal}ms`,
   "--oc-duration-panel": `${orbitMotionDurations.panel}ms`,
+  "--oc-duration-spinner": `${orbitMotionDurations.spinner}ms`,
 };
 
 /**
