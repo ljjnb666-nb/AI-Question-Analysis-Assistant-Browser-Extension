@@ -10,6 +10,7 @@ import { PopupFeedbackBanner, PopupRecoverySection, PopupPrimaryCommand } from "
 import { AuthPasswordField, AuthVerificationCodeInput } from "@/shared/auth/AuthFields";
 import { SettingsAccountSection } from "@/sidepanel/settingsSections";
 import { setKeyboardModalityForTesting } from "@/shared/ui/orbitFocus";
+import { orbitColors } from "@/shared/ui/orbitTokens";
 import { userFeedback } from "@/shared/ui/userFeedback";
 import { __resetStorageCacheForTests } from "@/shared/utils/storage";
 
@@ -91,17 +92,24 @@ const sessionApi = {
   sidePanel: { open: vi.fn(async () => ({})) },
 };
 
-type SessionPayload = { ok?: boolean; user?: { userId: string; email: string }; expiresAt?: number };
+type SessionPayload = { ok?: boolean; user?: { userId: string; email: string }; expiresAt?: number; status?: number };
 let sessionResponse: SessionPayload = { ok: true, user: { userId: "usr-1", email: "user@example.com" } };
 
-vi.stubGlobal("fetch", vi.fn(async (_url: string | URL, init?: { headers?: Record<string, string> }) => ({
-  ok: true,
-  status: 200,
-  json: async () => {
-    if (init?.headers?.Authorization) return sessionResponse;
-    return { ok: true, expiresAt: 4102444800000 };
-  },
-}) as Response));
+const createFetchMock = () =>
+  vi.fn(async (_url: string | URL, init?: { headers?: Record<string, string> }) => {
+    const isSessionAuth = Boolean(init?.headers?.Authorization);
+    const status = isSessionAuth ? (sessionResponse.status ?? (sessionResponse.ok === false ? 401 : 200)) : 200;
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => {
+        if (isSessionAuth) return sessionResponse;
+        return { ok: true, expiresAt: 4102444800000 };
+      },
+    } as Response;
+  });
+
+vi.stubGlobal("fetch", createFetchMock());
 
 beforeEach(() => {
   sentRuntimeMessages.length = 0;
@@ -110,14 +118,7 @@ beforeEach(() => {
   sessionStore.clear();
   storageListeners.length = 0;
   sessionResponse = { ok: true, user: { userId: "usr-1", email: "user@example.com" } };
-  vi.stubGlobal("fetch", vi.fn(async (_url: string | URL, init?: { headers?: Record<string, string> }) => ({
-    ok: true,
-    status: 200,
-    json: async () => {
-      if (init?.headers?.Authorization) return sessionResponse;
-      return { ok: true, expiresAt: 4102444800000 };
-    },
-  }) as Response));
+  vi.stubGlobal("fetch", createFetchMock());
   __resetStorageCacheForTests();
   store.set("appSettings", {
     userId: "usr-1",
@@ -249,7 +250,7 @@ describe("UI-02 Popup Commercial View Integration", () => {
     const solveBtn = await screen.findByRole("button", { name: /解析并填答|Solve & Fill/ });
     expect(solveBtn).not.toBeDisabled();
     expect(screen.getByText(/提交仍由你确认|Submission stays manual/)).toBeInTheDocument();
-    expect(screen.getByText(/不会自动提交|No automatic submission/)).toBeInTheDocument();
+    expect(screen.queryByText(/不会自动提交|No automatic submission/)).toBeNull();
   });
 
   it("UI02-P02: authenticated with missing provider disables Solve & Fill and displays reason", async () => {
@@ -344,7 +345,6 @@ describe("UI-02 Popup Commercial View Integration", () => {
 
     // Trust copy is prominently visible
     expect(screen.getByText(POPUP_COPY.zh.trustCopy)).toBeInTheDocument();
-    expect(screen.getByText(POPUP_COPY.zh.noAutoSubmitNotice)).toBeInTheDocument();
   });
 });
 
@@ -843,5 +843,196 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
       // Ensure no Chinese characters in aria-label
       expect(input.getAttribute("aria-label")).not.toMatch(/[\u4e00-\u9fa5]/);
     }
+  });
+
+  it("RF04-A01: retry validation from AUTHORITY_LOST clears reviewReason when session recovers to authenticated", async () => {
+    const messaging = await import("@/shared/utils/messaging");
+    const sendTabMock = vi.mocked(messaging.sendToTabWithBootstrap);
+    sendTabMock.mockRejectedValueOnce({
+      code: "AUTHORITY_LOST",
+      message: "Session expired",
+    });
+
+    render(<PopupApp />);
+    const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await act(async () => {
+      fireEvent.click(solveBtn);
+    });
+
+    // ViewState is now recoverable_error
+    expect(await screen.findByText("操作失败")).toBeInTheDocument();
+    expect(screen.getByText("登录状态已失效")).toBeInTheDocument();
+
+    // Now user clicks "重新验证登录" (primary recovery action)
+    sessionResponse = { ok: true, user: { userId: "usr-1", email: "user@example.com" } };
+    const retryBtn = screen.getByRole("button", { name: "重新验证登录" });
+    await act(async () => {
+      fireEvent.click(retryBtn);
+    });
+
+    // Successfully recovered! Header returns to "已就绪", recovery card cleared
+    await waitFor(() => {
+      expect(screen.getByText("已就绪")).toBeInTheDocument();
+      expect(screen.queryByText("操作失败")).toBeNull();
+      expect(screen.queryByText("登录状态已失效")).toBeNull();
+    });
+  });
+
+  it("RF04-A02: retry validation from AUTHORITY_LOST shows signed-out view when session becomes unauthenticated", async () => {
+    const messaging = await import("@/shared/utils/messaging");
+    const sendTabMock = vi.mocked(messaging.sendToTabWithBootstrap);
+    sendTabMock.mockRejectedValueOnce({
+      code: "AUTHORITY_LOST",
+      message: "Session expired",
+    });
+
+    render(<PopupApp />);
+    const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await act(async () => {
+      fireEvent.click(solveBtn);
+    });
+
+    expect(await screen.findByText("操作失败")).toBeInTheDocument();
+
+    // Server returns unauthenticated on validation
+    sessionResponse = { ok: false };
+    const retryBtn = screen.getByRole("button", { name: "重新验证登录" });
+    await act(async () => {
+      fireEvent.click(retryBtn);
+    });
+
+    // Auth section takes over
+    await waitFor(() => {
+      expect(screen.getByText("未登录")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^登录$|^Sign In$/ })).toBeInTheDocument();
+    });
+  });
+
+  it("RF04-A03: retry validation from AUTHORITY_LOST shows server unavailable when endpoint fails", async () => {
+    const messaging = await import("@/shared/utils/messaging");
+    const sendTabMock = vi.mocked(messaging.sendToTabWithBootstrap);
+    sendTabMock.mockRejectedValueOnce({
+      code: "AUTHORITY_LOST",
+      message: "Session expired",
+    });
+
+    render(<PopupApp />);
+    const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await act(async () => {
+      fireEvent.click(solveBtn);
+    });
+
+    expect(await screen.findByText("操作失败")).toBeInTheDocument();
+
+    // Server unavailable on validation
+    sessionResponse = { ok: false, status: 500 };
+
+    const retryBtn = screen.getByRole("button", { name: "重新验证登录" });
+    await act(async () => {
+      fireEvent.click(retryBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("服务不可用")).toBeInTheDocument();
+      expect(screen.getByText("暂时无法验证登录状态")).toBeInTheDocument();
+    });
+  });
+
+  it("RF04-R01: empty email -> Send Code disabled", async () => {
+    sessionResponse = { ok: false };
+    store.set("appSettings", { userId: undefined, authToken: undefined });
+    render(<PopupApp />);
+
+    const sendCodeBtn = await screen.findByRole("button", { name: "发送验证码" });
+    expect(sendCodeBtn).toBeDisabled();
+  });
+
+  it("RF04-R02: email + password but code not sent -> Complete Registration disabled", async () => {
+    sessionResponse = { ok: false };
+    store.set("appSettings", { userId: undefined, authToken: undefined });
+    render(<PopupApp />);
+
+    const emailInput = await screen.findByPlaceholderText("邮箱");
+    const pwdInput = screen.getByPlaceholderText("密码");
+    fireEvent.change(emailInput, { target: { value: "user@test.com" } });
+    fireEvent.change(pwdInput, { target: { value: "password123" } });
+
+    const completeBtn = screen.getByRole("button", { name: "完成注册并登录" });
+    expect(completeBtn).toBeDisabled();
+  });
+
+  it("RF04-R03: code sent but verification empty -> Complete Registration disabled", async () => {
+    sessionResponse = { ok: false };
+    store.set("appSettings", { userId: undefined, authToken: undefined });
+    render(<PopupApp />);
+
+    const emailInput = await screen.findByPlaceholderText("邮箱");
+    const pwdInput = screen.getByPlaceholderText("密码");
+    fireEvent.change(emailInput, { target: { value: "user@test.com" } });
+    fireEvent.change(pwdInput, { target: { value: "password123" } });
+
+    const sendCodeBtn = screen.getByRole("button", { name: "发送验证码" });
+    expect(sendCodeBtn).not.toBeDisabled();
+    await act(async () => {
+      fireEvent.click(sendCodeBtn);
+    });
+
+    expect(await screen.findByRole("group", { name: "验证码" })).toBeInTheDocument();
+    const completeBtn = screen.getByRole("button", { name: "完成注册并登录" });
+    expect(completeBtn).toBeDisabled();
+  });
+
+  it("RF04-R04: email + password + code sent + verification code -> Complete Registration enabled", async () => {
+    sessionResponse = { ok: false };
+    store.set("appSettings", { userId: undefined, authToken: undefined });
+    render(<PopupApp />);
+
+    const emailInput = await screen.findByPlaceholderText("邮箱");
+    const pwdInput = screen.getByPlaceholderText("密码");
+    fireEvent.change(emailInput, { target: { value: "user@test.com" } });
+    fireEvent.change(pwdInput, { target: { value: "password123" } });
+
+    const sendCodeBtn = screen.getByRole("button", { name: "发送验证码" });
+    await act(async () => {
+      fireEvent.click(sendCodeBtn);
+    });
+
+    expect(await screen.findByRole("group", { name: "验证码" })).toBeInTheDocument();
+    const slot1 = screen.getByLabelText("验证码第 1 位");
+    fireEvent.change(slot1, { target: { value: "123456" } });
+
+    const completeBtn = screen.getByRole("button", { name: "完成注册并登录" });
+    expect(completeBtn).not.toBeDisabled();
+  });
+
+  it("RF04-T01: small text in Popup uses text.secondary and not text.muted", async () => {
+    render(<PopupApp />);
+    await screen.findByRole("button", { name: /解析并填答/ });
+
+    // Context line
+    const contextEl = screen.getByText("当前页面可识别").parentElement;
+    expect(contextEl?.style.color).toBe(orbitColors.text.secondary);
+
+    // Secondary command subtitle
+    const detectSubtitle = screen.getByText("扫描当前屏题目");
+    expect(detectSubtitle.style.color).toBe(orbitColors.text.secondary);
+
+    // Shortcut key
+    const shortcut = screen.getByText("Alt+Q");
+    expect(shortcut.style.color).toBe(orbitColors.text.secondary);
+  });
+
+  it("RF04-P01: Context line provider copy deduped: shows only provider name or 未配置 / Not configured", async () => {
+    render(<PopupApp />);
+    // When configured with Claude, displays 'Claude' directly without awkward repetition
+    expect(await screen.findByText("Claude")).toBeInTheDocument();
+    expect(screen.queryByText("已连接 Claude")).toBeNull();
+    expect(screen.queryByText("Connected Claude")).toBeNull();
+
+    // When missing, displays '未配置' / 'Not configured'
+    expect(POPUP_COPY.zh.demoMode).toBe("未配置");
+    expect(POPUP_COPY.en.demoMode).toBe("Not configured");
+    expect(POPUP_COPY.zh.connected("Claude")).toBe("Claude");
+    expect(POPUP_COPY.en.connected("Claude")).toBe("Claude");
   });
 });

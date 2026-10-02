@@ -376,6 +376,15 @@ export const PopupApp: React.FC = () => {
     void runAction("auto", copy.startDetect, copy.detectError, "START_AUTO_DETECT", true);
   };
 
+  const handleRetryValidation = async () => {
+    await auth.retryValidation();
+    const currentStatus = auth.session.getState().status;
+    if (currentStatus === "authenticated") {
+      setReviewReason(null);
+      setFeedback(null);
+    }
+  };
+
   const toggleLang = () => {
     const nextLang: PopupLang = lang === "zh" ? "en" : "zh";
     setLang(nextLang);
@@ -477,7 +486,7 @@ export const PopupApp: React.FC = () => {
               onOpenWorkspace={() => void handleOpenSidePanel()}
               onRefreshPage={handleRefreshPage}
               onReDetect={handleReDetect}
-              onRetryValidation={() => void auth.retryValidation()}
+              onRetryValidation={handleRetryValidation}
               onLogout={() => void auth.handleLogout()}
             />
           ) : null}
@@ -493,7 +502,7 @@ export const PopupApp: React.FC = () => {
           copy={copy}
           isSessionPending={isSessionPending}
           isServerUnavailable={isServerUnavailable}
-          onRetry={() => void auth.retryValidation()}
+          onRetry={handleRetryValidation}
           onLogout={() => void auth.handleLogout()}
         />
       ) : (

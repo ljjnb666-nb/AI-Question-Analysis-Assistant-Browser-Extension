@@ -228,7 +228,7 @@ export const PopupContextLine: React.FC<PopupContextLineProps> = ({
         alignItems: "center",
         justifyContent: "space-between",
         fontSize: orbitTypography.fontSize.xs,
-        color: orbitColors.text.muted,
+        color: orbitColors.text.secondary,
         padding: `${orbitSpacing[1]}px 0`,
       }}
     >
@@ -314,11 +314,7 @@ export const PopupPrimaryCommand: React.FC<PopupPrimaryCommandProps> = ({
           <span style={{ color: orbitColors.semantic.warning, fontSize: orbitTypography.fontSize.xs }}>
             {readiness.reason}
           </span>
-        ) : (
-          <span style={{ color: orbitColors.text.muted, fontSize: orbitTypography.fontSize.xs }}>
-            {copy.noAutoSubmitNotice}
-          </span>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -449,7 +445,7 @@ const secondaryCommandTitleStyle: React.CSSProperties = {
 
 const secondaryCommandSubtitleStyle: React.CSSProperties = {
   fontSize: 10,
-  color: orbitColors.text.muted,
+  color: orbitColors.text.secondary,
   lineHeight: 1.1,
 };
 
@@ -601,7 +597,7 @@ export const PopupFooter: React.FC<PopupFooterProps> = ({
         style={{
           marginLeft: orbitSpacing[2],
           fontSize: orbitTypography.fontSize.xs,
-          color: orbitColors.text.muted,
+          color: orbitColors.text.secondary,
           fontFamily: orbitTypography.codeFamily,
         }}
       >
@@ -638,6 +634,15 @@ export interface PopupAuthSectionProps {
 export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }) => {
   const isRegister = auth.view === "register";
 
+  const canRegister =
+    auth.email.trim() !== "" &&
+    auth.password.trim() !== "" &&
+    auth.codeSent &&
+    auth.verificationCode.trim() !== "";
+
+  const isSendCodeDisabled =
+    !!auth.authBusy || auth.codeCooldown > 0 || auth.email.trim() === "";
+
   return (
     <OrbitSurface
       variant="default"
@@ -660,7 +665,7 @@ export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }
         >
           {isRegister ? copy.authTitleRegister : copy.authTitleLogin}
         </span>
-        <span style={{ fontSize: orbitTypography.fontSize.xs, color: orbitColors.text.muted }}>
+        <span style={{ fontSize: orbitTypography.fontSize.xs, color: orbitColors.text.secondary }}>
           {isRegister ? copy.registerHint : copy.loginHint}
         </span>
       </div>
@@ -715,34 +720,22 @@ export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: orbitSpacing[2] }}>
-        <OrbitInput
-          label={copy.emailLabel}
-          type="email"
-          value={auth.email}
-          onChange={(e) => auth.setEmail(e.target.value)}
-          placeholder={copy.emailPlaceholder}
-          autoComplete="email"
-        />
-
         {isRegister ? (
           <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: orbitSpacing[2], alignItems: "flex-end" }}>
             <div style={{ flex: 1 }}>
-              <AuthPasswordField
-                id="popup-auth-password"
-                label={copy.passwordLabel}
-                value={auth.password}
-                onChange={auth.setPassword}
-                visible={auth.showPassword}
-                onToggleVisibility={auth.togglePasswordVisibility}
-                placeholder={copy.passwordPlaceholder}
-                showLabel={copy.showPassword}
-                hideLabel={copy.hidePassword}
+              <OrbitInput
+                label={copy.emailLabel}
+                type="email"
+                value={auth.email}
+                onChange={(e) => auth.setEmail(e.target.value)}
+                placeholder={copy.emailPlaceholder}
+                autoComplete="email"
               />
             </div>
             <OrbitButton
               variant="secondary"
               size="md"
-              disabled={!!auth.authBusy || auth.codeCooldown > 0}
+              disabled={isSendCodeDisabled}
               onClick={() => void auth.handleSendCode()}
               style={{ minWidth: 90 }}
             >
@@ -754,18 +747,27 @@ export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }
             </OrbitButton>
           </div>
         ) : (
-          <AuthPasswordField
-            id="popup-auth-password"
-            label={copy.passwordLabel}
-            value={auth.password}
-            onChange={auth.setPassword}
-            visible={auth.showPassword}
-            onToggleVisibility={auth.togglePasswordVisibility}
-            placeholder={copy.passwordPlaceholder}
-            showLabel={copy.showPassword}
-            hideLabel={copy.hidePassword}
+          <OrbitInput
+            label={copy.emailLabel}
+            type="email"
+            value={auth.email}
+            onChange={(e) => auth.setEmail(e.target.value)}
+            placeholder={copy.emailPlaceholder}
+            autoComplete="email"
           />
         )}
+
+        <AuthPasswordField
+          id="popup-auth-password"
+          label={copy.passwordLabel}
+          value={auth.password}
+          onChange={auth.setPassword}
+          visible={auth.showPassword}
+          onToggleVisibility={auth.togglePasswordVisibility}
+          placeholder={copy.passwordPlaceholder}
+          showLabel={copy.showPassword}
+          hideLabel={copy.hidePassword}
+        />
 
         {isRegister && auth.codeSent ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -793,6 +795,7 @@ export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }
           variant="primary"
           size="md"
           isLoading={auth.authBusy === "login" || auth.authBusy === "register"}
+          disabled={isRegister ? (!canRegister || !!auth.authBusy) : !!auth.authBusy}
           onClick={() => void (isRegister ? auth.handleRegister() : auth.handleLogin())}
           style={{ width: "100%" }}
         >
