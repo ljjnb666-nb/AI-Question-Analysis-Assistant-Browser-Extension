@@ -8,7 +8,7 @@ import type { ExtMessage } from "@/shared/types";
 import { getProvider, getProviderShortName } from "@/shared/ai/providers";
 import { isProviderRuntimeConfigured } from "@/shared/ai/parseResultAuthority";
 import { logEvent } from "@/shared/utils/analytics";
-import { loadSettings } from "@/shared/utils/storage";
+import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { useAuthController } from "@/shared/auth/useAuthController";
 import {
   clearProtectedWorkOwner,
@@ -35,6 +35,27 @@ import {
 
 type ActiveFeature = "manual" | "auto" | "fullpage" | "solve" | null;
 
+function extractKnownErrorCode(err: unknown): string | null {
+  if (typeof err === "object" && err !== null && "code" in err && typeof (err as { code?: unknown }).code === "string") {
+    return (err as { code: string }).code;
+  }
+  const rawMsg = err instanceof Error ? err.message : String(err || "");
+  const knownCodes = [
+    "STALE_QUESTION_REVISION",
+    "STALE_ROOT_CONTEXT",
+    "PARTIAL_MUTATION_UNPROVABLE",
+    "AUTHORITY_LOST",
+    "PAGE_INJECTION_FAILED",
+    "DISPATCH_FAILED",
+  ];
+  for (const code of knownCodes) {
+    if (rawMsg.includes(code)) {
+      return code;
+    }
+  }
+  return null;
+}
+
 const shellStyle: React.CSSProperties = {
   padding: `${orbitSpacing[3]}px`,
   display: "flex",
@@ -55,7 +76,7 @@ export const PopupApp: React.FC = () => {
   const [lang, setLang] = useState<PopupLang>("zh");
   const [_loaded, setLoaded] = useState(false);
   const [activeFeature, setActiveFeature] = useState<ActiveFeature>(null);
-  const [isPageInjectable, setIsPageInjectable] = useState(true);
+  const [isPageInjectable, setIsPageInjectable] = useState<boolean | null>(null);
   const [reviewReason, setReviewReason] = useState<string | null>(null);
 
   const copy = POPUP_COPY[lang];
@@ -105,6 +126,9 @@ export const PopupApp: React.FC = () => {
       setProviderId(nextProviderId);
       setProviderName(getProviderShortName(nextProviderId));
       setLang(nextLang);
+      if (typeof document !== "undefined") {
+        document.documentElement.lang = nextLang === "zh" ? "zh-CN" : "en";
+      }
       setLoaded(true);
     });
     return () => {
@@ -123,11 +147,15 @@ export const PopupApp: React.FC = () => {
         void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
           if (tab?.url) {
             setIsPageInjectable(isInjectablePageUrl(tab.url));
+          } else {
+            setIsPageInjectable(false);
           }
         });
+      } else {
+        setIsPageInjectable(false);
       }
     } catch {
-      // Tab query unavailable in test mock without tabs
+      setIsPageInjectable(false);
     }
   }, []);
 
@@ -256,13 +284,25 @@ export const PopupApp: React.FC = () => {
         void clearProtectedWorkOwner(longRunningKind, ownerTabId);
       }
       const rawMsg = err instanceof Error ? err.message : String(err || "");
-      if (rawMsg.includes("STALE") || rawMsg.includes("AUTHORITY_LOST")) {
-        setReviewReason(rawMsg);
-        setFeedback(userFeedback("warning", copy.safetyCheckWarning, { code: rawMsg }));
+      const knownCode = extractKnownErrorCode(err);
+      if (
+        knownCode === "STALE_QUESTION_REVISION" ||
+        knownCode === "STALE_ROOT_CONTEXT" ||
+        knownCode === "PARTIAL_MUTATION_UNPROVABLE" ||
+        knownCode === "AUTHORITY_LOST"
+      ) {
+        setReviewReason(knownCode);
+        setFeedback(
+          userFeedback("warning", copy.safetyCheckWarning, {
+            code: knownCode,
+            technicalDetail: rawMsg,
+          }),
+        );
       } else {
+        setReviewReason(knownCode || "DISPATCH_FAILED");
         setFeedback(
           userFeedback("error", errorText, {
-            code: "DISPATCH_FAILED",
+            code: knownCode || "DISPATCH_FAILED",
             technicalDetail: rawMsg,
           }),
         );
@@ -304,7 +344,12 @@ export const PopupApp: React.FC = () => {
   };
 
   const toggleLang = () => {
-    setLang((prev) => (prev === "zh" ? "en" : "zh"));
+    const nextLang: PopupLang = lang === "zh" ? "en" : "zh";
+    setLang(nextLang);
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = nextLang === "zh" ? "zh-CN" : "en";
+    }
+    void saveSettings({ language: nextLang });
   };
 
   const sessionGateVisible = isSessionPending || isServerUnavailable;
@@ -389,10 +434,10 @@ export const PopupApp: React.FC = () => {
 
           {viewState === "provider_setup_required" ||
           viewState === "review_required" ||
-          viewState === "page_unavailable" ||
-          viewState === "recoverable_error" ? (
+          viewState === "page_unavailable" ? (
             <PopupRecoverySection
               viewState={viewState}
+              recoveryReason={reviewReason}
               lang={lang}
               onOpenSettings={() => void handleOpenSidePanel()}
               onOpenWorkspace={() => void handleOpenSidePanel()}

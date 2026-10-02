@@ -21,7 +21,7 @@ export type PopupActionReadiness = {
 
 export interface PopupActionContext {
   isAuthenticated: boolean;
-  isPageInjectable: boolean;
+  isPageInjectable: boolean | null;
   hasApiKey: boolean;
   isRunning?: boolean;
   lang?: "zh" | "en";
@@ -62,7 +62,15 @@ export function derivePopupActionReadiness(
     };
   }
 
-  // Next, require an injectable/supported page.
+  // Next, require an injectable/supported page. If null, checking in progress.
+  if (isPageInjectable === null) {
+    return {
+      enabled: false,
+      reasonCode: "PAGE_CHECKING",
+      reason: isZh ? "正在检查页面支持..." : "Checking page compatibility...",
+    };
+  }
+
   if (!isPageInjectable) {
     return {
       enabled: false,

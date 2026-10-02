@@ -23,6 +23,7 @@ export const POPUP_COPY = {
     // Page context
     pageInjectable: "当前页面可识别",
     pageNotInjectable: "受限页面不可操作",
+    pageChecking: "正在检查页面支持...",
 
     // Primary action
     solveTitle: "解析并填答",
@@ -63,6 +64,9 @@ export const POPUP_COPY = {
     // Auth view
     login: "登录",
     register: "注册",
+    authTitleLogin: "登录账号",
+    authTitleRegister: "注册账号",
+    loginSubmit: "登录账号",
     loginHint: "使用已注册账号进入插件",
     registerHint: "验证真实邮箱并完成注册",
     emailLabel: "邮箱",
@@ -87,7 +91,7 @@ export const POPUP_COPY = {
     goToRegister: "还没有账号？去注册",
 
     // Menu
-    menuSettings: "工作台设置",
+    menuSettings: "打开工作台",
     menuSwitchLang: "Switch to English",
     menuLogout: "退出登录",
     menuHelp: "帮助与反馈",
@@ -114,6 +118,7 @@ export const POPUP_COPY = {
     // Page context
     pageInjectable: "Current page supported",
     pageNotInjectable: "Restricted page unavailable",
+    pageChecking: "Checking page compatibility...",
 
     // Primary action
     solveTitle: "Solve & Fill",
@@ -152,8 +157,11 @@ export const POPUP_COPY = {
     safetyCheckWarning: "Page or question change detected. Safely stopped.",
 
     // Auth view
-    login: "Login",
+    login: "Sign In",
     register: "Register",
+    authTitleLogin: "Sign In",
+    authTitleRegister: "Register Account",
+    loginSubmit: "Sign In to Account",
     loginHint: "Sign in to access protected features",
     registerHint: "Verify your email and create an account",
     emailLabel: "Email",
@@ -178,7 +186,7 @@ export const POPUP_COPY = {
     goToRegister: "Don't have an account? Register",
 
     // Menu
-    menuSettings: "Workspace Settings",
+    menuSettings: "Open Workspace",
     menuSwitchLang: "切换为中文",
     menuLogout: "Sign Out",
     menuHelp: "Help & Feedback",

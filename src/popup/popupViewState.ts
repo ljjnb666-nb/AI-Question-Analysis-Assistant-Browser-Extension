@@ -11,23 +11,20 @@ export type PopupViewState =
   | "signed_out"
   | "service_unavailable"
   | "page_unavailable"
-  | "detection_ready"
   | "provider_setup_required"
   | "ready"
   | "running"
-  | "review_required"
-  | "recoverable_error";
+  | "review_required";
 
 export interface DerivePopupViewStateParams {
   authStatus?: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
   isAuthenticated: boolean;
   isSessionPending?: boolean;
   isServerUnavailable?: boolean;
-  isPageInjectable?: boolean;
+  isPageInjectable?: boolean | null;
   hasApiKey?: boolean;
   activeFeature?: string | null;
   reviewReason?: string | null;
-  recoverableError?: string | null;
 }
 
 /**
@@ -43,7 +40,6 @@ export function derivePopupViewState(params: DerivePopupViewStateParams): PopupV
     hasApiKey = false,
     activeFeature = null,
     reviewReason = null,
-    recoverableError = null,
   } = params;
 
   if (isSessionPending || authStatus === "loading" || authStatus === "validating") {
@@ -59,16 +55,12 @@ export function derivePopupViewState(params: DerivePopupViewStateParams): PopupV
   }
 
   // From here, user is authenticated:
-  if (!isPageInjectable) {
+  if (isPageInjectable === false) {
     return "page_unavailable";
   }
 
   if (reviewReason) {
     return "review_required";
-  }
-
-  if (recoverableError) {
-    return "recoverable_error";
   }
 
   if (activeFeature != null && activeFeature !== "") {

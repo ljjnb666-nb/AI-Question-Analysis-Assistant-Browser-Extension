@@ -47,10 +47,10 @@ export function getRecoveryPlan(
       return {
         title: isZh ? "AI 服务待配置" : "AI Provider Setup Required",
         explanation: isZh
-          ? "配置 AI 服务后即可使用解析并填答功能；页面识别仍可直接使用。"
-          : "Configure an AI provider to enable Solve & Fill. Detection actions remain available.",
-        primaryActionKind: "open_settings",
-        primaryActionLabel: isZh ? "前往设置" : "Open Settings",
+          ? "请在工作台的设置页配置 AI 服务；页面识别仍可直接使用。"
+          : "Configure an AI provider in the workspace Settings tab. Detection actions remain available.",
+        primaryActionKind: "open_workspace",
+        primaryActionLabel: isZh ? "打开工作台" : "Open Workspace",
       };
 
     case "service_unavailable":
@@ -68,6 +68,7 @@ export function getRecoveryPlan(
 
     case "page_unavailable":
     case "PAGE_UNAVAILABLE":
+    case "PAGE_INJECTION_FAILED":
       return {
         title: isZh ? "当前页面不支持" : "Page Not Supported",
         explanation: isZh
@@ -113,6 +114,7 @@ export function getRecoveryPlan(
 
     case "recoverable_error":
     case "transport_failure":
+    case "DISPATCH_FAILED":
       return {
         title: isZh ? "通信出现异常" : "Communication Error",
         explanation: isZh

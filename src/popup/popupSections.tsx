@@ -67,12 +67,7 @@ export const PopupHeader: React.FC<PopupHeaderProps> = ({
       badgeVariant = "warning";
       badgeLabel = copy.reviewRequired;
       break;
-    case "recoverable_error":
-      badgeVariant = "error";
-      badgeLabel = copy.serviceUnavailable;
-      break;
     case "provider_setup_required":
-    case "detection_ready":
       badgeVariant = "warning";
       badgeLabel = copy.providerSetupRequired;
       break;
@@ -205,7 +200,7 @@ const menuItemStyle: React.CSSProperties = {
 };
 
 export interface PopupContextLineProps {
-  isPageInjectable: boolean;
+  isPageInjectable: boolean | null;
   hasApiKey: boolean;
   providerName: string;
   copy: PopupCopy;
@@ -217,7 +212,12 @@ export const PopupContextLine: React.FC<PopupContextLineProps> = ({
   providerName,
   copy,
 }) => {
-  const pageText = isPageInjectable ? copy.pageInjectable : copy.pageNotInjectable;
+  const pageText =
+    isPageInjectable === null
+      ? copy.pageChecking
+      : isPageInjectable
+        ? copy.pageInjectable
+        : copy.pageNotInjectable;
   const providerText = hasApiKey ? copy.connected(providerName) : copy.demoMode;
 
   return (
@@ -245,7 +245,7 @@ export interface PopupPrimaryCommandProps {
   activeFeature: string | null;
   onSolve: () => void;
   isAuthenticated: boolean;
-  isPageInjectable: boolean;
+  isPageInjectable: boolean | null;
   hasApiKey: boolean;
 }
 
@@ -285,7 +285,7 @@ export const PopupPrimaryCommand: React.FC<PopupPrimaryCommandProps> = ({
         isLoading={isSolving}
         disabled={disabled}
         onClick={onSolve}
-        aria-label={`${copy.solveTitle} (自动答题)`}
+        aria-label={copy.solveTitle}
         style={{
           width: "100%",
           height: 48,
@@ -332,7 +332,7 @@ export interface PopupSecondaryCommandsProps {
   onManualCapture: () => void;
   onFullPageScan: () => void;
   isAuthenticated: boolean;
-  isPageInjectable: boolean;
+  isPageInjectable: boolean | null;
   hasApiKey: boolean;
 }
 
@@ -454,6 +454,7 @@ const secondaryCommandSubtitleStyle: React.CSSProperties = {
 
 export interface PopupRecoverySectionProps {
   viewState: PopupViewState;
+  recoveryReason?: string | null;
   lang: PopupLang;
   onOpenSettings: () => void;
   onOpenWorkspace: () => void;
@@ -465,6 +466,7 @@ export interface PopupRecoverySectionProps {
 
 export const PopupRecoverySection: React.FC<PopupRecoverySectionProps> = ({
   viewState,
+  recoveryReason,
   lang,
   onOpenSettings,
   onOpenWorkspace,
@@ -473,7 +475,7 @@ export const PopupRecoverySection: React.FC<PopupRecoverySectionProps> = ({
   onRetryValidation,
   onLogout,
 }) => {
-  const plan: PopupRecoveryPlan | null = getRecoveryPlan(viewState, lang);
+  const plan: PopupRecoveryPlan | null = getRecoveryPlan(recoveryReason || viewState, lang);
   if (!plan) return null;
 
   const handleAction = (kind: string) => {
@@ -652,7 +654,7 @@ export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }
             color: orbitColors.text.primary,
           }}
         >
-          {isRegister ? (copy.appName === "Quiz Solver" ? "Register Account" : "注册账号") : (copy.appName === "Quiz Solver" ? "Login Account" : "登录账号")}
+          {isRegister ? copy.authTitleRegister : copy.authTitleLogin}
         </span>
         <span style={{ fontSize: orbitTypography.fontSize.xs, color: orbitColors.text.muted }}>
           {isRegister ? copy.registerHint : copy.loginHint}
@@ -776,6 +778,7 @@ export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }
               value={auth.verificationCode}
               onChange={auth.setVerificationCode}
               ariaLabel={copy.verificationCodeLabel}
+              lang={copy.appName === "Quiz Solver" ? "en" : "zh"}
             />
           </div>
         ) : null}
@@ -795,7 +798,7 @@ export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }
               : copy.completeRegistration
             : auth.authBusy === "login"
               ? copy.loggingIn
-              : copy.login}
+              : copy.loginSubmit}
         </OrbitButton>
 
         <button
@@ -921,18 +924,6 @@ export const PopupFeedbackBanner: React.FC<PopupFeedbackBannerProps> = ({ feedba
       }}
     >
       <span>{feedback.message}</span>
-      {feedback.code ? (
-        <span
-          style={{
-            fontSize: 10,
-            opacity: 0.7,
-            fontFamily: orbitTypography.codeFamily,
-            flexShrink: 0,
-          }}
-        >
-          {feedback.code}
-        </span>
-      ) : null}
     </div>
   );
 };

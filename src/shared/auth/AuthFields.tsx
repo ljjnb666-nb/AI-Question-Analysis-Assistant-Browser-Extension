@@ -1,63 +1,73 @@
 import React from "react";
+import { orbitColors, orbitRadius, orbitSpacing, orbitTypography } from "@/shared/ui/orbitTokens";
+import { useFocusVisible } from "@/shared/ui/orbitFocus";
+import { usePrefersReducedMotion } from "@/shared/ui/orbitMotion";
 
-const verificationSlotStyle: React.CSSProperties = {
-  width: "100%",
-  minWidth: 0,
-  height: 40,
-  borderRadius: 10,
-  border: "1px solid rgba(76, 229, 255, 0.16)",
-  background: "rgba(7, 17, 34, 0.84)",
-  color: "#eefcff",
-  fontSize: 16,
-  fontWeight: 700,
-  textAlign: "center",
-  outline: "none",
-  boxSizing: "border-box",
-  fontFamily: '"Bahnschrift", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
-};
-
-const passwordFieldShellStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr auto",
-  alignItems: "center",
-  gap: 8,
-  width: "100%",
-  paddingRight: 10,
-  borderRadius: 12,
-  border: "1px solid rgba(76, 229, 255, 0.12)",
-  background: "rgba(7, 17, 34, 0.78)",
-  boxSizing: "border-box",
-};
-
-const passwordInputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "10px 12px",
-  border: "none",
-  background: "transparent",
-  color: "#eefcff",
-  fontSize: 13,
-  outline: "none",
-  boxSizing: "border-box",
-  fontFamily: '"Bahnschrift", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
-};
-
-const passwordToggleStyle: React.CSSProperties = {
-  border: "none",
-  background: "transparent",
-  color: "#8ef3ff",
-  cursor: "pointer",
-  fontSize: 11,
-  fontWeight: 650,
-  padding: "0 2px",
-  fontFamily: '"Bahnschrift", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
-};
-
-export const AuthVerificationCodeInput: React.FC<{
+export interface AuthVerificationCodeInputProps {
   value: string;
   onChange: (value: string) => void;
   ariaLabel?: string;
-}> = ({ value, onChange, ariaLabel = "验证码" }) => {
+  digitLabel?: (index: number) => string;
+  lang?: "zh" | "en";
+}
+
+const VerificationSlot: React.FC<{
+  index: number;
+  digit: string;
+  ariaLabel: string;
+  onChange: (val: string) => void;
+  reducedMotion: boolean;
+}> = ({ index, digit, ariaLabel, onChange, reducedMotion }) => {
+  const { isFocusVisible, onFocus, onBlur } = useFocusVisible();
+
+  return (
+    <input
+      key={index}
+      inputMode="numeric"
+      maxLength={6}
+      aria-label={ariaLabel}
+      value={digit.trim()}
+      onChange={(event) => onChange(event.target.value)}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      style={{
+        width: "100%",
+        minWidth: 0,
+        height: 40,
+        borderRadius: orbitRadius.md,
+        border: `1px solid ${isFocusVisible ? orbitColors.brand.primary : orbitColors.border.default}`,
+        background: orbitColors.bg.surfaceSubtle,
+        color: orbitColors.text.primary,
+        fontSize: 16,
+        fontWeight: orbitTypography.fontWeight.bold,
+        textAlign: "center",
+        outline: isFocusVisible ? `2px solid ${orbitColors.brand.primary}` : "none",
+        outlineOffset: 2,
+        boxSizing: "border-box",
+        fontFamily: orbitTypography.fontFamily,
+        transition: reducedMotion ? "none" : "border-color 140ms ease, box-shadow 140ms ease",
+      }}
+    />
+  );
+};
+
+export const AuthVerificationCodeInput: React.FC<AuthVerificationCodeInputProps> = ({
+  value,
+  onChange,
+  ariaLabel = "验证码",
+  digitLabel,
+  lang,
+}) => {
+  const reducedMotion = usePrefersReducedMotion();
   const digits = value.padEnd(6, " ").slice(0, 6).split("");
+
+  const getDigitAriaLabel = (index: number): string => {
+    if (digitLabel) return digitLabel(index);
+    if (lang === "en" || /^[a-zA-Z\s]+$/.test(ariaLabel)) {
+      return `Verification code digit ${index + 1}`;
+    }
+    return `验证码第 ${index + 1} 位`;
+  };
 
   const handleValueChange = (index: number, raw: string) => {
     const cleaned = raw.replace(/\D/g, "");
@@ -79,24 +89,23 @@ export const AuthVerificationCodeInput: React.FC<{
     <div
       role="group"
       aria-label={ariaLabel}
-      style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 6 }}
+      style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: orbitSpacing[2] }}
     >
       {digits.map((digit, index) => (
-        <input
+        <VerificationSlot
           key={index}
-          inputMode="numeric"
-          maxLength={6}
-          aria-label={`${ariaLabel} 第 ${index + 1} 位`}
-          value={digit.trim()}
-          onChange={(event) => handleValueChange(index, event.target.value)}
-          style={verificationSlotStyle}
+          index={index}
+          digit={digit}
+          ariaLabel={getDigitAriaLabel(index)}
+          onChange={(val) => handleValueChange(index, val)}
+          reducedMotion={reducedMotion}
         />
       ))}
     </div>
   );
 };
 
-export const AuthPasswordField: React.FC<{
+export interface AuthPasswordFieldProps {
   value: string;
   onChange: (value: string) => void;
   visible: boolean;
@@ -107,7 +116,9 @@ export const AuthPasswordField: React.FC<{
   id?: string;
   label?: string;
   ariaLabel?: string;
-}> = ({
+}
+
+export const AuthPasswordField: React.FC<AuthPasswordFieldProps> = ({
   value,
   onChange,
   visible,
@@ -118,43 +129,94 @@ export const AuthPasswordField: React.FC<{
   id,
   label,
   ariaLabel,
-}) => (
-  <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
-    {label ? (
-      <label
-        htmlFor={id}
+}) => {
+  const reducedMotion = usePrefersReducedMotion();
+  const inputFocus = useFocusVisible();
+  const toggleFocus = useFocusVisible();
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: orbitSpacing[1], width: "100%" }}>
+      {label ? (
+        <label
+          htmlFor={id}
+          style={{
+            fontSize: orbitTypography.fontSize.xs,
+            fontWeight: orbitTypography.fontWeight.medium,
+            color: orbitColors.text.secondary,
+            fontFamily: orbitTypography.fontFamily,
+          }}
+        >
+          {label}
+        </label>
+      ) : null}
+      <div
         style={{
-          fontSize: 12,
-          fontWeight: 500,
-          color: "#94a3b8",
+          display: "grid",
+          gridTemplateColumns: "1fr auto",
+          alignItems: "center",
+          gap: orbitSpacing[2],
+          width: "100%",
+          paddingRight: orbitSpacing[2],
+          borderRadius: orbitRadius.md,
+          border: `1px solid ${inputFocus.isFocusVisible ? orbitColors.brand.primary : orbitColors.border.default}`,
+          background: orbitColors.bg.surfaceSubtle,
+          boxSizing: "border-box",
+          outline: inputFocus.isFocusVisible ? `2px solid ${orbitColors.brand.primary}` : "none",
+          outlineOffset: 2,
+          transition: reducedMotion ? "none" : "border-color 140ms ease, box-shadow 140ms ease",
         }}
       >
-        {label}
-      </label>
-    ) : null}
-    <div style={passwordFieldShellStyle}>
-      <input
-        id={id}
-        type={visible ? "text" : "password"}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        aria-label={ariaLabel || label || placeholder}
-        style={passwordInputStyle}
-      />
-      {value ? (
-        <button
-          type="button"
-          onClick={onToggleVisibility}
-          aria-label={visible ? hideLabel : showLabel}
-          style={passwordToggleStyle}
-        >
-          {visible ? hideLabel : showLabel}
-        </button>
-      ) : (
-        <span style={{ width: 28 }} />
-      )}
+        <input
+          id={id}
+          type={visible ? "text" : "password"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onFocus={inputFocus.onFocus}
+          onBlur={inputFocus.onBlur}
+          placeholder={placeholder}
+          aria-label={ariaLabel || label || placeholder}
+          style={{
+            width: "100%",
+            height: 36,
+            padding: `0 ${orbitSpacing[3]}px`,
+            border: "none",
+            background: "transparent",
+            color: orbitColors.text.primary,
+            fontSize: orbitTypography.fontSize.sm,
+            outline: "none",
+            boxSizing: "border-box",
+            fontFamily: orbitTypography.fontFamily,
+          }}
+        />
+        {value ? (
+          <button
+            type="button"
+            onClick={onToggleVisibility}
+            onFocus={toggleFocus.onFocus}
+            onBlur={toggleFocus.onBlur}
+            aria-label={visible ? hideLabel : showLabel}
+            style={{
+              border: "none",
+              background: "transparent",
+              color: orbitColors.brand.primary,
+              cursor: "pointer",
+              fontSize: orbitTypography.fontSize.xs,
+              fontWeight: orbitTypography.fontWeight.semibold,
+              padding: `2px ${orbitSpacing[1]}px`,
+              borderRadius: orbitRadius.sm,
+              fontFamily: orbitTypography.fontFamily,
+              outline: toggleFocus.isFocusVisible ? `2px solid ${orbitColors.brand.primary}` : "none",
+              outlineOffset: 2,
+            }}
+          >
+            {visible ? hideLabel : showLabel}
+          </button>
+        ) : (
+          <span style={{ width: 28 }} />
+        )}
+      </div>
     </div>
-  </div>
-);
+  );
+};
+
 
