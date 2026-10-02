@@ -24,6 +24,7 @@ import {
   SidePanelActivityStrip,
   SidePanelHeader,
   SidePanelLockedState,
+  WorkspaceTabPanel,
 } from "./sidePanelShell";
 import type { AutoSolveProgressState, ScanProgressState, SidePanelAppState } from "./sidepanelAppState";
 import { initialSidePanelAppState, sidePanelAppReducer } from "./sidepanelAppState";
@@ -37,7 +38,7 @@ export { findNextFractionExpression, normalizeRenderableMathText, renderMathText
 
 export const SidePanelApp: React.FC = () => {
   const [state, dispatch] = useReducer(sidePanelAppReducer, initialSidePanelAppState);
-  const [providerName, setProviderName] = useState("Claude");
+  const [providerName, setProviderName] = useState<string | undefined>(undefined);
 
   const setUiLang = useCallback((updater: React.SetStateAction<UILang>) => dispatch({ type: "uiLang", updater }), []);
   const setIsAuthenticated = useCallback(
@@ -244,8 +245,12 @@ export const SidePanelApp: React.FC = () => {
   useEffect(() => {
     loadSettings().then((settings) => {
       setUiLang((settings.language ?? "zh") as UILang);
-      const configuredProvider = getProvider(settings.providerId);
-      setProviderName(getProviderShortName(settings.providerId) || configuredProvider.name || "Claude");
+      if (settings.providerId) {
+        const configuredProvider = getProvider(settings.providerId);
+        setProviderName(getProviderShortName(settings.providerId) || configuredProvider.name);
+      } else {
+        setProviderName(undefined);
+      }
     });
 
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
@@ -261,7 +266,7 @@ export const SidePanelApp: React.FC = () => {
       }
       if (nextSettings.providerId) {
         const configuredProvider = getProvider(nextSettings.providerId);
-        setProviderName(getProviderShortName(nextSettings.providerId) || configuredProvider.name || "Claude");
+        setProviderName(getProviderShortName(nextSettings.providerId) || configuredProvider.name);
       }
       // Auth-related storage changes are intentionally NOT converted into an
       // authenticated state here: the session coordinator owns that authority.
@@ -366,6 +371,10 @@ export const SidePanelApp: React.FC = () => {
     ],
   );
 
+  useEffect(() => {
+    document.documentElement.lang = state.uiLang === "en" ? "en" : "zh-CN";
+  }, [state.uiLang]);
+
   const activity = useMemo(
     () =>
       deriveWorkspaceActivity({
@@ -375,10 +384,14 @@ export const SidePanelApp: React.FC = () => {
         isFullPageScan: state.isFullPageScan,
         scanProgress: state.scanProgress,
         isAutoSolving: state.isAutoSolving,
+        isBatchParsing: state.isBatchParsing,
+        isBatchFilling: state.isBatchFilling,
         autoSolveProgress: state.autoSolveProgress,
         fillFeedback: state.fillFeedback,
+        currentTab: state.tab,
         onCancelFullPage: handleCancelFullPage,
         onStopAutoSolve: handleStopAutoSolve,
+        onReviewCandidates: () => setTab("candidates"),
         onDismissFeedback: () => setFillFeedback(null),
       }),
     [
@@ -388,10 +401,14 @@ export const SidePanelApp: React.FC = () => {
       state.isFullPageScan,
       state.scanProgress,
       state.isAutoSolving,
+      state.isBatchParsing,
+      state.isBatchFilling,
       state.autoSolveProgress,
       state.fillFeedback,
+      state.tab,
       handleCancelFullPage,
       handleStopAutoSolve,
+      setTab,
       setFillFeedback,
     ],
   );
@@ -425,20 +442,14 @@ export const SidePanelApp: React.FC = () => {
 
       <div style={PANEL_BODY_STYLE}>
         {state.tab === "settings" ? (
-          <div
-            role="tabpanel"
-            id="sidepanel-tabpanel-settings"
-            aria-labelledby="sidepanel-tab-settings"
-            tabIndex={0}
-            style={{ flex: 1, display: "flex", flexDirection: "column", width: "100%", outline: "none" }}
-          >
+          <WorkspaceTabPanel id="sidepanel-tabpanel-settings" tabId="settings">
             <SettingsTab
               lang={state.uiLang}
               onLanguageChange={setUiLang}
               authOnly={!state.isAuthenticated}
               sessionRejectedHint={state.sessionRejected}
             />
-          </div>
+          </WorkspaceTabPanel>
         ) : !state.isAuthenticated ? (
           // Authority-first structure: while not server-validated, nothing
           // but the locked state may mount — History and Candidates are
@@ -451,13 +462,7 @@ export const SidePanelApp: React.FC = () => {
             onRetryValidation={() => session.retryValidation()}
           />
         ) : state.tab === "candidates" ? (
-          <div
-            role="tabpanel"
-            id="sidepanel-tabpanel-candidates"
-            aria-labelledby="sidepanel-tab-candidates"
-            tabIndex={0}
-            style={{ flex: 1, display: "flex", flexDirection: "column", width: "100%", outline: "none" }}
-          >
+          <WorkspaceTabPanel id="sidepanel-tabpanel-candidates" tabId="candidates">
             <CandidatesTab
               autoSolveProgress={state.autoSolveProgress}
               candidateViewFilter={state.candidateViewFilter}
@@ -495,17 +500,11 @@ export const SidePanelApp: React.FC = () => {
               onToggleCandidate={toggleSelect}
               onToggleDetails={toggleDetails}
             />
-          </div>
+          </WorkspaceTabPanel>
         ) : state.tab === "history" ? (
-          <div
-            role="tabpanel"
-            id="sidepanel-tabpanel-history"
-            aria-labelledby="sidepanel-tab-history"
-            tabIndex={0}
-            style={{ flex: 1, display: "flex", flexDirection: "column", width: "100%", outline: "none" }}
-          >
+          <WorkspaceTabPanel id="sidepanel-tabpanel-history" tabId="history">
             <HistoryTab lang={state.uiLang} />
-          </div>
+          </WorkspaceTabPanel>
         ) : null}
       </div>
 

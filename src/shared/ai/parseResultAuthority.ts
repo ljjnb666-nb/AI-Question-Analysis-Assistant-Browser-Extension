@@ -68,7 +68,7 @@ export function getConnectionTestNotConfiguredMessage(language: AppSettings["lan
 /** Natural-language hint for starting Auto Solve without a provider. */
 export function getAutoSolveNotConfiguredMessage(language: AppSettings["language"]): string {
   if (language === "en") {
-    return "Configure an AI provider in Settings before starting Auto Solve.";
+    return "Configure an AI provider in Settings before starting Solve & Fill.";
   }
-  return "请先配置 AI 服务，再启动自动答题。";
+  return "请先配置 AI 服务，再启动解析并填答。";
 }

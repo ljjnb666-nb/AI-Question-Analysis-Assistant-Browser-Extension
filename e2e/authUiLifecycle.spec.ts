@@ -299,7 +299,10 @@ test("AUTH_UI_06_VALID_SESSION_ALL_SURFACES popup, sidepanel, and settings conve
       timeout: 25_000,
     });
     // Settings surface reached through the authenticated header tabs.
-    await sidepanel.getByRole("button", { name: /^(设置|Settings)$/ }).click();
+    await sidepanel
+      .getByRole("tab", { name: /^(设置|Settings)$/ })
+      .or(sidepanel.getByRole("button", { name: /^(设置|Settings)$/ }))
+      .click();
     await expect(sidepanel.getByText(/(当前账号|Current Account)/).first()).toBeVisible({ timeout: 15_000 });
   } finally {
     await closeExtensionContext(context);
@@ -361,7 +364,10 @@ test("AUTH_UI_08_LOGOUT_PROPAGATION logout converges every surface to unauthenti
     await sidepanel.goto(SIDEPANEL_URL(extensionId));
     await expectEventually(popup, () => isUnlocked(popup), { timeout: 25_000 });
 
-    await sidepanel.getByRole("button", { name: /^(设置|Settings)$/ }).click();
+    await sidepanel
+      .getByRole("tab", { name: /^(设置|Settings)$/ })
+      .or(sidepanel.getByRole("button", { name: /^(设置|Settings)$/ }))
+      .click();
     await expect(sidepanel.getByText(/(当前账号|Current Account)/).first()).toBeVisible({ timeout: 15_000 });
     await sidepanel.getByRole("button", { name: /^(Logout|退出登录)$/ }).click();
 
@@ -485,7 +491,10 @@ test("AUTH_UI_12_VALIDATION_RACE_LOGOUT stale hung validation cannot win over lo
     await expectEventually(sidepanel, () => sidepanelWorkspaceHeader(sidepanel).first().isVisible(), {
       timeout: 30_000,
     });
-    await sidepanel.getByRole("button", { name: /^(设置|Settings)$/ }).click();
+    await sidepanel
+      .getByRole("tab", { name: /^(设置|Settings)$/ })
+      .or(sidepanel.getByRole("button", { name: /^(设置|Settings)$/ }))
+      .click();
     await expectEventually(sidepanel, () => sidepanel.getByText(/(当前账号|Current Account)/).first().isVisible(), {
       timeout: 20_000,
     });
@@ -771,7 +780,10 @@ async function openAuthenticatedHistoryTab(
   await expectEventually(sidepanel, () => sidepanelWorkspaceHeader(sidepanel).first().isVisible(), {
     timeout: 30_000,
   });
-  await sidepanel.getByRole("button", { name: /^(历史|History)$/ }).click();
+  await sidepanel
+    .getByRole("tab", { name: /^(历史|History)$/ })
+    .or(sidepanel.getByRole("button", { name: /^(历史|History)$/ }))
+    .click();
   // With no records the History surface renders its empty state.
   await expectEventually(
     sidepanel,

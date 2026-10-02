@@ -43,6 +43,8 @@ export interface SidePanelCopy {
     scanning: string;
     scanningProgress: (step: number, total: number, found: number) => string;
     solving: string;
+    batchParse: string;
+    batchFill: string;
     solvingProgress: (current: number, total: number, filled: number) => string;
     reviewFallback: string;
     stop: string;
@@ -54,7 +56,8 @@ export interface SidePanelCopy {
 export const SIDEPANEL_COPY: Record<UILang, SidePanelCopy> = {
   zh: {
     appName: "题目解析助手",
-    contextLine: (providerName) => `当前页面 · ${providerName || "Claude"}`,
+    contextLine: (providerName) =>
+      providerName ? `当前页面 · ${providerName}` : "当前页面",
     contextProtected: "受保护工作台",
     status: {
       checking_session: "正在验证",
@@ -95,6 +98,8 @@ export const SIDEPANEL_COPY: Record<UILang, SidePanelCopy> = {
       scanning: "整页扫描",
       scanningProgress: (step, total, found) => `第 ${step} / ${total} 步 · 已发现 ${found} 题`,
       solving: "解析并填答",
+      batchParse: "批量解析",
+      batchFill: "批量填写",
       solvingProgress: (current, total, filled) => `第 ${current} / ${total} 题 · 已填写 ${filled} 题`,
       reviewFallback: "页面变化导致操作安全停止",
       stop: "停止",
@@ -104,7 +109,8 @@ export const SIDEPANEL_COPY: Record<UILang, SidePanelCopy> = {
   },
   en: {
     appName: "Quiz Solver",
-    contextLine: (providerName) => `Current Page · ${providerName || "Claude"}`,
+    contextLine: (providerName) =>
+      providerName ? `Current page · ${providerName}` : "Current page",
     contextProtected: "Protected Workspace",
     status: {
       checking_session: "Checking",
@@ -145,6 +151,8 @@ export const SIDEPANEL_COPY: Record<UILang, SidePanelCopy> = {
       scanning: "Full Page Scan",
       scanningProgress: (step, total, found) => `Step ${step} / ${total} · Found ${found} questions`,
       solving: "Solve & Fill",
+      batchParse: "Batch Solve",
+      batchFill: "Batch Fill",
       solvingProgress: (current, total, filled) => `Question ${current} / ${total} · Filled ${filled}`,
       reviewFallback: "Page change caused a safety stop",
       stop: "Stop",

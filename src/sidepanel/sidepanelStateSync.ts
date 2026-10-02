@@ -74,7 +74,7 @@ export function buildAutoSolveStartingState(uiLang: UILang) {
     filled: 0,
     total: 0,
     current: 0,
-    statusText: uiLang === "en" ? "Starting auto solve..." : "开始自动答题...",
+    statusText: uiLang === "en" ? "Starting solve & fill..." : "开始解析并填答...",
     statusCode: "STARTING",
     statusDetail: "",
   };

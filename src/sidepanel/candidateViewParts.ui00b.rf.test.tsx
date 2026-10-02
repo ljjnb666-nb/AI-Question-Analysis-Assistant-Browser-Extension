@@ -47,7 +47,7 @@ describe("CandidateAutoSolveCard semantic tones (review fix P1-03/P1-04)", () =>
         }}
       />,
     );
-    const card = screen.getByText(/自动答题/).closest("[data-status-tone]")!;
+    const card = screen.getByText(/解析并填答|自动答题/).closest("[data-status-tone]")!;
     expect(card.getAttribute("data-status-tone")).toBe("error");
     // The fill-code detail is localized, not shown raw.
     expect(card.textContent).toContain("无法确认填写结果");
@@ -61,7 +61,7 @@ describe("CandidateAutoSolveCard semantic tones (review fix P1-03/P1-04)", () =>
         autoSolveProgress={{ ...base, statusCode: "PARSING", statusText: "正在解析第 3 题..." }}
       />,
     );
-    const card = screen.getByText(/Auto Solve/).closest("[data-status-tone]")!;
+    const card = screen.getByText(/Solve & Fill|Auto Solve/).closest("[data-status-tone]")!;
     expect(card.getAttribute("data-status-tone")).toBe("info");
     expect(card.textContent).toContain("Parsing question 3...");
     expect(card.textContent).not.toMatch(/[\u4e00-\u9fff]/);
@@ -74,7 +74,7 @@ describe("CandidateAutoSolveCard semantic tones (review fix P1-03/P1-04)", () =>
         autoSolveProgress={{ ...base, statusText: "正在重新解析本题..." }}
       />,
     );
-    const card = screen.getByText(/Auto Solve/).closest("[data-status-tone]")!;
+    const card = screen.getByText(/Solve & Fill|Auto Solve/).closest("[data-status-tone]")!;
     expect(card.getAttribute("data-status-tone")).toBe("info");
     expect(card.textContent).toContain("Working...");
     expect(card.textContent).not.toMatch(/[\u4e00-\u9fff]/);
@@ -88,7 +88,7 @@ describe("CandidateAutoSolveCard semantic tones (review fix P1-03/P1-04)", () =>
         autoSolveProgress={{ ...base, statusText: "TypeError: boom at content.js:9" }}
       />,
     );
-    const card = screen.getByText(/自动答题/).closest("[data-status-tone]")!;
+    const card = screen.getByText(/解析并填答|自动答题/).closest("[data-status-tone]")!;
     expect(card.textContent).toContain("正在处理...");
     expect(card.textContent).not.toContain("TypeError");
   });

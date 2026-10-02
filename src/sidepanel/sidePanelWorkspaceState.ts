@@ -1,7 +1,7 @@
 import type { UILang } from "./displayUtils";
 import type { AutoSolveProgressState, ScanProgressState } from "./sidepanelStateSync";
 import type { UserFeedback } from "@/shared/ui/userFeedback";
-import { autoSolveStatusFeedback, autoSolveStatusTone } from "@/shared/ui/autoSolveStatus";
+import { autoSolveStatusFeedback } from "@/shared/ui/autoSolveStatus";
 import { SIDEPANEL_COPY } from "./sidePanelCopy";
 
 export type SidePanelWorkspaceStatus =
@@ -26,6 +26,31 @@ export interface WorkspaceStatusDerivationInput {
   fillFeedback: UserFeedback | null;
 }
 
+
+export const WORKSPACE_REVIEW_REQUIRED_FEEDBACK_CODES = new Set([
+  "STALE_QUESTION_REVISION",
+  "STALE_ROOT_CONTEXT",
+  "STALE_ACTION_PLAN",
+  "PARTIAL_MUTATION_UNPROVABLE",
+  "FILL_VERIFICATION_FAILED",
+  "USER_STATE_CHANGED",
+  "USER_STATE_SNAPSHOT_UNAVAILABLE",
+]);
+
+export function isWorkspaceReviewRequired(
+  autoSolveProgress: AutoSolveProgressState | undefined,
+  fillFeedback: UserFeedback | null | undefined,
+  _isAutoSolving?: boolean,
+): boolean {
+  if (autoSolveProgress?.statusCode === "FILL_STOPPED_SAFETY") {
+    return true;
+  }
+  if (fillFeedback?.code && WORKSPACE_REVIEW_REQUIRED_FEEDBACK_CODES.has(fillFeedback.code)) {
+    return true;
+  }
+  return false;
+}
+
 export function deriveSidePanelWorkspaceStatus(input: WorkspaceStatusDerivationInput): SidePanelWorkspaceStatus {
   // Priority 1: SESSION CHECKING
   if (input.authStatus === "loading" || input.authStatus === "validating") {
@@ -42,19 +67,12 @@ export function deriveSidePanelWorkspaceStatus(input: WorkspaceStatusDerivationI
     return "signed_out";
   }
 
-  // Priority 4: SAFETY / REVIEW
-  const hasSafetyTone =
-    (input.autoSolveProgress?.statusCode != null &&
-      (autoSolveStatusTone(input.autoSolveProgress.statusCode) === "error" ||
-        autoSolveStatusTone(input.autoSolveProgress.statusCode) === "warning")) ||
-    (input.fillFeedback != null &&
-      (input.fillFeedback.tone === "error" || input.fillFeedback.tone === "warning"));
-
-  if (hasSafetyTone) {
+  // Priority 4: SAFETY / REVIEW (Code-based, NEVER tone-based)
+  if (isWorkspaceReviewRequired(input.autoSolveProgress, input.fillFeedback, input.isAutoSolving)) {
     return "review_required";
   }
 
-  // Priority 5: SOLVING
+  // Priority 5: SOLVING (Auto Solve, Batch Parse, or Batch Fill)
   if (input.isAutoSolving || input.isBatchParsing || input.isBatchFilling) {
     return "solving";
   }
@@ -73,7 +91,14 @@ export function deriveSidePanelWorkspaceStatus(input: WorkspaceStatusDerivationI
   return "ready";
 }
 
-export type WorkspaceActivityKind = "detecting" | "scanning" | "solving" | "review";
+export type WorkspaceActivityKind =
+  | "detecting"
+  | "scanning"
+  | "solving"
+  | "auto_solve"
+  | "batch_parse"
+  | "batch_fill"
+  | "review";
 
 export interface WorkspaceActivityAction {
   label: string;
@@ -99,10 +124,14 @@ export interface WorkspaceActivityDerivationInput {
   isFullPageScan: boolean;
   scanProgress: ScanProgressState;
   isAutoSolving: boolean;
+  isBatchParsing?: boolean;
+  isBatchFilling?: boolean;
   autoSolveProgress: AutoSolveProgressState;
   fillFeedback: UserFeedback | null;
+  currentTab?: "candidates" | "history" | "settings";
   onCancelFullPage?: () => void;
   onStopAutoSolve?: () => void;
+  onReviewCandidates?: () => void;
   onDismissFeedback?: () => void;
 }
 
@@ -114,10 +143,14 @@ export function deriveWorkspaceActivity(input: WorkspaceActivityDerivationInput)
     isFullPageScan,
     scanProgress,
     isAutoSolving,
+    isBatchParsing,
+    isBatchFilling,
     autoSolveProgress,
     fillFeedback,
+    currentTab,
     onCancelFullPage,
     onStopAutoSolve,
+    onReviewCandidates,
     onDismissFeedback,
   } = input;
   const copy = SIDEPANEL_COPY[lang];
@@ -126,17 +159,36 @@ export function deriveWorkspaceActivity(input: WorkspaceActivityDerivationInput)
   if (status === "review_required") {
     let message: string;
     let tone: "warning" | "error" = "warning";
+    let action: WorkspaceActivityAction | undefined = undefined;
 
-    if (autoSolveProgress?.statusCode) {
-      const fb = autoSolveStatusFeedback(autoSolveProgress.statusCode, lang, {
-        current: autoSolveProgress.current,
-        detail: autoSolveProgress.statusDetail,
+    const isAutoSolveSafety = autoSolveProgress?.statusCode === "FILL_STOPPED_SAFETY";
+
+    if (isAutoSolveSafety) {
+      const fb = autoSolveStatusFeedback("FILL_STOPPED_SAFETY", lang, {
+        current: autoSolveProgress?.current,
+        detail: autoSolveProgress?.statusDetail,
       });
       message = fb.label;
-      tone = autoSolveStatusTone(autoSolveProgress.statusCode) === "error" ? "error" : "warning";
-    } else if (fillFeedback) {
+      tone = "error";
+
+      // RF01-R06 / RF01-R07: Auto solve safety review gives review action, NEVER fake dismiss
+      if (currentTab !== "candidates" && onReviewCandidates) {
+        action = {
+          label: copy.activity.check,
+          onAction: onReviewCandidates,
+        };
+      }
+    } else if (fillFeedback?.code && WORKSPACE_REVIEW_REQUIRED_FEEDBACK_CODES.has(fillFeedback.code)) {
       message = fillFeedback.message;
       tone = fillFeedback.tone === "error" ? "error" : "warning";
+
+      // RF01-R08: Transient fillFeedback can be dismissed to clear
+      if (onDismissFeedback) {
+        action = {
+          label: copy.activity.dismiss,
+          onAction: onDismissFeedback,
+        };
+      }
     } else {
       message = copy.activity.reviewFallback;
     }
@@ -146,40 +198,55 @@ export function deriveWorkspaceActivity(input: WorkspaceActivityDerivationInput)
       tone,
       label: copy.status.review_required,
       secondary: message,
-      action: onDismissFeedback
-        ? {
-            label: copy.activity.dismiss,
-            onAction: onDismissFeedback,
-          }
-        : undefined,
+      action,
     };
   }
 
-  // Priority 5: Solving
-  if (status === "solving" || isAutoSolving) {
-    let secondary = "";
-    if (autoSolveProgress && autoSolveProgress.total > 0) {
-      secondary = copy.activity.solvingProgress(
-        autoSolveProgress.current,
-        autoSolveProgress.total,
-        autoSolveProgress.filled,
-      );
+  // Priority 5: Solving / Auto Solve / Batch Parse / Batch Fill
+  if (status === "solving" || isAutoSolving || isBatchParsing || isBatchFilling) {
+    if (isAutoSolving) {
+      let secondary = "";
+      if (autoSolveProgress && autoSolveProgress.total > 0) {
+        secondary = copy.activity.solvingProgress(
+          autoSolveProgress.current,
+          autoSolveProgress.total,
+          autoSolveProgress.filled,
+        );
+      }
+      return {
+        kind: "auto_solve",
+        tone: "ai",
+        label: copy.activity.solving,
+        secondary: secondary || undefined,
+        current: autoSolveProgress?.current,
+        total: autoSolveProgress?.total,
+        filled: autoSolveProgress?.filled,
+        action: onStopAutoSolve
+          ? {
+              label: copy.activity.stop,
+              onAction: onStopAutoSolve,
+            }
+          : undefined,
+      };
     }
-    return {
-      kind: "solving",
-      tone: "ai",
-      label: copy.activity.solving,
-      secondary: secondary || undefined,
-      current: autoSolveProgress?.current,
-      total: autoSolveProgress?.total,
-      filled: autoSolveProgress?.filled,
-      action: onStopAutoSolve
-        ? {
-            label: copy.activity.stop,
-            onAction: onStopAutoSolve,
-          }
-        : undefined,
-    };
+
+    if (isBatchParsing) {
+      return {
+        kind: "batch_parse",
+        tone: "ai",
+        label: copy.activity.batchParse,
+        action: undefined, // RF01-A02: no cancel mechanism, no Stop action
+      };
+    }
+
+    if (isBatchFilling) {
+      return {
+        kind: "batch_fill",
+        tone: "ai",
+        label: copy.activity.batchFill,
+        action: undefined, // RF01-A03: no cancel mechanism, no Stop action
+      };
+    }
   }
 
   // Priority 6: Scanning

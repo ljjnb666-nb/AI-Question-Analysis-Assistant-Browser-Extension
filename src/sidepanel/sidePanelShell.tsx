@@ -252,7 +252,7 @@ export const SidePanelHeader: React.FC<{
             ref={menuButtonRef}
             type="button"
             aria-label={copy.menu.buttonAria}
-            aria-haspopup="menu"
+            aria-controls="sidepanel-product-popover"
             aria-expanded={isMenuOpen}
             onClick={() => setIsMenuOpen((prev) => !prev)}
             onFocus={onMenuFocus}
@@ -280,12 +280,11 @@ export const SidePanelHeader: React.FC<{
             ⋯
           </button>
 
-          {/* Product Menu Dropdown */}
+          {/* Product Popover */}
           {isMenuOpen && (
             <div
+              id="sidepanel-product-popover"
               ref={menuRef}
-              role="menu"
-              aria-label={copy.menu.buttonAria}
               style={{
                 position: "absolute",
                 right: 0,
@@ -304,11 +303,10 @@ export const SidePanelHeader: React.FC<{
             >
               {isAuthenticated && userEmail ? (
                 <div
-                  role="none"
                   style={{
                     padding: `${orbitSpacing[1]}px ${orbitSpacing[2]}px`,
                     fontSize: orbitTypography.fontSize.xs,
-                    color: orbitColors.text.muted,
+                    color: orbitColors.text.secondary,
                     borderBottom: `1px solid ${orbitColors.border.subtle}`,
                     marginBottom: 2,
                     overflow: "hidden",
@@ -317,7 +315,7 @@ export const SidePanelHeader: React.FC<{
                   }}
                   title={userEmail}
                 >
-                  <div style={{ fontSize: 10, color: orbitColors.text.muted }}>
+                  <div style={{ fontSize: 10, color: orbitColors.text.secondary }}>
                     {copy.menu.accountHeader}
                   </div>
                   <div style={{ color: orbitColors.text.secondary }}>{userEmail}</div>
@@ -327,7 +325,6 @@ export const SidePanelHeader: React.FC<{
               {onToggleLanguage ? (
                 <button
                   type="button"
-                  role="menuitem"
                   onClick={() => {
                     setIsMenuOpen(false);
                     onToggleLanguage();
@@ -352,7 +349,6 @@ export const SidePanelHeader: React.FC<{
 
               <button
                 type="button"
-                role="menuitem"
                 onClick={() => {
                   setIsMenuOpen(false);
                   onTabChange("settings");
@@ -377,7 +373,6 @@ export const SidePanelHeader: React.FC<{
               {isAuthenticated && onLogout ? (
                 <button
                   type="button"
-                  role="menuitem"
                   onClick={() => {
                     setIsMenuOpen(false);
                     onLogout();
@@ -408,7 +403,8 @@ export const SidePanelHeader: React.FC<{
 
       {/* Flat Tabs Navigation */}
       {isAuthenticated ? (
-        <nav
+        <div
+          role="tablist"
           ref={tabListRef}
           aria-label={copy.tabs.ariaLabel}
           style={{
@@ -435,7 +431,7 @@ export const SidePanelHeader: React.FC<{
               />
             );
           })}
-        </nav>
+        </div>
       ) : null}
     </header>
   );
@@ -455,10 +451,11 @@ const TabButton: React.FC<{
   return (
     <button
       id={id}
+      role="tab"
       type="button"
-      aria-pressed={isActive}
-      aria-current={isActive ? "page" : undefined}
+      aria-selected={isActive}
       aria-controls={controls}
+      tabIndex={isActive ? 0 : -1}
       onClick={onClick}
       onKeyDown={onKeyDown}
       onFocus={onFocus}
@@ -490,6 +487,36 @@ const TabButton: React.FC<{
     >
       {label}
     </button>
+  );
+};
+
+export const WorkspaceTabPanel: React.FC<{
+  id: string;
+  tabId: SidePanelTabId;
+  children: React.ReactNode;
+}> = ({ id, tabId, children }) => {
+  const { isFocusVisible, onFocus, onBlur } = useFocusVisible();
+  return (
+    <div
+      role="tabpanel"
+      id={id}
+      aria-labelledby={`sidepanel-tab-${tabId}`}
+      tabIndex={0}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        width: "100%",
+        boxSizing: "border-box",
+        outline: isFocusVisible ? orbitTokens.focus.outline : "none",
+        outlineOffset: orbitTokens.focus.outlineOffset,
+        boxShadow: isFocusVisible ? orbitTokens.focus.focusRing : "none",
+      }}
+    >
+      {children}
+    </div>
   );
 };
 

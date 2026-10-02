@@ -160,8 +160,8 @@ describe("sidepanelStateSync", () => {
     expect(doneFailed.tone).toBe("error");
     expect(doneFailed.message).not.toContain("raw-http-500");
     expect(doneFailed.technicalDetail).toContain("raw-http-500");
-    expect(buildAutoSolveStartingState("zh").statusText).toBe("开始自动答题...");
-    expect(buildAutoSolveStartingState("en").statusText).toBe("Starting auto solve...");
+    expect(buildAutoSolveStartingState("zh").statusText).toBe("开始解析并填答...");
+    expect(buildAutoSolveStartingState("en").statusText).toBe("Starting solve & fill...");
     expect(buildAutoSolveStartingState("zh").statusCode).toBe("STARTING");
   });
 
