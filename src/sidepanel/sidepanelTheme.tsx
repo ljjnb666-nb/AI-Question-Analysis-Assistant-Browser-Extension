@@ -1,21 +1,18 @@
 import React from "react";
+import { orbitTokens, orbitColors, orbitRadius, orbitTypography } from "../shared/ui/orbitTokens";
 
 export const sidePanelCardStyle: React.CSSProperties = {
-  borderRadius: 16,
-  border: "1px solid rgba(255, 255, 255, 0.06)",
-  background: "linear-gradient(180deg, rgba(16, 24, 48, 0.8), rgba(10, 15, 30, 0.85))",
-  boxShadow:
-    "0 8px 32px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08)",
-  backdropFilter: "blur(20px)",
+  borderRadius: orbitRadius.lg,
+  border: `1px solid ${orbitColors.border.subtle}`,
+  background: orbitColors.bg.surface,
+  boxShadow: orbitTokens.shadow.none,
 };
 
 export const historyCardStyle: React.CSSProperties = {
-  border: "1px solid rgba(255, 255, 255, 0.06)",
-  borderRadius: 16,
-  background: "linear-gradient(180deg, rgba(16, 24, 48, 0.8), rgba(10, 15, 30, 0.85))",
-  boxShadow:
-    "0 8px 32px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08)",
-  backdropFilter: "blur(20px)",
+  borderRadius: orbitRadius.lg,
+  border: `1px solid ${orbitColors.border.subtle}`,
+  background: orbitColors.bg.surface,
+  boxShadow: orbitTokens.shadow.none,
 };
 
 export const sidePanelShellStyle: React.CSSProperties = {
@@ -23,23 +20,22 @@ export const sidePanelShellStyle: React.CSSProperties = {
   flexDirection: "column",
   height: "100vh",
   overflow: "hidden",
-  background:
-    "radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.12), transparent 30%), radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.08), transparent 30%), linear-gradient(180deg, #070913 0%, #0f111a 60%, #070913 100%)",
-  color: "#f8fafc",
-  fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  background: orbitColors.bg.canvas,
+  color: orbitColors.text.primary,
+  fontFamily: orbitTypography.fontFamily,
 };
 
 export const sidePanelMutedTextStyle: React.CSSProperties = {
-  fontSize: 11,
-  lineHeight: 1.55,
-  color: "#94a3b8",
+  fontSize: orbitTypography.fontSize.xs,
+  lineHeight: orbitTypography.lineHeight.relaxed,
+  color: orbitColors.text.secondary,
 };
 
 export const panelChromeInsetStyle: React.CSSProperties = {
   position: "absolute",
   inset: 6,
-  borderRadius: 12,
-  border: "1px solid rgba(255,255,255,0.02)",
+  borderRadius: orbitRadius.md,
+  border: `1px solid ${orbitColors.border.subtle}`,
   pointerEvents: "none",
 };
 
@@ -52,7 +48,7 @@ export const PanelChrome: React.FC<{
   glow,
   bottom = -10,
   height = 22,
-  overlay = "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0) 28%)",
+  overlay = "none",
 }) => (
   <>
     <div
@@ -62,20 +58,23 @@ export const PanelChrome: React.FC<{
         right: 18,
         bottom,
         height,
-        borderRadius: 999,
+        borderRadius: orbitRadius.pill,
         background: `radial-gradient(circle, ${glow} 0%, rgba(0,0,0,0) 72%)`,
         filter: "blur(12px)",
         pointerEvents: "none",
+        opacity: 0.15,
       }}
     />
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        background: overlay,
-        pointerEvents: "none",
-      }}
-    />
+    {overlay && overlay !== "none" ? (
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: overlay,
+          pointerEvents: "none",
+        }}
+      />
+    ) : null}
     <div style={panelChromeInsetStyle} />
   </>
 );
