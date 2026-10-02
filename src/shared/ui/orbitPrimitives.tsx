@@ -1,5 +1,15 @@
-import React, { useState } from "react";
-import { orbitTokens, orbitColors, orbitSpacing, orbitRadius, orbitTypography, orbitControlHeight } from "./orbitTokens";
+import React, { useState, useEffect } from "react";
+import {
+  orbitTokens,
+  orbitColors,
+  orbitSpacing,
+  orbitRadius,
+  orbitTypography,
+  orbitControlHeight,
+  orbitComponent,
+} from "./orbitTokens";
+import { usePrefersReducedMotion, ensureOrbitKeyframes } from "./orbitMotion";
+import { useFocusVisible } from "./orbitFocus";
 import type { UserFeedbackTone } from "./userFeedback";
 
 export type OrbitButtonVariant = "primary" | "secondary" | "ghost" | "danger";
@@ -29,7 +39,16 @@ export const OrbitButton = React.forwardRef<HTMLButtonElement, OrbitButtonProps>
     ref,
   ) => {
     const [isHovered, setIsHovered] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
+    const prefersReducedMotion = usePrefersReducedMotion();
+    const { isFocusVisible, onFocus: handleFocusVisible, onBlur: handleBlurVisible } = useFocusVisible(
+      disabled || isLoading,
+    );
+
+    useEffect(() => {
+      if (isLoading) {
+        ensureOrbitKeyframes();
+      }
+    }, [isLoading]);
 
     const height =
       size === "sm"
@@ -50,8 +69,8 @@ export const OrbitButton = React.forwardRef<HTMLButtonElement, OrbitButtonProps>
     let border: string;
 
     if (disabled || isLoading) {
-      background = "rgba(255, 255, 255, 0.05)";
-      color = orbitColors.text.muted;
+      background = orbitColors.control.disabledBg;
+      color = orbitColors.control.disabledText;
       border = `1px solid ${orbitColors.border.subtle}`;
     } else {
       switch (variant) {
@@ -59,7 +78,7 @@ export const OrbitButton = React.forwardRef<HTMLButtonElement, OrbitButtonProps>
           background = isHovered
             ? orbitColors.brand.hover
             : orbitColors.brand.primary;
-          color = "#FFFFFF";
+          color = orbitColors.control.onAccent;
           border = `1px solid ${orbitColors.brand.hover}`;
           break;
         case "secondary":
@@ -70,7 +89,7 @@ export const OrbitButton = React.forwardRef<HTMLButtonElement, OrbitButtonProps>
           border = `1px solid ${isHovered ? orbitColors.border.strong : orbitColors.border.default}`;
           break;
         case "ghost":
-          background = isHovered ? "rgba(255, 255, 255, 0.06)" : "transparent";
+          background = isHovered ? orbitColors.control.ghostHover : "transparent";
           color = orbitColors.text.primary;
           border = "1px solid transparent";
           break;
@@ -78,13 +97,13 @@ export const OrbitButton = React.forwardRef<HTMLButtonElement, OrbitButtonProps>
           background = isHovered
             ? orbitColors.semantic.errorHover
             : orbitColors.semantic.error;
-          color = "#FFFFFF";
+          color = orbitColors.control.onAccent;
           border = `1px solid ${orbitColors.semantic.errorHover}`;
           break;
       }
     }
 
-    const focusRing = isFocused && !disabled
+    const focusRing = isFocusVisible
       ? {
           outline: orbitTokens.focus.outline,
           outlineOffset: orbitTokens.focus.outlineOffset,
@@ -93,6 +112,10 @@ export const OrbitButton = React.forwardRef<HTMLButtonElement, OrbitButtonProps>
       : {
           outline: "none",
         };
+
+    const transition = prefersReducedMotion
+      ? "none"
+      : `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}, color ${orbitTokens.motion.fast}`;
 
     const combinedStyle: React.CSSProperties = {
       display: "inline-flex",
@@ -112,7 +135,7 @@ export const OrbitButton = React.forwardRef<HTMLButtonElement, OrbitButtonProps>
       border,
       cursor: disabled || isLoading ? "not-allowed" : "pointer",
       boxSizing: "border-box",
-      transition: `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}, color ${orbitTokens.motion.fast}`,
+      transition,
       userSelect: "none",
       textDecoration: "none",
       whiteSpace: "nowrap",
@@ -136,11 +159,11 @@ export const OrbitButton = React.forwardRef<HTMLButtonElement, OrbitButtonProps>
           onMouseLeave?.(e);
         }}
         onFocus={(e) => {
-          setIsFocused(true);
+          handleFocusVisible();
           onFocus?.(e);
         }}
         onBlur={(e) => {
-          setIsFocused(false);
+          handleBlurVisible();
           onBlur?.(e);
         }}
         {...rest}
@@ -148,14 +171,15 @@ export const OrbitButton = React.forwardRef<HTMLButtonElement, OrbitButtonProps>
         {isLoading ? (
           <span
             aria-hidden="true"
+            data-testid="orbit-loading-spinner"
             style={{
               display: "inline-block",
-              width: 12,
-              height: 12,
-              border: "2px solid currentColor",
+              width: orbitComponent.spinner.size,
+              height: orbitComponent.spinner.size,
+              border: `${orbitComponent.spinner.borderWidth}px solid currentColor`,
               borderTopColor: "transparent",
-              borderRadius: "50%",
-              animation: "spin 0.8s linear infinite",
+              borderRadius: orbitRadius.pill,
+              animation: prefersReducedMotion ? "none" : "orbit-spin 0.8s linear infinite",
             }}
           />
         ) : null}
@@ -175,6 +199,7 @@ export interface OrbitSurfaceProps extends React.HTMLAttributes<HTMLDivElement> 
 export const OrbitSurface = React.forwardRef<HTMLDivElement, OrbitSurfaceProps>(
   ({ children, variant = "default", style, onMouseEnter, onMouseLeave, ...rest }, ref) => {
     const [isHovered, setIsHovered] = useState(false);
+    const prefersReducedMotion = usePrefersReducedMotion();
 
     let background: string;
     let border: string;
@@ -199,6 +224,10 @@ export const OrbitSurface = React.forwardRef<HTMLDivElement, OrbitSurfaceProps>(
         break;
     }
 
+    const transition = prefersReducedMotion
+      ? "none"
+      : `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}`;
+
     const surfaceStyle: React.CSSProperties = {
       background,
       border,
@@ -207,7 +236,7 @@ export const OrbitSurface = React.forwardRef<HTMLDivElement, OrbitSurfaceProps>(
       boxSizing: "border-box",
       color: orbitColors.text.primary,
       fontFamily: orbitTypography.fontFamily,
-      transition: `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}`,
+      transition,
       ...style,
     };
 
@@ -294,7 +323,7 @@ export const OrbitBadge: React.FC<OrbitBadgeProps> = ({
   const badgeStyle: React.CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
-    gap: 6,
+    gap: orbitComponent.badge.gap,
     padding: `2px ${orbitSpacing[2]}px`,
     borderRadius: orbitRadius.pill,
     fontSize: orbitTypography.fontSize.xs,
@@ -315,9 +344,9 @@ export const OrbitBadge: React.FC<OrbitBadgeProps> = ({
         <span
           aria-hidden="true"
           style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
+            width: orbitComponent.badge.dotSize,
+            height: orbitComponent.badge.dotSize,
+            borderRadius: orbitRadius.pill,
             backgroundColor: dotColor,
           }}
         />
@@ -378,9 +407,9 @@ export const OrbitStatus: React.FC<OrbitStatusProps> = ({
       <span
         aria-hidden="true"
         style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
+          width: orbitComponent.status.dotSize,
+          height: orbitComponent.status.dotSize,
+          borderRadius: orbitRadius.pill,
           backgroundColor: indicatorColor,
           flexShrink: 0,
         }}
@@ -403,18 +432,25 @@ export interface OrbitInputProps extends React.InputHTMLAttributes<HTMLInputElem
 
 export const OrbitInput = React.forwardRef<HTMLInputElement, OrbitInputProps>(
   ({ label, helperText, errorText, disabled, style, onFocus, onBlur, id, ...rest }, ref) => {
-    const [isFocused, setIsFocused] = useState(false);
-    const inputId = id || (label ? `orbit-input-${label.toLowerCase().replace(/\s+/g, "-")}` : undefined);
+    const generatedId = React.useId();
+    const inputId = id ?? generatedId;
+    const helperId = `${inputId}-helper`;
+    const errorId = `${inputId}-error`;
+
+    const prefersReducedMotion = usePrefersReducedMotion();
+    const { isFocusVisible, onFocus: handleFocusVisible, onBlur: handleBlurVisible } = useFocusVisible(disabled);
 
     const hasError = Boolean(errorText);
+    const describedBy =
+      [errorText ? errorId : null, helperText ? helperId : null].filter(Boolean).join(" ") || undefined;
 
     const borderColor = hasError
       ? orbitColors.semantic.error
-      : isFocused
+      : isFocusVisible
         ? orbitColors.border.focus
         : orbitColors.border.default;
 
-    const focusStyle: React.CSSProperties = isFocused
+    const focusStyle: React.CSSProperties = isFocusVisible
       ? {
           outline: "none",
           border: `1px solid ${borderColor}`,
@@ -426,6 +462,10 @@ export const OrbitInput = React.forwardRef<HTMLInputElement, OrbitInputProps>(
           outline: "none",
           border: `1px solid ${borderColor}`,
         };
+
+    const transition = prefersReducedMotion
+      ? "none"
+      : `border-color ${orbitTokens.motion.fast}, box-shadow ${orbitTokens.motion.fast}`;
 
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: orbitSpacing[1], width: "100%" }}>
@@ -446,32 +486,35 @@ export const OrbitInput = React.forwardRef<HTMLInputElement, OrbitInputProps>(
           ref={ref}
           id={inputId}
           disabled={disabled}
+          aria-invalid={hasError ? "true" : undefined}
+          aria-describedby={describedBy}
           style={{
             height: orbitControlHeight.md,
             padding: `0 ${orbitSpacing[3]}px`,
             borderRadius: orbitRadius.md,
-            background: disabled ? "rgba(255, 255, 255, 0.03)" : orbitColors.bg.surfaceSubtle,
+            background: disabled ? orbitColors.control.inputDisabledBg : orbitColors.bg.surfaceSubtle,
             color: disabled ? orbitColors.text.muted : orbitColors.text.primary,
             fontSize: orbitTypography.fontSize.md,
             fontFamily: orbitTypography.fontFamily,
             boxSizing: "border-box",
             width: "100%",
-            transition: `border-color ${orbitTokens.motion.fast}, box-shadow ${orbitTokens.motion.fast}`,
+            transition,
             ...focusStyle,
             ...style,
           }}
           onFocus={(e) => {
-            setIsFocused(true);
+            handleFocusVisible();
             onFocus?.(e);
           }}
           onBlur={(e) => {
-            setIsFocused(false);
+            handleBlurVisible();
             onBlur?.(e);
           }}
           {...rest}
         />
         {errorText ? (
           <span
+            id={errorId}
             role="alert"
             style={{
               fontSize: orbitTypography.fontSize.xs,
@@ -481,8 +524,10 @@ export const OrbitInput = React.forwardRef<HTMLInputElement, OrbitInputProps>(
           >
             {errorText}
           </span>
-        ) : helperText ? (
+        ) : null}
+        {helperText ? (
           <span
+            id={helperId}
             style={{
               fontSize: orbitTypography.fontSize.xs,
               color: orbitColors.text.muted,
@@ -507,17 +552,25 @@ export interface OrbitSelectProps extends React.SelectHTMLAttributes<HTMLSelectE
 
 export const OrbitSelect = React.forwardRef<HTMLSelectElement, OrbitSelectProps>(
   ({ label, helperText, errorText, disabled, options, children, style, id, onFocus, onBlur, ...rest }, ref) => {
-    const [isFocused, setIsFocused] = useState(false);
-    const selectId = id || (label ? `orbit-select-${label.toLowerCase().replace(/\s+/g, "-")}` : undefined);
+    const generatedId = React.useId();
+    const selectId = id ?? generatedId;
+    const helperId = `${selectId}-helper`;
+    const errorId = `${selectId}-error`;
+
+    const prefersReducedMotion = usePrefersReducedMotion();
+    const { isFocusVisible, onFocus: handleFocusVisible, onBlur: handleBlurVisible } = useFocusVisible(disabled);
+
     const hasError = Boolean(errorText);
+    const describedBy =
+      [errorText ? errorId : null, helperText ? helperId : null].filter(Boolean).join(" ") || undefined;
 
     const borderColor = hasError
       ? orbitColors.semantic.error
-      : isFocused
+      : isFocusVisible
         ? orbitColors.border.focus
         : orbitColors.border.default;
 
-    const focusStyle: React.CSSProperties = isFocused
+    const focusStyle: React.CSSProperties = isFocusVisible
       ? {
           outline: "none",
           border: `1px solid ${borderColor}`,
@@ -529,6 +582,10 @@ export const OrbitSelect = React.forwardRef<HTMLSelectElement, OrbitSelectProps>
           outline: "none",
           border: `1px solid ${borderColor}`,
         };
+
+    const transition = prefersReducedMotion
+      ? "none"
+      : `border-color ${orbitTokens.motion.fast}, box-shadow ${orbitTokens.motion.fast}`;
 
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: orbitSpacing[1], width: "100%" }}>
@@ -549,27 +606,29 @@ export const OrbitSelect = React.forwardRef<HTMLSelectElement, OrbitSelectProps>
           ref={ref}
           id={selectId}
           disabled={disabled}
+          aria-invalid={hasError ? "true" : undefined}
+          aria-describedby={describedBy}
           style={{
             height: orbitControlHeight.md,
             padding: `0 ${orbitSpacing[3]}px`,
             borderRadius: orbitRadius.md,
-            background: disabled ? "rgba(255, 255, 255, 0.03)" : orbitColors.bg.surfaceSubtle,
+            background: disabled ? orbitColors.control.inputDisabledBg : orbitColors.bg.surfaceSubtle,
             color: disabled ? orbitColors.text.muted : orbitColors.text.primary,
             fontSize: orbitTypography.fontSize.md,
             fontFamily: orbitTypography.fontFamily,
             boxSizing: "border-box",
             width: "100%",
             cursor: disabled ? "not-allowed" : "pointer",
-            transition: `border-color ${orbitTokens.motion.fast}, box-shadow ${orbitTokens.motion.fast}`,
+            transition,
             ...focusStyle,
             ...style,
           }}
           onFocus={(e) => {
-            setIsFocused(true);
+            handleFocusVisible();
             onFocus?.(e);
           }}
           onBlur={(e) => {
-            setIsFocused(false);
+            handleBlurVisible();
             onBlur?.(e);
           }}
           {...rest}
@@ -584,6 +643,7 @@ export const OrbitSelect = React.forwardRef<HTMLSelectElement, OrbitSelectProps>
         </select>
         {errorText ? (
           <span
+            id={errorId}
             role="alert"
             style={{
               fontSize: orbitTypography.fontSize.xs,
@@ -593,8 +653,10 @@ export const OrbitSelect = React.forwardRef<HTMLSelectElement, OrbitSelectProps>
           >
             {errorText}
           </span>
-        ) : helperText ? (
+        ) : null}
+        {helperText ? (
           <span
+            id={helperId}
             style={{
               fontSize: orbitTypography.fontSize.xs,
               color: orbitColors.text.muted,
@@ -625,8 +687,19 @@ export const OrbitToggle: React.FC<OrbitToggleProps> = ({
   disabled = false,
   id,
 }) => {
-  const [isFocused, setIsFocused] = useState(false);
-  const toggleId = id || (label ? `orbit-toggle-${label.toLowerCase().replace(/\s+/g, "-")}` : undefined);
+  const generatedId = React.useId();
+  const toggleId = id ?? generatedId;
+
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const { isFocusVisible, onFocus: handleFocusVisible, onBlur: handleBlurVisible } = useFocusVisible(disabled);
+
+  const trackTransition = prefersReducedMotion
+    ? "none"
+    : `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}`;
+
+  const thumbTransition = prefersReducedMotion
+    ? "none"
+    : `transform ${orbitTokens.motion.fast}`;
 
   return (
     <label
@@ -647,36 +720,39 @@ export const OrbitToggle: React.FC<OrbitToggleProps> = ({
         aria-checked={checked}
         disabled={disabled}
         onClick={() => !disabled && onChange(!checked)}
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
+        onFocus={handleFocusVisible}
+        onBlur={handleBlurVisible}
         style={{
-          width: 38,
-          height: 22,
+          width: orbitComponent.toggle.trackWidth,
+          height: orbitComponent.toggle.trackHeight,
           borderRadius: orbitRadius.pill,
           background: disabled
-            ? "rgba(255, 255, 255, 0.08)"
+            ? orbitColors.control.toggleDisabledBg
             : checked
               ? orbitColors.brand.primary
               : orbitColors.bg.surfaceInteractive,
-          border: `1px solid ${isFocused ? orbitColors.brand.primary : orbitColors.border.default}`,
+          border: `1px solid ${isFocusVisible ? orbitColors.brand.primary : orbitColors.border.default}`,
           position: "relative",
           cursor: disabled ? "not-allowed" : "pointer",
-          padding: 2,
+          padding: orbitComponent.toggle.trackPadding,
           boxSizing: "border-box",
-          outline: isFocused ? orbitTokens.focus.outline : "none",
+          outline: isFocusVisible ? orbitTokens.focus.outline : "none",
           outlineOffset: orbitTokens.focus.outlineOffset,
-          transition: `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}`,
+          boxShadow: isFocusVisible ? orbitTokens.focus.focusRing : "none",
+          transition: trackTransition,
         }}
       >
         <span
           style={{
             display: "block",
-            width: 16,
-            height: 16,
-            borderRadius: "50%",
-            background: disabled ? orbitColors.text.muted : "#FFFFFF",
-            transform: checked ? "translateX(16px)" : "translateX(0px)",
-            transition: `transform ${orbitTokens.motion.fast}`,
+            width: orbitComponent.toggle.thumbSize,
+            height: orbitComponent.toggle.thumbSize,
+            borderRadius: orbitRadius.pill,
+            background: disabled ? orbitColors.text.muted : orbitColors.control.onAccent,
+            transform: checked
+              ? `translateX(${orbitComponent.toggle.thumbTranslateX}px)`
+              : "translateX(0px)",
+            transition: thumbTransition,
           }}
         />
       </button>
@@ -758,6 +834,12 @@ export const OrbitDisclosure: React.FC<OrbitDisclosureProps> = ({
   defaultOpen = false,
 }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const { isFocusVisible, onFocus: handleFocusVisible, onBlur: handleBlurVisible } = useFocusVisible();
+
+  const chevronTransition = prefersReducedMotion
+    ? "none"
+    : `transform ${orbitTokens.motion.fast}`;
 
   return (
     <div
@@ -772,6 +854,8 @@ export const OrbitDisclosure: React.FC<OrbitDisclosureProps> = ({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
+        onFocus={handleFocusVisible}
+        onBlur={handleBlurVisible}
         aria-expanded={isOpen}
         style={{
           width: "100%",
@@ -786,15 +870,17 @@ export const OrbitDisclosure: React.FC<OrbitDisclosureProps> = ({
           fontSize: orbitTypography.fontSize.xs,
           fontWeight: orbitTypography.fontWeight.medium,
           textAlign: "left",
-          outline: "none",
+          outline: isFocusVisible ? orbitTokens.focus.outline : "none",
+          outlineOffset: orbitTokens.focus.outlineOffset,
+          boxShadow: isFocusVisible ? orbitTokens.focus.focusRing : "none",
         }}
       >
         <span>{title}</span>
         <span
           style={{
             transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
-            transition: `transform ${orbitTokens.motion.fast}`,
-            fontSize: 10,
+            transition: chevronTransition,
+            fontSize: orbitComponent.disclosure.chevronSize,
             color: orbitColors.text.muted,
           }}
         >

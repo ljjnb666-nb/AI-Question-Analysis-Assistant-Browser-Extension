@@ -1,21 +1,21 @@
 import React from "react";
-import { orbitTokens, orbitColors, orbitRadius, orbitTypography } from "./orbitTokens";
+import { orbitTokens, orbitColors, orbitSpacing, orbitRadius, orbitTypography } from "./orbitTokens";
 
 export * from "./orbitTokens";
 export * from "./orbitPrimitives";
 export * from "./orbitMotion";
+export * from "./orbitFocus";
 
 export const SHARED_FONT_FAMILY = orbitTypography.fontFamily;
 
 export const uiInputStyle: React.CSSProperties = {
   width: "100%",
-  padding: "8px 12px",
+  padding: `${orbitSpacing[2]}px ${orbitSpacing[3]}px`,
   borderRadius: orbitRadius.md,
   border: `1px solid ${orbitColors.border.default}`,
   background: orbitColors.bg.surfaceSubtle,
   color: orbitColors.text.primary,
   fontSize: orbitTypography.fontSize.md,
-  outline: "none",
   boxSizing: "border-box",
   fontFamily: SHARED_FONT_FAMILY,
   transition: `border-color ${orbitTokens.motion.fast}, box-shadow ${orbitTokens.motion.fast}`,
@@ -33,7 +33,7 @@ export const primaryButtonStyle: React.CSSProperties = {
   borderRadius: orbitRadius.md,
   border: `1px solid ${orbitColors.brand.hover}`,
   background: orbitColors.brand.primary,
-  color: "#FFFFFF",
+  color: orbitColors.control.onAccent,
   fontSize: orbitTypography.fontSize.sm,
   fontWeight: orbitTypography.fontWeight.semibold,
   lineHeight: 1,
@@ -41,7 +41,6 @@ export const primaryButtonStyle: React.CSSProperties = {
   letterSpacing: -0.1,
   fontFamily: SHARED_FONT_FAMILY,
   transition: `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}`,
-  outline: "none",
 };
 
 export const secondaryButtonStyle: React.CSSProperties = {
@@ -57,7 +56,6 @@ export const secondaryButtonStyle: React.CSSProperties = {
   letterSpacing: -0.1,
   fontFamily: SHARED_FONT_FAMILY,
   transition: `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}`,
-  outline: "none",
 };
 
 export const dangerButtonStyle: React.CSSProperties = {
@@ -65,7 +63,7 @@ export const dangerButtonStyle: React.CSSProperties = {
   borderRadius: orbitRadius.md,
   border: `1px solid ${orbitColors.semantic.errorHover}`,
   background: orbitColors.semantic.error,
-  color: "#FFFFFF",
+  color: orbitColors.control.onAccent,
   fontSize: orbitTypography.fontSize.sm,
   fontWeight: orbitTypography.fontWeight.semibold,
   lineHeight: 1,
@@ -73,7 +71,6 @@ export const dangerButtonStyle: React.CSSProperties = {
   letterSpacing: -0.1,
   fontFamily: SHARED_FONT_FAMILY,
   transition: `background ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}`,
-  outline: "none",
 };
 
 export const SectionCard: React.FC<{
@@ -135,9 +132,7 @@ export const UiButton: React.FC<{
         outlineOffset: orbitTokens.focus.outlineOffset,
         boxShadow: orbitTokens.focus.focusRing,
       }
-    : {
-        outline: "none",
-      };
+    : {};
 
   return (
     <button
@@ -148,7 +143,7 @@ export const UiButton: React.FC<{
       onBlur={() => setIsFocused(false)}
       style={{
         ...baseStyle,
-        background: disabled ? "rgba(255, 255, 255, 0.05)" : baseStyle.background,
+        background: disabled ? orbitColors.control.disabledBg : baseStyle.background,
         color: disabled ? orbitColors.text.muted : baseStyle.color,
         border: disabled ? `1px solid ${orbitColors.border.subtle}` : baseStyle.border,
         cursor: disabled ? "not-allowed" : "pointer",

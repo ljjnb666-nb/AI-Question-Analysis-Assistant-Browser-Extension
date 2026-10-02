@@ -11,6 +11,7 @@
  * - Direct contract alignment with UI-00B UserFeedbackTone (success, info, warning, error)
  * - System typography with zero external downloads
  * - Accessible focus rings and reduced-motion compliance
+ * - Single authoritative source of truth for motion, geometry, and tokens
  */
 
 export const orbitColors = {
@@ -33,6 +34,7 @@ export const orbitColors = {
     secondary: "#94A3B8",
     muted: "#64748B",
     inverse: "#0B0D11",
+    onAccent: "#FFFFFF",
   },
   brand: {
     primary: "#2563EB",
@@ -65,6 +67,14 @@ export const orbitColors = {
     surface: "rgba(139, 92, 246, 0.12)",
     border: "rgba(139, 92, 246, 0.3)",
   },
+  control: {
+    onAccent: "#FFFFFF",
+    disabledBg: "rgba(255, 255, 255, 0.05)",
+    disabledText: "#64748B",
+    ghostHover: "rgba(255, 255, 255, 0.06)",
+    inputDisabledBg: "rgba(255, 255, 255, 0.03)",
+    toggleDisabledBg: "rgba(255, 255, 255, 0.08)",
+  },
 } as const;
 
 export const orbitSpacing = {
@@ -92,6 +102,7 @@ export const orbitTypography = {
   codeFamily:
     'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
   fontSize: {
+    xxs: 10,
     xs: 11,
     sm: 12,
     md: 13,
@@ -118,6 +129,30 @@ export const orbitControlHeight = {
   lg: 40,
 } as const;
 
+export const orbitComponent = {
+  toggle: {
+    trackWidth: 38,
+    trackHeight: 22,
+    trackPadding: 2,
+    thumbSize: 16,
+    thumbTranslateX: 16,
+  },
+  badge: {
+    dotSize: 6,
+    gap: 6,
+  },
+  status: {
+    dotSize: 8,
+  },
+  disclosure: {
+    chevronSize: 10,
+  },
+  spinner: {
+    size: 12,
+    borderWidth: 2,
+  },
+} as const;
+
 export const orbitShadow = {
   none: "none",
   subtle: "0 1px 2px 0 rgba(0, 0, 0, 0.35)",
@@ -130,10 +165,24 @@ export const orbitFocus = {
   outlineOffset: "2px",
 } as const;
 
+export const orbitMotionDurations = {
+  fast: 140,
+  normal: 180,
+  panel: 220,
+} as const;
+
+export const orbitEasings = {
+  default: "ease",
+  inOut: "cubic-bezier(0.4, 0, 0.2, 1)",
+  linear: "linear",
+} as const;
+
 export const orbitMotion = {
-  fast: "140ms ease",
-  normal: "180ms ease",
-  panel: "220ms ease",
+  duration: orbitMotionDurations,
+  easing: orbitEasings,
+  fast: `${orbitMotionDurations.fast}ms ${orbitEasings.default}`,
+  normal: `${orbitMotionDurations.normal}ms ${orbitEasings.default}`,
+  panel: `${orbitMotionDurations.panel}ms ${orbitEasings.default}`,
   reducedMotionQuery: "@media (prefers-reduced-motion: reduce)",
 } as const;
 
@@ -157,6 +206,7 @@ export const orbitCssVariables: Record<string, string> = {
   "--oc-text-secondary": orbitColors.text.secondary,
   "--oc-text-muted": orbitColors.text.muted,
   "--oc-text-inverse": orbitColors.text.inverse,
+  "--oc-text-on-accent": orbitColors.text.onAccent,
 
   "--oc-brand-primary": orbitColors.brand.primary,
   "--oc-brand-hover": orbitColors.brand.hover,
@@ -183,9 +233,9 @@ export const orbitCssVariables: Record<string, string> = {
   "--oc-radius-xl": `${orbitRadius.xl}px`,
   "--oc-radius-pill": `${orbitRadius.pill}px`,
 
-  "--oc-duration-fast": "140ms",
-  "--oc-duration-normal": "180ms",
-  "--oc-duration-panel": "220ms",
+  "--oc-duration-fast": `${orbitMotionDurations.fast}ms`,
+  "--oc-duration-normal": `${orbitMotionDurations.normal}ms`,
+  "--oc-duration-panel": `${orbitMotionDurations.panel}ms`,
 };
 
 /**
@@ -197,6 +247,7 @@ export const orbitTokens = {
   radius: orbitRadius,
   typography: orbitTypography,
   controlHeight: orbitControlHeight,
+  component: orbitComponent,
   shadow: orbitShadow,
   focus: orbitFocus,
   motion: orbitMotion,

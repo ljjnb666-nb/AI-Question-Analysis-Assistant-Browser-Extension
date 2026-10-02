@@ -1,5 +1,5 @@
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import fs from "node:fs";
 import path from "node:path";
@@ -8,6 +8,7 @@ import {
   orbitColors,
   orbitSpacing,
   orbitRadius,
+  orbitComponent,
 } from "./orbitTokens";
 import {
   OrbitButton,
@@ -25,14 +26,22 @@ import {
   resolveMotionDuration,
   ORBIT_REDUCED_MOTION_CSS,
   ORBIT_MOTION_DURATIONS,
+  ORBIT_EASINGS,
 } from "./orbitMotion";
-import { userFeedback, mapKnownCodeFeedback, mapUserFacingError } from "./userFeedback";
 import {
-  isParseResultFillAuthoritative,
-} from "../ai/parseResultAuthority";
+  setKeyboardModalityForTesting,
+  getIsKeyboardModality,
+} from "./orbitFocus";
+import { userFeedback, mapKnownCodeFeedback, mapUserFacingError } from "./userFeedback";
+import { isParseResultFillAuthoritative } from "../ai/parseResultAuthority";
 import type { ParseResult } from "../types";
 
-describe("Orbit Console Design System Foundation (UI-01)", () => {
+describe("Orbit Console Design System Foundation (UI-01 & RF-01)", () => {
+  beforeEach(() => {
+    // Reset focus modality to default keyboard mode for standard tests
+    setKeyboardModalityForTesting(true);
+  });
+
   it("UI01-01: design token module exports required semantic groups", () => {
     expect(orbitTokens).toBeDefined();
     expect(orbitTokens.color).toBeDefined();
@@ -40,6 +49,7 @@ describe("Orbit Console Design System Foundation (UI-01)", () => {
     expect(orbitTokens.radius).toBeDefined();
     expect(orbitTokens.typography).toBeDefined();
     expect(orbitTokens.controlHeight).toBeDefined();
+    expect(orbitTokens.component).toBeDefined();
     expect(orbitTokens.shadow).toBeDefined();
     expect(orbitTokens.focus).toBeDefined();
     expect(orbitTokens.motion).toBeDefined();
@@ -94,16 +104,17 @@ describe("Orbit Console Design System Foundation (UI-01)", () => {
     const btn = screen.getByRole("button", { name: "Disabled Action" });
     expect(btn).toBeDisabled();
     expect(btn.style.cursor).toBe("not-allowed");
-    expect(btn.style.color).toBe(orbitColors.text.muted);
+    expect(btn.style.color).toBe(orbitColors.control.disabledText);
   });
 
   it("UI01-04: Button keyboard focus mechanism exists", () => {
+    setKeyboardModalityForTesting(true);
     render(<OrbitButton variant="primary">Focus Me</OrbitButton>);
     const btn = screen.getByRole("button", { name: "Focus Me" });
     expect(btn.style.outline).toContain("none");
 
     fireEvent.focus(btn);
-    // Focus visible styling applied
+    // Focus visible styling applied under keyboard modality
     expect(btn.style.outline).toContain("solid");
     expect(btn.style.boxShadow).toContain(orbitColors.brand.primary);
 
@@ -139,13 +150,14 @@ describe("Orbit Console Design System Foundation (UI-01)", () => {
   });
 
   it("UI01-06: Input does not rely on outline:none without replacement focus styling", () => {
+    setKeyboardModalityForTesting(true);
     render(<OrbitInput label="Target URL" placeholder="https://" />);
     const input = screen.getByPlaceholderText("https://") as HTMLInputElement;
 
     // Default border
     expect(input.style.borderColor).toBe(orbitColors.border.default);
 
-    // Focus triggers visible focus styling
+    // Keyboard focus triggers visible focus styling
     fireEvent.focus(input);
     expect(input.style.borderColor).toBe(orbitColors.border.focus);
     expect(input.style.boxShadow).toContain(orbitColors.brand.subtle);
@@ -193,7 +205,6 @@ describe("Orbit Console Design System Foundation (UI-01)", () => {
     expect(ORBIT_MOTION_DURATIONS.microMs).toBe(140);
     expect(ORBIT_MOTION_DURATIONS.panelMs).toBe(220);
 
-    // Mock matchMedia for testing reduced motion branch
     const originalMatchMedia = window.matchMedia;
     try {
       window.matchMedia = vi.fn().mockImplementation((query: string) => ({
@@ -252,12 +263,10 @@ describe("Orbit Console Design System Foundation (UI-01)", () => {
     expect(feedback.code).toBe("CONNECTION_FAILED");
     expect(feedback.technicalDetail).toBe("Socket closed prematurely");
 
-    // Known code mapping preserved
     const mapped = mapKnownCodeFeedback("STALE_QUESTION_REVISION", "zh");
     expect(mapped).not.toBeNull();
     expect(mapped?.tone).toBe("warning");
 
-    // Raw exception never becomes primary user copy
     const errMapped = mapUserFacingError(new Error("Raw SQL connection timeout"), "zh");
     expect(errMapped.tone).toBe("error");
     expect(errMapped.message).not.toContain("Raw SQL connection timeout");
@@ -265,7 +274,6 @@ describe("Orbit Console Design System Foundation (UI-01)", () => {
   });
 
   it("UI01-12: NO_AUTOMATIC_SUBMISSION regression remains PASS", () => {
-    // Form and button primitives do not cause automatic form submission or contain auto-submission text
     const onSubmit = vi.fn();
     render(
       <form onSubmit={onSubmit}>
@@ -274,11 +282,10 @@ describe("Orbit Console Design System Foundation (UI-01)", () => {
     );
 
     const btn = screen.getByRole("button", { name: "Manual Button" });
-    expect(btn.getAttribute("type")).toBe("button"); // Must not be type="submit"
+    expect(btn.getAttribute("type")).toBe("button");
     fireEvent.click(btn);
     expect(onSubmit).not.toHaveBeenCalled();
 
-    // Verify copy does not imply automatic submission
     const primitivesFile = fs.readFileSync(
       path.resolve(__dirname, "orbitPrimitives.tsx"),
       "utf-8"
@@ -287,26 +294,328 @@ describe("Orbit Console Design System Foundation (UI-01)", () => {
     expect(primitivesFile).not.toContain("自动提交");
   });
 
-  it("renders OrbitBadge, OrbitSelect, OrbitToggle, OrbitSectionHeader, and OrbitDisclosure", () => {
-    const onToggle = vi.fn();
+  /* ==================================================
+   * REVIEW FIX 01 TEST SUITE (RF01-01 through RF01-12)
+   * ================================================== */
+
+  it("RF01-01: reduced-motion=true actually disables transitions and animations across primitives", () => {
+    const originalMatchMedia = window.matchMedia;
+    try {
+      window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+
+      const { container } = render(
+        <div>
+          <OrbitButton>Button</OrbitButton>
+          <OrbitSurface data-testid="orbit-surface">Surface</OrbitSurface>
+          <OrbitInput label="Field" />
+          <OrbitSelect label="Dropdown" options={[{ value: "1", label: "One" }]} />
+          <OrbitToggle checked={false} onChange={() => {}} label="Toggle" />
+          <OrbitDisclosure title="Details">Body</OrbitDisclosure>
+        </div>
+      );
+
+      const btn = screen.getByRole("button", { name: "Button" });
+      expect(btn.style.transition).toBe("none");
+
+      const surface = screen.getByTestId("orbit-surface");
+      expect(surface.style.transition).toBe("none");
+
+      const input = screen.getByRole("textbox");
+      expect(input.style.transition).toBe("none");
+
+      const select = screen.getByRole("combobox");
+      expect(select.style.transition).toBe("none");
+
+      const toggleTrack = screen.getByRole("switch");
+      expect(toggleTrack.style.transition).toBe("none");
+
+      const toggleThumb = toggleTrack.querySelector("span") as HTMLElement;
+      expect(toggleThumb.style.transition).toBe("none");
+
+      const disclosureChevron = screen.getByText("▶");
+      expect(disclosureChevron.style.transition).toBe("none");
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it("RF01-02: OrbitButton loading spinner operates in normal motion and halts infinite spin in reduced motion", () => {
+    const originalMatchMedia = window.matchMedia;
+
+    // Normal motion
+    try {
+      window.matchMedia = vi.fn().mockImplementation(() => ({
+        matches: false,
+        media: "",
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+
+      const { unmount } = render(<OrbitButton isLoading>Loading Normal</OrbitButton>);
+      const spinnerNormal = screen.getByTestId("orbit-loading-spinner");
+      expect(spinnerNormal.style.animation).toContain("orbit-spin");
+      expect(spinnerNormal.style.animation).toContain("infinite");
+
+      // Verify that the keyframes style tag was actually injected
+      expect(document.getElementById("orbit-system-keyframes")).not.toBeNull();
+      unmount();
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+
+    // Reduced motion
+    try {
+      window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+
+      render(<OrbitButton isLoading>Loading Reduced</OrbitButton>);
+      const spinnerReduced = screen.getByTestId("orbit-loading-spinner");
+      // Under reduced motion: no infinite spin animation
+      expect(spinnerReduced.style.animation).toBe("none");
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it("RF01-03: OrbitDisclosure keyboard focus exhibits visible focus treatment", () => {
+    setKeyboardModalityForTesting(true);
+    render(<OrbitDisclosure title="Telemetry Logs">System ok</OrbitDisclosure>);
+    const trigger = screen.getByRole("button", { name: /Telemetry Logs/ });
+
+    expect(trigger.style.outline).toContain("none");
+
+    fireEvent.focus(trigger);
+    expect(trigger.style.outline).toContain("solid");
+    expect(trigger.style.boxShadow).toContain(orbitColors.brand.primary);
+
+    fireEvent.blur(trigger);
+    expect(trigger.style.outline).toContain("none");
+  });
+
+  it("RF01-04: mouse focus and keyboard focus adhere strictly to focus-visible contract", () => {
     render(
       <div>
-        <OrbitBadge variant="ai" dot>AI Generated</OrbitBadge>
-        <OrbitSelect label="Select Model" options={[{ value: "gpt", label: "GPT" }]} />
-        <OrbitToggle checked={true} onChange={onToggle} label="Enable Cache" />
-        <OrbitSectionHeader title="Configuration" description="Settings overview" />
-        <OrbitDisclosure title="Technical Details">Error code 500</OrbitDisclosure>
+        <OrbitButton variant="primary">Interactive Button</OrbitButton>
+        <OrbitButton disabled>Disabled Button</OrbitButton>
+      </div>
+    );
+    const activeBtn = screen.getByRole("button", { name: "Interactive Button" });
+    const disabledBtn = screen.getByRole("button", { name: "Disabled Button" });
+
+    // 1. Mouse focus: mousedown precedes focus -> No keyboard focus ring
+    setKeyboardModalityForTesting(false);
+    expect(getIsKeyboardModality()).toBe(false);
+    fireEvent.focus(activeBtn);
+    expect(activeBtn.style.outline).toContain("none");
+    expect(activeBtn.style.boxShadow).toBe("");
+
+    fireEvent.blur(activeBtn);
+
+    // 2. Keyboard focus: Tab/Arrow precedes focus -> Visible focus ring applied
+    setKeyboardModalityForTesting(true);
+    expect(getIsKeyboardModality()).toBe(true);
+    fireEvent.focus(activeBtn);
+    expect(activeBtn.style.outline).toContain("solid");
+    expect(activeBtn.style.boxShadow).toContain(orbitColors.brand.primary);
+
+    fireEvent.blur(activeBtn);
+
+    // 3. Disabled element: never shows focus ring under keyboard or mouse
+    setKeyboardModalityForTesting(true);
+    fireEvent.focus(disabledBtn);
+    expect(disabledBtn.style.outline).toContain("none");
+  });
+
+  it("RF01-05: OrbitInput helper generates correct aria-describedby relationship", () => {
+    render(<OrbitInput label="Port Number" helperText="Standard range 1024-65535" />);
+    const input = screen.getByRole("textbox", { name: "Port Number" });
+    const helper = screen.getByText("Standard range 1024-65535");
+
+    expect(helper.id).toBeDefined();
+    expect(helper.id.length).toBeGreaterThan(0);
+    expect(input.getAttribute("aria-describedby")).toBe(helper.id);
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("RF01-06: OrbitInput error sets aria-invalid=true and points aria-describedby to error alert", () => {
+    render(
+      <OrbitInput
+        label="Host URL"
+        helperText="Include protocol"
+        errorText="Invalid URL format"
+      />
+    );
+    const input = screen.getByRole("textbox", { name: "Host URL" });
+    const errorAlert = screen.getByRole("alert");
+    const helper = screen.getByText("Include protocol");
+
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    const describedBy = input.getAttribute("aria-describedby") || "";
+    expect(describedBy).toContain(errorAlert.id);
+    expect(describedBy).toContain(helper.id);
+    expect(errorAlert.textContent).toBe("Invalid URL format");
+  });
+
+  it("RF01-07: OrbitSelect adheres to identical aria-describedby and error contracts", () => {
+    render(
+      <OrbitSelect
+        label="Environment"
+        helperText="Choose execution target"
+        errorText="Target is currently unavailable"
+        options={[
+          { value: "prod", label: "Production" },
+          { value: "staging", label: "Staging" },
+        ]}
+      />
+    );
+    const select = screen.getByRole("combobox", { name: "Environment" });
+    const errorAlert = screen.getByRole("alert");
+    const helper = screen.getByText("Choose execution target");
+
+    expect(select.getAttribute("aria-invalid")).toBe("true");
+    const describedBy = select.getAttribute("aria-describedby") || "";
+    expect(describedBy).toContain(errorAlert.id);
+    expect(describedBy).toContain(helper.id);
+    expect(errorAlert.textContent).toBe("Target is currently unavailable");
+  });
+
+  it("RF01-08: multiple OrbitInput with duplicate label generate unique IDs and correct label associations", () => {
+    render(
+      <div>
+        <OrbitInput label="Model" placeholder="First Model" />
+        <OrbitInput label="Model" placeholder="Second Model" />
       </div>
     );
 
-    expect(screen.getByText("AI Generated")).toBeDefined();
-    expect(screen.getByText("Select Model")).toBeDefined();
-    expect(screen.getByText("Enable Cache")).toBeDefined();
-    expect(screen.getByText("Configuration")).toBeDefined();
-    expect(screen.getByText("Settings overview")).toBeDefined();
+    const input1 = screen.getByPlaceholderText("First Model");
+    const input2 = screen.getByPlaceholderText("Second Model");
+    const labels = screen.getAllByText("Model");
 
-    const disclosureBtn = screen.getByText("Technical Details");
-    fireEvent.click(disclosureBtn);
-    expect(screen.getByText("Error code 500")).toBeDefined();
+    expect(labels.length).toBe(2);
+    expect(input1.id).toBeDefined();
+    expect(input2.id).toBeDefined();
+    expect(input1.id).not.toBe(input2.id);
+
+    expect(labels[0].getAttribute("for")).toBe(input1.id);
+    expect(labels[1].getAttribute("for")).toBe(input2.id);
+  });
+
+  it("RF01-09: multiple OrbitSelect with duplicate label generate unique IDs and correct label associations", () => {
+    render(
+      <div>
+        <OrbitSelect
+          label="Model"
+          options={[{ value: "a", label: "Model A" }]}
+        />
+        <OrbitSelect
+          label="Model"
+          options={[{ value: "b", label: "Model B" }]}
+        />
+      </div>
+    );
+
+    const selects = screen.getAllByRole("combobox");
+    const labels = screen.getAllByText("Model");
+
+    expect(selects.length).toBe(2);
+    expect(labels.length).toBe(2);
+    expect(selects[0].id).toBeDefined();
+    expect(selects[1].id).toBeDefined();
+    expect(selects[0].id).not.toBe(selects[1].id);
+
+    expect(labels[0].getAttribute("for")).toBe(selects[0].id);
+    expect(labels[1].getAttribute("for")).toBe(selects[1].id);
+  });
+
+  it("RF01-10: motion token values have exactly one authoritative source", () => {
+    // orbitTokens is the authoritative source; orbitMotion directly derives from it
+    expect(ORBIT_MOTION_DURATIONS.microMs).toBe(orbitTokens.motion.duration.fast);
+    expect(ORBIT_MOTION_DURATIONS.normalMs).toBe(orbitTokens.motion.duration.normal);
+    expect(ORBIT_MOTION_DURATIONS.panelMs).toBe(orbitTokens.motion.duration.panel);
+    expect(ORBIT_EASINGS).toBe(orbitTokens.motion.easing);
+
+    // Verify file content confirms no hardcoded duplicate numbers in orbitMotion.ts
+    const motionFile = fs.readFileSync(path.resolve(__dirname, "orbitMotion.ts"), "utf-8");
+    expect(motionFile).not.toMatch(/microMs:\s*140/);
+    expect(motionFile).not.toMatch(/normalMs:\s*180/);
+    expect(motionFile).not.toMatch(/panelMs:\s*220/);
+  });
+
+  it("RF01-11: new primitive semantic colors and component geometry originate from tokens", () => {
+    const primitivesFile = fs.readFileSync(
+      path.resolve(__dirname, "orbitPrimitives.tsx"),
+      "utf-8"
+    );
+
+    // No hardcoded raw colors outside tokens
+    expect(primitivesFile).not.toContain("#6366f1");
+    expect(primitivesFile).not.toContain("#4f46e5");
+    expect(primitivesFile).not.toContain("#10b981");
+    expect(primitivesFile).not.toContain("#ef4444");
+    expect(primitivesFile).not.toContain("#2563EB");
+    expect(primitivesFile).not.toContain("#FFFFFF");
+
+    // Geometry is derived from orbitComponent token
+    expect(orbitComponent.toggle.trackWidth).toBe(38);
+    expect(orbitComponent.toggle.trackHeight).toBe(22);
+    expect(orbitComponent.toggle.thumbSize).toBe(16);
+    expect(orbitComponent.toggle.thumbTranslateX).toBe(16);
+    expect(orbitComponent.badge.dotSize).toBe(6);
+    expect(orbitComponent.badge.gap).toBe(6);
+    expect(orbitComponent.status.dotSize).toBe(8);
+    expect(orbitComponent.disclosure.chevronSize).toBe(10);
+    expect(orbitComponent.spinner.size).toBe(12);
+  });
+
+  it("RF01-12: UI-00A / UI-00B regressions and NO_AUTOMATIC_SUBMISSION remain PASS", () => {
+    // Provenance
+    const authoritativeResult: ParseResult = {
+      blockId: "b1",
+      questionType: "single_choice",
+      answer: "A",
+      confidence: 1,
+      briefExplanation: "",
+      detailedExplanation: "",
+      recognizedText: "Q",
+      routeUsed: "text",
+      resultSource: "provider",
+    };
+    expect(isParseResultFillAuthoritative(authoritativeResult)).toBe(true);
+
+    // Feedback
+    const fb = userFeedback("info", "Processing candidate");
+    expect(fb.tone).toBe("info");
+    expect(fb.message).toBe("Processing candidate");
+
+    // No auto submit
+    const submitHandler = vi.fn();
+    render(
+      <form onSubmit={submitHandler}>
+        <OrbitButton>Manual Trigger</OrbitButton>
+      </form>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Manual Trigger" }));
+    expect(submitHandler).not.toHaveBeenCalled();
   });
 });
