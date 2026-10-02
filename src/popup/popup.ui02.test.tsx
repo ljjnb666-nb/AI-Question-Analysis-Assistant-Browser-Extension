@@ -96,8 +96,18 @@ type SessionPayload = { ok?: boolean; user?: { userId: string; email: string }; 
 let sessionResponse: SessionPayload = { ok: true, user: { userId: "usr-1", email: "user@example.com" } };
 
 const createFetchMock = () =>
-  vi.fn(async (_url: string | URL, init?: { headers?: Record<string, string> }) => {
-    const isSessionAuth = Boolean(init?.headers?.Authorization);
+  vi.fn(async (url: string | URL, init?: { headers?: Record<string, string> | Headers }) => {
+    const isSessionEndpoint = String(url).includes("/auth/session");
+    let hasAuth = false;
+    if (init?.headers) {
+      if (typeof (init.headers as Headers).get === "function") {
+        hasAuth = Boolean((init.headers as Headers).get("authorization"));
+      } else {
+        const rec = init.headers as Record<string, string>;
+        hasAuth = Boolean(rec["Authorization"] || rec["authorization"]);
+      }
+    }
+    const isSessionAuth = isSessionEndpoint || hasAuth;
     const status = isSessionAuth ? (sessionResponse.status ?? (sessionResponse.ok === false ? 401 : 200)) : 200;
     return {
       ok: status >= 200 && status < 300,
@@ -894,8 +904,17 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
     expect(await screen.findByText("操作失败")).toBeInTheDocument();
 
-    // Server returns unauthenticated on validation
-    sessionResponse = { ok: false };
+    // Server returns unauthenticated (401) on validation
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL) => {
+        if (String(url).includes("/auth/session")) {
+          return { ok: false, status: 401, json: async () => ({ ok: false }) } as Response;
+        }
+        return { ok: true, status: 200, json: async () => ({ ok: true, expiresAt: 4102444800000 }) } as Response;
+      }),
+    );
+
     const retryBtn = screen.getByRole("button", { name: "重新验证登录" });
     await act(async () => {
       fireEvent.click(retryBtn);
@@ -924,8 +943,16 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
     expect(await screen.findByText("操作失败")).toBeInTheDocument();
 
-    // Server unavailable on validation
-    sessionResponse = { ok: false, status: 500 };
+    // Server unavailable on validation (endpoint fails with network error / rejection)
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL) => {
+        if (String(url).includes("/auth/session")) {
+          throw new Error("Network error / Server unavailable");
+        }
+        return { ok: true, status: 200, json: async () => ({ ok: true, expiresAt: 4102444800000 }) } as Response;
+      }),
+    );
 
     const retryBtn = screen.getByRole("button", { name: "重新验证登录" });
     await act(async () => {
