@@ -35,20 +35,30 @@ import {
 
 type ActiveFeature = "manual" | "auto" | "fullpage" | "solve" | null;
 
+const KNOWN_POPUP_RECOVERY_CODES = new Set([
+  "STALE_QUESTION_REVISION",
+  "STALE_ROOT_CONTEXT",
+  "PARTIAL_MUTATION_UNPROVABLE",
+  "AUTHORITY_LOST",
+  "PAGE_INJECTION_FAILED",
+  "DISPATCH_FAILED",
+]);
+
 function extractKnownErrorCode(err: unknown): string | null {
-  if (typeof err === "object" && err !== null && "code" in err && typeof (err as { code?: unknown }).code === "string") {
-    return (err as { code: string }).code;
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    typeof (err as { code?: unknown }).code === "string"
+  ) {
+    const rawCode = (err as { code: string }).code;
+    if (KNOWN_POPUP_RECOVERY_CODES.has(rawCode)) {
+      return rawCode;
+    }
+    return null;
   }
   const rawMsg = err instanceof Error ? err.message : String(err || "");
-  const knownCodes = [
-    "STALE_QUESTION_REVISION",
-    "STALE_ROOT_CONTEXT",
-    "PARTIAL_MUTATION_UNPROVABLE",
-    "AUTHORITY_LOST",
-    "PAGE_INJECTION_FAILED",
-    "DISPATCH_FAILED",
-  ];
-  for (const code of knownCodes) {
+  for (const code of KNOWN_POPUP_RECOVERY_CODES) {
     if (rawMsg.includes(code)) {
       return code;
     }
@@ -173,12 +183,20 @@ export const PopupApp: React.FC = () => {
     reviewReason,
   });
 
-  const openSidePanelDirect = async () => {
+  const openSidePanelDirect = async (): Promise<boolean> => {
     try {
+      if (typeof chrome === "undefined" || !chrome.tabs?.query || !chrome.sidePanel?.open) {
+        return false;
+      }
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.windowId) await chrome.sidePanel.open({ windowId: tab.windowId });
+      if (!tab?.windowId) {
+        return false;
+      }
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+      return true;
     } catch (error) {
       console.error("[Popup] sidePanel.open failed:", error);
+      return false;
     }
   };
 
@@ -284,12 +302,11 @@ export const PopupApp: React.FC = () => {
         void clearProtectedWorkOwner(longRunningKind, ownerTabId);
       }
       const rawMsg = err instanceof Error ? err.message : String(err || "");
-      const knownCode = extractKnownErrorCode(err);
+      const knownCode = extractKnownErrorCode(err) || "DISPATCH_FAILED";
       if (
         knownCode === "STALE_QUESTION_REVISION" ||
         knownCode === "STALE_ROOT_CONTEXT" ||
-        knownCode === "PARTIAL_MUTATION_UNPROVABLE" ||
-        knownCode === "AUTHORITY_LOST"
+        knownCode === "PARTIAL_MUTATION_UNPROVABLE"
       ) {
         setReviewReason(knownCode);
         setFeedback(
@@ -298,11 +315,19 @@ export const PopupApp: React.FC = () => {
             technicalDetail: rawMsg,
           }),
         );
+      } else if (knownCode === "AUTHORITY_LOST") {
+        setReviewReason("AUTHORITY_LOST");
+        setFeedback(
+          userFeedback("warning", copy.sessionExpiredNotice, {
+            code: "AUTHORITY_LOST",
+            technicalDetail: rawMsg,
+          }),
+        );
       } else {
-        setReviewReason(knownCode || "DISPATCH_FAILED");
+        setReviewReason(knownCode);
         setFeedback(
           userFeedback("error", errorText, {
-            code: knownCode || "DISPATCH_FAILED",
+            code: knownCode,
             technicalDetail: rawMsg,
           }),
         );
@@ -320,9 +345,17 @@ export const PopupApp: React.FC = () => {
       );
       return;
     }
-    await openSidePanelDirect();
-    if (typeof window !== "undefined" && window.close) {
-      window.close();
+    const opened = await openSidePanelDirect();
+    if (opened) {
+      if (typeof window !== "undefined" && window.close) {
+        window.close();
+      }
+    } else {
+      setFeedback(
+        userFeedback("error", copy.workspaceOpenError, {
+          code: "WORKSPACE_OPEN_FAILED",
+        }),
+      );
     }
   };
 
@@ -434,6 +467,7 @@ export const PopupApp: React.FC = () => {
 
           {viewState === "provider_setup_required" ||
           viewState === "review_required" ||
+          viewState === "recoverable_error" ||
           viewState === "page_unavailable" ? (
             <PopupRecoverySection
               viewState={viewState}

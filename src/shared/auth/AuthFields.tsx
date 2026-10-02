@@ -1,5 +1,5 @@
 import React from "react";
-import { orbitColors, orbitRadius, orbitSpacing, orbitTypography } from "@/shared/ui/orbitTokens";
+import { orbitColors, orbitRadius, orbitSpacing, orbitTypography, orbitTokens } from "@/shared/ui/orbitTokens";
 import { useFocusVisible } from "@/shared/ui/orbitFocus";
 import { usePrefersReducedMotion } from "@/shared/ui/orbitMotion";
 
@@ -41,11 +41,11 @@ const VerificationSlot: React.FC<{
         fontSize: 16,
         fontWeight: orbitTypography.fontWeight.bold,
         textAlign: "center",
-        outline: isFocusVisible ? `2px solid ${orbitColors.brand.primary}` : "none",
-        outlineOffset: 2,
+        outline: isFocusVisible ? orbitTokens.focus.outline : "none",
+        outlineOffset: orbitTokens.focus.outlineOffset,
         boxSizing: "border-box",
         fontFamily: orbitTypography.fontFamily,
-        transition: reducedMotion ? "none" : "border-color 140ms ease, box-shadow 140ms ease",
+        transition: reducedMotion ? "none" : `border-color ${orbitTokens.motion.fast}, box-shadow ${orbitTokens.motion.fast}`,
       }}
     />
   );
@@ -161,9 +161,9 @@ export const AuthPasswordField: React.FC<AuthPasswordFieldProps> = ({
           border: `1px solid ${inputFocus.isFocusVisible ? orbitColors.brand.primary : orbitColors.border.default}`,
           background: orbitColors.bg.surfaceSubtle,
           boxSizing: "border-box",
-          outline: inputFocus.isFocusVisible ? `2px solid ${orbitColors.brand.primary}` : "none",
-          outlineOffset: 2,
-          transition: reducedMotion ? "none" : "border-color 140ms ease, box-shadow 140ms ease",
+          outline: inputFocus.isFocusVisible ? orbitTokens.focus.outline : "none",
+          outlineOffset: orbitTokens.focus.outlineOffset,
+          transition: reducedMotion ? "none" : `border-color ${orbitTokens.motion.fast}, box-shadow ${orbitTokens.motion.fast}`,
         }}
       >
         <input
@@ -205,8 +205,8 @@ export const AuthPasswordField: React.FC<AuthPasswordFieldProps> = ({
               padding: `2px ${orbitSpacing[1]}px`,
               borderRadius: orbitRadius.sm,
               fontFamily: orbitTypography.fontFamily,
-              outline: toggleFocus.isFocusVisible ? `2px solid ${orbitColors.brand.primary}` : "none",
-              outlineOffset: 2,
+              outline: toggleFocus.isFocusVisible ? orbitTokens.focus.outline : "none",
+              outlineOffset: orbitTokens.focus.outlineOffset,
             }}
           >
             {visible ? hideLabel : showLabel}

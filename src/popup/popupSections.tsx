@@ -44,6 +44,7 @@ export const PopupHeader: React.FC<PopupHeaderProps> = ({
 
   switch (viewState) {
     case "checking_session":
+    case "checking_page":
       badgeVariant = "info";
       badgeLabel = copy.checking;
       break;
@@ -66,6 +67,10 @@ export const PopupHeader: React.FC<PopupHeaderProps> = ({
     case "review_required":
       badgeVariant = "warning";
       badgeLabel = copy.reviewRequired;
+      break;
+    case "recoverable_error":
+      badgeVariant = "error";
+      badgeLabel = copy.recoverableError;
       break;
     case "provider_setup_required":
       badgeVariant = "warning";
@@ -129,7 +134,6 @@ export const PopupHeader: React.FC<PopupHeaderProps> = ({
 
       {menuOpen ? (
         <div
-          role="menu"
           style={{
             position: "absolute",
             top: "100%",
@@ -148,7 +152,6 @@ export const PopupHeader: React.FC<PopupHeaderProps> = ({
         >
           <button
             type="button"
-            role="menuitem"
             onClick={() => {
               setMenuOpen(false);
               onOpenSettings();
@@ -159,7 +162,6 @@ export const PopupHeader: React.FC<PopupHeaderProps> = ({
           </button>
           <button
             type="button"
-            role="menuitem"
             onClick={() => {
               setMenuOpen(false);
               onToggleLang();
@@ -171,7 +173,6 @@ export const PopupHeader: React.FC<PopupHeaderProps> = ({
           {isAuthenticated && onLogout ? (
             <button
               type="button"
-              role="menuitem"
               onClick={() => {
                 setMenuOpen(false);
                 onLogout();
@@ -517,7 +518,10 @@ export const PopupRecoverySection: React.FC<PopupRecoverySectionProps> = ({
             style={{
               fontSize: orbitTypography.fontSize.xs,
               fontWeight: orbitTypography.fontWeight.semibold,
-              color: orbitColors.semantic.warning,
+              color:
+                viewState === "recoverable_error"
+                  ? orbitColors.semantic.error
+                  : orbitColors.semantic.warning,
             }}
           >
             {plan.title}

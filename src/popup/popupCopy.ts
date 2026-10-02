@@ -18,6 +18,7 @@ export const POPUP_COPY = {
     pageUnavailable: "页面不可用",
     running: "处理中",
     reviewRequired: "需要检查",
+    recoverableError: "操作失败",
     providerSetupRequired: "待配置 AI",
     
     // Page context
@@ -56,6 +57,7 @@ export const POPUP_COPY = {
     fullPageError: "整页扫描启动失败，请刷新页面后重试。",
     startSolve: "正在解析并填答...",
     solveError: "解析并填答启动失败，请刷新页面后重试。",
+    workspaceOpenError: "暂时无法打开工作台，请重试。",
     providerMissingWarning: "请先在工作台设置中配置 AI 服务，再启动解析并填答。",
     authRequiredWarning: "请先通过登录验证后再使用该功能。",
     sessionExpiredNotice: "登录验证已失效，该操作未开始。",
@@ -113,6 +115,7 @@ export const POPUP_COPY = {
     pageUnavailable: "Unsupported",
     running: "Processing",
     reviewRequired: "Check Needed",
+    recoverableError: "Action Failed",
     providerSetupRequired: "Setup Needed",
 
     // Page context
@@ -151,6 +154,7 @@ export const POPUP_COPY = {
     fullPageError: "Cannot start full page scan. Refresh the page and try again.",
     startSolve: "Starting Solve & Fill...",
     solveError: "Cannot start Solve & Fill. Refresh the page and try again.",
+    workspaceOpenError: "Could not open the workspace. Please try again.",
     providerMissingWarning: "Configure an AI provider in Workspace Settings before starting Solve & Fill.",
     authRequiredWarning: "Sign in with a verified session before using this action.",
     sessionExpiredNotice: "Sign-in verification ended. The action was not started.",

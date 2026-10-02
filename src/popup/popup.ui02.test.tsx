@@ -8,6 +8,7 @@ import { POPUP_COPY } from "./popupCopy";
 import { PopupApp } from "./PopupApp";
 import { PopupFeedbackBanner, PopupRecoverySection, PopupPrimaryCommand } from "./popupSections";
 import { AuthPasswordField, AuthVerificationCodeInput } from "@/shared/auth/AuthFields";
+import { SettingsAccountSection } from "@/sidepanel/settingsSections";
 import { setKeyboardModalityForTesting } from "@/shared/ui/orbitFocus";
 import { userFeedback } from "@/shared/ui/userFeedback";
 import { __resetStorageCacheForTests } from "@/shared/utils/storage";
@@ -189,7 +190,7 @@ describe("UI-02 Presentation State & Readiness Models", () => {
     expect(getRecoveryPlan("page_unavailable")?.primaryActionKind).toBe("refresh_page");
     expect(getRecoveryPlan("STALE_QUESTION_REVISION")?.primaryActionKind).toBe("re_detect");
     expect(getRecoveryPlan("PARTIAL_MUTATION_UNPROVABLE")?.primaryActionKind).toBe("open_workspace");
-    expect(getRecoveryPlan("AUTHORITY_LOST")?.primaryActionKind).toBe("re_detect");
+    expect(getRecoveryPlan("AUTHORITY_LOST")?.primaryActionKind).toBe("retry");
     expect(getRecoveryPlan("DISPATCH_FAILED")?.primaryActionKind).toBe("refresh_page");
   });
 });
@@ -553,7 +554,7 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
     await act(async () => {
       fireEvent.click(menuBtn);
     });
-    const langBtn = await screen.findByRole("menuitem", { name: "Switch to English" });
+    const langBtn = await screen.findByRole("button", { name: "Switch to English" });
     await act(async () => {
       fireEvent.click(langBtn);
     });
@@ -570,7 +571,7 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
     await act(async () => {
       fireEvent.click(menuBtn);
     });
-    const langBtn = await screen.findByRole("menuitem", { name: "Switch to English" });
+    const langBtn = await screen.findByRole("button", { name: "Switch to English" });
     await act(async () => {
       fireEvent.click(langBtn);
     });
@@ -626,5 +627,221 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
     const input = screen.getByPlaceholderText("Enter password");
     fireEvent.focus(input);
     expect(input.parentElement?.style.outline).toMatch(/^none/);
+  });
+
+  it("RF03-W01: chrome.sidePanel.open rejects -> popup remains open, semantic error shown, no raw exception, no window.close", async () => {
+    const closeSpy = vi.spyOn(window, "close").mockImplementation(() => {});
+    const openMock = vi.mocked(chrome.sidePanel.open);
+    openMock.mockRejectedValueOnce(new Error("Cannot open side panel"));
+
+    render(<PopupApp />);
+    const openBtn = await screen.findByRole("button", { name: /打开完整工作台/ });
+    await act(async () => {
+      fireEvent.click(openBtn);
+    });
+
+    expect(closeSpy).not.toHaveBeenCalled();
+    expect(await screen.findByText("暂时无法打开工作台，请重试。")).toBeInTheDocument();
+    expect(screen.queryByText("Cannot open side panel")).toBeNull();
+    closeSpy.mockRestore();
+  });
+
+  it("RF03-W02: missing windowId -> fail-safe behavior, popup remains open, shows semantic error", async () => {
+    const closeSpy = vi.spyOn(window, "close").mockImplementation(() => {});
+    const queryMock = vi.mocked(chrome.tabs.query);
+    queryMock.mockResolvedValue([{ id: 5, url: "https://example.com/exam", active: true } as unknown as chrome.tabs.Tab]);
+
+    render(<PopupApp />);
+    const openBtn = await screen.findByRole("button", { name: /打开完整工作台/ });
+    await act(async () => {
+      fireEvent.click(openBtn);
+    });
+
+    expect(closeSpy).not.toHaveBeenCalled();
+    expect(await screen.findByText("暂时无法打开工作台，请重试。")).toBeInTheDocument();
+    closeSpy.mockRestore();
+  });
+
+  it("RF03-P01: provider configured, authenticated, page capability null -> checking_page, Header NOT Ready, actions disabled, context checking", () => {
+    const state = derivePopupViewState({
+      isAuthenticated: true,
+      hasApiKey: true,
+      isPageInjectable: null,
+    });
+    expect(state).toBe("checking_page");
+
+    const solveReadiness = derivePopupActionReadiness("solve_fill", {
+      isAuthenticated: true,
+      hasApiKey: true,
+      isPageInjectable: null,
+      isRunning: false,
+    });
+    expect(solveReadiness.enabled).toBe(false);
+    expect(solveReadiness.reasonCode).toBe("PAGE_CHECKING");
+
+    const detectReadiness = derivePopupActionReadiness("detect_current", {
+      isAuthenticated: true,
+      hasApiKey: true,
+      isPageInjectable: null,
+      isRunning: false,
+    });
+    expect(detectReadiness.enabled).toBe(false);
+    expect(detectReadiness.reasonCode).toBe("PAGE_CHECKING");
+  });
+
+  it("RF03-E01: unknown error code fallback -> recoveryReason = DISPATCH_FAILED, recoverable_error, no dead-end, no raw code display", async () => {
+    const messaging = await import("@/shared/utils/messaging");
+    const sendTabMock = vi.mocked(messaging.sendToTabWithBootstrap);
+    sendTabMock.mockRejectedValueOnce({
+      code: "RANDOM_INTERNAL_CODE",
+      message: "Internal socket error",
+    });
+
+    render(<PopupApp />);
+    const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await act(async () => {
+      fireEvent.click(solveBtn);
+    });
+
+    // Header badge becomes "操作失败"
+    expect(await screen.findByText("操作失败")).toBeInTheDocument();
+    // RANDOM_INTERNAL_CODE does NOT display
+    expect(screen.queryByText("RANDOM_INTERNAL_CODE")).toBeNull();
+    // Recovery UI is present (refresh recovery button)
+    expect(screen.getByRole("button", { name: "刷新页面" })).toBeInTheDocument();
+  });
+
+  it("RF03-R01: recovery state classification and AUTHORITY_LOST recovery plan", () => {
+    // Safety review codes -> review_required
+    expect(
+      derivePopupViewState({
+        isAuthenticated: true,
+        isPageInjectable: true,
+        hasApiKey: true,
+        reviewReason: "STALE_QUESTION_REVISION",
+      }),
+    ).toBe("review_required");
+
+    // Recoverable errors -> recoverable_error
+    expect(
+      derivePopupViewState({
+        isAuthenticated: true,
+        isPageInjectable: true,
+        hasApiKey: true,
+        reviewReason: "DISPATCH_FAILED",
+      }),
+    ).toBe("recoverable_error");
+    expect(
+      derivePopupViewState({
+        isAuthenticated: true,
+        isPageInjectable: true,
+        hasApiKey: true,
+        reviewReason: "PAGE_INJECTION_FAILED",
+      }),
+    ).toBe("recoverable_error");
+    expect(
+      derivePopupViewState({
+        isAuthenticated: true,
+        isPageInjectable: true,
+        hasApiKey: true,
+        reviewReason: "AUTHORITY_LOST",
+      }),
+    ).toBe("recoverable_error");
+
+    // AUTHORITY_LOST recovery plan provides retry validation, NOT re_detect
+    const planZh = getRecoveryPlan("AUTHORITY_LOST", "zh");
+    expect(planZh?.primaryActionKind).toBe("retry");
+    expect(planZh?.primaryActionLabel).toBe("重新验证登录");
+    expect(planZh?.secondaryActionKind).toBe("logout");
+    expect(planZh?.secondaryActionLabel).toBe("退出登录");
+
+    const planEn = getRecoveryPlan("AUTHORITY_LOST", "en");
+    expect(planEn?.primaryActionKind).toBe("retry");
+    expect(planEn?.primaryActionLabel).toBe("Re-check Sign-in");
+    expect(planEn?.secondaryActionKind).toBe("logout");
+    expect(planEn?.secondaryActionLabel).toBe("Sign Out");
+  });
+
+  it("RF03-M01: product menu uses accessible buttons without unsupported role=menu / menuitem semantics", async () => {
+    render(<PopupApp />);
+    const menuBtn = await screen.findByRole("button", { name: "产品菜单" });
+    await act(async () => {
+      fireEvent.click(menuBtn);
+    });
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("menuitem")).toBeNull();
+    expect(screen.getByRole("button", { name: "打开工作台" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Switch to English" })).toBeInTheDocument();
+  });
+
+  it("RF03-S01: Side Panel settings English verification digit aria-label contains zero Chinese characters", () => {
+    const dummyAuthText = {
+      registerPage: "Register",
+      loginPage: "Sign In",
+      emailPlaceholder: "Email",
+      passwordPlaceholder: "Password",
+      sendCode: "Send Code",
+      sendingCode: "Sending...",
+      completeRegistration: "Complete Registration",
+      registering: "Registering...",
+      login: "Sign In",
+      loggingIn: "Signing In...",
+      loggingOut: "Signing Out...",
+      logout: "Sign Out",
+      showPassword: "Show",
+      hidePassword: "Hide",
+      validatingSession: "Validating...",
+      sessionUnavailable: "Session Unavailable",
+      sessionUnavailableHint: "Hint",
+      retrySession: "Retry",
+      sessionExpired: "Session Expired",
+      verificationCodePlaceholder: "Enter 6-digit verification code",
+    };
+    const dummyAuth = {
+      authBusy: null,
+      codeCooldown: 0,
+      codeSent: true,
+      email: "test@example.com",
+      feedback: "",
+      handleLogin: vi.fn(),
+      handleLogout: vi.fn(),
+      handleRegister: vi.fn(),
+      handleSendCode: vi.fn(),
+      isAuthenticated: false,
+      isServerUnavailable: false,
+      isSessionPending: false,
+      password: "password123",
+      retryValidation: vi.fn(),
+      setEmail: vi.fn(),
+      setPassword: vi.fn(),
+      setVerificationCode: vi.fn(),
+      showPassword: false,
+      switchView: vi.fn(),
+      togglePasswordVisibility: vi.fn(),
+      userId: "",
+      userEmail: "",
+      verificationCode: "",
+      view: "register" as const,
+      sessionRejected: false,
+      status: "unauthenticated" as const,
+    };
+
+    render(
+      <SettingsAccountSection
+        auth={dummyAuth}
+        authText={dummyAuthText as unknown as Parameters<typeof SettingsAccountSection>[0]["authText"]}
+        isEn={true}
+      />,
+    );
+
+    const digit1 = screen.getByLabelText("Verification code digit 1");
+    expect(digit1).toBeInTheDocument();
+    for (let i = 1; i <= 6; i++) {
+      const input = screen.getByLabelText(`Verification code digit ${i}`);
+      expect(input).toBeInTheDocument();
+      // Ensure no Chinese characters in aria-label
+      expect(input.getAttribute("aria-label")).not.toMatch(/[\u4e00-\u9fa5]/);
+    }
   });
 });

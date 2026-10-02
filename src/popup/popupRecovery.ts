@@ -104,12 +104,14 @@ export function getRecoveryPlan(
     case "AUTHORITY_LOST":
     case "authority_lost":
       return {
-        title: isZh ? "操作权限失效" : "Authority Lost",
+        title: isZh ? "登录状态已失效" : "Session Expired",
         explanation: isZh
-          ? "登录状态或操作授权已失效，请重新验证或重新识别。"
-          : "Session or authorization expired. Please re-validate or re-detect.",
-        primaryActionKind: "re_detect",
-        primaryActionLabel: isZh ? "重新识别" : "Re-Detect",
+          ? "登录状态或操作授权已失效，请重新验证登录。"
+          : "Your session or authorization has expired. Please re-check sign-in.",
+        primaryActionKind: "retry",
+        primaryActionLabel: isZh ? "重新验证登录" : "Re-check Sign-in",
+        secondaryActionKind: "logout",
+        secondaryActionLabel: isZh ? "退出登录" : "Sign Out",
       };
 
     case "recoverable_error":

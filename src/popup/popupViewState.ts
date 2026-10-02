@@ -10,11 +10,19 @@ export type PopupViewState =
   | "checking_session"
   | "signed_out"
   | "service_unavailable"
+  | "checking_page"
   | "page_unavailable"
   | "provider_setup_required"
   | "ready"
   | "running"
-  | "review_required";
+  | "review_required"
+  | "recoverable_error";
+
+export const SAFETY_REVIEW_CODES = new Set([
+  "STALE_QUESTION_REVISION",
+  "STALE_ROOT_CONTEXT",
+  "PARTIAL_MUTATION_UNPROVABLE",
+]);
 
 export interface DerivePopupViewStateParams {
   authStatus?: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
@@ -55,12 +63,16 @@ export function derivePopupViewState(params: DerivePopupViewStateParams): PopupV
   }
 
   // From here, user is authenticated:
+  if (isPageInjectable === null) {
+    return "checking_page";
+  }
+
   if (isPageInjectable === false) {
     return "page_unavailable";
   }
 
   if (reviewReason) {
-    return "review_required";
+    return SAFETY_REVIEW_CODES.has(reviewReason) ? "review_required" : "recoverable_error";
   }
 
   if (activeFeature != null && activeFeature !== "") {
