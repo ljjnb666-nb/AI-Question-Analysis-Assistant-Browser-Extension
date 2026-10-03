@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import type { QuestionBlock } from "@/shared/types";
+import type { AppSettings, QuestionBlock } from "@/shared/types";
 import { DEFAULT_ANALYTICS_BASE_URL } from "@/shared/constants/analytics";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { getConnectionTestNotConfiguredMessage, isProviderRuntimeConfigured } from "@/shared/ai/parseResultAuthority";
@@ -12,7 +12,13 @@ import { getAuthText } from "@/shared/auth/authText";
 import { useAuthController } from "@/shared/auth/useAuthController";
 import type { ProviderId } from "@/shared/utils/parseRouter";
 import type { UILang } from "./displayUtils";
-import { SettingsAccountSection, SettingsActionsSection, SettingsConfigSections } from "./settingsSections";
+import {
+  SettingsAccountSection,
+  SettingsActionsSection,
+  SettingsConfigSections,
+  SettingsSetupStatusCard,
+} from "./settingsSections";
+import { deriveSetupStatus, isSettingsDirty, type SettingsFormValues } from "./settingsTypes";
 
 gsap.registerPlugin(useGSAP);
 
@@ -36,9 +42,12 @@ export const SettingsTab: React.FC<{
   const [customProtocol, setCustomProtocol] = useState<"openai" | "anthropic">("openai");
   const [lang, setLang] = useState<"zh" | "en">(initialLang);
   const [saved, setSaved] = useState(false);
+  const [savedOnce, setSavedOnce] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<UserFeedback | null>(null);
   const [deviceId, setDeviceId] = useState("");
+  const [storedSnapshot, setStoredSnapshot] = useState<Partial<AppSettings> | null>(null);
+
   const auth = useAuthController({
     lang,
     variant: "settings",
@@ -51,14 +60,18 @@ export const SettingsTab: React.FC<{
   const isEn = lang === "en";
   const authText = getAuthText(lang, "settings");
 
+  const initialLangRef = useRef(initialLang);
+
   useEffect(() => {
+    initialLangRef.current = initialLang;
     authRef.current = auth;
-  }, [auth]);
+  }, [initialLang, auth]);
 
   useEffect(() => {
     let disposed = false;
     void loadSettings().then((settings) => {
       if (disposed) return;
+      setStoredSnapshot(settings);
       setProviderId((settings.providerId as ProviderId) ?? "anthropic");
       setApiKey(settings.apiKey ?? "");
       setModel(settings.apiModel ?? "");
@@ -67,10 +80,11 @@ export const SettingsTab: React.FC<{
       setAnalyticsBaseUrl(settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL);
       setEnableAnalytics(settings.enableAnalytics ?? false);
       setCustomProtocol(settings.customProviderProtocol ?? "openai");
-      setLang(settings.language ?? "zh");
+      setLang(initialLangRef.current || settings.language || "zh");
       setDeviceId(settings.deviceId ?? "");
-      // Auth identity is owned by the shared session coordinator inside
-      // useAuthController; storage values never establish "signed in" here.
+      if (settings.apiKey || settings.providerId === "ollama") {
+        setSavedOnce(true);
+      }
     });
     return () => {
       disposed = true;
@@ -81,56 +95,68 @@ export const SettingsTab: React.FC<{
     setLang(initialLang);
   }, [initialLang]);
 
+  const currentValues: SettingsFormValues = useMemo(
+    () => ({
+      providerId,
+      apiKey,
+      apiModel: model,
+      preferredRoute: route,
+      customBaseUrl: customUrl,
+      analyticsBaseUrl,
+      enableAnalytics,
+      customProviderProtocol: customProtocol,
+      language: lang,
+    }),
+    [providerId, apiKey, model, route, customUrl, analyticsBaseUrl, enableAnalytics, customProtocol, lang],
+  );
+
+  const isDirty = useMemo(
+    () => isSettingsDirty(currentValues, storedSnapshot),
+    [currentValues, storedSnapshot],
+  );
+
+  const isConfigured = useMemo(
+    () => isProviderRuntimeConfigured(provider, { apiKey: apiKey.trim() }),
+    [provider, apiKey],
+  );
+
+  const setupStatus = useMemo(
+    () =>
+      deriveSetupStatus({
+        isConfigured,
+        isDirty,
+        testing,
+        testResult,
+        savedOnce,
+      }),
+    [isConfigured, isDirty, testing, testResult, savedOnce],
+  );
+
+  const activeStep = useMemo(() => {
+    if (testResult?.tone === "success") return 4;
+    if (testing) return 3;
+    if (isConfigured) return 3;
+    return 2;
+  }, [testResult, testing, isConfigured]);
+
   useGSAP(
     () => {
       gsap.from(".settings-card", {
-        y: 18,
+        y: 14,
         autoAlpha: 0,
-        duration: 0.44,
-        stagger: 0.06,
+        duration: 0.35,
+        stagger: 0.05,
         ease: "power2.out",
       });
       gsap.from(".settings-action", {
-        y: 16,
-        scale: 0.97,
+        y: 12,
+        scale: 0.98,
         autoAlpha: 0,
-        duration: 0.42,
-        stagger: 0.08,
+        duration: 0.35,
+        stagger: 0.06,
         ease: "power2.out",
-        delay: 0.08,
+        delay: 0.06,
       });
-
-      const hoverTargets = gsap.utils.toArray<HTMLElement>(".settings-card");
-      const cleanups = hoverTargets.map((element) => {
-        const onEnter = () => {
-          gsap.to(element, {
-            y: -3,
-            boxShadow:
-              "0 12px 28px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255,255,255,0.08)",
-            duration: 0.2,
-            ease: "power2.out",
-          });
-        };
-        const onLeave = () => {
-          gsap.to(element, {
-            y: 0,
-            boxShadow:
-              "0 4px 16px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.04)",
-            duration: 0.2,
-            ease: "power2.out",
-          });
-        };
-        element.addEventListener("mouseenter", onEnter);
-        element.addEventListener("mouseleave", onLeave);
-        return () => {
-          element.removeEventListener("mouseenter", onEnter);
-          element.removeEventListener("mouseleave", onLeave);
-        };
-      });
-
-      return () => {
-        cleanups.forEach((cleanup) => cleanup());
-      };
     },
     { scope: scopeRef, dependencies: [providerId, lang, testResult], revertOnUpdate: true },
   );
@@ -143,7 +169,7 @@ export const SettingsTab: React.FC<{
   };
 
   const handleSave = async () => {
-    await saveSettings({
+    const nextSettings: Partial<AppSettings> = {
       providerId,
       apiKey: apiKey.trim(),
       apiModel: model || provider.defaultModel,
@@ -153,11 +179,14 @@ export const SettingsTab: React.FC<{
       enableAnalytics,
       customProviderProtocol: customProtocol,
       language: lang,
-    });
+    };
+    await saveSettings(nextSettings);
+    setStoredSnapshot((prev) => ({ ...prev, ...nextSettings }));
     logEvent("settings_saved", { providerId, route });
     if (apiKey.trim()) logEvent("api_key_set", { providerId });
     onLanguageChange(lang);
     setSaved(true);
+    setSavedOnce(true);
     setTimeout(() => setSaved(false), 2000);
   };
 
@@ -166,11 +195,13 @@ export const SettingsTab: React.FC<{
     setTestResult(null);
     try {
       const currentProvider = getProvider(providerId);
-      // UI-00A: a required-key provider without a key must never report a
-      // successful connection (the old path silently returned a mock result).
-      // key-optional providers such as Ollama keep testing normally.
+      // Pre-flight check: required-key provider without a key fails closed safely.
       if (!isProviderRuntimeConfigured(currentProvider, { apiKey: apiKey.trim() })) {
-        setTestResult(userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), { code: "PROVIDER_NOT_CONFIGURED" }));
+        setTestResult(
+          userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), {
+            code: "PROVIDER_NOT_CONFIGURED",
+          }),
+        );
         setTesting(false);
         return;
       }
@@ -208,16 +239,16 @@ export const SettingsTab: React.FC<{
             : isEn
               ? "hybrid"
               : "混合";
-      setTestResult(userFeedback(
-        "success",
-        isEn
-          ? `Connection success | route: ${routeLabel} | answer: ${result.answer} | confidence ${Math.round(result.confidence * 100)}%`
-          : `连接成功 | 路由：${routeLabel} | 答案：${result.answer} | 置信度 ${Math.round(result.confidence * 100)}%`,
-        { code: "CONNECTION_TEST_OK" },
-      ));
+      setTestResult(
+        userFeedback(
+          "success",
+          isEn
+            ? `Connection success | route: ${routeLabel} | answer: ${result.answer} | confidence ${Math.round(result.confidence * 100)}%`
+            : `连接成功 | 路由：${routeLabel} | 答案：${result.answer} | 置信度 ${Math.round(result.confidence * 100)}%`,
+          { code: "CONNECTION_TEST_OK" },
+        ),
+      );
     } catch (error) {
-      // UI-00B PART H: classified, safe copy; the raw provider text only
-      // survives as technical detail and is not displayed by default.
       setTestResult(mapUserFacingError(error, isEn ? "en" : "zh", { context: "connection-test" }));
     }
     setTesting(false);
@@ -225,14 +256,43 @@ export const SettingsTab: React.FC<{
 
   if (authOnly) {
     return (
-      <div ref={scopeRef} style={{ padding: "14px 10px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
+      <div
+        ref={scopeRef}
+        style={{
+          padding: "14px 10px 18px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          width: "100%",
+          boxSizing: "border-box",
+        }}
+      >
         <SettingsAccountSection auth={auth} authText={authText} isEn={isEn} rejectedSessionHint={sessionRejectedHint} />
       </div>
     );
   }
 
   return (
-    <div ref={scopeRef} style={{ padding: "14px 10px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
+    <div
+      ref={scopeRef}
+      style={{
+        padding: "14px 10px 18px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        width: "100%",
+        boxSizing: "border-box",
+      }}
+    >
+      {/* 1. Setup Status & 4-Step Onboarding Stepper */}
+      <SettingsSetupStatusCard
+        status={setupStatus}
+        isEn={isEn}
+        activeStep={activeStep}
+        onRetest={() => void handleTest()}
+      />
+
+      {/* 2. Provider, Credentials, Model, Base URL, Advanced, Language */}
       <SettingsConfigSections
         analyticsBaseUrl={analyticsBaseUrl}
         apiKey={apiKey}
@@ -252,14 +312,20 @@ export const SettingsTab: React.FC<{
         setApiKey={setApiKey}
         setCustomProtocol={setCustomProtocol}
         setCustomUrl={setCustomUrl}
-        setLang={setLang}
+        setLang={(nextLang) => {
+          setLang(nextLang);
+          onLanguageChange(nextLang);
+        }}
         setModel={setModel}
         setRoute={setRoute}
       />
 
+      {/* 3. Account / Session Section */}
       <SettingsAccountSection auth={auth} authText={authText} isEn={isEn} rejectedSessionHint={sessionRejectedHint} />
 
+      {/* 4. Actions: Save Settings & Test Configuration */}
       <SettingsActionsSection
+        isDirty={isDirty}
         isEn={isEn}
         onSave={() => void handleSave()}
         onTest={() => void handleTest()}
