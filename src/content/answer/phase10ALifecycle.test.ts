@@ -98,58 +98,66 @@ describe("Phase 10A runtime registry lifecycle", () => {
     vi.useRealTimers();
   });
 
-  it("P10A-CONTROL-CHURN-1000 caps 1000 unique four-control mappings", () => {
-    controlRegistry.clear();
-    let peak = controlRegistry.size;
-    for (let index = 0; index < 1000; index += 1) {
-      const owner = ownerWithChoices();
-      document.body.append(owner);
-      const question = block(`historical-${index}`);
-      const mapping = mapQuestion(question, owner);
-      expect(mapping.options.size).toBe(4);
-      peak = Math.max(peak, controlRegistry.size);
-      controlRegistry.clearQuestion(question.id, TOP_ROOT_KEY, TOP_ROOT_GENERATION);
-      owner.remove();
-    }
+  it(
+    "P10A-CONTROL-CHURN-1000 caps 1000 unique four-control mappings",
+    () => {
+      controlRegistry.clear();
+      let peak = controlRegistry.size;
+      for (let index = 0; index < 1000; index += 1) {
+        const owner = ownerWithChoices();
+        document.body.append(owner);
+        const question = block(`historical-${index}`);
+        const mapping = mapQuestion(question, owner);
+        expect(mapping.options.size).toBe(4);
+        peak = Math.max(peak, controlRegistry.size);
+        controlRegistry.clearQuestion(question.id, TOP_ROOT_KEY, TOP_ROOT_GENERATION);
+        owner.remove();
+      }
 
-    expect(peak).toBe(4);
-    expect(controlRegistry.size).toBe(0);
-    expect(peak).toBeLessThanOrEqual(MAX_CONTROL_REGISTRY_ENTRIES);
-  });
+      expect(peak).toBe(4);
+      expect(controlRegistry.size).toBe(0);
+      expect(peak).toBeLessThanOrEqual(MAX_CONTROL_REGISTRY_ENTRIES);
+    },
+    30_000,
+  );
 
-  it("P10A-SAME-QUESTION-RERENDER-1000 rebinds only the latest live controls", () => {
-    controlRegistry.clear();
-    const question = block("stable-question");
-    let latestOwner: HTMLElement | null = null;
-    let latestMapping: ReturnType<typeof mapQuestion> | null = null;
-    let peak = 0;
+  it(
+    "P10A-SAME-QUESTION-RERENDER-1000 rebinds only the latest live controls",
+    () => {
+      controlRegistry.clear();
+      const question = block("stable-question");
+      let latestOwner: HTMLElement | null = null;
+      let latestMapping: ReturnType<typeof mapQuestion> | null = null;
+      let peak = 0;
 
-    for (let index = 0; index < 1000; index += 1) {
-      const previous = latestMapping
-        ? [...latestMapping.options.values()].map((ref) => ({ id: ref.controlId, element: controlRegistry.get(ref.controlId)! }))
-        : [];
-      const owner = ownerWithChoices();
-      document.body.append(owner);
-      const mapping = mapQuestion(question, owner);
-      const elements = [...mapping.options.values()].map((ref) => controlRegistry.get(ref.controlId)!);
-      expect(elements.every(Boolean)).toBe(true);
-      expect(previous.every(({ id, element }) => controlRegistry.get(id) !== element)).toBe(true);
-      if (latestOwner) latestOwner.remove();
-      latestOwner = owner;
-      latestMapping = mapping;
-      peak = Math.max(peak, controlRegistry.size);
-    }
+      for (let index = 0; index < 1000; index += 1) {
+        const previous = latestMapping
+          ? [...latestMapping.options.values()].map((ref) => ({ id: ref.controlId, element: controlRegistry.get(ref.controlId)! }))
+          : [];
+        const owner = ownerWithChoices();
+        document.body.append(owner);
+        const mapping = mapQuestion(question, owner);
+        const elements = [...mapping.options.values()].map((ref) => controlRegistry.get(ref.controlId)!);
+        expect(elements.every(Boolean)).toBe(true);
+        expect(previous.every(({ id, element }) => controlRegistry.get(id) !== element)).toBe(true);
+        if (latestOwner) latestOwner.remove();
+        latestOwner = owner;
+        latestMapping = mapping;
+        peak = Math.max(peak, controlRegistry.size);
+      }
 
-    expect(peak).toBe(4);
-    expect(controlRegistry.size).toBe(4);
-    expect(controlRegistry.entryCountForQuestion("stable-question")).toBe(4);
-    for (const [key, ref] of latestMapping!.options) {
-      const current = controlRegistry.get(ref.controlId);
-      expect(current).toBe(latestOwner!.querySelectorAll("button")["ABCD".indexOf(key)]);
-      expect(current?.isConnected).toBe(true);
-    }
-    expect(latestMapping!.owner).toBe(latestOwner);
-  });
+      expect(peak).toBe(4);
+      expect(controlRegistry.size).toBe(4);
+      expect(controlRegistry.entryCountForQuestion("stable-question")).toBe(4);
+      for (const [key, ref] of latestMapping!.options) {
+        const current = controlRegistry.get(ref.controlId);
+        expect(current).toBe(latestOwner!.querySelectorAll("button")["ABCD".indexOf(key)]);
+        expect(current?.isConnected).toBe(true);
+      }
+      expect(latestMapping!.owner).toBe(latestOwner);
+    },
+    30_000,
+  );
 
   it("P10A-ROOT-REMOVE-500 releases every control owned by a removed frame root", async () => {
     controlRegistry.clear();

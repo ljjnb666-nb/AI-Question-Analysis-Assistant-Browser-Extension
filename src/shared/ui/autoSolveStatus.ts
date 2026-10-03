@@ -35,7 +35,7 @@ export type AutoSolveStatusData = {
 };
 
 const AUTO_SOLVE_STATUS_COPY: Record<AutoSolveStatusCode, { zh: string; en: string }> = {
-  STARTING: { zh: "正在启动自动解析并填答...", en: "Starting auto solve..." },
+  STARTING: { zh: "正在启动解析并填答...", en: "Starting solve & fill..." },
   WAITING_FOR_QUESTIONS: { zh: "未发现题目，等待页面内容出现...", en: "No questions found yet. Waiting for page content..." },
   PARSING: { zh: "正在解析第 {current} 题...", en: "Parsing question {current}..." },
   RETRYING_PARSE: { zh: "第 {current} 题解析未收敛，正在重试...", en: "Question {current} needs another parse attempt..." },
@@ -122,23 +122,23 @@ export function mapAutoSolveDoneFeedback(
     return userFeedback(
       "success",
       lang === "en"
-        ? `Auto solve finished: processed ${solved} question(s), filled ${filled}.`
-        : `自动解析并填答完成，共处理 ${solved} 题，填写 ${filled}。`,
+        ? `Solve & Fill finished: processed ${solved} question(s), filled ${filled}.`
+        : `解析并填答完成，共处理 ${solved} 题，填写 ${filled}。`,
       { technicalDetail: rawMessage || undefined },
     );
   }
   if (msg.stopped) {
     return userFeedback(
       "info",
-      lang === "en" ? "Auto solve was stopped." : "自动解析已停止。",
+      lang === "en" ? "Solve & Fill was stopped." : "解析并填答已停止。",
       { technicalDetail: rawMessage || undefined },
     );
   }
   return userFeedback(
     "error",
     lang === "en"
-      ? "Auto solve stopped because of a problem. Check the page and try again."
-      : "自动解析遇到问题已停止，请检查页面后重试。",
+      ? "Solve & Fill stopped because of a problem. Check the page and try again."
+      : "解析并填答遇到问题已停止，请检查页面后重试。",
     { code: "AUTO_SOLVE_FAILED", technicalDetail: rawMessage.slice(0, 200) || undefined },
   );
 }

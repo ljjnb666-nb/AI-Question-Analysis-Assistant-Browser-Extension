@@ -78,7 +78,7 @@ describe("autoSolveStatus contract (UI-00B PART F/G)", () => {
       "zh",
     );
     expect(feedback.tone).toBe("error");
-    expect(feedback.message).toBe("自动解析遇到问题已停止，请检查页面后重试。");
+    expect(feedback.message).toBe("解析并填答遇到问题已停止，请检查页面后重试。");
     expect(feedback.message).not.toContain("TypeError");
     expect(feedback.technicalDetail).toContain("TypeError");
 

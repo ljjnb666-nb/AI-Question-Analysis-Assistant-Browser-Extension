@@ -155,13 +155,13 @@ describe("sidepanelStateSync", () => {
     // demoted to technical detail.
     const doneOk = mapAutoSolveDoneFeedback({ ok: true, solved: 5, filled: 4, message: "自动答题完成，共处理 5 题" }, "zh");
     expect(doneOk.tone).toBe("success");
-    expect(doneOk.message).toContain("自动解析并填答完成");
+    expect(doneOk.message).toContain("解析并填答完成");
     const doneFailed = mapAutoSolveDoneFeedback({ ok: false, solved: 0, filled: 0, message: "Provider exploded: raw-http-500" }, "en");
     expect(doneFailed.tone).toBe("error");
     expect(doneFailed.message).not.toContain("raw-http-500");
     expect(doneFailed.technicalDetail).toContain("raw-http-500");
-    expect(buildAutoSolveStartingState("zh").statusText).toBe("开始自动答题...");
-    expect(buildAutoSolveStartingState("en").statusText).toBe("Starting auto solve...");
+    expect(buildAutoSolveStartingState("zh").statusText).toBe("开始解析并填答...");
+    expect(buildAutoSolveStartingState("en").statusText).toBe("Starting solve & fill...");
     expect(buildAutoSolveStartingState("zh").statusCode).toBe("STARTING");
   });
 

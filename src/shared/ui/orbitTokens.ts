@@ -158,6 +158,7 @@ export const orbitShadow = {
   none: "none",
   subtle: "0 1px 2px 0 rgba(0, 0, 0, 0.35)",
   elevation: "0 8px 24px -4px rgba(0, 0, 0, 0.5)",
+  activityElevation: "0 -2px 8px rgba(0, 0, 0, 0.25)",
 } as const;
 
 /**

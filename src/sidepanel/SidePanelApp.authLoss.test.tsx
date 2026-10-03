@@ -157,13 +157,25 @@ beforeEach(() => {
 // can exceed the 1s testing-library default, so waits are explicit.
 const UI_TIMEOUT = 5_000;
 
-async function findButton(name: string): Promise<HTMLElement> {
-  return screen.findByRole("button", { name }, { timeout: UI_TIMEOUT });
+async function findButton(name: string | RegExp): Promise<HTMLElement> {
+  const match =
+    typeof name === "string" && name === "Auto Solve"
+      ? /^(Auto Solve|Solve & Fill)$/
+      : typeof name === "string" && name === "Stop Auto Solve"
+        ? /^(Stop Auto Solve|Stop Solve & Fill)$/
+        : name;
+  return screen.findByRole("button", { name: match }, { timeout: UI_TIMEOUT });
 }
 
-function waitForButton(name: string): Promise<HTMLElement> {
+function waitForButton(name: string | RegExp): Promise<HTMLElement> {
+  const match =
+    typeof name === "string" && name === "Auto Solve"
+      ? /^(Auto Solve|Solve & Fill)$/
+      : typeof name === "string" && name === "Stop Auto Solve"
+        ? /^(Stop Auto Solve|Stop Solve & Fill)$/
+        : name;
   return waitFor(() => {
-    const button = screen.getByRole("button", { name });
+    const button = screen.getByRole("button", { name: match });
     expect(button).toBeInTheDocument();
     return button;
   }, { timeout: UI_TIMEOUT });
@@ -197,7 +209,7 @@ describe("SidePanelApp auth-loss watchdog", () => {
     // The surface converges to the locked state: no protected UI stays
     // mounted and the transient running indicators are gone.
     await waitForGone(() => screen.queryByText("Running"));
-    await waitForGone(() => screen.queryByRole("button", { name: "Auto Solve" }));
+    await waitForGone(() => screen.queryByRole("button", { name: /^(Auto Solve|Solve & Fill)$/ }));
   });
 
   it("AUTH_UI_24_AUTH_LOSS_STOPS_RUNNING_WORK auth loss sends FULL_PAGE_DETECT_CANCELLED for an active scan", { timeout: 20_000 }, async () => {
@@ -373,5 +385,19 @@ describe("SidePanelApp auth-loss watchdog", () => {
     await waitFor(() =>
       expect(sentMessages.STOP_AUTO_SOLVE_ALL?.length ?? 0).toBeGreaterThanOrEqual(1),
     { timeout: UI_TIMEOUT });
+  });
+
+  it("RF02-P2-LANG: document.documentElement.lang reflects SidePanelApp uiLang effect and toggle", async () => {
+    document.documentElement.lang = "initial";
+    render(<SidePanelApp />);
+    await waitFor(() => expect(document.documentElement.lang).toBe("en"), { timeout: UI_TIMEOUT });
+
+    // Open workspace menu and click switch language
+    const menuBtn = screen.getByRole("button", { name: /Workspace menu|工作台菜单/i });
+    fireEvent.click(menuBtn);
+    const switchBtn = screen.getByRole("button", { name: /切换到简体中文|Switch to English/i });
+    fireEvent.click(switchBtn);
+
+    await waitFor(() => expect(document.documentElement.lang).toBe("zh-CN"), { timeout: UI_TIMEOUT });
   });
 });

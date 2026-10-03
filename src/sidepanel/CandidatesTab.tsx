@@ -158,7 +158,7 @@ export const CandidatesTab: React.FC<{
   }, { scope: scopeRef, dependencies: [filteredCandidates.length, candidates.length, candidateViewFilter], revertOnUpdate: true });
 
   return (
-    <div ref={scopeRef} style={{ padding: "12px 0 18px" }}>
+    <div ref={scopeRef} style={{ padding: "0 10px 18px" }}>
       <CandidateStatsGrid statCards={statCards} />
       <CandidateQuickActionsCard
         candidatesCount={candidates.length}

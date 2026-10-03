@@ -18,7 +18,10 @@ export const historyCardStyle: React.CSSProperties = {
 export const sidePanelShellStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  height: "100vh",
+  height: "100%",
+  minHeight: "100vh",
+  width: "100%",
+  boxSizing: "border-box",
   overflow: "hidden",
   background: orbitColors.bg.canvas,
   color: orbitColors.text.primary,
@@ -40,41 +43,8 @@ export const panelChromeInsetStyle: React.CSSProperties = {
 };
 
 export const PanelChrome: React.FC<{
-  glow: string;
+  glow?: string;
   bottom?: number;
   height?: number;
   overlay?: string;
-}> = ({
-  glow,
-  bottom = -10,
-  height = 22,
-  overlay = "none",
-}) => (
-  <>
-    <div
-      style={{
-        position: "absolute",
-        left: 18,
-        right: 18,
-        bottom,
-        height,
-        borderRadius: orbitRadius.pill,
-        background: `radial-gradient(circle, ${glow} 0%, rgba(0,0,0,0) 72%)`,
-        filter: "blur(12px)",
-        pointerEvents: "none",
-        opacity: 0.15,
-      }}
-    />
-    {overlay && overlay !== "none" ? (
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: overlay,
-          pointerEvents: "none",
-        }}
-      />
-    ) : null}
-    <div style={panelChromeInsetStyle} />
-  </>
-);
+}> = () => <div style={panelChromeInsetStyle} />;

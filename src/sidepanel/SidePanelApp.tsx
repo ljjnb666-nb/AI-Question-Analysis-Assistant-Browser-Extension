@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
-import gsap from "gsap";
-import { useGSAP } from "@gsap/react";
-import { loadSettings } from "@/shared/utils/storage";
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { loadSettings, saveSettings } from "@/shared/utils/storage";
+import { logoutAccount } from "@/shared/utils/auth";
+import { getProvider, getProviderShortName } from "@/shared/ai/providers";
 import { useAuthSession } from "@/shared/auth/useAuthSession";
 import {
   clearProtectedWorkOwner,
@@ -21,20 +21,24 @@ import { sendTabMessageWithBootstrap } from "./tabActions";
 import {
   APP_SHELL_STYLE,
   PANEL_BODY_STYLE,
+  SidePanelActivityStrip,
   SidePanelHeader,
   SidePanelLockedState,
+  WorkspaceTabPanel,
 } from "./sidePanelShell";
 import type { AutoSolveProgressState, ScanProgressState, SidePanelAppState } from "./sidepanelAppState";
 import { initialSidePanelAppState, sidePanelAppReducer } from "./sidepanelAppState";
 import { useSidePanelActions } from "./useSidePanelActions";
+import {
+  deriveSidePanelWorkspaceStatus,
+  deriveWorkspaceActivity,
+} from "./sidePanelWorkspaceState";
 
 export { findNextFractionExpression, normalizeRenderableMathText, renderMathText } from "./displayUtils";
 
-gsap.registerPlugin(useGSAP);
-
 export const SidePanelApp: React.FC = () => {
-  const scopeRef = useRef<HTMLDivElement | null>(null);
   const [state, dispatch] = useReducer(sidePanelAppReducer, initialSidePanelAppState);
+  const [providerName, setProviderName] = useState<string | undefined>(undefined);
 
   const setUiLang = useCallback((updater: React.SetStateAction<UILang>) => dispatch({ type: "uiLang", updater }), []);
   const setIsAuthenticated = useCallback(
@@ -127,6 +131,7 @@ export const SidePanelApp: React.FC = () => {
     autoSolve: { active: boolean; tabId?: number };
     fullPage: { active: boolean; tabId?: number };
   }>({ autoSolve: { active: false }, fullPage: { active: false } });
+
   const markProtectedWork = useCallback(
     async (kind: "autoSolve" | "fullPage", active: boolean, tabId: number) => {
       // Zero-lag sync flip FIRST: the auth-loss watchdog must see the local
@@ -240,6 +245,12 @@ export const SidePanelApp: React.FC = () => {
   useEffect(() => {
     loadSettings().then((settings) => {
       setUiLang((settings.language ?? "zh") as UILang);
+      if (settings.providerId) {
+        const configuredProvider = getProvider(settings.providerId);
+        setProviderName(getProviderShortName(settings.providerId) || configuredProvider.name);
+      } else {
+        setProviderName(undefined);
+      }
     });
 
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
@@ -247,10 +258,15 @@ export const SidePanelApp: React.FC = () => {
 
       const nextSettings = changes.appSettings.newValue as {
         language?: UILang;
+        providerId?: string;
       };
 
       if (nextSettings.language === "zh" || nextSettings.language === "en") {
         setUiLang(nextSettings.language);
+      }
+      if (nextSettings.providerId) {
+        const configuredProvider = getProvider(nextSettings.providerId);
+        setProviderName(getProviderShortName(nextSettings.providerId) || configuredProvider.name);
       }
       // Auth-related storage changes are intentionally NOT converted into an
       // authenticated state here: the session coordinator owns that authority.
@@ -329,41 +345,87 @@ export const SidePanelApp: React.FC = () => {
     [state.candidateViewFilter, state.candidates],
   );
 
-  useGSAP(() => {
-    gsap.from(".sp-header-copy", {
-      y: 12,
-      autoAlpha: 0,
-      duration: 0.6,
-      ease: "power2.out",
-    });
-    gsap.from(".sp-tab", {
-      y: 8,
-      autoAlpha: 0,
-      duration: 0.42,
-      stagger: 0.06,
-      ease: "power2.out",
-      delay: 0.08,
-    });
-    gsap.to(".sp-glow-a", {
-      x: 18,
-      y: -8,
-      duration: 8,
-      repeat: -1,
-      yoyo: true,
-      ease: "sine.inOut",
-    });
-    gsap.to(".sp-glow-b", {
-      x: -8,
-      y: 8,
-      duration: 9,
-      repeat: -1,
-      yoyo: true,
-      ease: "sine.inOut",
-    });
-  }, { scope: scopeRef });
+  const workspaceStatus = useMemo(
+    () =>
+      deriveSidePanelWorkspaceStatus({
+        authStatus: state.authStatus,
+        isAuthenticated: state.isAuthenticated,
+        isDetecting: state.isDetecting,
+        isFullPageScan: state.isFullPageScan,
+        isAutoSolving: state.isAutoSolving,
+        isBatchParsing: state.isBatchParsing,
+        isBatchFilling: state.isBatchFilling,
+        autoSolveProgress: state.autoSolveProgress,
+        fillFeedback: state.fillFeedback,
+      }),
+    [
+      state.authStatus,
+      state.autoSolveProgress,
+      state.fillFeedback,
+      state.isAutoSolving,
+      state.isBatchFilling,
+      state.isBatchParsing,
+      state.isAuthenticated,
+      state.isDetecting,
+      state.isFullPageScan,
+    ],
+  );
+
+  useEffect(() => {
+    document.documentElement.lang = state.uiLang === "en" ? "en" : "zh-CN";
+  }, [state.uiLang]);
+
+  const activity = useMemo(
+    () =>
+      deriveWorkspaceActivity({
+        status: workspaceStatus,
+        lang: state.uiLang,
+        isDetecting: state.isDetecting,
+        isFullPageScan: state.isFullPageScan,
+        scanProgress: state.scanProgress,
+        isAutoSolving: state.isAutoSolving,
+        isBatchParsing: state.isBatchParsing,
+        isBatchFilling: state.isBatchFilling,
+        autoSolveProgress: state.autoSolveProgress,
+        fillFeedback: state.fillFeedback,
+        currentTab: state.tab,
+        onCancelFullPage: handleCancelFullPage,
+        onStopAutoSolve: handleStopAutoSolve,
+        onReviewCandidates: () => setTab("candidates"),
+        onDismissFeedback: () => setFillFeedback(null),
+      }),
+    [
+      workspaceStatus,
+      state.uiLang,
+      state.isDetecting,
+      state.isFullPageScan,
+      state.scanProgress,
+      state.isAutoSolving,
+      state.isBatchParsing,
+      state.isBatchFilling,
+      state.autoSolveProgress,
+      state.fillFeedback,
+      state.tab,
+      handleCancelFullPage,
+      handleStopAutoSolve,
+      setTab,
+      setFillFeedback,
+    ],
+  );
+
+  const handleToggleLanguage = useCallback(() => {
+    const nextLang: UILang = state.uiLang === "zh" ? "en" : "zh";
+    setUiLang(nextLang);
+    void saveSettings({ language: nextLang });
+  }, [state.uiLang, setUiLang]);
+
+  const handleLogout = useCallback(async () => {
+    session.applyLoggedOut();
+    void logoutAccount();
+  }, [session]);
 
   return (
-    <div ref={scopeRef} style={APP_SHELL_STYLE}>
+    <div style={APP_SHELL_STYLE}>
       <SidePanelHeader
         authStatus={state.authStatus}
         isAuthenticated={state.isAuthenticated}
@@ -371,16 +433,23 @@ export const SidePanelApp: React.FC = () => {
         onTabChange={setTab}
         tab={state.tab}
         userEmail={state.userEmail}
+        workspaceStatus={workspaceStatus}
+        providerName={providerName}
+        onToggleLanguage={handleToggleLanguage}
+        onLogout={handleLogout}
+        onRetryValidation={() => session.retryValidation()}
       />
 
       <div style={PANEL_BODY_STYLE}>
         {state.tab === "settings" ? (
-          <SettingsTab
-            lang={state.uiLang}
-            onLanguageChange={setUiLang}
-            authOnly={!state.isAuthenticated}
-            sessionRejectedHint={state.sessionRejected}
-          />
+          <WorkspaceTabPanel id="sidepanel-tabpanel-settings" tabId="settings">
+            <SettingsTab
+              lang={state.uiLang}
+              onLanguageChange={setUiLang}
+              authOnly={!state.isAuthenticated}
+              sessionRejectedHint={state.sessionRejected}
+            />
+          </WorkspaceTabPanel>
         ) : !state.isAuthenticated ? (
           // Authority-first structure: while not server-validated, nothing
           // but the locked state may mount — History and Candidates are
@@ -390,49 +459,58 @@ export const SidePanelApp: React.FC = () => {
             authStatus={state.authStatus}
             lang={state.uiLang}
             onOpenSettings={() => setTab("settings")}
+            onRetryValidation={() => session.retryValidation()}
           />
         ) : state.tab === "candidates" ? (
-          <CandidatesTab
-            autoSolveProgress={state.autoSolveProgress}
-            candidateViewFilter={state.candidateViewFilter}
-            candidates={state.candidates}
-            doneCount={doneCount}
-            expandedIds={state.expandedIds}
-            fillFeedback={state.fillFeedback}
-            filteredCandidates={filteredCandidates}
-            isAutoSolving={state.isAutoSolving}
-            isBatchFilling={state.isBatchFilling}
-            isBatchParsing={state.isBatchParsing}
-            isDetecting={state.isDetecting}
-            isFullPageScan={state.isFullPageScan}
-            isRetryingRisky={state.isRetryingRisky}
-            lang={state.uiLang}
-            riskyCount={riskyCount}
-            scanProgress={state.scanProgress}
-            selectedCount={selectedCount}
-            selectedSolvedCount={selectedSolvedCount}
-            onBatchFill={handleBatchFill}
-            onBatchParse={handleBatchParse}
-            onCancelFullPage={handleCancelFullPage}
-            onCandidateFilterChange={setCandidateViewFilter}
-            onClearSelection={handleClearSelection}
-            onDetect={handleDetect}
-            onFillCandidate={handleFillCandidate}
-            onFlashCandidate={handleFlash}
-            onFullPageDetect={handleFullPageDetect}
-            onRetryRisky={handleRetryRisky}
-            onRetryVision={handleRetryVision}
-            onSelectAll={handleSelectAll}
-            onSelectRisky={handleSelectRisky}
-            onStartAutoSolve={handleStartAutoSolve}
-            onStopAutoSolve={handleStopAutoSolve}
-            onToggleCandidate={toggleSelect}
-            onToggleDetails={toggleDetails}
-          />
+          <WorkspaceTabPanel id="sidepanel-tabpanel-candidates" tabId="candidates">
+            <CandidatesTab
+              autoSolveProgress={state.autoSolveProgress}
+              candidateViewFilter={state.candidateViewFilter}
+              candidates={state.candidates}
+              doneCount={doneCount}
+              expandedIds={state.expandedIds}
+              fillFeedback={state.fillFeedback}
+              filteredCandidates={filteredCandidates}
+              isAutoSolving={state.isAutoSolving}
+              isBatchFilling={state.isBatchFilling}
+              isBatchParsing={state.isBatchParsing}
+              isDetecting={state.isDetecting}
+              isFullPageScan={state.isFullPageScan}
+              isRetryingRisky={state.isRetryingRisky}
+              lang={state.uiLang}
+              riskyCount={riskyCount}
+              scanProgress={state.scanProgress}
+              selectedCount={selectedCount}
+              selectedSolvedCount={selectedSolvedCount}
+              onBatchFill={handleBatchFill}
+              onBatchParse={handleBatchParse}
+              onCancelFullPage={handleCancelFullPage}
+              onCandidateFilterChange={setCandidateViewFilter}
+              onClearSelection={handleClearSelection}
+              onDetect={handleDetect}
+              onFillCandidate={handleFillCandidate}
+              onFlashCandidate={handleFlash}
+              onFullPageDetect={handleFullPageDetect}
+              onRetryRisky={handleRetryRisky}
+              onRetryVision={handleRetryVision}
+              onSelectAll={handleSelectAll}
+              onSelectRisky={handleSelectRisky}
+              onStartAutoSolve={handleStartAutoSolve}
+              onStopAutoSolve={handleStopAutoSolve}
+              onToggleCandidate={toggleSelect}
+              onToggleDetails={toggleDetails}
+            />
+          </WorkspaceTabPanel>
         ) : state.tab === "history" ? (
-          <HistoryTab lang={state.uiLang} />
+          <WorkspaceTabPanel id="sidepanel-tabpanel-history" tabId="history">
+            <HistoryTab lang={state.uiLang} />
+          </WorkspaceTabPanel>
         ) : null}
       </div>
+
+      {activity ? (
+        <SidePanelActivityStrip activity={activity} lang={state.uiLang} />
+      ) : null}
     </div>
   );
 };

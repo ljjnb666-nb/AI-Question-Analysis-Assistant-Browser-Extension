@@ -209,7 +209,7 @@ export const CandidateQuickActionsCard: React.FC<{
         onClick={props.isAutoSolving ? props.onStopAutoSolve : props.onStartAutoSolve}
         disabled={props.isDetecting || props.isFullPageScan || props.isBatchParsing || props.isBatchFilling}
       >
-        {props.isAutoSolving ? (props.isEn ? "Stop Auto Solve" : "停止自动答题") : props.isEn ? "Auto Solve" : "自动答题"}
+        {props.isAutoSolving ? (props.isEn ? "Stop Solve & Fill" : "停止解析并填答") : props.isEn ? "Solve & Fill" : "解析并填答"}
       </UiButton>
       {props.candidatesCount > 0 && !props.isFullPageScan ? (
         <>
@@ -347,7 +347,7 @@ export const CandidateAutoSolveCard: React.FC<{
     >
       <PanelChrome glow={tone.glow} />
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 8, fontSize: 12 }}>
-        <span style={{ color: tone.text, fontWeight: 700 }}>{lang === "en" ? "Auto Solve" : "自动答题"}</span>
+        <span style={{ color: tone.text, fontWeight: 700 }}>{lang === "en" ? "Solve & Fill" : "解析并填答"}</span>
         <span style={{ color: "#94a3b8" }}>
           {lang === "en"
             ? `Solved ${autoSolveProgress.solved}${autoSolveProgress.total ? ` / ${autoSolveProgress.total}` : ""}, filled ${autoSolveProgress.filled}`
@@ -442,7 +442,7 @@ export const EmptyCandidatesState: React.FC<{
     >
       <PanelChrome glow="rgba(99, 102, 241, 0.16)" />
       {isEn
-        ? 'Use "Current View" or "Full Page" to start detection. Auto Solve becomes useful after questions are found.'
-        : "先用“当前屏”或“整页扫描”开始识别，找到题目后再使用“自动答题”会更高效。"}
+        ? 'Use "Current View" or "Full Page" to start detection. Solve & Fill becomes useful after questions are found.'
+        : "先用“当前屏”或“整页扫描”开始识别，找到题目后再使用“解析并填答”会更高效。"}
     </div>
   ) : null;

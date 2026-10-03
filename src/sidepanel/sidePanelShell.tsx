@@ -1,44 +1,28 @@
-import React from "react";
-import { UiButton } from "@/shared/ui/extensionUi";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  OrbitBadge,
+  type OrbitBadgeVariant,
+  OrbitButton,
+  OrbitSurface,
+} from "@/shared/ui/orbitPrimitives";
+import {
+  orbitColors,
+  orbitRadius,
+  orbitSpacing,
+  orbitTokens,
+  orbitTypography,
+} from "@/shared/ui/orbitTokens";
+import { useFocusVisible } from "@/shared/ui/orbitFocus";
+import { usePrefersReducedMotion } from "@/shared/ui/orbitMotion";
 import type { UILang } from "./displayUtils";
 import { sidePanelShellStyle } from "./sidepanelTheme";
+import { SIDEPANEL_COPY } from "./sidePanelCopy";
+import type {
+  SidePanelWorkspaceStatus,
+  WorkspaceActivity,
+} from "./sidePanelWorkspaceState";
 
 export type SidePanelTabId = "candidates" | "history" | "settings";
-
-export const APP_SHELL_STYLE = sidePanelShellStyle;
-
-export const PANEL_BODY_STYLE: React.CSSProperties = {
-  flex: 1,
-  overflowY: "auto",
-  padding: "0 10px 10px",
-};
-
-const HEADER_STYLE: React.CSSProperties = {
-  padding: "14px 14px 12px",
-  borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
-  background: "linear-gradient(180deg, rgba(16, 22, 42, 0.9), rgba(10, 14, 28, 0.85))",
-  backdropFilter: "blur(20px)",
-};
-
-const tabButtonStyle: React.CSSProperties = {
-  padding: "10px 8px 11px",
-  border: "none",
-  cursor: "pointer",
-  borderRadius: 10,
-  fontSize: 12,
-  fontWeight: 600,
-  transition: "background-color 0.2s ease, color 0.2s ease, transform 0.18s ease",
-  letterSpacing: -0.1,
-  fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-  willChange: "transform",
-};
-
-const lockedCardStyle: React.CSSProperties = {
-  borderRadius: 16,
-  border: "1px solid rgba(255, 255, 255, 0.06)",
-  background: "linear-gradient(180deg, rgba(16, 24, 48, 0.8), rgba(10, 15, 30, 0.85))",
-  padding: 16,
-};
 
 export type SidePanelAuthStatus =
   | "loading"
@@ -47,62 +31,43 @@ export type SidePanelAuthStatus =
   | "unauthenticated"
   | "server_unavailable";
 
-const getHeaderCopy = (
-  lang: UILang,
-  isAuthenticated: boolean,
-  tab: SidePanelTabId,
-  authStatus: SidePanelAuthStatus,
-) => {
-  const isEn = lang === "en";
+export const APP_SHELL_STYLE = sidePanelShellStyle;
 
-  if (!isAuthenticated) {
-    if (authStatus === "loading" || authStatus === "validating") {
-      return {
-        appName: isEn ? "Quiz Solver" : "题目解析助手",
-        title: isEn ? "Verifying session..." : "正在验证登录状态",
-        description: isEn
-          ? "Checking your sign-in status with the account service."
-          : "正在向账号服务确认你的登录状态。",
-      };
-    }
-    if (authStatus === "server_unavailable") {
-      return {
-        appName: isEn ? "Quiz Solver" : "题目解析助手",
-        title: isEn ? "Can't verify sign-in" : "无法验证登录状态",
-        description: isEn
-          ? "The account service can't be reached, so the workspace stays locked."
-          : "账号服务暂时不可达，工作台保持锁定。",
-      };
-    }
-    return {
-      appName: isEn ? "Quiz Solver" : "题目解析助手",
-      title: isEn ? "Login Account" : "登录账号",
-      description: isEn ? "Register or log in with email in Settings before using the workspace." : "先在设置里完成邮箱注册或登录，再使用工作台。",
-    };
-  }
-
-  if (tab === "candidates") {
-    return {
-      appName: isEn ? "Quiz Solver" : "题目解析助手",
-      title: isEn ? "Workspace" : "工作台",
-      description: isEn ? "Detect, solve, fill, and review without switching pages." : "在不切页的情况下完成识别、解析、填答和复核。",
-    };
-  }
-
-  if (tab === "history") {
-    return {
-      appName: isEn ? "Quiz Solver" : "题目解析助手",
-      title: isEn ? "History" : "历史记录",
-      description: isEn ? "Review past answers and export parse records." : "查看过去的答题结果，也可以导出记录。",
-    };
-  }
-
-  return {
-    appName: isEn ? "Quiz Solver" : "题目解析助手",
-    title: isEn ? "Settings" : "设置",
-    description: isEn ? "Manage provider, route, and interface language." : "管理服务商、路由和界面语言。",
-  };
+export const PANEL_BODY_STYLE: React.CSSProperties = {
+  flex: 1,
+  overflowY: "auto",
+  display: "flex",
+  flexDirection: "column",
+  width: "100%",
+  boxSizing: "border-box",
+  background: orbitColors.bg.canvas,
 };
+
+function getStatusBadgeProps(status: SidePanelWorkspaceStatus, lang: UILang): {
+  label: string;
+  variant: OrbitBadgeVariant;
+} {
+  const copy = SIDEPANEL_COPY[lang].status;
+  switch (status) {
+    case "checking_session":
+      return { label: copy.checking_session, variant: "info" };
+    case "service_unavailable":
+      return { label: copy.service_unavailable, variant: "error" };
+    case "signed_out":
+      return { label: copy.signed_out, variant: "neutral" };
+    case "review_required":
+      return { label: copy.review_required, variant: "warning" };
+    case "solving":
+      return { label: copy.solving, variant: "ai" };
+    case "scanning":
+      return { label: copy.scanning, variant: "info" };
+    case "detecting":
+      return { label: copy.detecting, variant: "info" };
+    case "ready":
+    default:
+      return { label: copy.ready, variant: "success" };
+  }
+}
 
 export const SidePanelHeader: React.FC<{
   authStatus: SidePanelAuthStatus;
@@ -111,56 +76,595 @@ export const SidePanelHeader: React.FC<{
   onTabChange: (tab: SidePanelTabId) => void;
   tab: SidePanelTabId;
   userEmail: string;
-}> = ({ authStatus, isAuthenticated, lang, onTabChange, tab, userEmail }) => {
-  const isEn = lang === "en";
-  const copy = getHeaderCopy(lang, isAuthenticated, tab, authStatus);
+  workspaceStatus?: SidePanelWorkspaceStatus;
+  providerName?: string;
+  onToggleLanguage?: () => void;
+  onLogout?: () => void;
+  onRetryValidation?: () => void;
+}> = ({
+  authStatus: _authStatus,
+  isAuthenticated,
+  lang,
+  onTabChange,
+  tab,
+  userEmail,
+  workspaceStatus = "ready",
+  providerName,
+  onToggleLanguage,
+  onLogout,
+}) => {
+  const copy = SIDEPANEL_COPY[lang];
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const tabListRef = useRef<HTMLDivElement | null>(null);
+  const prefersReducedMotion = usePrefersReducedMotion();
+
+  const { isFocusVisible: isMenuFocusVisible, onFocus: onMenuFocus, onBlur: onMenuBlur } =
+    useFocusVisible();
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        menuButtonRef.current &&
+        !menuButtonRef.current.contains(e.target as Node)
+      ) {
+        setIsMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsMenuOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isMenuOpen]);
+
   const tabs: Array<{ id: SidePanelTabId; label: string }> = [
-    { id: "candidates", label: isEn ? "Candidates" : "候选题" },
-    { id: "history", label: isEn ? "History" : "历史" },
-    { id: "settings", label: isEn ? "Settings" : "设置" },
+    { id: "candidates", label: copy.tabs.candidates },
+    { id: "history", label: copy.tabs.history },
+    { id: "settings", label: copy.tabs.settings },
   ];
+
+  const handleTabKeyDown = (e: React.KeyboardEvent, index: number) => {
+    let targetIndex = -1;
+    if (e.key === "ArrowRight") {
+      targetIndex = (index + 1) % tabs.length;
+    } else if (e.key === "ArrowLeft") {
+      targetIndex = (index - 1 + tabs.length) % tabs.length;
+    } else if (e.key === "Home") {
+      targetIndex = 0;
+    } else if (e.key === "End") {
+      targetIndex = tabs.length - 1;
+    }
+    if (targetIndex >= 0) {
+      e.preventDefault();
+      const nextTab = tabs[targetIndex];
+      onTabChange(nextTab.id);
+      const tabButtons = tabListRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+      tabButtons?.[targetIndex]?.focus();
+    }
+  };
+
+  const statusBadge = getStatusBadgeProps(workspaceStatus, lang);
 
   return (
     <header
       style={{
-        ...HEADER_STYLE,
-        position: "relative",
-        overflow: "hidden",
-        background: "linear-gradient(135deg, rgba(16, 22, 42, 0.95) 0%, rgba(10, 14, 28, 0.9) 58%, rgba(20, 12, 40, 0.85) 100%)",
+        position: "sticky",
+        top: 0,
+        zIndex: 50,
+        background: orbitColors.bg.surface,
+        borderBottom: `1px solid ${orbitColors.border.subtle}`,
+        boxSizing: "border-box",
+        width: "100%",
       }}
     >
-      <div className="sp-glow-a" style={{ position: "absolute", width: 180, height: 180, right: -40, top: -70, borderRadius: 999, background: "radial-gradient(circle, rgba(99,102,241,0.16) 0%, rgba(99,102,241,0) 70%)", pointerEvents: "none" }} />
-      <div className="sp-glow-b" style={{ position: "absolute", width: 160, height: 160, left: -52, bottom: -80, borderRadius: 999, background: "radial-gradient(circle, rgba(139,92,246,0.12) 0%, rgba(139,92,246,0) 70%)", pointerEvents: "none" }} />
-      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(255,255,255,0.03), transparent 28%)", pointerEvents: "none" }} />
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-        <div className="sp-header-copy" style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 10, color: "#818cf8", letterSpacing: 1.4, textTransform: "uppercase", fontWeight: 700 }}>{copy.appName}</div>
-          <div style={{ fontSize: 21, fontWeight: 700, color: "#f8fafc", marginTop: 5, letterSpacing: -0.2, textShadow: "0 0 18px rgba(99,102,241,0.2)" }}>{copy.title}</div>
-          <div style={{ fontSize: 12, lineHeight: 1.55, color: "#94a3b8", marginTop: 5, maxWidth: 300 }}>{copy.description}</div>
-          {!isAuthenticated && userEmail ? <div style={{ fontSize: 11, marginTop: 6, color: "#818cf8" }}>{userEmail}</div> : null}
+      {/* Compact App Bar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: `${orbitSpacing[3]}px ${orbitSpacing[3]}px`,
+          gap: orbitSpacing[2],
+          boxSizing: "border-box",
+          minHeight: 56,
+        }}
+      >
+        {/* Left: Product title & Context Line */}
+        <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, minWidth: 0 }}>
+            <span
+              style={{
+                fontSize: orbitTypography.fontSize.base,
+                fontWeight: orbitTypography.fontWeight.semibold,
+                color: orbitColors.text.primary,
+                lineHeight: 1.25,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {copy.appName}
+            </span>
+            {isAuthenticated ? (
+              <>
+                <span style={{ fontSize: 11, color: orbitColors.text.muted }}>·</span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: orbitColors.text.secondary,
+                    fontWeight: orbitTypography.fontWeight.medium,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {lang === "en" ? "Workspace" : "工作台"}
+                </span>
+              </>
+            ) : null}
+          </div>
+          <span
+            style={{
+              fontSize: orbitTypography.fontSize.xs,
+              color: orbitColors.text.secondary,
+              marginTop: 2,
+              lineHeight: 1.2,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {isAuthenticated
+              ? copy.contextLine(providerName)
+              : _authStatus === "loading" || _authStatus === "validating"
+                ? (lang === "en" ? "Verifying Session..." : "正在验证登录状态")
+                : _authStatus === "server_unavailable"
+                  ? (lang === "en" ? "Cannot Verify Session" : "无法验证登录状态")
+                  : (lang === "en" ? "Login Account" : "登录账号")}
+          </span>
+        </div>
+
+        {/* Right: Global Status Badge & Product Menu */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: orbitSpacing[2],
+            flexShrink: 0,
+            position: "relative",
+          }}
+        >
+          <OrbitBadge variant={statusBadge.variant} dot={true}>
+            {statusBadge.label}
+          </OrbitBadge>
+
+          <button
+            ref={menuButtonRef}
+            type="button"
+            aria-label={copy.menu.buttonAria}
+            aria-controls="sidepanel-product-popover"
+            aria-expanded={isMenuOpen}
+            onClick={() => setIsMenuOpen((prev) => !prev)}
+            onFocus={onMenuFocus}
+            onBlur={onMenuBlur}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 28,
+              height: 28,
+              borderRadius: orbitRadius.md,
+              border: `1px solid ${isMenuOpen ? orbitColors.border.strong : orbitColors.border.subtle}`,
+              background: isMenuOpen ? orbitColors.bg.surfaceInteractive : orbitColors.bg.surfaceRaised,
+              color: orbitColors.text.primary,
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: "bold",
+              lineHeight: 1,
+              outline: isMenuFocusVisible ? orbitTokens.focus.outline : "none",
+              outlineOffset: orbitTokens.focus.outlineOffset,
+              boxShadow: isMenuFocusVisible ? orbitTokens.focus.focusRing : "none",
+              transition: prefersReducedMotion ? "none" : `background ${orbitTokens.motion.fast}`,
+            }}
+          >
+            ⋯
+          </button>
+
+          {/* Product Popover */}
+          {isMenuOpen && (
+            <div
+              id="sidepanel-product-popover"
+              ref={menuRef}
+              style={{
+                position: "absolute",
+                right: 0,
+                top: "calc(100% + 4px)",
+                minWidth: 170,
+                background: orbitColors.bg.surfaceRaised,
+                border: `1px solid ${orbitColors.border.default}`,
+                borderRadius: orbitRadius.md,
+                boxShadow: orbitTokens.shadow.elevation,
+                padding: orbitSpacing[1],
+                zIndex: 100,
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+              }}
+            >
+              {isAuthenticated && userEmail ? (
+                <div
+                  style={{
+                    padding: `${orbitSpacing[1]}px ${orbitSpacing[2]}px`,
+                    fontSize: orbitTypography.fontSize.xs,
+                    color: orbitColors.text.secondary,
+                    borderBottom: `1px solid ${orbitColors.border.subtle}`,
+                    marginBottom: 2,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={userEmail}
+                >
+                  <div style={{ fontSize: 10, color: orbitColors.text.secondary }}>
+                    {copy.menu.accountHeader}
+                  </div>
+                  <div style={{ color: orbitColors.text.secondary }}>{userEmail}</div>
+                </div>
+              ) : null}
+
+              {onToggleLanguage ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    onToggleLanguage();
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    width: "100%",
+                    padding: `${orbitSpacing[2]}px ${orbitSpacing[2]}px`,
+                    borderRadius: orbitRadius.sm,
+                    background: "transparent",
+                    border: "none",
+                    color: orbitColors.text.primary,
+                    fontSize: orbitTypography.fontSize.xs,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  {copy.menu.switchLang}
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  onTabChange("settings");
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  width: "100%",
+                  padding: `${orbitSpacing[2]}px ${orbitSpacing[2]}px`,
+                  borderRadius: orbitRadius.sm,
+                  background: "transparent",
+                  border: "none",
+                  color: orbitColors.text.primary,
+                  fontSize: orbitTypography.fontSize.xs,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                {copy.menu.settings}
+              </button>
+
+              {isAuthenticated && onLogout ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    onLogout();
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    width: "100%",
+                    padding: `${orbitSpacing[2]}px ${orbitSpacing[2]}px`,
+                    borderRadius: orbitRadius.sm,
+                    background: "transparent",
+                    border: "none",
+                    color: orbitColors.semantic.error,
+                    fontSize: orbitTypography.fontSize.xs,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    borderTop: `1px solid ${orbitColors.border.subtle}`,
+                    marginTop: 2,
+                  }}
+                >
+                  {copy.menu.signOut}
+                </button>
+              ) : null}
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Flat Tabs Navigation */}
       {isAuthenticated ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, marginTop: 12, padding: 4, borderRadius: 14, backgroundColor: "rgba(15, 23, 42, 0.6)", border: "1px solid rgba(255, 255, 255, 0.06)", boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)" }}>
-          {tabs.map((item) => (
-            <button
-              className="sp-tab"
-              key={item.id}
-              onClick={() => onTabChange(item.id)}
-              style={{
-                ...tabButtonStyle,
-                background: tab === item.id ? "linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))" : "transparent",
-                color: tab === item.id ? "#ffffff" : "#94a3b8",
-                boxShadow: tab === item.id ? "inset 0 1px 0 rgba(255,255,255,0.08)" : "none",
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div
+          role="tablist"
+          ref={tabListRef}
+          aria-label={copy.tabs.ariaLabel}
+          style={{
+            display: "flex",
+            alignItems: "stretch",
+            padding: `0 ${orbitSpacing[3]}px`,
+            borderTop: `1px solid ${orbitColors.border.subtle}`,
+            background: orbitColors.bg.canvas,
+            boxSizing: "border-box",
+            width: "100%",
+          }}
+        >
+          {tabs.map((item, index) => {
+            const isActive = tab === item.id;
+            return (
+              <TabButton
+                key={item.id}
+                id={`sidepanel-tab-${item.id}`}
+                controls={`sidepanel-tabpanel-${item.id}`}
+                isActive={isActive}
+                label={item.label}
+                onClick={() => onTabChange(item.id)}
+                onKeyDown={(e) => handleTabKeyDown(e, index)}
+              />
+            );
+          })}
         </div>
       ) : null}
     </header>
+  );
+};
+
+const TabButton: React.FC<{
+  id: string;
+  controls: string;
+  isActive: boolean;
+  label: string;
+  onClick: () => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+}> = ({ id, controls, isActive, label, onClick, onKeyDown }) => {
+  const { isFocusVisible, onFocus, onBlur } = useFocusVisible();
+  const prefersReducedMotion = usePrefersReducedMotion();
+
+  return (
+    <button
+      id={id}
+      role="tab"
+      type="button"
+      aria-selected={isActive}
+      aria-controls={controls}
+      tabIndex={isActive ? 0 : -1}
+      onClick={onClick}
+      onKeyDown={onKeyDown}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: `${orbitSpacing[2]}px ${orbitSpacing[3]}px`,
+        background: "transparent",
+        border: "none",
+        borderBottom: `2px solid ${isActive ? orbitColors.brand.primary : "transparent"}`,
+        color: isActive ? orbitColors.text.primary : orbitColors.text.secondary,
+        fontFamily: orbitTypography.fontFamily,
+        fontSize: orbitTypography.fontSize.sm,
+        fontWeight: isActive
+          ? orbitTypography.fontWeight.semibold
+          : orbitTypography.fontWeight.medium,
+        cursor: "pointer",
+        position: "relative",
+        boxSizing: "border-box",
+        outline: isFocusVisible ? orbitTokens.focus.outline : "none",
+        outlineOffset: orbitTokens.focus.outlineOffset,
+        boxShadow: isFocusVisible ? orbitTokens.focus.focusRing : "none",
+        transition: prefersReducedMotion
+          ? "none"
+          : `color ${orbitTokens.motion.fast}, border-color ${orbitTokens.motion.fast}`,
+      }}
+    >
+      {label}
+    </button>
+  );
+};
+
+export const WorkspaceTabPanel: React.FC<{
+  id: string;
+  tabId: SidePanelTabId;
+  children: React.ReactNode;
+}> = ({ id, tabId, children }) => {
+  const { isFocusVisible, onFocus, onBlur } = useFocusVisible();
+  return (
+    <div
+      role="tabpanel"
+      id={id}
+      aria-labelledby={`sidepanel-tab-${tabId}`}
+      tabIndex={0}
+      onFocus={(event) => {
+        if (event.target === event.currentTarget) {
+          onFocus(event);
+        }
+      }}
+      onBlur={(event) => {
+        if (event.target === event.currentTarget) {
+          onBlur(event);
+        }
+      }}
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        width: "100%",
+        boxSizing: "border-box",
+        outline: isFocusVisible ? orbitTokens.focus.outline : "none",
+        outlineOffset: orbitTokens.focus.outlineOffset,
+        boxShadow: isFocusVisible ? orbitTokens.focus.focusRing : "none",
+      }}
+    >
+      {children}
+    </div>
+  );
+};
+
+export const SidePanelActivityStrip: React.FC<{
+  activity: WorkspaceActivity;
+  lang: UILang;
+}> = ({ activity }) => {
+  const prefersReducedMotion = usePrefersReducedMotion();
+
+  let dotColor: string = orbitColors.semantic.info;
+  if (activity.tone === "ai") dotColor = orbitColors.ai.accent;
+  else if (activity.tone === "error") dotColor = orbitColors.semantic.error;
+  else if (activity.tone === "warning") dotColor = orbitColors.semantic.warning;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="workspace-activity-strip"
+      style={{
+        position: "sticky",
+        bottom: 0,
+        zIndex: 40,
+        display: "flex",
+        flexDirection: "column",
+        gap: orbitSpacing[1],
+        padding: `${orbitSpacing[2]}px ${orbitSpacing[3]}px`,
+        background: orbitColors.bg.surfaceRaised,
+        borderTop: `1px solid ${orbitColors.border.default}`,
+        boxSizing: "border-box",
+        width: "100%",
+        boxShadow: orbitTokens.shadow.activityElevation,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: orbitSpacing[2],
+          width: "100%",
+        }}
+      >
+        {/* Left: Dot & Message */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: orbitSpacing[2],
+            minWidth: 0,
+            flex: 1,
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: orbitRadius.pill,
+              backgroundColor: dotColor,
+              flexShrink: 0,
+            }}
+          />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: orbitSpacing[2],
+              minWidth: 0,
+              overflow: "hidden",
+            }}
+          >
+            <span
+              style={{
+                fontSize: orbitTypography.fontSize.xs,
+                fontWeight: orbitTypography.fontWeight.semibold,
+                color: orbitColors.text.primary,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {activity.label}
+            </span>
+            {activity.secondary ? (
+              <span
+                style={{
+                  fontSize: orbitTypography.fontSize.xs,
+                  color: orbitColors.text.secondary,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {activity.secondary}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Right: Action Button */}
+        {activity.action ? (
+          <div style={{ flexShrink: 0 }}>
+            <OrbitButton
+              size="sm"
+              variant={activity.kind === "review" ? "secondary" : "danger"}
+              onClick={activity.action.onAction}
+            >
+              {activity.action.label}
+            </OrbitButton>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Progress Bar (when progress is numerical) */}
+      {activity.progress != null ? (
+        <div
+          role="progressbar"
+          aria-valuenow={Math.round(activity.progress)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          style={{
+            width: "100%",
+            height: 3,
+            borderRadius: 2,
+            background: orbitColors.bg.surfaceInteractive,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              height: "100%",
+              width: `${Math.max(0, Math.min(100, activity.progress))}%`,
+              background: dotColor,
+              transition: prefersReducedMotion
+                ? "none"
+                : `width ${orbitTokens.motion.normal}`,
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 };
 
@@ -168,46 +672,131 @@ export const SidePanelLockedState: React.FC<{
   authStatus: SidePanelAuthStatus;
   lang: UILang;
   onOpenSettings: () => void;
-}> = ({ authStatus, lang, onOpenSettings }) => {
-  const isEn = lang === "en";
-  const title =
-    authStatus === "loading" || authStatus === "validating"
-      ? isEn
-        ? "Verifying session..."
-        : "正在验证登录状态..."
-      : authStatus === "server_unavailable"
-        ? isEn
-          ? "Can't verify sign-in right now"
-          : "暂时无法验证登录状态"
-        : isEn
-          ? "Workspace Locked"
-          : "工作台未解锁";
-  const description =
-    authStatus === "loading" || authStatus === "validating"
-      ? isEn
-        ? "Checking your saved sign-in with the account service. This only takes a moment."
-        : "正在向账号服务确认本地保存的登录状态，请稍候。"
-      : authStatus === "server_unavailable"
-        ? isEn
-          ? "The account service can't be reached. Protected features stay locked; open Settings to retry or sign out."
-          : "账号服务暂时不可达，受保护的功能保持锁定。可前往设置重试或退出登录。"
-        : isEn
-          ? "Open Settings, register or log in with your email account, then return here to start detection and solving."
-          : "请先打开设置页，完成邮箱注册或登录，之后再返回这里开始识题、解析和自动答题。";
+  onRetryValidation?: () => void;
+}> = ({ authStatus, lang, onOpenSettings, onRetryValidation }) => {
+  const copy = SIDEPANEL_COPY[lang].locked;
+
+  if (authStatus === "loading" || authStatus === "validating") {
+    return (
+      <div style={{ padding: `${orbitSpacing[4]}px ${orbitSpacing[3]}px` }}>
+        <OrbitSurface
+          variant="raised"
+          style={{
+            padding: orbitSpacing[4],
+            display: "flex",
+            flexDirection: "column",
+            gap: orbitSpacing[2],
+          }}
+        >
+          <div
+            style={{
+              fontSize: orbitTypography.fontSize.md,
+              fontWeight: orbitTypography.fontWeight.semibold,
+              color: orbitColors.text.primary,
+            }}
+          >
+            {copy.checkingTitle}
+          </div>
+          <div
+            style={{
+              fontSize: orbitTypography.fontSize.xs,
+              color: orbitColors.text.secondary,
+              lineHeight: orbitTypography.lineHeight.normal,
+            }}
+          >
+            {copy.checkingDesc}
+          </div>
+        </OrbitSurface>
+      </div>
+    );
+  }
+
+  if (authStatus === "server_unavailable") {
+    return (
+      <div style={{ padding: `${orbitSpacing[4]}px ${orbitSpacing[3]}px` }}>
+        <OrbitSurface
+          variant="raised"
+          style={{
+            padding: orbitSpacing[4],
+            display: "flex",
+            flexDirection: "column",
+            gap: orbitSpacing[3],
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: orbitTypography.fontSize.md,
+                fontWeight: orbitTypography.fontWeight.semibold,
+                color: orbitColors.text.primary,
+              }}
+            >
+              {copy.unavailableTitle}
+            </div>
+            <div
+              style={{
+                fontSize: orbitTypography.fontSize.xs,
+                color: orbitColors.text.secondary,
+                lineHeight: orbitTypography.lineHeight.normal,
+                marginTop: orbitSpacing[1],
+              }}
+            >
+              {copy.unavailableDesc}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: orbitSpacing[2] }}>
+            {onRetryValidation ? (
+              <OrbitButton variant="primary" size="sm" onClick={onRetryValidation}>
+                {copy.retry}
+              </OrbitButton>
+            ) : null}
+            <OrbitButton variant="secondary" size="sm" onClick={onOpenSettings}>
+              {copy.openSettings}
+            </OrbitButton>
+          </div>
+        </OrbitSurface>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ padding: "18px 8px" }}>
-      <div style={lockedCardStyle}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: "#f8fafc" }}>{title}</div>
-        <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.6, marginTop: 8 }}>
-          {description}
+    <div style={{ padding: `${orbitSpacing[4]}px ${orbitSpacing[3]}px` }}>
+      <OrbitSurface
+        variant="raised"
+        style={{
+          padding: orbitSpacing[4],
+          display: "flex",
+          flexDirection: "column",
+          gap: orbitSpacing[3],
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: orbitTypography.fontSize.md,
+              fontWeight: orbitTypography.fontWeight.semibold,
+              color: orbitColors.text.primary,
+            }}
+          >
+            {copy.signedOutTitle}
+          </div>
+          <div
+            style={{
+              fontSize: orbitTypography.fontSize.xs,
+              color: orbitColors.text.secondary,
+              lineHeight: orbitTypography.lineHeight.normal,
+              marginTop: orbitSpacing[1],
+            }}
+          >
+            {copy.signedOutDesc}
+          </div>
         </div>
-        <div style={{ marginTop: 12 }}>
-          <UiButton primary onClick={onOpenSettings}>
-            {isEn ? "Open Settings" : "前往设置"}
-          </UiButton>
+        <div>
+          <OrbitButton variant="primary" size="sm" onClick={onOpenSettings}>
+            {copy.signInOrSettings}
+          </OrbitButton>
         </div>
-      </div>
+      </OrbitSurface>
     </div>
   );
 };
