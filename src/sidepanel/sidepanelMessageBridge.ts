@@ -16,6 +16,8 @@ import {
 type StorageChangeMap = { [key: string]: chrome.storage.StorageChange };
 
 export type SidePanelRuntimeHandlers = {
+  /** Rendering is origin/sequence-fenced by hydration; owner reconciliation stays global. */
+  renderWorkspace?: boolean;
   loadLanguage: () => Promise<"zh" | "en">;
   setUiLang: (lang: "zh" | "en") => void;
   setCandidates: React.Dispatch<React.SetStateAction<DetectedCandidate[]>>;
@@ -41,6 +43,15 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
     const origin = sender.tab?.id && sender.tab.url
       ? { tabId: sender.tab.id, url: sender.tab.url }
       : undefined;
+    if (handlers.renderWorkspace === false) {
+      if (origin?.tabId != null) {
+        if (msg.type === "FULL_PAGE_DETECT_PROGRESS") void reconcileProtectedWorkOwnerFromRuntime("fullPage", origin.tabId);
+        if (msg.type === "FULL_PAGE_DETECT_DONE") void clearProtectedWorkOwner("fullPage", origin.tabId);
+        if (msg.type === "AUTO_SOLVE_PROGRESS" && msg.running) void reconcileProtectedWorkOwnerFromRuntime("autoSolve", origin.tabId);
+        if (msg.type === "AUTO_SOLVE_DONE") void clearProtectedWorkOwner("autoSolve", origin.tabId);
+      }
+      return;
+    }
     if (msg.type === "AUTO_DETECT_RESULT_READY") {
       const snapshots = (msg.candidates as CandidateSnapshot[]) ?? [];
       handlers.setCandidates((prev) => mergeCandidateSnapshots(prev, snapshots, origin));
