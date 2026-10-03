@@ -1,4 +1,5 @@
-import type { CSSProperties } from "react";
+import { useId, useState, type CSSProperties } from "react";
+import { OrbitButton } from "@/shared/ui/orbitPrimitives";
 import type { QuestionBlock } from "@/shared/types";
 import { orbitColors, orbitRadius, orbitSpacing, orbitTypography } from "@/shared/ui/orbitTokens";
 import { DisplaySegmentsView } from "./candidateViewParts";
@@ -20,6 +21,19 @@ function CandidateOptions({ items }: { items: Array<{ key: string; value: string
   </div>;
 }
 
+function CandidateStem({ text, lang }: { text: string; lang: UILang }) {
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
+  const copy = CANDIDATE_WORKSPACE_COPY[lang];
+  if (text.length <= 600) return <div>{renderMathText(text || copy.noPreview)}</div>;
+  return <div style={CANDIDATE_TEXT_STYLE}>
+    <div id={contentId}>{expanded ? renderMathText(text) : `${text.slice(0, 180)}…`}</div>
+    <OrbitButton size="sm" variant="ghost" aria-expanded={expanded} aria-controls={contentId} onClick={() => setExpanded(value => !value)}>
+      {expanded ? copy.hideQuestion : copy.showQuestion}
+    </OrbitButton>
+  </div>;
+}
+
 export function CandidateQuestionContent({ block, lang }: { block: QuestionBlock; lang: UILang }) {
   const copy = CANDIDATE_WORKSPACE_COPY[lang];
   const normalized = cleanCandidatePreviewText(block.previewText || "");
@@ -32,11 +46,11 @@ export function CandidateQuestionContent({ block, lang }: { block: QuestionBlock
   const stem = block.questionTypeGuess === "fill_blank" ? ensureBlankPlaceholders(blanks.stem || normalized, blanks.blanks.length)
     : block.questionTypeGuess === "judge" ? judge.stem || normalized : choice.stem || normalized;
   const options = block.questionTypeGuess === "judge" ? judge.options
-    : block.questionTypeGuess === "fill_blank" ? blanks.blanks.map(blank => ({ key: blank.label, value: blank.hint })) : choice.options;
+    : block.questionTypeGuess === "fill_blank" ? blanks.blanks.map((blank, index) => ({ key: copy.blank(index + 1), value: blank.hint })) : choice.options;
   const fallbackImage = segments.some(segment => segment.type === "image") ? "" : getDisplayQuestionImageFromBlock(block);
   const hasImage = !!fallbackImage || segments.some(segment => segment.type === "image");
   return <div style={{ display: "grid", gap: orbitSpacing[2], ...CANDIDATE_TEXT_STYLE }}>
-    {segments.length > 0 ? <DisplaySegmentsView segments={segments} lang={lang} /> : <div>{renderMathText(formatQuestionTextForDisplay(stem) || copy.noPreview)}</div>}
+    {segments.length > 0 ? <DisplaySegmentsView segments={segments} lang={lang} /> : <CandidateStem text={formatQuestionTextForDisplay(stem)} lang={lang} />}
     {fallbackImage && <DisplaySegmentsView segments={[{ type: "image", url: fallbackImage }]} lang={lang} />}
     {options.length > 0 && <CandidateOptions items={options} />}
     {block.hasImage && !hasImage && <p style={{ margin: 0, color: orbitColors.text.secondary, fontSize: orbitTypography.fontSize.sm }}>{copy.imageUnavailable}</p>}
