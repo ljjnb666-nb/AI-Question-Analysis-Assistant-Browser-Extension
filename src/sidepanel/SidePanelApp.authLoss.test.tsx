@@ -181,7 +181,7 @@ async function findButton(name: string | RegExp): Promise<HTMLElement> {
       ? /^(Auto Solve|Solve & Fill)$/
       : typeof name === "string" && name === "Stop Auto Solve"
         ? /^(Stop Auto Solve|Stop Solve & Fill)$/
-        : name;
+        : name === "Stop Scan" ? "Cancel scan" : name;
   return screen.findByRole("button", { name: match }, { timeout: UI_TIMEOUT });
 }
 
@@ -191,7 +191,7 @@ function waitForButton(name: string | RegExp): Promise<HTMLElement> {
       ? /^(Auto Solve|Solve & Fill)$/
       : typeof name === "string" && name === "Stop Auto Solve"
         ? /^(Stop Auto Solve|Stop Solve & Fill)$/
-        : name;
+        : name === "Stop Scan" ? "Cancel scan" : name;
   return waitFor(() => {
     const button = screen.getByRole("button", { name: match });
     expect(button).toBeInTheDocument();

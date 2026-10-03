@@ -365,8 +365,8 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       await expect(sidePanel.getByText("Workspace", { exact: true })).toBeVisible();
       await sendDetectToTab(driver, originTabId);
       await expect(sidePanel.getByText(/Which value is equal to 2 \+ 2/)).toBeVisible();
-      await sidePanel.getByText(/Which value is equal to 2 \+ 2/).click();
-      const solveButton = sidePanel.getByRole("button", { name: "Solve 1" });
+      await sidePanel.getByRole("checkbox", { name: "Select question 1" }).check();
+      const solveButton = sidePanel.getByRole("button", { name: "Solve selected" });
       await expect(solveButton).toBeVisible();
 
       const provider = await installControlledProvider(context);
@@ -378,7 +378,7 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       expect(activeTabId).toBe(otherTabId);
       held.release();
 
-      await expect(sidePanel.getByText(/Answer: B/)).toBeVisible();
+      await expect(sidePanel.getByRole("region", { name: "Answer", exact: true }).getByText("B", { exact: true })).toBeVisible();
       const historyAfterParse = await driver.evaluate(async () => (await chrome.storage.local.get("parseHistory")).parseHistory as Array<{ host?: string }>);
       expect(historyAfterParse).toHaveLength(1);
       expect(historyAfterParse[0].host).toBe("127.0.0.1");
@@ -423,11 +423,11 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       await expect(sidePanel.getByText("Workspace", { exact: true })).toBeVisible();
       await sendDetectToTab(driver, originTabId);
       await expect(sidePanel.getByText(/Which value is equal to 2 \+ 2/)).toBeVisible();
-      await sidePanel.getByText(/Which value is equal to 2 \+ 2/).click();
+      await sidePanel.getByRole("checkbox", { name: "Select question 1" }).check();
 
       const provider = await installControlledProvider(context);
       const held = provider.holdNext();
-      await sidePanel.getByRole("button", { name: "Solve 1" }).click();
+      await sidePanel.getByRole("button", { name: "Solve selected" }).click();
       await held.started;
       await driver.evaluate(async (id) => chrome.tabs.update(id, { active: true }), otherTabId);
       await originPage.evaluate(() => {
@@ -440,8 +440,8 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       await expect(sidePanel.getByText(/Which value is equal to 5 \+ 5/)).toBeVisible();
       held.release();
 
-      await expect(sidePanel.getByRole("button", { name: "Done 0" })).toBeVisible();
-      expect(await sidePanel.getByText(/Answer:/).count()).toBe(0);
+      await expect(sidePanel.locator("dl dt").filter({ hasText: /^Solved$/ }).locator("..").locator("dd")).toHaveText("0");
+      expect(await sidePanel.getByRole("region", { name: "Answer", exact: true }).count()).toBe(0);
       const history = await driver.evaluate(async () => (await chrome.storage.local.get("parseHistory")).parseHistory as unknown[]);
       expect(history).toEqual([]);
       await expect.poll(async () => driver.evaluate(async () => {

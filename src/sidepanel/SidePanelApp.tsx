@@ -32,8 +32,9 @@ import { useSidePanelActions } from "./useSidePanelActions";
 import { useCandidateWorkspaceHydration } from "./useCandidateWorkspaceHydration";
 import type { CandidateOrigin, CandidateWorkspaceSnapshot } from "@/shared/types";
 import type { WorkspaceHydrationStatus } from "./workspaceHydration";
-import { OrbitButton, OrbitSurface } from "@/shared/ui/orbitPrimitives";
+import { OrbitButton, OrbitSurface, OrbitStatus } from "@/shared/ui/orbitPrimitives";
 import { SIDEPANEL_COPY } from "./sidePanelCopy";
+import { ORBIT_SCROLLBAR_CSS } from "./orbitScrollbar";
 import {
   deriveSidePanelWorkspaceStatus,
   deriveWorkspaceActivity,
@@ -442,6 +443,7 @@ export const SidePanelApp: React.FC = () => {
 
   return (
     <div style={APP_SHELL_STYLE}>
+      <style>{ORBIT_SCROLLBAR_CSS}</style>
       <SidePanelHeader
         authStatus={state.authStatus}
         isAuthenticated={state.isAuthenticated}
@@ -456,7 +458,7 @@ export const SidePanelApp: React.FC = () => {
         onRetryValidation={() => session.retryValidation()}
       />
 
-      <div style={PANEL_BODY_STYLE}>
+      <div className="orbit-panel-scroll" style={PANEL_BODY_STYLE}>
         {state.tab === "settings" ? (
           <WorkspaceTabPanel id="sidepanel-tabpanel-settings" tabId="settings">
             <SettingsTab
@@ -485,7 +487,11 @@ export const SidePanelApp: React.FC = () => {
                 {state.hydrationStatus === "runtime_unavailable" ? <OrbitButton onClick={retryWorkspace}>{SIDEPANEL_COPY[state.uiLang].runtime.retry}</OrbitButton> : null}
               </OrbitSurface>
             ) : (
+            <>
+            {state.fillFeedback && !activity && <OrbitStatus tone={state.fillFeedback.tone} label={state.fillFeedback.message} />}
             <CandidatesTab
+              detectionPhase={state.detectionPhase}
+              workspaceOrigin={state.workspaceOrigin}
               autoSolveProgress={state.autoSolveProgress}
               candidateViewFilter={state.candidateViewFilter}
               candidates={state.candidates}
@@ -522,6 +528,7 @@ export const SidePanelApp: React.FC = () => {
               onToggleCandidate={toggleSelect}
               onToggleDetails={toggleDetails}
             />
+            </>
             )}
           </WorkspaceTabPanel>
         ) : state.tab === "history" ? (

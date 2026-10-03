@@ -1,26 +1,19 @@
-import React, { useRef } from "react";
-import gsap from "gsap";
-import { useGSAP } from "@gsap/react";
-import type { DetectedCandidate, QuestionBlock as _QuestionBlock } from "@/shared/types";
-import { CandidateCard } from "./candidateViews";
-import {
-  CandidateAutoSolveCard,
-  CandidateFeedbackCard,
-  CandidateFilterBar,
-  CandidateQuickActionsCard,
-  CandidateScanProgressCard,
-  CandidateStatsGrid,
-  EmptyCandidatesState,
-} from "./candidatesTabSections";
+import React from "react";
+import type { CandidateOrigin, DetectedCandidate, DetectionPhase } from "@/shared/types";
+import type { AutoSolveProgressState, ScanProgressState } from "./sidepanelStateSync";
 import type { CandidateViewFilter } from "./sidepanelCandidateMetrics";
 import type { UILang } from "./displayUtils";
 import type { UserFeedback } from "@/shared/ui/userFeedback";
-import type { CandidateAutoSolveProgress, CandidateScanProgress } from "./candidatesTabSections";
-
-gsap.registerPlugin(useGSAP);
-
+import { CandidateWorkspaceCard } from "./CandidateWorkspaceCard";
+import { CandidateSummary, CandidateActionBar, CandidateReviewToolbar, CandidateEmptyState, type CandidateAction } from "./candidateWorkspaceSections";
+import { CANDIDATE_WORKSPACE_COPY } from "./candidateWorkspaceCopy";
+import { findActiveCandidateId } from "./activeCandidateIdentity";
+import { orbitSpacing } from "@/shared/ui/orbitTokens";
+type CandidateScanProgress = ScanProgressState;
 export const CandidatesTab: React.FC<{
-  autoSolveProgress: CandidateAutoSolveProgress;
+  autoSolveProgress: AutoSolveProgressState;
+  detectionPhase?: DetectionPhase;
+  workspaceOrigin?: CandidateOrigin;
   candidateViewFilter: CandidateViewFilter;
   candidates: DetectedCandidate[];
   doneCount: number;
@@ -55,173 +48,34 @@ export const CandidatesTab: React.FC<{
   onStopAutoSolve: () => void;
   onToggleCandidate: (blockId: string) => void;
   onToggleDetails: (blockId: string) => void;
-}> = ({
-  autoSolveProgress,
-  candidateViewFilter,
-  candidates,
-  doneCount,
-  expandedIds,
-  fillFeedback,
-  filteredCandidates,
-  isAutoSolving,
-  isBatchFilling,
-  isBatchParsing,
-  isDetecting,
-  isFullPageScan,
-  isRetryingRisky,
-  riskyCount,
-  scanProgress,
-  selectedCount,
-  selectedSolvedCount,
-  onBatchFill,
-  onBatchParse,
-  onCancelFullPage,
-  onCandidateFilterChange,
-  onClearSelection,
-  onDetect,
-  onFillCandidate,
-  onFlashCandidate,
-  onFullPageDetect,
-  onRetryRisky,
-  onRetryVision,
-  onSelectAll,
-  onSelectRisky,
-  onStartAutoSolve,
-  onStopAutoSolve,
-  onToggleCandidate,
-  onToggleDetails,
-  lang,
-}) => {
-  const scopeRef = useRef<HTMLDivElement | null>(null);
-  const isEn = lang === "en";
-  const statCards = [
-    { label: isEn ? "Detected" : "\u5df2\u8bc6\u522b", value: candidates.length, tint: "rgba(99, 102, 241, 0.15)", glow: "rgba(99, 102, 241, 0.25)" },
-    { label: isEn ? "Selected" : "\u5df2\u9009\u4e2d", value: selectedCount, tint: "rgba(139, 92, 246, 0.15)", glow: "rgba(139, 92, 246, 0.25)" },
-    { label: isEn ? "Solved" : "\u5df2\u5b8c\u6210", value: doneCount, tint: "rgba(16, 185, 129, 0.12)", glow: "rgba(16, 185, 129, 0.2)" },
-    { label: isEn ? "Risky" : "\u5f85\u590d\u6838", value: riskyCount, tint: "rgba(245, 158, 11, 0.12)", glow: "rgba(245, 158, 11, 0.2)" },
+}> = (props) => {
+  const { lang, candidates, filteredCandidates, isAutoSolving, isBatchFilling, isBatchParsing, isDetecting, isFullPageScan, isRetryingRisky } = props;
+  const copy = CANDIDATE_WORKSPACE_COPY[lang];
+  const busy = isAutoSolving || isBatchFilling || isBatchParsing || isDetecting || isFullPageScan || isRetryingRisky;
+  const actions: CandidateAction[] = [
+    { label: copy.currentView, onAction: props.onDetect, disabled: busy },
+    { label: isFullPageScan ? copy.cancelScan : copy.fullPage, onAction: isFullPageScan ? props.onCancelFullPage : props.onFullPageDetect, disabled: busy && !isFullPageScan },
+    { label: isAutoSolving ? copy.stop : copy.solveFill, onAction: isAutoSolving ? props.onStopAutoSolve : props.onStartAutoSolve, disabled: busy && !isAutoSolving, primary: !isAutoSolving, danger: isAutoSolving },
+    { label: copy.solveSelected, onAction: props.onBatchParse, disabled: busy || !props.selectedCount },
+    { label: copy.fillSelected, onAction: props.onBatchFill, disabled: busy || !props.selectedSolvedCount },
   ];
-
-  useGSAP(() => {
-    gsap.from(".cand-stat", {
-      y: 14,
-      autoAlpha: 0,
-      duration: 0.4,
-      stagger: 0.06,
-      ease: "power2.out",
-    });
-    gsap.from(".cand-section", {
-      y: 16,
-      autoAlpha: 0,
-      duration: 0.42,
-      stagger: 0.08,
-      ease: "power2.out",
-      delay: 0.08,
-    });
-    gsap.from(".candidate-card", {
-      y: 12,
-      autoAlpha: 0,
-      duration: 0.35,
-      stagger: 0.035,
-      ease: "power2.out",
-      delay: 0.14,
-    });
-
-    const hoverTargets = gsap.utils.toArray<HTMLElement>(".cand-stat, .cand-section");
-    const cleanups = hoverTargets.map((element) => {
-      const onEnter = () => {
-        gsap.to(element, {
-          y: -3,
-          boxShadow: "0 12px 28px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255,255,255,0.08)",
-          duration: 0.2,
-          ease: "power2.out",
-        });
-      };
-      const onLeave = () => {
-        gsap.to(element, {
-          y: 0,
-          boxShadow: "0 4px 16px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.04)",
-          duration: 0.2,
-          ease: "power2.out",
-        });
-      };
-      element.addEventListener("mouseenter", onEnter);
-      element.addEventListener("mouseleave", onLeave);
-      return () => {
-        element.removeEventListener("mouseenter", onEnter);
-        element.removeEventListener("mouseleave", onLeave);
-      };
-    });
-
-    return () => {
-      cleanups.forEach((cleanup) => cleanup());
-    };
-  }, { scope: scopeRef, dependencies: [filteredCandidates.length, candidates.length, candidateViewFilter], revertOnUpdate: true });
-
-  return (
-    <div ref={scopeRef} style={{ padding: "0 10px 18px" }}>
-      <CandidateStatsGrid statCards={statCards} />
-      <CandidateQuickActionsCard
-        candidatesCount={candidates.length}
-        isAutoSolving={isAutoSolving}
-        isBatchFilling={isBatchFilling}
-        isBatchParsing={isBatchParsing}
-        isDetecting={isDetecting}
-        isEn={isEn}
-        isFullPageScan={isFullPageScan}
-        isRetryingRisky={isRetryingRisky}
-        onBatchFill={onBatchFill}
-        onBatchParse={onBatchParse}
-        onCancelFullPage={onCancelFullPage}
-        onClearSelection={onClearSelection}
-        onDetect={onDetect}
-        onFullPageDetect={onFullPageDetect}
-        onRetryRisky={onRetryRisky}
-        onSelectAll={onSelectAll}
-        onSelectRisky={onSelectRisky}
-        onStartAutoSolve={onStartAutoSolve}
-        onStopAutoSolve={onStopAutoSolve}
-        riskyCount={riskyCount}
-        selectedCount={selectedCount}
-        selectedSolvedCount={selectedSolvedCount}
-      />
-      <CandidateFeedbackCard fillFeedback={fillFeedback} />
-      <CandidateAutoSolveCard autoSolveProgress={autoSolveProgress} lang={lang} />
-      <CandidateScanProgressCard isEn={isEn} scanProgress={scanProgress} />
-      <CandidateFilterBar
-        candidateViewFilter={candidateViewFilter}
-        candidatesCount={candidates.length}
-        doneCount={doneCount}
-        isEn={isEn}
-        isFullPageScan={isFullPageScan}
-        onCandidateFilterChange={onCandidateFilterChange}
-        riskyCount={riskyCount}
-      />
-      {candidates.length === 0 ? (
-        <EmptyCandidatesState
-          isDetecting={isDetecting}
-          isEn={isEn}
-          isFullPageScan={isFullPageScan}
-          scanProgress={scanProgress}
-        />
-      ) : null}
-
-      <div>
-        {filteredCandidates.map((cand, i) => (
-          <div key={cand.block.id} className="candidate-card">
-            <CandidateCard
-              index={i + 1}
-              cand={cand}
-              isExpanded={!!expandedIds[cand.block.id]}
-              onToggle={() => onToggleCandidate(cand.block.id)}
-              onFlash={() => onFlashCandidate(cand.block.id)}
-              onToggleDetails={() => onToggleDetails(cand.block.id)}
-              onFill={() => onFillCandidate(cand)}
-              onRetryVision={() => onRetryVision(cand)}
-              lang={lang}
-            />
-          </div>
-        ))}
-      </div>
+  if (props.riskyCount) {
+    actions.push({ label: copy.selectReview, onAction: props.onSelectRisky, disabled: busy });
+    actions.push({ label: copy.retryReview, onAction: props.onRetryRisky, disabled: busy });
+  }
+  const activeId = isAutoSolving && props.workspaceOrigin
+    ? findActiveCandidateId(candidates, props.workspaceOrigin, props.autoSolveProgress?.currentQuestionId, props.autoSolveProgress?.currentBlock) : null;
+  const indexById = new Map(candidates.map((candidate, index) => [candidate.block.id, index + 1]));
+  return <div data-candidate-workspace style={{ padding: `0 ${orbitSpacing[3]}px ${orbitSpacing[4]}px`, display: "grid", gap: orbitSpacing[3], minWidth: 0 }}>
+    <CandidateSummary lang={lang} counts={{ detected: candidates.length, selected: props.selectedCount, solved: props.doneCount, risky: props.riskyCount }} />
+    <CandidateActionBar lang={lang} actions={actions} />
+    <CandidateReviewToolbar lang={lang} filter={props.candidateViewFilter} onFilter={props.onCandidateFilterChange} onClear={props.onClearSelection} selectedCount={props.selectedCount} />
+    {filteredCandidates.length === 0 && <CandidateEmptyState lang={lang} phase={props.detectionPhase ?? (isDetecting || isFullPageScan ? "detecting" : "never_started")} filteredEmpty={candidates.length > 0} />}
+    <div style={{ display: "grid", gap: orbitSpacing[3], minWidth: 0 }}>
+      {filteredCandidates.map(candidate => <CandidateWorkspaceCard key={candidate.block.id} index={indexById.get(candidate.block.id)!} cand={candidate}
+        isExpanded={!!props.expandedIds[candidate.block.id]} active={candidate.block.id === activeId} lang={lang}
+        onToggle={() => props.onToggleCandidate(candidate.block.id)} onFlash={() => props.onFlashCandidate(candidate.block.id)}
+        onToggleDetails={() => props.onToggleDetails(candidate.block.id)} onFill={() => props.onFillCandidate(candidate)} onRetryVision={() => props.onRetryVision(candidate)} />)}
     </div>
-  );
+  </div>;
 };
