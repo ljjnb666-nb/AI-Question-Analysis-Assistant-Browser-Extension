@@ -2,7 +2,7 @@ import type { DetectedCandidate } from "@/shared/types";
 import { isParseResultFillAuthoritative } from "@/shared/ai/parseResultAuthority";
 import { isStructuredAnswerExtractionFailed } from "./displayUtils";
 
-export type CandidateViewFilter = "all" | "risky" | "done";
+export type CandidateViewFilter = "all" | "selected" | "unsolved" | "risky" | "done";
 
 /**
  * UI-00B PART D: the single fill-readiness predicate shared by the UI count
@@ -33,6 +33,8 @@ export function computeCandidateMetrics(
   const riskyCount = candidates.filter(isRiskyCandidate).length;
   const doneCount = candidates.filter((cand) => cand.status === "success").length;
   const filteredCandidates = candidates.filter((cand) => {
+    if (candidateViewFilter === "selected") return cand.selected;
+    if (candidateViewFilter === "unsolved") return cand.status !== "success";
     if (candidateViewFilter === "risky") return isRiskyCandidate(cand);
     if (candidateViewFilter === "done") return cand.status === "success";
     return true;

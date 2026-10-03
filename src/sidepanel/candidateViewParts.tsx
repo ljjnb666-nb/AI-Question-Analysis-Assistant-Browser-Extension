@@ -1,3 +1,4 @@
+import { orbitColors, orbitRadius, orbitSpacing, orbitTypography } from "@/shared/ui/orbitTokens";
 import type { DetectedCandidate, QuestionDisplaySegment, QuestionType } from "@/shared/types";
 import { isParseResultFillAuthoritative } from "@/shared/ai/parseResultAuthority";
 import { mapKnownCodeFeedback, mapUserFacingError } from "@/shared/ui/userFeedback";
@@ -49,7 +50,7 @@ export function getTypeLabel(questionType: QuestionType, lang: UILang, fallback 
 export const DisplaySegmentsView: React.FC<{ segments: QuestionDisplaySegment[]; lang: UILang }> = ({ segments, lang }) => {
   const normalizedSegments = expandStructuredSegmentsForRender(segments);
   return (
-    <div style={{ display: "grid", gap: 10 }}>
+    <div style={{ display: "grid", gap: orbitSpacing[2] }}>
       {normalizedSegments.map((segment, idx) => (
         segment.type === "image" ? (
           <img
@@ -60,22 +61,22 @@ export const DisplaySegmentsView: React.FC<{ segments: QuestionDisplaySegment[];
               width: "100%",
               maxHeight: 220,
               objectFit: "contain",
-              borderRadius: 12,
-              border: "1px solid rgba(255, 255, 255, 0.08)",
-              backgroundColor: "rgba(6, 12, 22, 0.92)",
+              borderRadius: orbitRadius.md,
+              border: `1px solid ${orbitColors.border.subtle}`,
+              backgroundColor: orbitColors.bg.surfaceSubtle,
             }}
           />
         ) : segment.role === "title" ? (
           <div
             key={`${segment.type}-${idx}`}
-            style={{ fontSize: 17, fontWeight: 800, color: "#f3f7fd", lineHeight: 1.35, letterSpacing: 0.2 }}
+            style={{ fontSize: orbitTypography.fontSize.lg, fontWeight: orbitTypography.fontWeight.bold, color: orbitColors.text.primary, lineHeight: orbitTypography.lineHeight.tight, letterSpacing: 0.2 }}
           >
             {renderMathText(formatQuestionTextForDisplay(segment.text))}
           </div>
         ) : segment.role === "meta" ? (
           <div
             key={`${segment.type}-${idx}`}
-            style={{ fontSize: 11, color: "#9fb1c7", lineHeight: 1.5 }}
+            style={{ fontSize: orbitTypography.fontSize.xs, color: orbitColors.text.secondary, lineHeight: orbitTypography.lineHeight.normal }}
           >
             {renderMathText(formatQuestionTextForDisplay(segment.text))}
           </div>
@@ -83,15 +84,14 @@ export const DisplaySegmentsView: React.FC<{ segments: QuestionDisplaySegment[];
           <div
             key={`${segment.type}-${idx}`}
             style={{
-              padding: "10px 12px",
-              borderRadius: 12,
-              background: "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02))",
-              border: "1px solid rgba(255,255,255,0.08)",
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
-            }}
+              padding: orbitSpacing[3],
+              borderRadius: orbitRadius.md,
+              background: orbitColors.bg.surfaceRaised,
+              border: `1px solid ${orbitColors.border.subtle}`,
+              }}
           >
             {segment.label && (
-              <div style={{ marginBottom: 6, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: "#9ec5ff" }}>
+              <div style={{ marginBottom: orbitSpacing[1], fontSize: orbitTypography.fontSize.xxs, fontWeight: orbitTypography.fontWeight.bold, color: orbitColors.text.secondary }}>
                 {segment.label}
               </div>
             )}
@@ -112,26 +112,26 @@ function renderStructuredSectionBody(
   if (segment.label === "函数接口") {
     const { code, prose } = splitInterfaceSection(segment.text);
     return (
-      <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ display: "grid", gap: orbitSpacing[2] }}>
         <pre
           style={{
             margin: 0,
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
-            fontSize: 12,
-            lineHeight: 1.7,
-            color: "#e7edf5",
-            fontFamily: "Consolas, 'SFMono-Regular', 'Liberation Mono', Menlo, monospace",
-            background: "rgba(8, 12, 20, 0.42)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: 10,
-            padding: "10px 12px",
+            fontSize: orbitTypography.fontSize.sm,
+            lineHeight: orbitTypography.lineHeight.relaxed,
+            color: orbitColors.text.primary,
+            fontFamily: orbitTypography.codeFamily,
+            background: orbitColors.bg.surfaceSubtle,
+            border: `1px solid ${orbitColors.border.subtle}`,
+            borderRadius: orbitRadius.sm,
+            padding: orbitSpacing[3],
           }}
         >
           {formatStructuredCode(code)}
         </pre>
         {prose ? (
-          <div style={{ color: "#e7edf5", lineHeight: 1.7 }}>
+          <div style={{ color: orbitColors.text.primary, lineHeight: orbitTypography.lineHeight.relaxed }}>
             {renderMathText(formatQuestionTextForDisplay(prose))}
           </div>
         ) : null}
@@ -147,14 +147,14 @@ function renderStructuredSectionBody(
           margin: 0,
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
-          fontSize: 12,
-          lineHeight: 1.7,
-          color: "#e7edf5",
-          fontFamily: "Consolas, 'SFMono-Regular', 'Liberation Mono', Menlo, monospace",
-          background: "rgba(8, 12, 20, 0.42)",
-          border: "1px solid rgba(255,255,255,0.06)",
-          borderRadius: 10,
-          padding: "10px 12px",
+          fontSize: orbitTypography.fontSize.sm,
+          lineHeight: orbitTypography.lineHeight.relaxed,
+          color: orbitColors.text.primary,
+          fontFamily: orbitTypography.codeFamily,
+          background: orbitColors.bg.surfaceSubtle,
+          border: `1px solid ${orbitColors.border.subtle}`,
+          borderRadius: orbitRadius.sm,
+          padding: orbitSpacing[3],
         }}
       >
         {codeText}
@@ -169,14 +169,14 @@ function renderStructuredSectionBody(
           margin: 0,
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
-          fontSize: 12,
-          lineHeight: 1.7,
-          color: "#e7edf5",
-          fontFamily: "Consolas, 'SFMono-Regular', 'Liberation Mono', Menlo, monospace",
-          background: "rgba(8, 12, 20, 0.28)",
-          border: "1px solid rgba(255,255,255,0.05)",
-          borderRadius: 10,
-          padding: "10px 12px",
+          fontSize: orbitTypography.fontSize.sm,
+          lineHeight: orbitTypography.lineHeight.relaxed,
+          color: orbitColors.text.primary,
+          fontFamily: orbitTypography.codeFamily,
+          background: orbitColors.bg.surfaceSubtle,
+          border: `1px solid ${orbitColors.border.subtle}`,
+          borderRadius: orbitRadius.sm,
+          padding: orbitSpacing[3],
         }}
       >
         {segment.text}
@@ -188,22 +188,22 @@ function renderStructuredSectionBody(
     const items = parseConstraintItems(segment.text);
     if (items.length > 0) {
       return (
-        <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "grid", gap: orbitSpacing[2] }}>
           {items.map((item) => (
             <div
               key={item.label}
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                gap: 12,
-                padding: "8px 10px",
-                borderRadius: 10,
-                background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.06)",
+                gap: orbitSpacing[3],
+                padding: orbitSpacing[2],
+                borderRadius: orbitRadius.sm,
+                background: orbitColors.bg.surfaceRaised,
+                border: `1px solid ${orbitColors.border.subtle}`,
               }}
             >
-              <span style={{ color: "#9fb1c7", fontSize: 11, fontWeight: 700 }}>{item.label}</span>
-              <span style={{ color: "#e7edf5", fontSize: 12, fontWeight: 700 }}>{item.value}</span>
+              <span style={{ color: orbitColors.text.secondary, fontSize: orbitTypography.fontSize.xs, fontWeight: orbitTypography.fontWeight.bold }}>{item.label}</span>
+              <span style={{ color: orbitColors.text.primary, fontSize: orbitTypography.fontSize.sm, fontWeight: orbitTypography.fontWeight.bold }}>{item.value}</span>
             </div>
           ))}
         </div>
@@ -212,7 +212,7 @@ function renderStructuredSectionBody(
   }
 
   return (
-    <div style={{ color: "#e7edf5", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+    <div style={{ color: orbitColors.text.primary, lineHeight: orbitTypography.lineHeight.relaxed, whiteSpace: "pre-wrap" }}>
       {renderMathText(formatQuestionTextForDisplay(segment.text || (lang === "en" ? "(Empty)" : "（空）")))}
     </div>
   );
