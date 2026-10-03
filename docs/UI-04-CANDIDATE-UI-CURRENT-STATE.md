@@ -162,3 +162,8 @@ npm run test:run -- src/sidepanel/sidepanelStateSync.test.ts src/sidepanel/sidep
 ```
 
 These passing tests verify existing contracts, not opening rehydration or UI-04 acceptance. No production code, tests or visual harness were changed. UI04-01 through UI04-30, full check/build/artifact/E2E, screenshots and exact-head CI have not established implementation readiness. The requested UI is BLOCKED, not READY_FOR_CHATGPT_REVIEW.
+
+
+## UI-04A checkpoint after protocol approval
+
+The audit above describes head `1077f505f1b58490f7e790bd7bb0f8887c9d4765`. Gatekeeper subsequently approved `UI04_RUNTIME_SNAPSHOT_PROTOCOL_APPROVED` on PR #34. The minimal implementation and its test mapping are documented in [UI-04A-RUNTIME-SNAPSHOT-CONTRACT.md](UI-04A-RUNTIME-SNAPSHOT-CONTRACT.md). Opening runtime rehydration is implemented within that approved scope; the earlier no-protocol finding is historical. Abandoned panel result recovery, Filled receipts and media transport remain unsupported. Candidate Card redesign and the broader UI-04 acceptance remain outstanding until the UI-04A checkpoint report is returned. PR #34 stays Draft/unmerged.

@@ -238,3 +238,32 @@ describe("useSidePanelActions owner commit atomicity", () => {
     expect(authenticated).toBe(true);
   });
 });
+
+
+describe("UI04A bound workspace dispatch", () => {
+  it("blocks START while opening hydration is pending", async () => {
+    const options = makeOptions({ isWorkspaceReadyNow: () => false, getWorkspaceOrigin: () => ({ tabId: 7, url: "https://quiz.example.com/page" }) });
+    const { result } = renderHook(() => useSidePanelActions(options));
+    await result.current.handleFullPageDetect();
+    expect(sentMessages).toEqual([]);
+    expect(options.markProtectedWork).not.toHaveBeenCalled();
+  });
+
+  it("invalidates a waiting START if its bound origin changes during the owner commit", async () => {
+    let origin = { tabId: 7, url: "https://quiz.example.com/page" };
+    vi.stubGlobal("chrome", { ...chrome, tabs: { ...chrome.tabs, get: vi.fn(async () => ({ id: 7, url: origin.url })) } });
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const markProtectedWork = vi.fn(async (_kind, active) => { if (active) await pending; });
+    const options = makeOptions({ isWorkspaceReadyNow: () => true, getWorkspaceOrigin: () => origin, markProtectedWork });
+    const { result } = renderHook(() => useSidePanelActions(options));
+    const running = result.current.handleFullPageDetect();
+    await vi.waitFor(() => expect(markProtectedWork).toHaveBeenCalledWith("fullPage", true, 7));
+    origin = { tabId: 7, url: "https://quiz.example.com/next" };
+    release();
+    await running;
+    expect(sentMessages).toEqual([]);
+    expect(markProtectedWork).toHaveBeenLastCalledWith("fullPage", false, 7);
+    vi.unstubAllGlobals();
+  });
+});

@@ -1,4 +1,5 @@
 import http from "node:http";
+import type { CandidateWorkspaceSnapshot } from "../src/shared/types/workspace";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
@@ -20,13 +21,13 @@ type DriverWindow = Window & typeof globalThis & { __events: string[] };
 declare const chrome: {
   tabs: {
     query: (info: { url?: string; active?: boolean; currentWindow?: boolean }) => Promise<Array<{ id: number; title?: string; url?: string }>>;
-    sendMessage: (tabId: number, message: { type: string }) => Promise<unknown>;
+    sendMessage: (tabId: number, message: { type: string; expectedUrl?: string }) => Promise<unknown>;
     update: (tabId: number, properties: { active?: boolean }) => Promise<unknown>;
   };
   scripting: { executeScript: (injection: { target: { tabId: number }; files: string[] }) => Promise<unknown> };
   runtime: { onMessage: { addListener: (listener: (message: unknown) => void) => void } };
   storage: { local: {
-    get: (keys: string | string[]) => Promise<Record<string, unknown>>;
+    get: (keys: string | string[] | null) => Promise<Record<string, unknown>>;
     set: (items: Record<string, unknown>) => Promise<void>;
   } };
 };
@@ -357,10 +358,11 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       await seedAuthenticatedSidePanel(driver, authBackend, phase8aAccount);
       const originTabId = await getPageTabId(driver, server.origin, "Phase 8A Origin");
       const otherTabId = await getPageTabId(driver, server.origin, "Phase 8A Other");
+      await driver.evaluate(async (id) => chrome.tabs.update(id, { active: true }), originTabId);
 
       const sidePanel = await context.newPage();
       await sidePanel.goto(`chrome-extension://${extensionId}/sidepanel/sidepanel.html`);
-      await expect(sidePanel.getByText("Workspace")).toBeVisible();
+      await expect(sidePanel.getByText("Workspace", { exact: true })).toBeVisible();
       await sendDetectToTab(driver, originTabId);
       await expect(sidePanel.getByText(/Which value is equal to 2 \+ 2/)).toBeVisible();
       await sidePanel.getByText(/Which value is equal to 2 \+ 2/).click();
@@ -415,9 +417,10 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       await seedAuthenticatedSidePanel(driver, authBackend, phase8aAccount);
       const originTabId = await getPageTabId(driver, server.origin, "Phase 8A Stale Origin");
       const otherTabId = await getPageTabId(driver, server.origin, "Phase 8A Stale Other");
+      await driver.evaluate(async (id) => chrome.tabs.update(id, { active: true }), originTabId);
       const sidePanel = await context.newPage();
       await sidePanel.goto(`chrome-extension://${extensionId}/sidepanel/sidepanel.html`);
-      await expect(sidePanel.getByText("Workspace")).toBeVisible();
+      await expect(sidePanel.getByText("Workspace", { exact: true })).toBeVisible();
       await sendDetectToTab(driver, originTabId);
       await expect(sidePanel.getByText(/Which value is equal to 2 \+ 2/)).toBeVisible();
       await sidePanel.getByText(/Which value is equal to 2 \+ 2/).click();
@@ -506,4 +509,68 @@ test.describe("Phase 6 synthetic SPA revision scenarios", () => {
       await server.close();
     }
   });
+});
+
+
+test("UI04A real runtime: reopening during provider await restores running; a different bound tab stays independent", async () => {
+  test.setTimeout(60_000);
+  const server = await startSpaServer();
+  const context = await launchExtensionContext();
+  const backend = await startTestAnalyticsBackend();
+  try {
+    const account = await backend.registerAccount("ui04a");
+    const extensionId = await resolveExtensionId(context);
+    const pageA = await context.newPage();
+    await pageA.goto(`${server.origin}/q?workspace=A`);
+    const driver = await startProductionAutoSolve(context, extensionId, server.origin);
+    await expect.poll(() => server.held.length).toBe(1);
+    await seedAuthenticatedSidePanel(driver, backend, account);
+    const tabA = await driver.evaluate(async (url) => (await chrome.tabs.query({ url }))[0]!.id, pageA.url());
+    const read = (tabId: number, url: string): Promise<{ ok: boolean; snapshot: CandidateWorkspaceSnapshot }> => driver.evaluate(async ({ tabId, url }) =>
+      chrome.tabs.sendMessage(tabId, { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT", expectedUrl: url }), { tabId, url }) as Promise<{ ok: boolean; snapshot: CandidateWorkspaceSnapshot }>;
+    const before = await read(tabA, pageA.url());
+    expect(before.ok).toBe(true);
+    expect(before.snapshot.autoSolve.running).toBe(true);
+    const owners = await driver.evaluate(async () => {
+      const stored = await chrome.storage.local.get(null);
+      return Object.fromEntries(Object.entries(stored).filter(([key]) => key.startsWith("protectedWorkOwner:")));
+    });
+    const openPanel = async () => {
+      const panel = await context.newPage();
+      await panel.goto(`chrome-extension://${extensionId}/sidepanel/sidepanel.html`);
+      return panel;
+    };
+    const first = await openPanel();
+    await expect(first.getByRole("button", { name: /Stop Solve/ })).toBeVisible();
+    await first.close();
+    const reopened = await openPanel();
+    await expect(reopened.getByRole("button", { name: /Stop Solve/ })).toBeVisible();
+    // No progress/completion event has occurred: opening reads cannot restart
+    // work, mutate selection or owners, or synthesize a later content seq.
+    expect((await read(tabA, pageA.url())).snapshot).toEqual(before.snapshot);
+    expect(server.held).toHaveLength(1);
+    expect(await driver.evaluate(async () => {
+      const stored = await chrome.storage.local.get(null);
+      return Object.fromEntries(Object.entries(stored).filter(([key]) => key.startsWith("protectedWorkOwner:")));
+    })).toEqual(owners);
+    await reopened.close();
+    const pageB = await context.newPage();
+    await pageB.goto(`${server.origin}/q?workspace=B`);
+    await pageB.evaluate(() => document.getElementById("q12")!.remove());
+    const tabB = await driver.evaluate(async (url) => (await chrome.tabs.query({ url }))[0]!.id, pageB.url());
+    await sendDetectToTab(driver, tabB);
+    const empty = await read(tabB, pageB.url());
+    expect(empty.snapshot.detection.phase).toBe("completed");
+    expect(empty.snapshot.candidates).toEqual([]);
+    expect(empty.snapshot.autoSolve.running).toBe(false);
+    const boundB = await openPanel();
+    await expect(boundB.getByRole("button", { name: "Solve & Fill", exact: true })).toBeVisible();
+    await expect(boundB.getByRole("button", { name: /Stop Solve/ })).toHaveCount(0);
+    await expect(boundB.getByText(/Which value is equal to 2/)).toHaveCount(0);
+    expect((await read(tabA, pageA.url())).snapshot.autoSolve.running).toBe(true);
+  } finally {
+    await closeExtensionContext(context);
+    await server.close();
+    await backend.close();
+  }
 });
