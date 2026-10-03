@@ -893,4 +893,198 @@ describe("UI-03 Side Panel Workspace Shell Test Matrix (including Review Fix 01)
       expect(stripEl.style.boxShadow).toBe(orbitTokens.shadow.activityElevation);
     });
   });
+
+  // ==========================================
+  // RF03: IDLE VS RUNNING VISUAL & CONTRACT SEPARATION
+  // ==========================================
+  describe("RF03: Idle vs Running visual and contract separation", () => {
+    it("RF03-V01: Idle workspace status shows '已就绪' badge and no activity strip (ZH)", () => {
+      const { container } = render(
+        <SidePanelHeader
+          authStatus="authenticated"
+          isAuthenticated={true}
+          lang="zh"
+          onTabChange={() => {}}
+          tab="candidates"
+          workspaceStatus="ready"
+          userEmail="test@example.com"
+        />,
+      );
+      expect(container.textContent).toContain("已就绪");
+      expect(container.textContent).not.toContain("处理中");
+
+      const activity = deriveWorkspaceActivity({
+        status: "ready",
+        lang: "zh",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: false,
+        isBatchParsing: false,
+        isBatchFilling: false,
+        autoSolveProgress: null,
+        fillFeedback: null,
+      });
+      expect(activity).toBeNull();
+    });
+
+    it("RF03-V02: Idle workspace status shows 'Ready' badge and no activity strip (EN)", () => {
+      const { container } = render(
+        <SidePanelHeader
+          authStatus="authenticated"
+          isAuthenticated={true}
+          lang="en"
+          onTabChange={() => {}}
+          tab="candidates"
+          workspaceStatus="ready"
+          userEmail="test@example.com"
+        />,
+      );
+      expect(container.textContent).toContain("Ready");
+      expect(container.textContent).not.toContain("Working");
+
+      const activity = deriveWorkspaceActivity({
+        status: "ready",
+        lang: "en",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: false,
+        isBatchParsing: false,
+        isBatchFilling: false,
+        autoSolveProgress: null,
+        fillFeedback: null,
+      });
+      expect(activity).toBeNull();
+    });
+
+    it("RF03-V03: Auto Solve running state shows '处理中' badge and active strip with '解析并填答' + '停止' (ZH)", () => {
+      const { container: headerContainer } = render(
+        <SidePanelHeader
+          authStatus="authenticated"
+          isAuthenticated={true}
+          lang="zh"
+          onTabChange={() => {}}
+          tab="candidates"
+          workspaceStatus="solving"
+          userEmail="test@example.com"
+        />,
+      );
+      expect(headerContainer.textContent).toContain("处理中");
+      expect(headerContainer.textContent).not.toContain("已就绪");
+
+      const activity = deriveWorkspaceActivity({
+        status: "solving",
+        lang: "zh",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: true,
+        isBatchParsing: false,
+        isBatchFilling: false,
+        autoSolveProgress: { current: 5, total: 8, solved: 4, filled: 4, statusText: "解析中", statusCode: "PARSING" },
+        fillFeedback: null,
+        onStopAutoSolve: () => {},
+      });
+      expect(activity).not.toBeNull();
+      expect(activity?.kind).toBe("auto_solve");
+      expect(activity?.label).toBe("解析并填答");
+      expect(activity?.action?.label).toBe("停止");
+
+      const { container: stripContainer } = render(
+        <SidePanelActivityStrip activity={activity!} lang="zh" />,
+      );
+      expect(stripContainer.textContent).toContain("解析并填答");
+      expect(stripContainer.textContent).toContain("停止");
+    });
+
+    it("RF03-V04: Auto Solve running state shows 'Working' badge and active strip with 'Solve & Fill' + 'Stop' (EN)", () => {
+      const { container: headerContainer } = render(
+        <SidePanelHeader
+          authStatus="authenticated"
+          isAuthenticated={true}
+          lang="en"
+          onTabChange={() => {}}
+          tab="candidates"
+          workspaceStatus="solving"
+          userEmail="test@example.com"
+        />,
+      );
+      expect(headerContainer.textContent).toContain("Working");
+      expect(headerContainer.textContent).not.toContain("Ready");
+
+      const activity = deriveWorkspaceActivity({
+        status: "solving",
+        lang: "en",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: true,
+        isBatchParsing: false,
+        isBatchFilling: false,
+        autoSolveProgress: { current: 5, total: 8, solved: 4, filled: 4, statusText: "Solving", statusCode: "PARSING" },
+        fillFeedback: null,
+        onStopAutoSolve: () => {},
+      });
+      expect(activity).not.toBeNull();
+      expect(activity?.kind).toBe("auto_solve");
+      expect(activity?.label).toBe("Solve & Fill");
+      expect(activity?.action?.label).toBe("Stop");
+
+      const { container: stripContainer } = render(
+        <SidePanelActivityStrip activity={activity!} lang="en" />,
+      );
+      expect(stripContainer.textContent).toContain("Solve & Fill");
+      expect(stripContainer.textContent).toContain("Stop");
+    });
+
+    it("RF03-V05: Batch Parse running state shows '处理中' badge and strip with '批量解析' without Stop button (ZH)", () => {
+      const activity = deriveWorkspaceActivity({
+        status: "solving",
+        lang: "zh",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: false,
+        isBatchParsing: true,
+        isBatchFilling: false,
+        autoSolveProgress: null,
+        fillFeedback: null,
+      });
+      expect(activity?.kind).toBe("batch_parse");
+      expect(activity?.label).toBe("批量解析");
+      expect(activity?.action).toBeUndefined();
+
+      const { container } = render(
+        <SidePanelActivityStrip activity={activity!} lang="zh" />,
+      );
+      expect(container.textContent).toContain("批量解析");
+      expect(container.textContent).not.toContain("停止");
+    });
+
+    it("RF03-V06: Batch Fill running state shows '处理中' badge and strip with '批量填写' without Stop button (ZH)", () => {
+      const activity = deriveWorkspaceActivity({
+        status: "solving",
+        lang: "zh",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: false,
+        isBatchParsing: false,
+        isBatchFilling: true,
+        autoSolveProgress: null,
+        fillFeedback: null,
+      });
+      expect(activity?.kind).toBe("batch_fill");
+      expect(activity?.label).toBe("批量填写");
+      expect(activity?.action).toBeUndefined();
+
+      const { container } = render(
+        <SidePanelActivityStrip activity={activity!} lang="zh" />,
+      );
+      expect(container.textContent).toContain("批量填写");
+      expect(container.textContent).not.toContain("停止");
+    });
+  });
 });
+

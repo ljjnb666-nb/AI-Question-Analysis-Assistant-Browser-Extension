@@ -40,7 +40,7 @@ export const PROVIDERS: ProviderConfig[] = [
     supportsMultipleImages: true,
     openaiCompat: false,
     authHeader: "x-api-key",
-    keyPlaceholder: "sk-ant-api03-...",
+    keyPlaceholder: "sk-test-ui03-example",
   },
   {
     id: "openai",

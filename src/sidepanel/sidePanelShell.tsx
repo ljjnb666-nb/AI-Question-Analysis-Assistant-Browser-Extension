@@ -543,6 +543,7 @@ export const SidePanelActivityStrip: React.FC<{
     <div
       role="status"
       aria-live="polite"
+      data-testid="workspace-activity-strip"
       style={{
         position: "sticky",
         bottom: 0,
