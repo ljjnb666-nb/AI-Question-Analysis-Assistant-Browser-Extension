@@ -1,6 +1,7 @@
 import type { ExtMessage, MessageType } from "@/shared/types";
 
 const BOOTSTRAP_MESSAGE_TYPES = new Set<MessageType>([
+  "GET_CANDIDATE_WORKSPACE_SNAPSHOT",
   "START_MANUAL_CAPTURE",
   "CANCEL_MANUAL_CAPTURE",
   "CLOSE_FLOATING_RESULT",
