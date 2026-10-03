@@ -155,7 +155,7 @@ describe("sidepanelStateSync", () => {
     // demoted to technical detail.
     const doneOk = mapAutoSolveDoneFeedback({ ok: true, solved: 5, filled: 4, message: "自动答题完成，共处理 5 题" }, "zh");
     expect(doneOk.tone).toBe("success");
-    expect(doneOk.message).toContain("自动解析并填答完成");
+    expect(doneOk.message).toContain("解析并填答完成");
     const doneFailed = mapAutoSolveDoneFeedback({ ok: false, solved: 0, filled: 0, message: "Provider exploded: raw-http-500" }, "en");
     expect(doneFailed.tone).toBe("error");
     expect(doneFailed.message).not.toContain("raw-http-500");

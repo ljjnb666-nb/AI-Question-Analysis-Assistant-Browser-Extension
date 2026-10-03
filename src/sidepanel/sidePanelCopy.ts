@@ -66,7 +66,7 @@ export const SIDEPANEL_COPY: Record<UILang, SidePanelCopy> = {
       ready: "已就绪",
       detecting: "识别中",
       scanning: "扫描中",
-      solving: "解析中",
+      solving: "处理中",
       review_required: "需要检查",
     },
     tabs: {
@@ -119,7 +119,7 @@ export const SIDEPANEL_COPY: Record<UILang, SidePanelCopy> = {
       ready: "Ready",
       detecting: "Detecting",
       scanning: "Scanning",
-      solving: "Solving",
+      solving: "Working",
       review_required: "Check Needed",
     },
     tabs: {

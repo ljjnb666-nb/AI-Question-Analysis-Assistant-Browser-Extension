@@ -502,8 +502,16 @@ export const WorkspaceTabPanel: React.FC<{
       id={id}
       aria-labelledby={`sidepanel-tab-${tabId}`}
       tabIndex={0}
-      onFocus={onFocus}
-      onBlur={onBlur}
+      onFocus={(event) => {
+        if (event.target === event.currentTarget) {
+          onFocus(event);
+        }
+      }}
+      onBlur={(event) => {
+        if (event.target === event.currentTarget) {
+          onBlur(event);
+        }
+      }}
       style={{
         flex: 1,
         display: "flex",
@@ -547,7 +555,7 @@ export const SidePanelActivityStrip: React.FC<{
         borderTop: `1px solid ${orbitColors.border.default}`,
         boxSizing: "border-box",
         width: "100%",
-        boxShadow: "0 -2px 8px rgba(0, 0, 0, 0.25)",
+        boxShadow: orbitTokens.shadow.activityElevation,
       }}
     >
       <div

@@ -94,7 +94,6 @@ export function deriveSidePanelWorkspaceStatus(input: WorkspaceStatusDerivationI
 export type WorkspaceActivityKind =
   | "detecting"
   | "scanning"
-  | "solving"
   | "auto_solve"
   | "batch_parse"
   | "batch_fill"

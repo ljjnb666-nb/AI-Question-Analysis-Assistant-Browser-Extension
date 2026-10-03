@@ -122,23 +122,23 @@ export function mapAutoSolveDoneFeedback(
     return userFeedback(
       "success",
       lang === "en"
-        ? `Auto solve finished: processed ${solved} question(s), filled ${filled}.`
-        : `自动解析并填答完成，共处理 ${solved} 题，填写 ${filled}。`,
+        ? `Solve & Fill finished: processed ${solved} question(s), filled ${filled}.`
+        : `解析并填答完成，共处理 ${solved} 题，填写 ${filled}。`,
       { technicalDetail: rawMessage || undefined },
     );
   }
   if (msg.stopped) {
     return userFeedback(
       "info",
-      lang === "en" ? "Auto solve was stopped." : "自动解析已停止。",
+      lang === "en" ? "Solve & Fill was stopped." : "解析并填答已停止。",
       { technicalDetail: rawMessage || undefined },
     );
   }
   return userFeedback(
     "error",
     lang === "en"
-      ? "Auto solve stopped because of a problem. Check the page and try again."
-      : "自动解析遇到问题已停止，请检查页面后重试。",
+      ? "Solve & Fill stopped because of a problem. Check the page and try again."
+      : "解析并填答遇到问题已停止，请检查页面后重试。",
     { code: "AUTO_SOLVE_FAILED", technicalDetail: rawMessage.slice(0, 200) || undefined },
   );
 }

@@ -386,4 +386,18 @@ describe("SidePanelApp auth-loss watchdog", () => {
       expect(sentMessages.STOP_AUTO_SOLVE_ALL?.length ?? 0).toBeGreaterThanOrEqual(1),
     { timeout: UI_TIMEOUT });
   });
+
+  it("RF02-P2-LANG: document.documentElement.lang reflects SidePanelApp uiLang effect and toggle", async () => {
+    document.documentElement.lang = "initial";
+    render(<SidePanelApp />);
+    await waitFor(() => expect(document.documentElement.lang).toBe("en"), { timeout: UI_TIMEOUT });
+
+    // Open workspace menu and click switch language
+    const menuBtn = screen.getByRole("button", { name: /Workspace menu|工作台菜单/i });
+    fireEvent.click(menuBtn);
+    const switchBtn = screen.getByRole("button", { name: /切换到简体中文|Switch to English/i });
+    fireEvent.click(switchBtn);
+
+    await waitFor(() => expect(document.documentElement.lang).toBe("zh-CN"), { timeout: UI_TIMEOUT });
+  });
 });

@@ -5,6 +5,7 @@ import {
   deriveSidePanelWorkspaceStatus,
   deriveWorkspaceActivity,
   type SidePanelWorkspaceStatus,
+  type WorkspaceActivityKind,
 } from "./sidePanelWorkspaceState";
 import {
   SidePanelHeader,
@@ -13,6 +14,9 @@ import {
   WorkspaceTabPanel,
 } from "./sidePanelShell";
 import { userFeedback } from "@/shared/ui/userFeedback";
+import { orbitTokens } from "@/shared/ui/orbitTokens";
+import { setKeyboardModalityForTesting } from "@/shared/ui/orbitFocus";
+import { mapAutoSolveDoneFeedback } from "@/shared/ui/autoSolveStatus";
 
 describe("UI-03 Side Panel Workspace Shell Test Matrix (including Review Fix 01)", () => {
   beforeEach(() => {
@@ -344,6 +348,46 @@ describe("UI-03 Side Panel Workspace Shell Test Matrix (including Review Fix 01)
       expect(tabpanel).toHaveAttribute("aria-labelledby", "sidepanel-tab-candidates");
     });
 
+    it("RF02-X01: keyboard focuses panel itself -> panel focus ring visible", () => {
+      setKeyboardModalityForTesting(true);
+      render(
+        <WorkspaceTabPanel id="panel-focus-test" tabId="candidates">
+          <button>Inner Action</button>
+        </WorkspaceTabPanel>,
+      );
+      const panel = screen.getByRole("tabpanel");
+      fireEvent.focus(panel);
+      expect(panel.style.boxShadow).toBe(orbitTokens.focus.focusRing);
+      expect(panel.style.outline).toContain("solid");
+    });
+
+    it("RF02-X02: keyboard focuses child button -> child focus -> panel focus ring NOT activated", () => {
+      setKeyboardModalityForTesting(true);
+      render(
+        <WorkspaceTabPanel id="panel-focus-test-child" tabId="candidates">
+          <button>Inner Action</button>
+        </WorkspaceTabPanel>,
+      );
+      const panel = screen.getByRole("tabpanel");
+      const child = screen.getByRole("button", { name: "Inner Action" });
+      fireEvent.focus(child);
+      expect(panel.style.boxShadow).toBe("none");
+      expect(panel.style.outline).toContain("none");
+    });
+
+    it("RF02-X03: mouse focuses panel -> no keyboard focus ring", () => {
+      setKeyboardModalityForTesting(false);
+      render(
+        <WorkspaceTabPanel id="panel-focus-test-mouse" tabId="candidates">
+          <button>Inner Action</button>
+        </WorkspaceTabPanel>,
+      );
+      const panel = screen.getByRole("tabpanel");
+      fireEvent.focus(panel);
+      expect(panel.style.boxShadow).toBe("none");
+      expect(panel.style.outline).toContain("none");
+    });
+
     it("RF01-X04: inactive tab has tabIndex=-1 and active tab has tabIndex=0", () => {
       render(
         <SidePanelHeader
@@ -631,6 +675,222 @@ describe("UI-03 Side Panel Workspace Shell Test Matrix (including Review Fix 01)
       expect(screen.getByText("Solve & Fill")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
       expect(container.querySelectorAll('button[role="tab"]')).toHaveLength(3);
+    });
+  });
+
+  // ==========================================
+  // RF02-S: GLOBAL STATUS & ACTIVITY ALIGNMENT
+  // ==========================================
+  describe("RF02-S: Global status must not lie during batch fill", () => {
+    it("RF02-S01: isBatchFilling -> Header status copy = 处理中 / Working", () => {
+      const { rerender } = render(
+        <SidePanelHeader
+          authStatus="authenticated"
+          isAuthenticated={true}
+          lang="zh"
+          tab="candidates"
+          onTabChange={vi.fn()}
+          userEmail="user@example.com"
+          workspaceStatus="solving"
+        />,
+      );
+      expect(screen.getByText("处理中")).toBeInTheDocument();
+      expect(screen.queryByText("解析中")).toBeNull();
+
+      rerender(
+        <SidePanelHeader
+          authStatus="authenticated"
+          isAuthenticated={true}
+          lang="en"
+          tab="candidates"
+          onTabChange={vi.fn()}
+          userEmail="user@example.com"
+          workspaceStatus="solving"
+        />,
+      );
+      expect(screen.getByText("Working")).toBeInTheDocument();
+      expect(screen.queryByText("Solving")).toBeNull();
+    });
+
+    it("RF02-S02: isBatchFilling -> Activity = 批量填写 / Batch Fill", () => {
+      const activityZh = deriveWorkspaceActivity({
+        status: "solving",
+        lang: "zh",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: false,
+        isBatchParsing: false,
+        isBatchFilling: true,
+        autoSolveProgress: { current: 0, total: 0, solved: 0, filled: 0, statusText: "", statusCode: "" },
+        fillFeedback: null,
+      });
+      expect(activityZh?.kind).toBe("batch_fill");
+      expect(activityZh?.label).toBe("批量填写");
+
+      const activityEn = deriveWorkspaceActivity({
+        status: "solving",
+        lang: "en",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: false,
+        isBatchParsing: false,
+        isBatchFilling: true,
+        autoSolveProgress: { current: 0, total: 0, solved: 0, filled: 0, statusText: "", statusCode: "" },
+        fillFeedback: null,
+      });
+      expect(activityEn?.kind).toBe("batch_fill");
+      expect(activityEn?.label).toBe("Batch Fill");
+    });
+
+    it("RF02-S03: isBatchParsing -> Activity = 批量解析 / Batch Solve", () => {
+      const activityZh = deriveWorkspaceActivity({
+        status: "solving",
+        lang: "zh",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: false,
+        isBatchParsing: true,
+        isBatchFilling: false,
+        autoSolveProgress: { current: 0, total: 0, solved: 0, filled: 0, statusText: "", statusCode: "" },
+        fillFeedback: null,
+      });
+      expect(activityZh?.kind).toBe("batch_parse");
+      expect(activityZh?.label).toBe("批量解析");
+
+      const activityEn = deriveWorkspaceActivity({
+        status: "solving",
+        lang: "en",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: false,
+        isBatchParsing: true,
+        isBatchFilling: false,
+        autoSolveProgress: { current: 0, total: 0, solved: 0, filled: 0, statusText: "", statusCode: "" },
+        fillFeedback: null,
+      });
+      expect(activityEn?.kind).toBe("batch_parse");
+      expect(activityEn?.label).toBe("Batch Solve");
+    });
+
+    it("RF02-S04: isAutoSolving -> Activity = 解析并填答 / Solve & Fill", () => {
+      const activityZh = deriveWorkspaceActivity({
+        status: "solving",
+        lang: "zh",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: true,
+        isBatchParsing: false,
+        isBatchFilling: false,
+        autoSolveProgress: { current: 1, total: 3, solved: 0, filled: 0, statusText: "", statusCode: "PARSING" },
+        fillFeedback: null,
+      });
+      expect(activityZh?.kind).toBe("auto_solve");
+      expect(activityZh?.label).toBe("解析并填答");
+
+      const activityEn = deriveWorkspaceActivity({
+        status: "solving",
+        lang: "en",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: true,
+        isBatchParsing: false,
+        isBatchFilling: false,
+        autoSolveProgress: { current: 1, total: 3, solved: 0, filled: 0, statusText: "", statusCode: "PARSING" },
+        fillFeedback: null,
+      });
+      expect(activityEn?.kind).toBe("auto_solve");
+      expect(activityEn?.label).toBe("Solve & Fill");
+    });
+  });
+
+  // ==========================================
+  // RF02-COPY: FEEDBACK TERMINOLOGY REGRESSION
+  // ==========================================
+  describe("RF02-COPY: Consumer-facing feedback copy regression", () => {
+    it("RF02-COPY01: success feedback contains no 'Auto solve'", () => {
+      const fb = mapAutoSolveDoneFeedback({ ok: true, solved: 3, filled: 2 }, "en");
+      expect(fb.message).not.toContain("Auto solve");
+      expect(fb.message).not.toContain("Auto Solve");
+      expect(fb.message).toBe("Solve & Fill finished: processed 3 question(s), filled 2.");
+    });
+
+    it("RF02-COPY02: stopped feedback contains no 'Auto solve'", () => {
+      const fb = mapAutoSolveDoneFeedback({ stopped: true }, "en");
+      expect(fb.message).not.toContain("Auto solve");
+      expect(fb.message).not.toContain("Auto Solve");
+      expect(fb.message).toBe("Solve & Fill was stopped.");
+    });
+
+    it("RF02-COPY03: error feedback contains no 'Auto solve'", () => {
+      const fb = mapAutoSolveDoneFeedback({ ok: false }, "en");
+      expect(fb.message).not.toContain("Auto solve");
+      expect(fb.message).not.toContain("Auto Solve");
+      expect(fb.message).toBe("Solve & Fill stopped because of a problem. Check the page and try again.");
+    });
+
+    it("RF02-COPY04: ZH consumer feedback contains no '自动答题' or '自动解析'", () => {
+      const success = mapAutoSolveDoneFeedback({ ok: true, solved: 3, filled: 2 }, "zh");
+      expect(success.message).not.toContain("自动答题");
+      expect(success.message).not.toContain("自动解析");
+      expect(success.message).toBe("解析并填答完成，共处理 3 题，填写 2。");
+
+      const stopped = mapAutoSolveDoneFeedback({ stopped: true }, "zh");
+      expect(stopped.message).not.toContain("自动答题");
+      expect(stopped.message).not.toContain("自动解析");
+      expect(stopped.message).toBe("解析并填答已停止。");
+
+      const error = mapAutoSolveDoneFeedback({ ok: false }, "zh");
+      expect(error.message).not.toContain("自动答题");
+      expect(error.message).not.toContain("自动解析");
+      expect(error.message).toBe("解析并填答遇到问题已停止，请检查页面后重试。");
+    });
+  });
+
+  // ==========================================
+  // RF02-P2: CLEAN ACTIVITY KIND & SHADOW TOKEN
+  // ==========================================
+  describe("RF02-P2: Clean activity kind and shadow token", () => {
+    it("RF02-P2-KIND: WorkspaceActivityKind does not include 'solving' and derivation never produces 'solving'", () => {
+      // Type assertion: kind cannot be "solving"
+      type HasSolving = "solving" extends WorkspaceActivityKind ? true : false;
+      const hasSolving: HasSolving = false;
+      expect(hasSolving).toBe(false);
+
+      const solvingStatusActivity = deriveWorkspaceActivity({
+        status: "solving",
+        lang: "zh",
+        isDetecting: false,
+        isFullPageScan: false,
+        scanProgress: null,
+        isAutoSolving: true,
+        isBatchParsing: false,
+        isBatchFilling: false,
+        autoSolveProgress: { current: 1, total: 1, solved: 0, filled: 0, statusText: "", statusCode: "PARSING" },
+        fillFeedback: null,
+      });
+      expect(solvingStatusActivity?.kind).toBe("auto_solve");
+    });
+
+    it("RF02-P2-SHADOW: SidePanelActivityStrip uses orbitTokens.shadow.activityElevation", () => {
+      expect(orbitTokens.shadow.activityElevation).toBe("0 -2px 8px rgba(0, 0, 0, 0.25)");
+      const { container } = render(
+        <SidePanelActivityStrip
+          activity={{
+            kind: "auto_solve",
+            tone: "ai",
+            label: "Solve & Fill",
+          }}
+          lang="en"
+        />,
+      );
+      const stripEl = container.firstElementChild as HTMLElement;
+      expect(stripEl.style.boxShadow).toBe(orbitTokens.shadow.activityElevation);
     });
   });
 });
