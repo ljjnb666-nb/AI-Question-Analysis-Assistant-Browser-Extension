@@ -15,6 +15,7 @@ export type AutoSolveProgressState = {
   /** Stable sub-code behind the status (e.g. a fill result code). */
   statusDetail?: string;
   currentPreview?: string;
+  currentQuestionId?: string;
   currentBlock?: QuestionBlock;
 } | null;
 
@@ -64,6 +65,7 @@ export function mapAutoSolveProgressMessage(msg: Record<string, unknown>) {
     statusCode: typeof msg.statusCode === "string" ? msg.statusCode : "",
     statusDetail: typeof msg.statusDetail === "string" ? msg.statusDetail : "",
     currentPreview: typeof msg.currentPreview === "string" ? msg.currentPreview : "",
+    currentQuestionId: typeof msg.currentQuestionId === "string" ? msg.currentQuestionId : undefined,
     currentBlock: (msg.currentBlock as QuestionBlock | undefined) ?? undefined,
   };
 }

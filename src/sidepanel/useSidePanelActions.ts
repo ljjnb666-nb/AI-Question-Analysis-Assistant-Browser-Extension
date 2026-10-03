@@ -1,5 +1,5 @@
 import { useCallback, useRef } from "react";
-import type { DetectedCandidate } from "@/shared/types";
+import type { CandidateOrigin, DetectedCandidate } from "@/shared/types";
 import { addHistoryEntryIfCurrent, loadSettings } from "@/shared/utils/storage";
 import {
   getAutoSolveNotConfiguredMessage,
@@ -44,6 +44,8 @@ import {
 import type { UILang } from "./displayUtils";
 
 type UseSidePanelActionsOptions = {
+  isWorkspaceReadyNow?: () => boolean;
+  getWorkspaceOrigin?: () => CandidateOrigin | undefined;
   candidates: DetectedCandidate[];
   isBatchParsing: boolean;
   /**
@@ -89,6 +91,7 @@ type UseSidePanelActionsOptions = {
 export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   const candidateAttempts = useRef(createCandidateAttemptRegistry()).current;
   const requireAuthenticatedAction = useCallback((): boolean => {
+    if (options.isWorkspaceReadyNow && !options.isWorkspaceReadyNow()) return false;
     if (options.isAuthenticatedNow()) return true;
     options.setFillFeedback(
       userFeedback(
@@ -101,6 +104,21 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     );
     return false;
   }, [options]);
+  const canDispatchToTab = useCallback((tab: chrome.tabs.Tab): boolean => {
+    if (!options.isAuthenticatedNow()) return false;
+    if (!options.getWorkspaceOrigin) return true;
+    const origin = options.getWorkspaceOrigin();
+    return !!options.isWorkspaceReadyNow?.() && !!origin && origin.tabId === tab.id && origin.url === tab.url;
+  }, [options]);
+  const getActionTab = useCallback(async (): Promise<chrome.tabs.Tab | null> => {
+    if (!options.getWorkspaceOrigin) return getBestActionTab();
+    const origin = options.getWorkspaceOrigin();
+    if (!origin || !options.isWorkspaceReadyNow?.()) return null;
+    try {
+      const tab = await chrome.tabs.get(origin.tabId);
+      return tab.url === origin.url && canDispatchToTab(tab) ? tab : null;
+    } catch { return null; }
+  }, [options, canDispatchToTab]);
   const isCandidateCurrent = useCallback(
     async (candidate: DetectedCandidate) => {
       // Auth loss invalidates every in-flight protected commit: batch parse,
@@ -117,18 +135,18 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   );
   const syncSelection = useCallback(
     async (payload: { blockId?: string; selected?: boolean; selectAll?: boolean }) => {
-      const activeTab = await getBestActionTab();
+      const activeTab = await getActionTab();
       if (!activeTab?.id) return;
       // Last-responsible-moment recheck: selection sync reaches the content
       // runtime, so the authority must hold after the tab lookup awaited.
-      if (!options.isAuthenticatedNow()) return;
+      if (!canDispatchToTab(activeTab)) return;
       await sendProtectedTabMessageWithBootstrap(
         activeTab.id,
         { type: "UPDATE_CANDIDATE_SELECTION", ...payload },
-        options.isAuthenticatedNow,
+        () => canDispatchToTab(activeTab),
       );
     },
-    [options],
+    [getActionTab, canDispatchToTab],
   );
 
   const applyDetectState = useCallback(
@@ -145,52 +163,52 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
 
   const handleDetect = useCallback(async () => {
     if (!requireAuthenticatedAction()) return;
-    const activeTab = await getBestActionTab();
+    const activeTab = await getActionTab();
     if (!activeTab?.id) return;
     // Last-responsible-moment recheck after the tab lookup await.
-    if (!options.isAuthenticatedNow()) return;
+    if (!canDispatchToTab(activeTab)) return;
     const response = await sendProtectedTabMessageWithBootstrap(
       activeTab.id,
       { type: "START_AUTO_DETECT" },
-      options.isAuthenticatedNow,
+      () => canDispatchToTab(activeTab),
     );
     // A rejected/authority-lost START — or one whose authority lapsed during
     // the dispatch itself — must not flip the UI into a stale running state
     // (AUTH-UI-INV-12/13).
-    if (response.ok === false || !options.isAuthenticatedNow()) return;
-    applyDetectState(resetDetectState());
-  }, [applyDetectState, options, requireAuthenticatedAction]);
+    if (response.ok === false || !canDispatchToTab(activeTab)) return;
+    if (!options.getWorkspaceOrigin) applyDetectState(resetDetectState());
+  }, [applyDetectState, options, requireAuthenticatedAction, getActionTab, canDispatchToTab]);
 
   const handleFullPageDetect = useCallback(async () => {
     if (!requireAuthenticatedAction()) return;
-    const activeTab = await getBestActionTab();
+    const activeTab = await getActionTab();
     if (!activeTab?.id) return;
     // Last-responsible-moment recheck after the tab lookup await. A full
     // page scan is long-running protected work: the owner record commits
     // (awaited) before the START so the auth-loss watchdog can always see
     // it, with the exact owner tab.
-    if (!options.isAuthenticatedNow()) return;
+    if (!canDispatchToTab(activeTab)) return;
     await options.markProtectedWork("fullPage", true, activeTab.id);
     // The owner write awaited — re-confirm the authority before dispatching:
     // a session lost during the owner commit must not start the workflow.
-    if (!options.isAuthenticatedNow()) {
+    if (!canDispatchToTab(activeTab)) {
       await options.markProtectedWork("fullPage", false, activeTab.id);
       return;
     }
     const response = await sendProtectedTabMessageWithBootstrap(
       activeTab.id,
       { type: "START_FULL_PAGE_DETECT" },
-      options.isAuthenticatedNow,
+      () => canDispatchToTab(activeTab),
     );
     // Running UI state only after a confirmed transport dispatch with the
     // authority still holding; every failed path clears the exact owner
     // record it created (AUTH-UI-INV-12/13).
-    if (response.ok === false || !options.isAuthenticatedNow()) {
+    if (response.ok === false || !canDispatchToTab(activeTab)) {
       await options.markProtectedWork("fullPage", false, activeTab.id);
       return;
     }
-    applyDetectState(startFullPageDetectState());
-  }, [applyDetectState, options, requireAuthenticatedAction]);
+    if (!options.getWorkspaceOrigin) applyDetectState(startFullPageDetectState());
+  }, [applyDetectState, options, requireAuthenticatedAction, getActionTab, canDispatchToTab]);
 
   const handleCancelFullPage = useCallback(async () => {
     // AUTH-UI-INV-16: cancel EVERY recorded full-page owner — this surface's
@@ -235,16 +253,16 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
 
   const handleFlash = useCallback(async (blockId: string) => {
     if (!requireAuthenticatedAction()) return;
-    const activeTab = await getBestActionTab();
+    const activeTab = await getActionTab();
     if (!activeTab?.id) return;
     // Last-responsible-moment recheck after the tab lookup await.
-    if (!options.isAuthenticatedNow()) return;
+    if (!canDispatchToTab(activeTab)) return;
     await sendProtectedTabMessageWithBootstrap(
       activeTab.id,
       { type: "HIGHLIGHT_CANDIDATE", blockId },
-      options.isAuthenticatedNow,
+      () => canDispatchToTab(activeTab),
     );
-  }, [options, requireAuthenticatedAction]);
+  }, [requireAuthenticatedAction, getActionTab, canDispatchToTab]);
 
   const toggleDetails = useCallback((id: string) => {
     options.setExpandedIds((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -416,12 +434,12 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       window.setTimeout(() => options.setFillFeedback(null), 3200);
       return;
     }
-    const activeTab = await getBestActionTab();
+    const activeTab = await getActionTab();
     if (!activeTab?.id) return;
     // Last-responsible-moment recheck after the tab lookup await: an auth
     // loss while the lookup was pending must never resurrect the workflow
     // after the watchdog already sent STOP.
-    if (!options.isAuthenticatedNow()) return;
+    if (!canDispatchToTab(activeTab)) return;
     // Record the owner tab with the START (awaited): auth-loss termination
     // must go to the tab that actually runs the workflow, never to a
     // re-guessed best tab. The cross-surface owner is established BEFORE the
@@ -429,23 +447,25 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     // transport dispatch with the authority still holding (AUTH-UI-INV-12
     // /13/16). Every failed path clears the exact owner record it created.
     await options.markProtectedWork("autoSolve", true, activeTab.id);
-    if (!options.isAuthenticatedNow()) {
+    if (!canDispatchToTab(activeTab)) {
       await options.markProtectedWork("autoSolve", false, activeTab.id);
       return;
     }
     const response = await sendProtectedTabMessageWithBootstrap(
       activeTab.id,
       { type: "START_AUTO_SOLVE_ALL" },
-      options.isAuthenticatedNow,
+      () => canDispatchToTab(activeTab),
     );
-    if (response.ok === false || !options.isAuthenticatedNow()) {
+    if (response.ok === false || !canDispatchToTab(activeTab)) {
       await options.markProtectedWork("autoSolve", false, activeTab.id);
       return;
     }
     options.setFillFeedback(null);
-    options.setIsAutoSolving(true);
-    options.setAutoSolveProgress(buildAutoSolveStartingState(options.uiLang));
-  }, [options, requireAuthenticatedAction]);
+    if (!options.getWorkspaceOrigin) {
+      options.setIsAutoSolving(true);
+      options.setAutoSolveProgress(buildAutoSolveStartingState(options.uiLang));
+    }
+  }, [options, requireAuthenticatedAction, getActionTab, canDispatchToTab]);
 
   // STOP / CANCEL are deliberately NOT auth-gated: after an auth loss they
   // are the only way to terminate an already-started protected workflow.

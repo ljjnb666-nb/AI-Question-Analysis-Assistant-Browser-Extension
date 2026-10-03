@@ -9,3 +9,4 @@ export * from "./answerPlan";
 export * from "./actionPlan";
 export * from "./settings";
 export * from "./ui";
+export * from "./workspace";

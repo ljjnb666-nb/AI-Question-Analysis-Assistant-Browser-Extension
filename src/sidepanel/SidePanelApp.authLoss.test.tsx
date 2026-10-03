@@ -36,6 +36,8 @@ let currentBestTabId = 7;
 const sessionStore = new Map<string, unknown>();
 const sessionChangeListeners = new Array<(changes: unknown, area: string) => void>();
 (globalThis as unknown as { chrome: unknown }).chrome = {
+  runtime: { onMessage: { addListener: vi.fn(), removeListener: vi.fn() } },
+  tabs: { get: async (id: number) => ({ id, url: "https://quiz.example/exam" }) },
   storage: {
     onChanged: {
       addListener: (fn: (changes: unknown, area: string) => void) => sessionChangeListeners.push(fn),
@@ -69,6 +71,8 @@ vi.mock("./tabActions", () => ({
   }),
   sendProtectedTabMessageWithBootstrap: vi.fn(async (tabId: number, message: { type: string }) => {
     (sentMessages[message.type] ??= []).push({ tabId, type: message.type });
+    if (message.type === "START_AUTO_SOLVE_ALL") bridgeHandlers?.setIsAutoSolving(true);
+    if (message.type === "START_FULL_PAGE_DETECT") bridgeHandlers?.setIsFullPageScan(true);
     return {};
   }),
   isCandidateResultAuthorityCurrent: vi.fn(async () => true),
@@ -76,10 +80,24 @@ vi.mock("./tabActions", () => ({
   sendFillMessageWithVerify: vi.fn(),
 }));
 
+// The auth watchdog suite controls transport separately from session authority.
+// Supply the now-required read-only opening handshake; real race behavior is
+// exercised in the dedicated UI-04A hook/controller suites.
+vi.mock("./workspaceTarget", () => ({
+  resolveWorkspaceOrigin: async () => hasActiveTab ? { tabId: currentBestTabId, url: "https://quiz.example/exam" } : null,
+  readWorkspaceOrigin: async (tabId: number) => hasActiveTab ? { tabId, url: "https://quiz.example/exam" } : null,
+  requestWorkspaceSnapshot: async () => ({ ok: true, snapshot: {
+    protocolVersion: 1, runtimeInstanceId: "auth-test-runtime", runtimeGeneration: 1, routeEpoch: 0, seq: 0,
+    originUrl: "https://quiz.example/exam", disposed: false, detection: { phase: "never_started", mode: null },
+    candidates: [], autoSolve: { running: false, progress: null }, fullPage: { running: false, progress: null },
+  } }),
+}));
+
 // Captured so tests can drive the runtime-reported UI state (e.g. a
 // popup-started run reporting AUTO_SOLVE_PROGRESS into this surface).
 let bridgeHandlers: {
   setIsAutoSolving: (next: boolean) => void;
+  setIsFullPageScan: (next: boolean) => void;
 } | null = null;
 
 vi.mock("./sidepanelMessageBridge", () => ({
@@ -163,7 +181,7 @@ async function findButton(name: string | RegExp): Promise<HTMLElement> {
       ? /^(Auto Solve|Solve & Fill)$/
       : typeof name === "string" && name === "Stop Auto Solve"
         ? /^(Stop Auto Solve|Stop Solve & Fill)$/
-        : name;
+        : name === "Stop Scan" ? "Cancel scan" : name;
   return screen.findByRole("button", { name: match }, { timeout: UI_TIMEOUT });
 }
 
@@ -173,7 +191,7 @@ function waitForButton(name: string | RegExp): Promise<HTMLElement> {
       ? /^(Auto Solve|Solve & Fill)$/
       : typeof name === "string" && name === "Stop Auto Solve"
         ? /^(Stop Auto Solve|Stop Solve & Fill)$/
-        : name;
+        : name === "Stop Scan" ? "Cancel scan" : name;
   return waitFor(() => {
     const button = screen.getByRole("button", { name: match });
     expect(button).toBeInTheDocument();
@@ -345,9 +363,12 @@ describe("SidePanelApp auth-loss watchdog", () => {
 
   it("AUTH_UI_48_POPUP_STARTED_MANUAL_STOP_OWNER an explicit Stop terminates a popup-started run at its owner tab", async () => {
     await markProtectedWorkOwner("autoSolve", 7);
-    currentBestTabId = 8;
+    currentBestTabId = 7;
 
     render(<SidePanelApp />);
+    // Finish the opening read before reporting progress on the bound origin.
+    await findButton("Auto Solve");
+    currentBestTabId = 8;
     // The popup-started run reports progress into this surface: the UI shows
     // the running state while the OWNER stays tab 7 in the cross-surface
     // registry.

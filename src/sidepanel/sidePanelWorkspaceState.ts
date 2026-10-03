@@ -1,10 +1,13 @@
 import type { UILang } from "./displayUtils";
+import type { WorkspaceHydrationStatus } from "./workspaceHydration";
 import type { AutoSolveProgressState, ScanProgressState } from "./sidepanelStateSync";
 import type { UserFeedback } from "@/shared/ui/userFeedback";
 import { autoSolveStatusFeedback } from "@/shared/ui/autoSolveStatus";
 import { SIDEPANEL_COPY } from "./sidePanelCopy";
 
 export type SidePanelWorkspaceStatus =
+  | "syncing_runtime"
+  | "runtime_unavailable"
   | "checking_session"
   | "signed_out"
   | "service_unavailable"
@@ -15,6 +18,7 @@ export type SidePanelWorkspaceStatus =
   | "review_required";
 
 export interface WorkspaceStatusDerivationInput {
+  hydrationStatus?: WorkspaceHydrationStatus;
   authStatus: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
   isAuthenticated: boolean;
   isDetecting: boolean;
@@ -68,6 +72,9 @@ export function deriveSidePanelWorkspaceStatus(input: WorkspaceStatusDerivationI
   }
 
   // Priority 4: SAFETY / REVIEW (Code-based, NEVER tone-based)
+  if (input.hydrationStatus && input.hydrationStatus !== "ready") {
+    return input.hydrationStatus === "runtime_unavailable" ? "runtime_unavailable" : "syncing_runtime";
+  }
   if (isWorkspaceReviewRequired(input.autoSolveProgress, input.fillFeedback, input.isAutoSolving)) {
     return "review_required";
   }

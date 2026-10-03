@@ -67,6 +67,7 @@ import { refineViewportCandidate } from "./viewportCandidateRefinement";
 import type { FloatingWindowManager } from "./floating/FloatingWindowManager";
 import type { HighlightLayer as _HighlightLayerInstance } from "./highlight/HighlightLayer";
 import type { CandidateStatusMap, ContentMainBridgeState } from "./contentRuntimeState";
+import type { createCandidateWorkspaceRuntime } from "./candidateWorkspaceRuntime";
 
 const MANUAL_PARSE_TIER_TIMEOUTS_MS = [10_000, 20_000, 30_000] as const;
 const MANUAL_PARSE_PIPELINE_TIMEOUT_MS = 45_000;
@@ -76,6 +77,7 @@ const AUTO_SOLVE_QUICK_REVIEW_TIMEOUT_MS = 15_000;
 const AUTO_SOLVE_REVIEW_CONFIDENCE_THRESHOLD = 0.9;
 
 type CreateContentMainBridgesOptions = {
+  workspace?: ReturnType<typeof createCandidateWorkspaceRuntime>;
   candidateStatusMap: CandidateStatusMap;
   floatingMgr: FloatingWindowManager;
   isRuntimeCurrent: () => boolean;
@@ -86,6 +88,11 @@ type CreateContentMainBridgesOptions = {
 };
 
 export function createContentMainBridges(options: CreateContentMainBridgesOptions) {
+  const sendWorkspaceMessage = (message: unknown) => {
+    if (!options.isRuntimeCurrent()) return;
+    if (options.workspace && !options.workspace.observe(message as Record<string, unknown>)) return;
+    safeRuntimeSendMessage({ ...(message as Record<string, unknown>), ...options.workspace?.metadata() });
+  };
   const parseRetryDeps = {
     logEvent,
     parseQuestion,
@@ -197,6 +204,9 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
   } = createContentDetectionBridge({
     candidateStatusMap: options.candidateStatusMap,
     cancelFullPageScan,
+    resetWorkspace: () => options.workspace?.resetRoute(),
+    workspaceRouteEpoch: options.workspace ? () => options.workspace!.metadata().routeEpoch : undefined,
+    workspaceDetectionGeneration: options.workspace?.detectionGeneration,
     createHighlightLayer: (bridgeOptions) => new HighlightLayer(bridgeOptions),
     detectCandidatesFullPage,
     detectCandidatesInViewport: detectCandidatesAcrossRoots,
@@ -221,7 +231,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     refreshLayoutResizeObservation: options.refreshLayoutResizeObservation,
     resolveFullPageScrollRoot,
     resolveQuestionBlockFromBBox,
-    safeRuntimeSendMessage,
+    safeRuntimeSendMessage: sendWorkspaceMessage,
     setActiveCandidates: options.state.setActiveCandidates,
     setActiveDetectMode: options.state.setActiveDetectMode,
     setActiveHighlightBlocks: options.state.setActiveHighlightBlocks,
@@ -275,17 +285,26 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     resolveQuestionBlockFromBBox,
     stopRequestedRef: options.state.getAutoSolveStopRequested,
     sendAutoSolveDoneCore: (payload) => {
-      if (options.isRuntimeCurrent()) sendAutoSolveDoneCore(payload);
+      if (!options.isRuntimeCurrent()) return;
+      if (options.workspace) sendWorkspaceMessage({ type: "AUTO_SOLVE_DONE", ...payload });
+      else sendAutoSolveDoneCore(payload);
     },
     sendAutoSolveProgressCore: (payload) => {
-      if (options.isRuntimeCurrent()) sendAutoSolveProgressCore(payload);
+      if (!options.isRuntimeCurrent()) return;
+      if (options.workspace) sendWorkspaceMessage({ type: "AUTO_SOLVE_PROGRESS", ...payload });
+      else sendAutoSolveProgressCore(payload);
     },
     waitForQuestionAdvanceCore,
   });
 
+  const startViewportDetection = () => {
+    if (!options.isRuntimeCurrent()) return;
+    options.workspace?.beginDetection("viewport");
+    return handleAutoDetect();
+  };
   const disposeBindings = initializeContentBindings({
     floatingMgr: options.floatingMgr,
-    handleAutoDetect,
+    handleAutoDetect: startViewportDetection,
     installFormulaEmbedFallback,
     logEvent,
     scheduleHighlightRelayoutRescan: options.scheduleHighlightRelayoutRescan,
@@ -300,8 +319,13 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     clickNextQuestionButton,
     detectZhihuishuCurrentQuestionBlock,
     findNextQuestionButton,
-    handleAutoDetect,
-    handleFullPageDetect,
+    handleAutoDetect: startViewportDetection,
+    handleFullPageDetect: () => {
+      if (!options.isRuntimeCurrent()) return;
+      if (isFullPageScanRunning()) options.workspace?.cancelFullPage();
+      else options.workspace?.beginDetection("fullpage");
+      return handleFullPageDetect();
+    },
     layoutWatch,
     looksLikeGarbledFullPageText,
     manualParsePipelineTimeoutMs: MANUAL_PARSE_PIPELINE_TIMEOUT_MS,

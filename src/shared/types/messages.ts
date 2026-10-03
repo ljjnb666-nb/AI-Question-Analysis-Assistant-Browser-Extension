@@ -3,8 +3,11 @@ import type { ParseResult } from "./parse";
 import type { QuestionBlock } from "./question";
 import type { AppSettings } from "./settings";
 import type { CandidateSnapshot, FloatingWindowState } from "./ui";
+import type { CandidateWorkspaceSnapshot } from "./workspace";
 
 export type MessageType =
+  | "GET_CANDIDATE_WORKSPACE_SNAPSHOT"
+  | "CANDIDATE_WORKSPACE_UPDATED"
   | "START_MANUAL_CAPTURE"
   | "CANCEL_MANUAL_CAPTURE"
   | "SUBMIT_MANUAL_CAPTURE"
@@ -237,6 +240,8 @@ export interface AutoSolveDoneMsg extends BaseMessage {
 }
 
 export type ExtMessage =
+  | { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT"; expectedUrl: string }
+  | { type: "CANDIDATE_WORKSPACE_UPDATED"; snapshot: CandidateWorkspaceSnapshot }
   | StartManualCaptureMsg
   | CancelManualCaptureMsg
   | SubmitManualCaptureMsg

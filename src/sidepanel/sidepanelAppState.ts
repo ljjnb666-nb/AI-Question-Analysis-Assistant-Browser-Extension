@@ -1,5 +1,8 @@
 import type React from "react";
-import type { DetectedCandidate } from "@/shared/types";
+import type { CandidateOrigin, CandidateWorkspaceSnapshot, DetectedCandidate, DetectionPhase } from "@/shared/types";
+import type { WorkspaceHydrationStatus } from "./workspaceHydration";
+import { mapAutoSolveProgressMessage, mapFullPageProgressMessage, mergeCandidateSnapshots } from "./sidepanelStateSync";
+import { sameCandidateResultContext } from "./candidateAuthority";
 import type { UserFeedback } from "@/shared/ui/userFeedback";
 import type { UILang } from "./displayUtils";
 import type { SidePanelTabId } from "./sidePanelShell";
@@ -11,6 +14,9 @@ import type { AutoSolveProgressState, ScanProgressState } from "./sidepanelState
 export type { AutoSolveProgressState, ScanProgressState };
 
 export type SidePanelAppState = {
+  hydrationStatus: WorkspaceHydrationStatus;
+  workspaceOrigin: CandidateOrigin | undefined;
+  detectionPhase: DetectionPhase;
   uiLang: UILang;
   /** Server-validated session status; never derived from local storage. */
   authStatus: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
@@ -34,6 +40,9 @@ export type SidePanelAppState = {
 };
 
 export const initialSidePanelAppState: SidePanelAppState = {
+  hydrationStatus: "idle",
+  workspaceOrigin: undefined,
+  detectionPhase: "never_started",
   uiLang: "zh",
   authStatus: "loading",
   isAuthenticated: false,
@@ -61,9 +70,27 @@ type ReducerAction<T extends keyof SidePanelAppState> = {
 
 export type SidePanelAppAction = {
   [K in keyof SidePanelAppState]: ReducerAction<K>;
-}[keyof SidePanelAppState];
+}[keyof SidePanelAppState] | { type: "hydrateWorkspace"; status: WorkspaceHydrationStatus; snapshot?: CandidateWorkspaceSnapshot; origin?: CandidateOrigin };
 
 export function sidePanelAppReducer(state: SidePanelAppState, action: SidePanelAppAction): SidePanelAppState {
+  if (action.type === "hydrateWorkspace") {
+    const s = action.snapshot;
+    const candidates = s ? mergeCandidateSnapshots(state.candidates, s.candidates.map((item) => {
+      const old = state.candidates.find((c) => c.block.id === item.block.id);
+      // Panel-local parse evidence remains local; a content status cannot create it.
+      return item.status === "idle" && old && sameCandidateResultContext(old, { block: item.block, origin: action.origin })
+        && (old.result || old.status === "loading") ? { ...item, status: old.status } : item;
+    }), action.origin).map((c) => c.status === "success" && !c.result ? { ...c, status: "idle" as const } : c) : [];
+    return { ...state, hydrationStatus: action.status, workspaceOrigin: action.origin,
+      detectionPhase: s?.detection.phase ?? "never_started", candidates,
+      isDetecting: s?.detection.phase === "detecting" && s.detection.mode === "viewport",
+      isFullPageScan: s?.fullPage.running ?? false,
+      scanProgress: s?.fullPage.running && s.fullPage.progress ? mapFullPageProgressMessage({ ...s.fullPage.progress }) : null,
+      isAutoSolving: s?.autoSolve.running ?? false,
+      autoSolveProgress: s?.autoSolve.progress ? mapAutoSolveProgressMessage({ ...s.autoSolve.progress }) : null,
+      fillFeedback: action.status === "ready" ? state.fillFeedback : null,
+    };
+  }
   const previousValue = state[action.type];
   const nextValue =
     typeof action.updater === "function"

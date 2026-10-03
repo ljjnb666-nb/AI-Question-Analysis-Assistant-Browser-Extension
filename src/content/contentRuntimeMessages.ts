@@ -1,4 +1,4 @@
-import type { BoundingBox, ExtMessage, ParseResult, QuestionBlock, UpdateCandidateSelectionMsg } from "@/shared/types";
+import type { BoundingBox, ExtMessage, ParseResult, QuestionBlock, UpdateCandidateSelectionMsg, WorkspaceSnapshotResponse } from "@/shared/types";
 import type { HighlightLayer } from "./highlight/HighlightLayer";
 import type { CandidateStatusMap } from "./contentRuntimeState";
 import { applySelectionUpdate as applySelectionUpdateCore } from "./layoutSync";
@@ -6,6 +6,8 @@ import { handleContentMessage } from "./contentMessageRouter";
 import { isCurrentRuntimeQuestionBlock } from "./liveQuestionObservation";
 
 type RegisterContentRuntimeMessageHandlersOptions = {
+  getWorkspaceSnapshot?: (expectedUrl: string) => WorkspaceSnapshotResponse;
+  notifySelectionChanged?: () => void;
   cancelFullPageScan: () => void;
   cancelManualCapture: () => void;
   candidateStatusMap: CandidateStatusMap;
@@ -38,6 +40,10 @@ export function registerContentRuntimeMessageHandlers(options: RegisterContentRu
 export function createContentRuntimeMessageListener(options: RegisterContentRuntimeMessageHandlersOptions) {
   return (message: ExtMessage, _sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) => {
     if (options.isRuntimeCurrent && !options.isRuntimeCurrent()) return false;
+    if (message.type === "GET_CANDIDATE_WORKSPACE_SNAPSHOT") {
+      sendResponse(options.getWorkspaceSnapshot?.(message.expectedUrl) ?? { ok: false });
+      return false;
+    }
     return handleContentMessage(message, sendResponse, {
       cancelFullPageScan: options.cancelFullPageScan,
       cancelManualCapture: options.cancelManualCapture,
@@ -64,8 +70,9 @@ export function createContentRuntimeMessageListener(options: RegisterContentRunt
           activeHighlightBlocks: options.getActiveHighlightBlocks(),
           activeCandidates: options.getActiveCandidates(),
           highlightLayer: options.getHighlightLayer(),
-          notifySidePanel: options.notifySidePanel,
+          notifySidePanel: options.notifySelectionChanged ? () => {} : options.notifySidePanel,
         });
+        options.notifySelectionChanged?.();
       },
       validateQuestionResultAuthority: (block) => isCurrentRuntimeQuestionBlock(block),
       verifyParsedAnswerInPage: options.verifyParsedAnswerInPage,

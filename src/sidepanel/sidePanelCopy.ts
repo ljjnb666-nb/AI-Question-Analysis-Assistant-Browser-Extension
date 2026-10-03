@@ -1,6 +1,7 @@
 import type { UILang } from "./displayUtils";
 
 export interface SidePanelCopy {
+  runtime: { syncing: string; unavailable: string; retry: string };
   appName: string;
   contextLine: (providerName?: string) => string;
   contextProtected: string;
@@ -55,6 +56,7 @@ export interface SidePanelCopy {
 
 export const SIDEPANEL_COPY: Record<UILang, SidePanelCopy> = {
   zh: {
+    runtime: { syncing: "正在同步题目工作区", unavailable: "题目工作区暂时不可用", retry: "重新同步" },
     appName: "题目解析助手",
     contextLine: (providerName) =>
       providerName ? `当前页面 · ${providerName}` : "当前页面",
@@ -108,6 +110,7 @@ export const SIDEPANEL_COPY: Record<UILang, SidePanelCopy> = {
     },
   },
   en: {
+    runtime: { syncing: "Syncing question workspace", unavailable: "Question workspace unavailable", retry: "Retry sync" },
     appName: "Quiz Solver",
     contextLine: (providerName) =>
       providerName ? `Current page · ${providerName}` : "Current page",

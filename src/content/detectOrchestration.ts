@@ -1,7 +1,7 @@
 import type { QuestionBlock } from "@/shared/types";
 import type { ScanScrollRoot } from "./detector/fullPageDetector";
 import { CandidateRootAggregation } from "./candidateRootAggregation";
-import { sanitizeQuestionBlockForRuntimeMessage } from "@/shared/utils/mediaSerialization";
+import { projectCandidateSnapshots } from "./candidateWorkspaceRuntime";
 
 type CandidateStatus = { status: string; selected: boolean };
 
@@ -60,11 +60,7 @@ export function notifySidePanel(
   candidates: QuestionBlock[],
   deps: NotifySidePanelDeps,
 ): void {
-  const enriched = candidates.map((block) => ({
-    block: sanitizeQuestionBlockForRuntimeMessage(block),
-    selected: deps.candidateStatusMap.get(block.id)?.selected ?? false,
-    status: (deps.candidateStatusMap.get(block.id)?.status ?? "idle") as "idle" | "loading" | "success" | "error",
-  }));
+  const enriched = projectCandidateSnapshots(candidates, deps.candidateStatusMap);
   deps.safeRuntimeSendMessage({ type: "AUTO_DETECT_RESULT_READY", candidates: enriched });
 }
 

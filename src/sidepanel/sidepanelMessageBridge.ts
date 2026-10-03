@@ -1,4 +1,4 @@
-import type { CandidateSnapshot, DetectedCandidate, QuestionBlock } from "@/shared/types";
+import type { CandidateOrigin, CandidateSnapshot, DetectedCandidate, QuestionBlock } from "@/shared/types";
 import { mapAutoSolveDoneFeedback } from "@/shared/ui/autoSolveStatus";
 import type { UserFeedback } from "@/shared/ui/userFeedback";
 import {
@@ -16,6 +16,9 @@ import {
 type StorageChangeMap = { [key: string]: chrome.storage.StorageChange };
 
 export type SidePanelRuntimeHandlers = {
+  /** Rendering is origin/sequence-fenced by hydration; owner reconciliation stays global. */
+  renderWorkspace?: boolean;
+  getFeedbackOrigin?: () => CandidateOrigin | undefined;
   loadLanguage: () => Promise<"zh" | "en">;
   setUiLang: (lang: "zh" | "en") => void;
   setCandidates: React.Dispatch<React.SetStateAction<DetectedCandidate[]>>;
@@ -29,6 +32,7 @@ export type SidePanelRuntimeHandlers = {
 };
 
 export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHandlers): () => void {
+  let disposed = false;
   void handlers.loadLanguage().then(handlers.setUiLang);
 
   const onChanged = (changes: StorageChangeMap, areaName: string) => {
@@ -41,6 +45,28 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
     const origin = sender.tab?.id && sender.tab.url
       ? { tabId: sender.tab.id, url: sender.tab.url }
       : undefined;
+    if (handlers.renderWorkspace === false) {
+      if (origin?.tabId != null) {
+        if (msg.type === "FULL_PAGE_DETECT_PROGRESS") void reconcileProtectedWorkOwnerFromRuntime("fullPage", origin.tabId);
+        if (msg.type === "FULL_PAGE_DETECT_DONE") void clearProtectedWorkOwner("fullPage", origin.tabId);
+        if (msg.type === "AUTO_SOLVE_PROGRESS" && msg.running) void reconcileProtectedWorkOwnerFromRuntime("autoSolve", origin.tabId);
+        if (msg.type === "AUTO_SOLVE_DONE") void clearProtectedWorkOwner("autoSolve", origin.tabId);
+      }
+      // Completion is feedback only. Owner reconciliation above stays global;
+      // candidates and progress remain exclusively snapshot-authoritative.
+      const matchesBoundOrigin = () => {
+        const bound = handlers.getFeedbackOrigin?.();
+        return !disposed && bound !== undefined && origin !== undefined
+          && bound.tabId === origin.tabId && bound.url === origin.url
+          && (sender.frameId === undefined || sender.frameId === 0);
+      };
+      if (msg.type === "AUTO_SOLVE_DONE" && matchesBoundOrigin()) {
+        void handlers.loadLanguage().then((lang) => {
+          if (matchesBoundOrigin()) handlers.setFillFeedback(mapAutoSolveDoneFeedback(msg, lang));
+        });
+      }
+      return;
+    }
     if (msg.type === "AUTO_DETECT_RESULT_READY") {
       const snapshots = (msg.candidates as CandidateSnapshot[]) ?? [];
       handlers.setCandidates((prev) => mergeCandidateSnapshots(prev, snapshots, origin));
@@ -96,6 +122,7 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
   chrome.runtime.onMessage.addListener(onMessage);
   chrome.storage.onChanged.addListener(onChanged);
   return () => {
+    disposed = true;
     chrome.runtime.onMessage.removeListener(onMessage);
     chrome.storage.onChanged.removeListener(onChanged);
   };

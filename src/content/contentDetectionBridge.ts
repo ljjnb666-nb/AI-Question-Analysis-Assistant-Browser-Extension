@@ -6,6 +6,9 @@ import { createDetectSessionDeps as createDetectSessionDepsFactory, createNotify
 import { refineFullPageCandidatesViaManualPipeline as refineFullPageCandidatesViaManualPipelineCore } from "./fullPagePlan";
 
 type BridgeDeps = {
+  resetWorkspace?: () => void;
+  workspaceRouteEpoch?: () => number;
+  workspaceDetectionGeneration?: () => number;
   candidateStatusMap: Map<string, { status: string; selected: boolean }>;
   cancelFullPageScan: () => void;
   createHighlightLayer: (options: ConstructorParameters<typeof HighlightLayer>[0]) => HighlightLayer;
@@ -60,6 +63,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
     deps.setLastFullPageLayoutKey("");
     deps.refreshLayoutResizeObservation();
     notifySidePanel([]);
+    deps.resetWorkspace?.();
   }
 
   async function refineFullPageCandidatesViaManualPipeline(candidates: QuestionBlock[]): Promise<QuestionBlock[]> {
@@ -107,17 +111,21 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
 
   async function handleFullPageDetect() {
     if (!isRuntimeCurrent()) return;
+    const epoch = deps.workspaceRouteEpoch?.();
+    const detectionGeneration = deps.workspaceDetectionGeneration?.();
+    const isDetectionCurrent = () => isRuntimeCurrent() && deps.workspaceRouteEpoch?.() === epoch
+      && deps.workspaceDetectionGeneration?.() === detectionGeneration;
     await runFullPageDetectSession(createDetectSessionDepsFactory({
       candidateStatusMap: deps.candidateStatusMap,
-      clearRouteOwnedState,
-      cancelFullPageScan: deps.cancelFullPageScan,
+      clearRouteOwnedState: () => { if (isDetectionCurrent()) clearRouteOwnedState(); },
+      cancelFullPageScan: () => { if (isDetectionCurrent()) deps.cancelFullPageScan(); },
       createHighlightLayer: deps.createHighlightLayer,
       detectCandidatesFullPage: deps.detectCandidatesFullPage,
       detectCandidatesInViewport: deps.detectCandidatesInViewport,
       destroyHighlightLayer: deps.destroyHighlightLayer,
       getFullPageLayoutKey: deps.getFullPageLayoutKey,
       isFullPageScanRunning: deps.isFullPageScanRunning,
-      isRuntimeCurrent,
+      isRuntimeCurrent: isDetectionCurrent,
       logEvent: deps.logEvent,
       notifySidePanel,
       refreshFullPageHighlightsAfterLayoutChange: deps.refreshFullPageHighlightsAfterLayoutChange,

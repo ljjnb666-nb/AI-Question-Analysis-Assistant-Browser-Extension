@@ -49,6 +49,10 @@ function getStatusBadgeProps(status: SidePanelWorkspaceStatus, lang: UILang): {
 } {
   const copy = SIDEPANEL_COPY[lang].status;
   switch (status) {
+    case "syncing_runtime":
+      return { label: SIDEPANEL_COPY[lang].runtime.syncing, variant: "info" };
+    case "runtime_unavailable":
+      return { label: SIDEPANEL_COPY[lang].runtime.unavailable, variant: "warning" };
     case "checking_session":
       return { label: copy.checking_session, variant: "info" };
     case "service_unavailable":

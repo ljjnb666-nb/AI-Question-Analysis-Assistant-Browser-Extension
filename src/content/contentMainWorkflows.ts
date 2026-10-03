@@ -41,6 +41,10 @@ type LayoutWatchLike = {
 };
 
 type CreateContentMainWorkflowsOptions = {
+  workspaceRouteEpoch?: () => number;
+  setSupersededAutoSolveStopped?: () => void;
+  sendSupersededAutoSolveDone?: CreateContentMainWorkflowsOptions["sendAutoSolveDone"];
+  sendSupersededAutoSolveProgress?: CreateContentMainWorkflowsOptions["sendAutoSolveProgress"];
   isRuntimeCurrent: () => boolean;
   floatingMgr: {
     close: () => void;
@@ -269,10 +273,14 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
   }
 
   async function handleAutoSolveAll() {
+    const startedAtUrl = location.href;
+    const routeEpoch = options.workspaceRouteEpoch?.();
+    const isRunCurrent = () => options.isRuntimeCurrent() && location.href === startedAtUrl && options.workspaceRouteEpoch?.() === routeEpoch;
     // UI-00A entry guard (layer 1): refuse to start the workflow without a
     // usable provider. Even if this guard is bypassed, the fill core's
     // provenance gate keeps real-page mutation at zero.
     const autoSolveSettings = await loadSettings();
+    if (!isRunCurrent()) return;
     if (!isProviderRuntimeConfigured(getProvider(autoSolveSettings.providerId ?? "anthropic"), autoSolveSettings)) {
       options.sendAutoSolveDone({
         ok: false,
@@ -286,9 +294,12 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
     await runAutoSolveAll(
       {
         isRunning: options.runtimeState.getAutoSolveRunning,
-        setRunning: options.runtimeState.setAutoSolveRunning,
-        isStopRequested: options.runtimeState.getAutoSolveStopRequested,
-        requestStop: options.runtimeState.setAutoSolveStopRequested,
+        setRunning: (running) => {
+          if (isRunCurrent()) options.runtimeState.setAutoSolveRunning(running);
+          else if (!running && options.isRuntimeCurrent()) options.setSupersededAutoSolveStopped?.();
+        },
+        isStopRequested: () => !isRunCurrent() || options.runtimeState.getAutoSolveStopRequested(),
+        requestStop: (stop) => { if (isRunCurrent()) options.runtimeState.setAutoSolveStopRequested(stop); },
       },
       {
         activeCandidates: options.runtimeState.getActiveCandidates(),
@@ -346,8 +357,14 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         resolveQuestionAdvance: options.waitForQuestionAdvance,
         resolveQuestionBlockFromBBox: options.resolveQuestionBlockFromBBox,
         resolveScrollRoot: options.resolveFullPageScrollRoot,
-        sendAutoSolveDone: options.sendAutoSolveDone,
-        sendAutoSolveProgress: options.sendAutoSolveProgress,
+        sendAutoSolveDone: (payload) => {
+          if (isRunCurrent()) options.sendAutoSolveDone(payload);
+          else if (options.isRuntimeCurrent()) options.sendSupersededAutoSolveDone?.(payload);
+        },
+        sendAutoSolveProgress: (payload) => {
+          if (isRunCurrent()) options.sendAutoSolveProgress(payload);
+          else if (options.isRuntimeCurrent()) options.sendSupersededAutoSolveProgress?.(payload);
+        },
         setScrollPosition: options.setScrollPosition,
         shouldPersistAutoSolveParseResult: options.shouldPersistAutoSolveParseResult,
         shouldPreferViewportPreview: options.shouldPreferViewportPreview,

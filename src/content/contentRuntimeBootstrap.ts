@@ -44,7 +44,8 @@ import {
   shouldStopAutoSolveAtTail,
 } from "./autoSolveHeuristics";
 import { pickBestAutoSolvePreviewText } from "./autoSolvePreview";
-import { pauseMs, withTimeout } from "./contentRuntime";
+import { pauseMs, withTimeout, safeRuntimeSendMessage, sendAutoSolveDone as sendLegacyAutoSolveDone, sendAutoSolveProgress as sendLegacyAutoSolveProgress } from "./contentRuntime";
+import { createCandidateWorkspaceRuntime } from "./candidateWorkspaceRuntime";
 import { initAnalytics } from "@/shared/utils/analytics";
 import { createContentMainBridges } from "./contentMainBridges";
 import { createContentRuntimeState } from "./contentRuntimeState";
@@ -81,6 +82,11 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
 
   const floatingMgr = new FloatingWindowManager();
   const runtimeState = createContentRuntimeState();
+  const workspace = createCandidateWorkspaceRuntime({ url: () => location.href, send: safeRuntimeSendMessage });
+  const cancelWorkspaceScan = () => {
+    cancelFullPageScan();
+    workspace.cancelFullPage();
+  };
   let workflows: ReturnType<typeof createContentMainWorkflows> | null = null;
   let startManualCaptureImpl = (_forceVisionMode: boolean) => {};
   function startManualCapture(forceVisionMode: boolean) {
@@ -114,6 +120,7 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     sortAutoSolveCandidates,
     waitForQuestionAdvance,
   } = createContentMainBridges({
+    workspace,
     candidateStatusMap: runtimeState.candidateStatusMap,
     floatingMgr,
     isRuntimeCurrent: lifecycle.isCurrent,
@@ -123,6 +130,12 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     state: runtimeState,
   });
   workflows = createContentMainWorkflows({
+    workspaceRouteEpoch: () => workspace.metadata().routeEpoch,
+    // Preserve owner termination and safety evidence without projecting an
+    // old route's completion/progress into the current workspace snapshot.
+    setSupersededAutoSolveStopped: () => runtimeState.setAutoSolveRunning(false),
+    sendSupersededAutoSolveDone: sendLegacyAutoSolveDone,
+    sendSupersededAutoSolveProgress: sendLegacyAutoSolveProgress,
     isRuntimeCurrent: lifecycle.isCurrent,
     clickNextQuestionButton,
     detectCandidatesFullPage: async () => detectCandidatesFullPage(() => {}),
@@ -169,7 +182,10 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     refineViewportCandidate,
     resolveFullPageScrollRoot,
     resolveQuestionBlockFromBBox,
-    runtimeState,
+    runtimeState: { ...runtimeState, setAutoSolveRunning: (running) => {
+      runtimeState.setAutoSolveRunning(running);
+      workspace.setAutoSolveRunning(running);
+    } },
     screenshotWithRetry,
     sendAutoSolveDone,
     sendAutoSolveProgress,
@@ -211,7 +227,12 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
   workflows.refreshLayoutResizeObservation();
 
   const messageHandlerOptions = {
-    cancelFullPageScan,
+    cancelFullPageScan: cancelWorkspaceScan,
+    getWorkspaceSnapshot: workspace.snapshot,
+    notifySelectionChanged: () => {
+      const candidates = workspace.updateSelection(runtimeState.candidateStatusMap);
+      safeRuntimeSendMessage({ type: "AUTO_DETECT_RESULT_READY", candidates, ...workspace.metadata() });
+    },
     cancelManualCapture: () => {
       runtimeState.destroyActiveOverlay();
     },
@@ -238,6 +259,7 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     resetDetectionArtifacts: () => {
       runtimeState.destroyActiveOverlay();
       runtimeState.resetDetectionArtifacts();
+      workspace.resetDetection();
     },
     startAutoSolveAll: () => {
       void workflows.handleAutoSolveAll();
@@ -291,6 +313,7 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
       cleanup(() => runtimeMediaPayloadStore.clear());
       cleanup(() => runtimeMediaSourceLocatorStore.clear());
       cleanup(runtimeState.disposeEphemeralState);
+      cleanup(workspace.dispose);
 
       if (activeRuntime === runtimeHandle) activeRuntime = null;
       cleanup(() => options.onShutdown?.());

@@ -29,6 +29,13 @@ import {
 import type { AutoSolveProgressState, ScanProgressState, SidePanelAppState } from "./sidepanelAppState";
 import { initialSidePanelAppState, sidePanelAppReducer } from "./sidepanelAppState";
 import { useSidePanelActions } from "./useSidePanelActions";
+import { useCandidateWorkspaceHydration } from "./useCandidateWorkspaceHydration";
+import type { CandidateOrigin, CandidateWorkspaceSnapshot } from "@/shared/types";
+import type { WorkspaceHydrationStatus } from "./workspaceHydration";
+import { OrbitButton, OrbitSurface } from "@/shared/ui/orbitPrimitives";
+import { WorkspaceUserFeedback } from "./WorkspaceUserFeedback";
+import { SIDEPANEL_COPY } from "./sidePanelCopy";
+import { ORBIT_SCROLLBAR_CSS } from "./orbitScrollbar";
 import {
   deriveSidePanelWorkspaceStatus,
   deriveWorkspaceActivity,
@@ -113,6 +120,12 @@ export const SidePanelApp: React.FC = () => {
   // and re-reconciles on auth-related storage changes; storage values alone
   // never unlock the workspace.
   const session = useAuthSession();
+  const workspaceAccessRef = useRef<{ status: WorkspaceHydrationStatus; origin?: CandidateOrigin }>({ status: "idle" });
+  const applyWorkspace = useCallback((status: WorkspaceHydrationStatus, snapshot?: CandidateWorkspaceSnapshot, origin?: CandidateOrigin) => {
+    workspaceAccessRef.current = { status, origin };
+    dispatch({ type: "hydrateWorkspace", status, snapshot, origin });
+  }, []);
+  const retryWorkspace = useCandidateWorkspaceHydration(session, applyWorkspace);
 
   // Latest committed state for non-render consumers.
   const stateRef = useRef(state);
@@ -275,6 +288,9 @@ export const SidePanelApp: React.FC = () => {
     chrome.storage.onChanged.addListener(handleStorageChange);
 
     const unregisterRuntime = registerSidePanelRuntimeListeners({
+      renderWorkspace: false,
+      getFeedbackOrigin: () => session.getState().status === "authenticated"
+        && workspaceAccessRef.current.status === "ready" ? workspaceAccessRef.current.origin : undefined,
       loadLanguage: async () => ((await loadSettings()).language ?? "zh") as UILang,
       setUiLang,
       setCandidates,
@@ -292,6 +308,7 @@ export const SidePanelApp: React.FC = () => {
       unregisterRuntime();
     };
   }, [
+    session,
     setAutoSolveProgress,
     setCandidates,
     setExpandedIds,
@@ -324,6 +341,8 @@ export const SidePanelApp: React.FC = () => {
     candidates: state.candidates,
     isBatchParsing: state.isBatchParsing,
     isAuthenticatedNow: () => session.getState().status === "authenticated",
+    isWorkspaceReadyNow: () => workspaceAccessRef.current.status === "ready",
+    getWorkspaceOrigin: () => workspaceAccessRef.current.origin,
     markProtectedWork,
     protectedWork: protectedWorkRef,
     setCandidates,
@@ -350,6 +369,7 @@ export const SidePanelApp: React.FC = () => {
       deriveSidePanelWorkspaceStatus({
         authStatus: state.authStatus,
         isAuthenticated: state.isAuthenticated,
+        hydrationStatus: state.hydrationStatus,
         isDetecting: state.isDetecting,
         isFullPageScan: state.isFullPageScan,
         isAutoSolving: state.isAutoSolving,
@@ -366,6 +386,7 @@ export const SidePanelApp: React.FC = () => {
       state.isBatchFilling,
       state.isBatchParsing,
       state.isAuthenticated,
+      state.hydrationStatus,
       state.isDetecting,
       state.isFullPageScan,
     ],
@@ -426,6 +447,7 @@ export const SidePanelApp: React.FC = () => {
 
   return (
     <div style={APP_SHELL_STYLE}>
+      <style>{ORBIT_SCROLLBAR_CSS}</style>
       <SidePanelHeader
         authStatus={state.authStatus}
         isAuthenticated={state.isAuthenticated}
@@ -440,7 +462,7 @@ export const SidePanelApp: React.FC = () => {
         onRetryValidation={() => session.retryValidation()}
       />
 
-      <div style={PANEL_BODY_STYLE}>
+      <div className="orbit-panel-scroll" style={PANEL_BODY_STYLE}>
         {state.tab === "settings" ? (
           <WorkspaceTabPanel id="sidepanel-tabpanel-settings" tabId="settings">
             <SettingsTab
@@ -463,7 +485,17 @@ export const SidePanelApp: React.FC = () => {
           />
         ) : state.tab === "candidates" ? (
           <WorkspaceTabPanel id="sidepanel-tabpanel-candidates" tabId="candidates">
+            {state.hydrationStatus !== "ready" ? (
+              <OrbitSurface role="status">
+                <p>{state.hydrationStatus === "runtime_unavailable" ? SIDEPANEL_COPY[state.uiLang].runtime.unavailable : SIDEPANEL_COPY[state.uiLang].runtime.syncing}</p>
+                {state.hydrationStatus === "runtime_unavailable" ? <OrbitButton onClick={retryWorkspace}>{SIDEPANEL_COPY[state.uiLang].runtime.retry}</OrbitButton> : null}
+              </OrbitSurface>
+            ) : (
+            <>
+            <WorkspaceUserFeedback feedback={state.fillFeedback} activity={activity} />
             <CandidatesTab
+              detectionPhase={state.detectionPhase}
+              workspaceOrigin={state.workspaceOrigin}
               autoSolveProgress={state.autoSolveProgress}
               candidateViewFilter={state.candidateViewFilter}
               candidates={state.candidates}
@@ -500,6 +532,8 @@ export const SidePanelApp: React.FC = () => {
               onToggleCandidate={toggleSelect}
               onToggleDetails={toggleDetails}
             />
+            </>
+            )}
           </WorkspaceTabPanel>
         ) : state.tab === "history" ? (
           <WorkspaceTabPanel id="sidepanel-tabpanel-history" tabId="history">
