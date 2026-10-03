@@ -32,7 +32,8 @@ import { useSidePanelActions } from "./useSidePanelActions";
 import { useCandidateWorkspaceHydration } from "./useCandidateWorkspaceHydration";
 import type { CandidateOrigin, CandidateWorkspaceSnapshot } from "@/shared/types";
 import type { WorkspaceHydrationStatus } from "./workspaceHydration";
-import { OrbitButton, OrbitSurface, OrbitStatus } from "@/shared/ui/orbitPrimitives";
+import { OrbitButton, OrbitSurface } from "@/shared/ui/orbitPrimitives";
+import { WorkspaceUserFeedback } from "./WorkspaceUserFeedback";
 import { SIDEPANEL_COPY } from "./sidePanelCopy";
 import { ORBIT_SCROLLBAR_CSS } from "./orbitScrollbar";
 import {
@@ -288,6 +289,8 @@ export const SidePanelApp: React.FC = () => {
 
     const unregisterRuntime = registerSidePanelRuntimeListeners({
       renderWorkspace: false,
+      getFeedbackOrigin: () => session.getState().status === "authenticated"
+        && workspaceAccessRef.current.status === "ready" ? workspaceAccessRef.current.origin : undefined,
       loadLanguage: async () => ((await loadSettings()).language ?? "zh") as UILang,
       setUiLang,
       setCandidates,
@@ -305,6 +308,7 @@ export const SidePanelApp: React.FC = () => {
       unregisterRuntime();
     };
   }, [
+    session,
     setAutoSolveProgress,
     setCandidates,
     setExpandedIds,
@@ -488,7 +492,7 @@ export const SidePanelApp: React.FC = () => {
               </OrbitSurface>
             ) : (
             <>
-            {state.fillFeedback && !activity && <OrbitStatus tone={state.fillFeedback.tone} label={state.fillFeedback.message} />}
+            <WorkspaceUserFeedback feedback={state.fillFeedback} activity={activity} />
             <CandidatesTab
               detectionPhase={state.detectionPhase}
               workspaceOrigin={state.workspaceOrigin}

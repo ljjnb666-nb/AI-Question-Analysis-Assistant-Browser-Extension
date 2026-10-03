@@ -9,6 +9,8 @@ import { APP_SHELL_STYLE, PANEL_BODY_STYLE, SidePanelHeader, SidePanelActivitySt
 import { deriveWorkspaceActivity } from "../../src/sidepanel/sidePanelWorkspaceState";
 import { SettingsTab } from "../../src/sidepanel/settingsPanel";
 import { ORBIT_SCROLLBAR_CSS } from "../../src/sidepanel/orbitScrollbar";
+import { WorkspaceUserFeedback } from "../../src/sidepanel/WorkspaceUserFeedback";
+import { getBatchFillFeedback, getFillActionFeedback } from "../../src/sidepanel/sidepanelActionMessages";
 
 const params = new URLSearchParams(location.search);
 const lang = params.get("lang") === "en" ? "en" : "zh";
@@ -51,18 +53,22 @@ function Fixture() {
   const [candidates, setCandidates] = useState(fixtures);
   const [filter, setFilter] = useState<CandidateViewFilter>(mode === "review" ? "risky" : mode === "selected" ? "selected" : "all");
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
-  const [running, setRunning] = useState(mode === "running");
+  const [running, setRunning] = useState(mode === "running" || mode === "feedback-warning");
+  const feedback = mode === "feedback-success" ? getFillActionFeedback(lang, { ok: true })
+    : mode === "feedback-warning" ? getBatchFillFeedback(lang, 1, 1, 1)
+    : mode === "feedback-review" ? getFillActionFeedback(lang, { ok: false, code: "FILL_VERIFICATION_FAILED" }) : null;
   const [tab, setTab] = useState<"candidates" | "history" | "settings">(mode === "settings" ? "settings" : "candidates");
   const metrics = computeCandidateMetrics(candidates, filter, isRiskyCandidate);
   const progress = running ? { current: 3, total: 3, solved: 2, filled: 1, statusText: "", currentQuestionId: "q3", currentBlock: candidates[2].block } : null;
-  const activity = deriveWorkspaceActivity({ status: running ? "solving" : "ready", lang, isDetecting: false, isFullPageScan: false, scanProgress: null,
-    isAutoSolving: running, autoSolveProgress: progress, fillFeedback: null, onStopAutoSolve: () => setRunning(false) });
+  const activity = deriveWorkspaceActivity({ status: mode === "feedback-review" ? "review_required" : running ? "solving" : "ready", lang, isDetecting: false, isFullPageScan: false, scanProgress: null,
+    isAutoSolving: running, autoSolveProgress: progress, fillFeedback: feedback, onStopAutoSolve: () => setRunning(false) });
   useEffect(() => { document.documentElement.lang = lang === "en" ? "en" : "zh-CN"; }, []);
   const noop = () => {};
   return <div style={APP_SHELL_STYLE}><style>{ORBIT_SCROLLBAR_CSS}</style>
     <SidePanelHeader lang={lang} authStatus="authenticated" isAuthenticated userEmail="" tab={tab} onTabChange={setTab} workspaceStatus={running ? "solving" : "ready"} providerName="Fixture" />
     <div className="orbit-panel-scroll" style={PANEL_BODY_STYLE}>
       <WorkspaceTabPanel id={`sidepanel-tabpanel-${tab}`} tabId={tab}>
+        <WorkspaceUserFeedback feedback={feedback} activity={activity} />
         {tab === "settings" ? <SettingsTab lang={lang} onLanguageChange={noop} /> : <CandidatesTab {...metrics} candidates={candidates} filteredCandidates={metrics.filteredCandidates}
           candidateViewFilter={filter} expandedIds={expandedIds} fillFeedback={null} detectionPhase="never_started" workspaceOrigin={origin}
           lang={lang} isAutoSolving={running} autoSolveProgress={progress} isBatchFilling={false} isBatchParsing={false} isDetecting={false} isFullPageScan={false} isRetryingRisky={false} scanProgress={null}

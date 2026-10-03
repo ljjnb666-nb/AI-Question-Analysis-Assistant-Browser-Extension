@@ -62,6 +62,28 @@ test("UI04-24: available image segments load actual image pixels, including mult
   await expect(page.getByText(/preview is unavailable/)).toHaveCount(0);
   await noOverflow(page);
 });
+test("RF01 feedback: 360px ZH/EN outcomes remain visible beside authoritative progress", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  for (const lang of ["zh", "en"]) {
+    await open(page, "feedback-success", lang);
+    await expect(page.getByTestId("workspace-user-feedback")).toContainText(lang === "en" ? "Fill completed" : "填写完成");
+    await expect(page.getByRole("button", { name: lang === "en" ? "Fill selected" : "填写所选" })).toBeVisible();
+    await expect(page.getByTestId("workspace-activity-strip")).toHaveCount(0);
+    await noOverflow(page);
+    if (lang === "zh") await capture(page, "sidepanel-ui04-feedback-success.png");
+    await open(page, "feedback-warning", lang);
+    await expect(page.getByTestId("workspace-user-feedback")).toContainText(lang === "en" ? "re-parsed" : "重新解析");
+    await expect(page.getByTestId("workspace-activity-strip")).toContainText(lang === "en" ? "Question 3 / 3" : "第 3 / 3 题");
+    await expect(page.getByRole("button", { name: lang === "en" ? "Stop Solve & Fill" : "停止解析并填答" })).toBeVisible();
+    await noOverflow(page);
+    if (lang === "en") await capture(page, "sidepanel-ui04-feedback-warning.png");
+    await open(page, "feedback-review", lang);
+    await expect(page.getByTestId("workspace-user-feedback")).toHaveCount(0);
+    await expect(page.getByTestId("workspace-activity-strip")).toBeVisible();
+  }
+  expect(errors).toEqual([]);
+});
 test("UI04 visual evidence: asserted empty, mixed, selected, review, running, long and Settings", async ({ page }) => {
   await open(page, "empty"); await expect(page.getByRole("article")).toHaveCount(0); await expect(page.getByText(/先用/)).toBeVisible(); await capture(page, "sidepanel-ui04-zh-empty.png");
   for (const lang of ["zh", "en"]) {
