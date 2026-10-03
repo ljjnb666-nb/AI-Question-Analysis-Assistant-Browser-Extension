@@ -155,7 +155,7 @@ export const SettingsSetupStatusCard: React.FC<{
         style={{
           ...sectionSurfaceStyle,
           padding: "14px 16px",
-          borderColor: orbitColors.semantic.successBorder,
+          border: `1px solid ${orbitColors.semantic.successBorder}`,
           background: `linear-gradient(180deg, ${orbitColors.semantic.successSurface}, rgba(20, 24, 31, 0.95))`,
           display: "flex",
           flexDirection: "column",
@@ -1126,13 +1126,23 @@ export const SettingsActionsSection: React.FC<{
         <UiButton
           onClick={onTest}
           disabled={testing}
-          aria-label={isEn ? "Test configuration" : "测试配置 (连接测试)"}
+          aria-label={
+            testing
+              ? copy.actions.testing
+              : isDirty
+                ? copy.actions.saveAndTest
+                : isEn
+                  ? copy.actions.test
+                  : `${copy.actions.test} (${copy.actions.testAlias})`
+          }
         >
           {testing
             ? copy.actions.testing
-            : isEn
-              ? copy.actions.test
-              : `${copy.actions.test} (${copy.actions.testAlias})`}
+            : isDirty
+              ? copy.actions.saveAndTest
+              : isEn
+                ? copy.actions.test
+                : `${copy.actions.test} (${copy.actions.testAlias})`}
         </UiButton>
 
         {isDirty ? (

@@ -110,9 +110,6 @@ function Fixture() {
           (b) => b.textContent?.includes("保存设置") || b.textContent?.includes("Save Settings"),
         );
         if (saveBtn) saveBtn.click();
-      } else if (state === "validation-testing" || state === "validation-success" || state === "ready" || state === "validation-error") {
-        const testBtn = document.querySelector('button[aria-label*="测试配置"], button[aria-label*="Test"]') as HTMLButtonElement;
-        if (testBtn) testBtn.click();
       }
     };
     void runStateAction();

@@ -21,9 +21,9 @@ export const SETTINGS_COPY = {
     stepper: {
       title: "快速配置引导",
       step1: "选择服务商",
-      step2: "填写凭据与模型",
+      step2: "凭据模型",
       step3: "测试配置",
-      step4: "就绪开始解题",
+      step4: "就绪解题",
       summaryUnconfigured: "请先选择一个 AI 服务商并填写对应的 API Key。",
       summaryIncomplete: "服务商已选定，请继续填写 API Key 并选择模型。",
       summarySavedUntested: "配置已保存，请点击「测试配置」验证是否可用。",
@@ -33,7 +33,7 @@ export const SETTINGS_COPY = {
     },
     readyBanner: {
       badge: "AI 运行正常",
-      title: "AI 服务已就绪",
+      title: "AI 配置已就绪",
       description: "当前服务商与模型已通过连接验证，可以在候选题工作台开始题目识别与解析。",
       retest: "重新测试",
     },
@@ -59,7 +59,7 @@ export const SETTINGS_COPY = {
       showKey: "显示 API Key",
       hideKey: "隐藏 API Key",
       getKeyLink: (platform: string) => `前往 ${platform} 获取 Key`,
-      maskedNotice: "密钥安全存储于本地受保护区域，不会上传至任何第三方服务器。",
+      maskedNotice: "API Key 会加密保存在本地，并仅用于向你选择的模型服务商或自定义端点发起请求。",
     },
     model: {
       title: "模型",
@@ -127,9 +127,9 @@ export const SETTINGS_COPY = {
     stepper: {
       title: "Setup Guide",
       step1: "Choose Provider",
-      step2: "Add API Key & Model",
-      step3: "Test Configuration",
-      step4: "Ready to Solve",
+      step2: "Credentials",
+      step3: "Test Setup",
+      step4: "Ready",
       summaryUnconfigured: "Please select an AI provider and enter your API Key to get started.",
       summaryIncomplete: "Provider selected. Please enter your API Key and choose a model.",
       summarySavedUntested: "Settings saved. Click \"Test configuration\" to verify your connection.",
@@ -165,7 +165,7 @@ export const SETTINGS_COPY = {
       showKey: "Show API key",
       hideKey: "Hide API key",
       getKeyLink: (platform: string) => `Get key from ${platform}`,
-      maskedNotice: "Keys are securely stored in local encrypted storage and never sent to third-party tracking.",
+      maskedNotice: "Your API Key is encrypted and stored locally, and is only sent to your chosen AI provider or custom endpoint.",
     },
     model: {
       title: "Model",

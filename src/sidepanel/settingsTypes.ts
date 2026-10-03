@@ -22,9 +22,34 @@ export interface SettingsFormValues {
   language: "zh" | "en";
 }
 
+export interface ValidationFingerprintInput {
+  providerId: ProviderId;
+  apiKey: string;
+  apiModel: string;
+  customBaseUrl?: string;
+  customProviderProtocol?: "openai" | "anthropic";
+}
+
+/**
+ * Deterministically computes the validation fingerprint covering all provider-runtime-relevant
+ * authority configuration fields: providerId, apiKey, apiModel, customBaseUrl, and customProviderProtocol.
+ */
+export function computeValidationFingerprint(
+  input: ValidationFingerprintInput | null | undefined,
+): string {
+  if (!input) return "";
+  return JSON.stringify({
+    providerId: input.providerId ?? "",
+    apiKey: (input.apiKey ?? "").trim(),
+    apiModel: (input.apiModel ?? "").trim(),
+    customBaseUrl: (input.customBaseUrl ?? "").trim(),
+    customProviderProtocol: input.customProviderProtocol ?? "openai",
+  });
+}
+
 /**
  * Derives current setup status based on runtime provider configuration,
- * dirty state, testing state, and test feedback.
+ * dirty state, testing state, validation authority, and test feedback.
  */
 export function deriveSetupStatus(params: {
   isConfigured: boolean;
@@ -32,13 +57,17 @@ export function deriveSetupStatus(params: {
   testing: boolean;
   testResult: UserFeedback | null;
   savedOnce: boolean;
+  isValidated?: boolean;
 }): SetupStatus {
-  const { isConfigured, isDirty, testing, testResult, savedOnce } = params;
+  const { isConfigured, isDirty, testing, testResult, savedOnce, isValidated = false } = params;
 
   if (testing) return "testing";
 
   if (testResult) {
-    if (testResult.tone === "success") return "validated";
+    if (testResult.tone === "success") {
+      if (isValidated) return "validated";
+      return isDirty ? "incomplete" : "saved_untested";
+    }
     return "error";
   }
 

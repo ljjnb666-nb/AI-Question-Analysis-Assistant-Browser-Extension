@@ -43,6 +43,8 @@ async function noOverflow(page: Page) {
 async function capture(page: Page, name: string) {
   await noOverflow(page);
   await page.evaluate(async () => {
+    const scroller = document.querySelector(".orbit-panel-scroll");
+    if (scroller) scroller.scrollTop = 0;
     await document.fonts.ready;
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   });
@@ -94,25 +96,38 @@ test.describe("UI-05: Visual Evidence & First-Run Redesign Screenshots", () => {
 
   test("ui05-config-saved-not-tested.png", async ({ page }) => {
     await open(page, "config-saved-not-tested", "zh", 360);
-    await page.waitForTimeout(200);
+    await expect(page.getByText("已保存（待测试）")).toBeVisible();
     await capture(page, "ui05-config-saved-not-tested.png");
   });
 
   test("ui05-validation-testing.png", async ({ page }) => {
     await open(page, "validation-testing", "zh", 360);
-    await page.waitForTimeout(200);
+    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
+    await expect(testBtn).toBeVisible();
+    await testBtn.click();
+    await expect(page.getByText("正在测试配置...")).toBeVisible();
+    const loadingBtn = page.getByRole("button", { name: /测试中\.\.\.|Testing\.\.\./ });
+    await expect(loadingBtn).toBeDisabled();
     await capture(page, "ui05-validation-testing.png");
   });
 
   test("ui05-validation-success.png", async ({ page }) => {
     await open(page, "validation-success", "zh", 360);
-    await page.waitForTimeout(400);
+    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
+    await expect(testBtn).toBeVisible();
+    await testBtn.click();
+    await expect(page.getByText("AI 配置已就绪")).toBeVisible();
+    await expect(page.locator('[data-test-tone="success"]')).toBeVisible();
     await capture(page, "ui05-validation-success.png");
   });
 
   test("ui05-validation-error.png", async ({ page }) => {
     await open(page, "validation-error", "zh", 360);
-    await page.waitForTimeout(400);
+    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
+    await expect(testBtn).toBeVisible();
+    await testBtn.click();
+    await expect(page.getByText("连接测试失败")).toBeVisible();
+    await expect(page.locator('[data-test-tone="error"]')).toBeVisible();
     await capture(page, "ui05-validation-error.png");
   });
 
@@ -128,31 +143,47 @@ test.describe("UI-05: Visual Evidence & First-Run Redesign Screenshots", () => {
 
   test("ui05-ready.png", async ({ page }) => {
     await open(page, "ready", "zh", 360);
-    await page.waitForTimeout(400);
+    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
+    await expect(testBtn).toBeVisible();
+    await testBtn.click();
+    await expect(page.locator('[data-testid="settings-ready-banner"]')).toBeVisible();
+    await expect(page.getByText("已保存（待测试）")).toHaveCount(0);
     await capture(page, "ui05-ready.png");
   });
 
   test("ui05-320.png", async ({ page }) => {
     await open(page, "ready", "zh", 320);
-    await page.waitForTimeout(300);
+    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
+    await expect(testBtn).toBeVisible();
+    await testBtn.click();
+    await expect(page.locator('[data-testid="settings-ready-banner"]')).toBeVisible();
     await capture(page, "ui05-320.png");
   });
 
   test("ui05-360.png", async ({ page }) => {
     await open(page, "ready", "zh", 360);
-    await page.waitForTimeout(300);
+    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
+    await expect(testBtn).toBeVisible();
+    await testBtn.click();
+    await expect(page.locator('[data-testid="settings-ready-banner"]')).toBeVisible();
     await capture(page, "ui05-360.png");
   });
 
   test("ui05-400.png", async ({ page }) => {
     await open(page, "ready", "zh", 400);
-    await page.waitForTimeout(300);
+    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
+    await expect(testBtn).toBeVisible();
+    await testBtn.click();
+    await expect(page.locator('[data-testid="settings-ready-banner"]')).toBeVisible();
     await capture(page, "ui05-400.png");
   });
 
   test("ui05-480.png", async ({ page }) => {
     await open(page, "ready", "zh", 480);
-    await page.waitForTimeout(300);
+    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
+    await expect(testBtn).toBeVisible();
+    await testBtn.click();
+    await expect(page.locator('[data-testid="settings-ready-banner"]')).toBeVisible();
     await capture(page, "ui05-480.png");
   });
 });

@@ -64,6 +64,7 @@ vi.mock("@/shared/utils/parseRouter", async (importOriginal) => ({
 import { parseQuestion } from "@/shared/utils/parseRouter";
 import { DEFAULT_SETTINGS, type AppSettings, type ParseResult } from "@/shared/types";
 import { SettingsTab } from "./settingsPanel";
+import { computeValidationFingerprint, deriveSetupStatus } from "./settingsTypes";
 import * as storage from "@/shared/utils/storage";
 
 const SYNTHETIC_TEST_KEY = "sk-test-ui05-example";
@@ -272,7 +273,7 @@ describe("UI-05: Settings & First-Run Experience Tests (UI05-01 - UI05-30)", () 
 
     await waitFor(() => {
       expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
-      expect(screen.getByText("AI 服务已就绪")).toBeInTheDocument();
+      expect(screen.getByText("AI 配置已就绪")).toBeInTheDocument();
       expect(screen.getByText(/连接成功/)).toBeInTheDocument();
     });
   });
@@ -508,7 +509,7 @@ describe("UI-05: Settings & First-Run Experience Tests (UI05-01 - UI05-30)", () 
     fireEvent.click(testBtn);
 
     await waitFor(() => {
-      expect(screen.getByText("AI 服务已就绪")).toBeInTheDocument();
+      expect(screen.getByText("AI 配置已就绪")).toBeInTheDocument();
     });
     // Account auth login was never invoked by provider test
     expect(mockAuth.handleLogin).not.toHaveBeenCalled();
@@ -526,5 +527,275 @@ describe("UI-05: Settings & First-Run Experience Tests (UI05-01 - UI05-30)", () 
 
     // No auto-fill or auto-submit dispatch occurs
     expect(globalThis.chrome.tabs).toBeDefined();
+  });
+});
+
+describe("UI-05 Review Fix 01: Validation Authority & Freshness Tests (RF01-VAL01 - RF01-VAL08)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // RF01-VAL01: successful validation of clean saved config -> Ready
+  it("RF01-VAL01: successful validation of clean saved config -> Ready", async () => {
+    mockSettings({ apiKey: SYNTHETIC_TEST_KEY });
+    vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    const input = await screen.findByTestId("settings-api-key-input");
+    await waitFor(() => {
+      expect(input).toHaveValue(SYNTHETIC_TEST_KEY);
+    });
+
+    const testBtn = await screen.findByRole("button", { name: /测试配置|连接测试/ });
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+      expect(screen.getByText("AI 配置已就绪")).toBeInTheDocument();
+    });
+  });
+
+  // RF01-VAL02: dirty config test cannot become runtime Ready unless committed
+  it("RF01-VAL02: dirty config test cannot become runtime Ready unless committed", async () => {
+    mockSettings({ apiKey: "" });
+    vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
+    const saveSpy = vi.spyOn(storage, "saveSettings");
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    const input = await screen.findByTestId("settings-api-key-input");
+    fireEvent.change(input, { target: { value: SYNTHETIC_TEST_KEY } });
+
+    // When dirty, the button becomes Save & Test
+    const saveAndTestBtn = await screen.findByRole("button", { name: "保存并测试" });
+    expect(saveAndTestBtn).toBeInTheDocument();
+
+    // Verify pure dirty test result cannot be validated in status derivation
+    expect(
+      deriveSetupStatus({
+        isConfigured: true,
+        isDirty: true,
+        testing: false,
+        testResult: { tone: "success", message: "ok" },
+        savedOnce: false,
+        isValidated: false,
+      }),
+    ).toBe("incomplete");
+
+    // Click Save & Test: must commit to storage before entering ready
+    fireEvent.click(saveAndTestBtn);
+
+    await waitFor(() => {
+      expect(saveSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiKey: SYNTHETIC_TEST_KEY,
+        }),
+      );
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+      expect(screen.getByText("AI 配置已就绪")).toBeInTheDocument();
+    });
+  });
+
+  // RF01-VAL03: validation success -> edit API Key -> Ready invalidated
+  it("RF01-VAL03: validation success -> edit API Key -> Ready invalidated", async () => {
+    mockSettings({ apiKey: SYNTHETIC_TEST_KEY });
+    vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    const input = await screen.findByTestId("settings-api-key-input");
+    await waitFor(() => {
+      expect(input).toHaveValue(SYNTHETIC_TEST_KEY);
+    });
+
+    const testBtn = await screen.findByRole("button", { name: /测试配置|连接测试/ });
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+    });
+
+    // Edit API Key
+    fireEvent.change(input, { target: { value: "sk-different-key-modified" } });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+      expect(screen.getByTestId("settings-setup-status-card")).toBeInTheDocument();
+    });
+  });
+
+  // RF01-VAL04: validation success -> edit model -> Ready invalidated
+  it("RF01-VAL04: validation success -> edit model -> Ready invalidated", async () => {
+    mockSettings({ apiKey: SYNTHETIC_TEST_KEY, apiModel: "claude-opus-4.8" });
+    vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    const input = await screen.findByTestId("settings-api-key-input");
+    await waitFor(() => {
+      expect(input).toHaveValue(SYNTHETIC_TEST_KEY);
+    });
+
+    const testBtn = await screen.findByRole("button", { name: /测试配置|连接测试/ });
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+    });
+
+    // Change model using known model dropdown
+    const modelSelect = await screen.findByLabelText(/模型/i);
+    fireEvent.change(modelSelect, { target: { value: "claude-3-5-haiku" } });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+      expect(screen.getByTestId("settings-setup-status-card")).toBeInTheDocument();
+    });
+  });
+
+  // RF01-VAL05: validation success -> edit Base URL -> Ready invalidated
+  it("RF01-VAL05: validation success -> edit Base URL -> Ready invalidated", async () => {
+    mockSettings({
+      providerId: "custom",
+      apiKey: SYNTHETIC_TEST_KEY,
+      customBaseUrl: "https://custom.internal/v1",
+      customProviderProtocol: "openai",
+    });
+    vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    const input = await screen.findByTestId("settings-api-key-input");
+    await waitFor(() => {
+      expect(input).toHaveValue(SYNTHETIC_TEST_KEY);
+    });
+
+    const testBtn = await screen.findByRole("button", { name: /测试配置|连接测试/ });
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+    });
+
+    // Edit Base URL input
+    const urlInput = await screen.findByTestId("settings-base-url-input");
+    fireEvent.change(urlInput, { target: { value: "https://different-proxy.internal/v1" } });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+      expect(screen.getByTestId("settings-setup-status-card")).toBeInTheDocument();
+    });
+  });
+
+  // RF01-VAL06: validation success -> edit custom protocol -> Ready invalidated
+  it("RF01-VAL06: validation success -> edit custom protocol -> Ready invalidated", async () => {
+    mockSettings({
+      providerId: "custom",
+      apiKey: SYNTHETIC_TEST_KEY,
+      customBaseUrl: "https://custom.internal/v1",
+      customProviderProtocol: "openai",
+    });
+    vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    const input = await screen.findByTestId("settings-api-key-input");
+    await waitFor(() => {
+      expect(input).toHaveValue(SYNTHETIC_TEST_KEY);
+    });
+
+    const testBtn = await screen.findByRole("button", { name: /测试配置|连接测试/ });
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+    });
+
+    // Switch protocol to Claude (Advanced section is open by default)
+    const claudeRadio = await screen.findByLabelText("Claude 兼容");
+    fireEvent.click(claudeRadio);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+      expect(screen.getByTestId("settings-setup-status-card")).toBeInTheDocument();
+    });
+  });
+
+  // RF01-VAL07: validated fingerprint equals committed runtime fingerprint before Ready
+  it("RF01-VAL07: validated fingerprint equals committed runtime fingerprint before Ready", () => {
+    const base = {
+      providerId: "anthropic" as const,
+      apiKey: "sk-test",
+      apiModel: "claude-3-opus",
+      customBaseUrl: "",
+      customProviderProtocol: "openai" as const,
+    };
+
+    const fp1 = computeValidationFingerprint(base);
+    const fp2 = computeValidationFingerprint({ ...base });
+    expect(fp1).toBe(fp2);
+
+    const fpChangedKey = computeValidationFingerprint({ ...base, apiKey: "sk-test-different" });
+    expect(fpChangedKey).not.toBe(fp1);
+
+    const fpChangedModel = computeValidationFingerprint({ ...base, apiModel: "claude-3.5-sonnet" });
+    expect(fpChangedModel).not.toBe(fp1);
+
+    const fpChangedUrl = computeValidationFingerprint({ ...base, customBaseUrl: "https://example.com" });
+    expect(fpChangedUrl).not.toBe(fp1);
+
+    const fpChangedProto = computeValidationFingerprint({ ...base, customProviderProtocol: "anthropic" });
+    expect(fpChangedProto).not.toBe(fp1);
+
+    // deriveSetupStatus contract requires isValidated === true to return validated
+    expect(
+      deriveSetupStatus({
+        isConfigured: true,
+        isDirty: false,
+        testing: false,
+        testResult: { tone: "success", message: "ok" },
+        savedOnce: true,
+        isValidated: false,
+      }),
+    ).toBe("saved_untested");
+
+    expect(
+      deriveSetupStatus({
+        isConfigured: true,
+        isDirty: false,
+        testing: false,
+        testResult: { tone: "success", message: "ok" },
+        savedOnce: true,
+        isValidated: true,
+      }),
+    ).toBe("validated");
+  });
+
+  // RF01-VAL08: failed validation cannot survive subsequent config edit as current error authority
+  it("RF01-VAL08: failed validation cannot survive subsequent config edit as current error authority", async () => {
+    mockSettings({ apiKey: SYNTHETIC_TEST_KEY });
+    vi.mocked(parseQuestion).mockRejectedValue(new Error("401 Unauthorized"));
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    const input = await screen.findByTestId("settings-api-key-input");
+    await waitFor(() => {
+      expect(input).toHaveValue(SYNTHETIC_TEST_KEY);
+    });
+
+    const testBtn = await screen.findByRole("button", { name: /测试配置|连接测试/ });
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("连接测试失败")).toBeInTheDocument();
+    });
+
+    // Edit API key: previous failure must NOT survive as authority
+    fireEvent.change(input, { target: { value: "sk-repaired-key" } });
+
+    await waitFor(() => {
+      expect(screen.queryByText("连接测试失败")).toBeNull();
+    });
   });
 });

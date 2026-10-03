@@ -18,7 +18,12 @@ import {
   SettingsConfigSections,
   SettingsSetupStatusCard,
 } from "./settingsSections";
-import { deriveSetupStatus, isSettingsDirty, type SettingsFormValues } from "./settingsTypes";
+import {
+  computeValidationFingerprint,
+  deriveSetupStatus,
+  isSettingsDirty,
+  type SettingsFormValues,
+} from "./settingsTypes";
 
 gsap.registerPlugin(useGSAP);
 
@@ -45,6 +50,7 @@ export const SettingsTab: React.FC<{
   const [savedOnce, setSavedOnce] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<UserFeedback | null>(null);
+  const [validatedFingerprint, setValidatedFingerprint] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState("");
   const [storedSnapshot, setStoredSnapshot] = useState<Partial<AppSettings> | null>(null);
 
@@ -120,6 +126,40 @@ export const SettingsTab: React.FC<{
     [provider, apiKey],
   );
 
+  const currentFingerprint = useMemo(
+    () =>
+      computeValidationFingerprint({
+        providerId,
+        apiKey,
+        apiModel: model || provider.defaultModel,
+        customBaseUrl: customUrl,
+        customProviderProtocol: customProtocol,
+      }),
+    [providerId, apiKey, model, provider.defaultModel, customUrl, customProtocol],
+  );
+
+  const committedFingerprint = useMemo(
+    () =>
+      computeValidationFingerprint({
+        providerId: (storedSnapshot?.providerId as ProviderId) ?? "anthropic",
+        apiKey: storedSnapshot?.apiKey ?? "",
+        apiModel:
+          storedSnapshot?.apiModel ??
+          getProvider((storedSnapshot?.providerId as ProviderId) ?? "anthropic").defaultModel,
+        customBaseUrl: storedSnapshot?.customBaseUrl ?? "",
+        customProviderProtocol: storedSnapshot?.customProviderProtocol ?? "openai",
+      }),
+    [storedSnapshot],
+  );
+
+  const isValidated = Boolean(
+    testResult?.tone === "success" &&
+      validatedFingerprint &&
+      validatedFingerprint === committedFingerprint &&
+      currentFingerprint === committedFingerprint &&
+      !isDirty,
+  );
+
   const setupStatus = useMemo(
     () =>
       deriveSetupStatus({
@@ -128,16 +168,17 @@ export const SettingsTab: React.FC<{
         testing,
         testResult,
         savedOnce,
+        isValidated,
       }),
-    [isConfigured, isDirty, testing, testResult, savedOnce],
+    [isConfigured, isDirty, testing, testResult, savedOnce, isValidated],
   );
 
   const activeStep = useMemo(() => {
-    if (testResult?.tone === "success") return 4;
+    if (isValidated) return 4;
     if (testing) return 3;
     if (isConfigured) return 3;
     return 2;
-  }, [testResult, testing, isConfigured]);
+  }, [isValidated, testing, isConfigured]);
 
   useGSAP(
     () => {
@@ -161,11 +202,36 @@ export const SettingsTab: React.FC<{
     { scope: scopeRef, dependencies: [providerId, lang, testResult], revertOnUpdate: true },
   );
 
+  const invalidateValidationAuthority = () => {
+    setTestResult(null);
+    setValidatedFingerprint(null);
+  };
+
   const handleProviderChange = (id: ProviderId) => {
     setProviderId(id);
     setModel(getProvider(id).defaultModel);
     setApiKey("");
-    setTestResult(null);
+    invalidateValidationAuthority();
+  };
+
+  const handleApiKeyChange = (val: string) => {
+    setApiKey(val);
+    invalidateValidationAuthority();
+  };
+
+  const handleModelChange = (val: string) => {
+    setModel(val);
+    invalidateValidationAuthority();
+  };
+
+  const handleCustomUrlChange = (val: string) => {
+    setCustomUrl(val);
+    invalidateValidationAuthority();
+  };
+
+  const handleCustomProtocolChange = (val: "openai" | "anthropic") => {
+    setCustomProtocol(val);
+    invalidateValidationAuthority();
   };
 
   const handleSave = async () => {
@@ -205,7 +271,34 @@ export const SettingsTab: React.FC<{
         setTesting(false);
         return;
       }
-      const settings = await loadSettings();
+
+      // If configuration is dirty, commit exact configuration first (Save & Test contract)
+      let activeSettings: AppSettings;
+      if (isDirty) {
+        const nextSettings: Partial<AppSettings> = {
+          providerId,
+          apiKey: apiKey.trim(),
+          apiModel: model || currentProvider.defaultModel,
+          preferredRoute: route,
+          customBaseUrl: customUrl || undefined,
+          analyticsBaseUrl: analyticsBaseUrl.trim() || DEFAULT_ANALYTICS_BASE_URL,
+          enableAnalytics,
+          customProviderProtocol: customProtocol,
+          language: lang,
+        };
+        await saveSettings(nextSettings);
+        setStoredSnapshot((prev) => ({ ...prev, ...nextSettings }));
+        logEvent("settings_saved", { providerId, route });
+        if (apiKey.trim()) logEvent("api_key_set", { providerId });
+        onLanguageChange(lang);
+        setSaved(true);
+        setSavedOnce(true);
+        setTimeout(() => setSaved(false), 2000);
+        activeSettings = { ...(await loadSettings()), ...nextSettings } as AppSettings;
+      } else {
+        activeSettings = (await loadSettings()) as AppSettings;
+      }
+
       const testBlock: QuestionBlock = {
         id: "test",
         bbox: { x: 0, y: 0, width: 100, height: 50 },
@@ -218,8 +311,9 @@ export const SettingsTab: React.FC<{
         confidence: 1,
         source: "manual_capture",
       };
+
       const result = await parseQuestion(testBlock, {
-        ...settings,
+        ...activeSettings,
         providerId,
         apiKey: apiKey.trim(),
         apiModel: model || currentProvider.defaultModel,
@@ -227,6 +321,17 @@ export const SettingsTab: React.FC<{
         customBaseUrl: customUrl || undefined,
         customProviderProtocol: customProtocol,
       });
+
+      const testedFingerprint = computeValidationFingerprint({
+        providerId,
+        apiKey,
+        apiModel: model || currentProvider.defaultModel,
+        customBaseUrl: customUrl,
+        customProviderProtocol: customProtocol,
+      });
+
+      setValidatedFingerprint(testedFingerprint);
+
       const routeLabel =
         result.routeUsed === "vision"
           ? isEn
@@ -309,21 +414,18 @@ export const SettingsTab: React.FC<{
         route={route}
         setAnalyticsBaseUrl={setAnalyticsBaseUrl}
         setEnableAnalytics={setEnableAnalytics}
-        setApiKey={setApiKey}
-        setCustomProtocol={setCustomProtocol}
-        setCustomUrl={setCustomUrl}
+        setApiKey={handleApiKeyChange}
+        setCustomProtocol={handleCustomProtocolChange}
+        setCustomUrl={handleCustomUrlChange}
         setLang={(nextLang) => {
           setLang(nextLang);
           onLanguageChange(nextLang);
         }}
-        setModel={setModel}
+        setModel={handleModelChange}
         setRoute={setRoute}
       />
 
-      {/* 3. Account / Session Section */}
-      <SettingsAccountSection auth={auth} authText={authText} isEn={isEn} rejectedSessionHint={sessionRejectedHint} />
-
-      {/* 4. Actions: Save Settings & Test Configuration */}
+      {/* 3. Actions: Save Settings & Test Configuration */}
       <SettingsActionsSection
         isDirty={isDirty}
         isEn={isEn}
@@ -333,6 +435,9 @@ export const SettingsTab: React.FC<{
         testResult={testResult}
         testing={testing}
       />
+
+      {/* 4. Account / Session Section */}
+      <SettingsAccountSection auth={auth} authText={authText} isEn={isEn} rejectedSessionHint={sessionRejectedHint} />
     </div>
   );
 };
