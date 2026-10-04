@@ -42,6 +42,19 @@ even if the old form resubmits its prior URL. Official-to-custom accepts the
 explicit supplied custom URL. This temporary form bridge cannot distinguish a
 fresh official override from a stale prior provider URL, so it uses safe reset.
 
+RF01: Settings clears the endpoint draft whenever provider identity changes.
+Only a URL explicitly entered after selecting Custom belongs to that new
+provider state; the old official proxy cannot silently accompany a new key.
+Switching to an official provider still clears the override in background.
+
+Gemini is canonical-endpoint only during compatibility mode: its unchanged
+legacy client ignores customBaseUrl. A same-provider nonempty Gemini URL
+mutation is rejected with AI_RUNTIME_COMPATIBILITY_UNSUPPORTED before encryption
+or commit. Switching to Gemini resets any old endpoint. Existing V1 Gemini
+overrides also fail closed in readiness and the runtime adapter before secret
+resolution or dispatch, so authority and actual request endpoint cannot diverge.
+Background client errors retain a non-secret machine-readable error.code.
+
 ## Read and solve boundaries
 
 General/UI `loadSettings` projects active connection metadata and always returns
@@ -93,6 +106,10 @@ plan media/capabilities, resolve the exact credential, and call
 assertRuntimeConfigCurrent at the last responsible moment immediately before
 provider request dispatch. The final fence remains necessary after plaintext
 resolution. Final endpoint-security and capability enforcement are also deferred.
+
+E2B-2/security hardening must restrict mutation commands to intended extension
+surfaces. The current manifest has no externally_connectable surface; RF01 keeps
+payload validation and does not expand sender authorization scope.
 
 ## Production ownership audit
 

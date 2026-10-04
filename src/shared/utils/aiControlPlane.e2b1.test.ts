@@ -521,6 +521,93 @@ describe("UI projection and runtime compatibility", () => {
   });
 });
 
+describe("RF01 Gemini legacy compatibility representability", () => {
+  async function existingGeminiOverride() {
+    await saveSettings({ providerId: "gemini", apiKey: keyB });
+    await updateAIConnectionState((value) => {
+      const connection = value.connections[value.activeConnectionId!];
+      connection.endpointOverride = "https://gemini-proxy.example";
+      connection.connectionRevision += 1;
+      return value;
+    });
+  }
+  it("E2B1-RF01-GEMINI-01 same-provider override is rejected atomically with a machine-readable code", async () => {
+    await saveSettings({ providerId: "gemini", apiKey: keyA });
+    const before = JSON.stringify(await state());
+    const nonAI = JSON.stringify(memory.store.get("appSettings"));
+    await expect(
+      saveSettings({
+        providerId: "gemini",
+        customBaseUrl: "https://gemini-proxy.example",
+        apiKey: keyB,
+        language: "en",
+      }),
+    ).rejects.toMatchObject({
+      code: "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
+      message: "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
+    });
+    expect(JSON.stringify(await state())).toBe(before);
+    expect(JSON.stringify(memory.store.get("appSettings"))).toBe(nonAI);
+    expect((await main()).endpointOverride).toBeUndefined();
+  });
+  it("E2B1-RF01-GEMINI-02 existing override readiness fails closed without resolving a secret", async () => {
+    await existingGeminiOverride();
+    const secret = vi.spyOn(credentials, "resolveCredentialRecordForRuntime");
+    expect(await getAIConnectionReadiness()).toEqual({
+      ready: false,
+      code: "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
+    });
+    expect(secret).not.toHaveBeenCalled();
+  });
+  it("E2B1-RF01-GEMINI-03 existing override cannot enter runtime compatibility settings", async () => {
+    await existingGeminiOverride();
+    await expect(loadLegacyRuntimeSettingsCompat()).rejects.toMatchObject({
+      code: "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
+    });
+  });
+  it("E2B1-RF01-GEMINI-04 override cannot silently dispatch to the canonical endpoint", async () => {
+    await existingGeminiOverride();
+    const fetch = vi.spyOn(globalThis, "fetch");
+    const { parseQuestion } = await import("./parseRouter");
+    const solve = async () =>
+      parseQuestion(
+        {
+          id: "gemini-override",
+          bbox: { x: 0, y: 0, width: 100, height: 50 },
+          previewText: "What is 2 + 2? A. 3 B. 4",
+          hasImage: false,
+          questionTypeGuess: "single_choice",
+          confidence: 1,
+          source: "manual_capture",
+        },
+        await loadLegacyRuntimeSettingsCompat(),
+      );
+    await expect(solve()).rejects.toMatchObject({
+      code: "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("switching to Gemini clears prior endpoints even when the old form resubmits one", async () => {
+    await saveSettings({
+      providerId: "custom",
+      customBaseUrl: "https://old-custom.example",
+      apiKey: keyA,
+    });
+    await saveSettings({
+      providerId: "gemini",
+      customBaseUrl: "https://old-custom.example",
+      apiKey: keyB,
+    });
+    expect((await main()).endpointOverride).toBeUndefined();
+    expect(await getAIConnectionReadiness()).toEqual({ ready: true });
+    expect(await loadLegacyRuntimeSettingsCompat()).toMatchObject({
+      providerId: "gemini",
+      apiKey: keyB,
+      customBaseUrl: undefined,
+    });
+  });
+});
+
 describe("message trust and response boundary", () => {
   it("typed success response contains metadata only", async () => {
     const response: AIConnectionResponse = await ensure();

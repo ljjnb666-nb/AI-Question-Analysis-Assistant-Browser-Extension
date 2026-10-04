@@ -123,14 +123,17 @@ async function applyLegacySettings(
 ): Promise<void> {
   // Encryption and the coherent commit share the existing owner lock.
   await updateAIConnectionState(async (state) => {
-    const envelope =
-      patch.credential.action === "REPLACE"
-        ? await encryptValue(patch.credential.value)
-        : undefined;
     const connection = state.activeConnectionId
       ? state.connections[state.activeConnectionId]
       : undefined;
     if (!connection) throw new AuthorityError("AI_ACTIVE_CONNECTION_MISSING");
+    const providerId = patch.providerId ?? connection.presetId;
+    const switched = providerId !== connection.presetId;
+    if (!switched && providerId === "gemini" && patch.customBaseUrl) {
+      throw new AuthorityError("AI_RUNTIME_COMPATIBILITY_UNSUPPORTED");
+    }
+    const envelope = patch.credential.action === "REPLACE"
+      ? await encryptValue(patch.credential.value) : undefined;
     const previous = JSON.stringify({
       presetId: connection.presetId,
       selectedModelId: connection.selectedModelId,
@@ -138,8 +141,6 @@ async function applyLegacySettings(
       protocolOverride: connection.protocolOverride,
       authScheme: connection.authScheme,
     });
-    const providerId = patch.providerId ?? connection.presetId;
-    const switched = providerId !== connection.presetId;
     connection.presetId = providerId;
     connection.selectedModelId =
       patch.apiModel ??

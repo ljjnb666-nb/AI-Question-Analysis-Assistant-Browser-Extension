@@ -137,6 +137,7 @@ export const SettingsTab: React.FC<{
   );
 
   const handleProviderChange = (id: ProviderId) => {
+    if (id !== providerId) setCustomUrl("");
     setProviderId(id);
     setModel(getProvider(id).defaultModel);
     setApiKey("");

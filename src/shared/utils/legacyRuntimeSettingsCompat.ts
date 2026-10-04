@@ -17,6 +17,10 @@ class RuntimeCompatibilityError extends Error {
   }
 }
 function assertLegacyRepresentable(config: AIConnectionRuntimeConfig): void {
+  // The unchanged Gemini client ignores customBaseUrl and uses its preset URL.
+  if (config.presetId === "gemini" && config.endpointProvenance !== "canonical_builtin_endpoint") {
+    throw new RuntimeCompatibilityError();
+  }
   // V1 can express more custom auth/protocol combinations than the unchanged
   // legacy clients. Reject those rather than silently changing their meaning.
   const expected = resolvePresetAuthScheme("custom", config.protocol);
