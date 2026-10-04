@@ -268,14 +268,14 @@ export function withAIConnectionStateWriteLock<T>(task: () => Promise<T>): Promi
  * writing (idempotent no-op).
  */
 export async function updateAIConnectionState(
-  mutate: (state: AIConnectionState) => AIConnectionState | null,
+  mutate: (state: AIConnectionState) => AIConnectionState | null | Promise<AIConnectionState | null>,
 ): Promise<AIConnectionState | null> {
   return withAIConnectionStateWriteLock(async () => {
     const raw = await readRawState();
     if (raw === undefined) throw new AIConnectionStateNotInitializedError();
     const base = validateAIConnectionState(raw);
 
-    const draft = mutate(cloneState(base));
+    const draft = await mutate(cloneState(base));
     if (draft === null) return null;
     draft.revision = base.revision + 1;
     const validated = validateAIConnectionState(draft);

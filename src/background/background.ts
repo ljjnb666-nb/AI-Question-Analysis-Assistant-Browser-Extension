@@ -1,3 +1,4 @@
+import { handleAIConnectionCommand } from "./aiConnectionAuthority";
 /**
  * Background Service Worker
  * Responsibilities:
@@ -26,7 +27,12 @@ chrome.runtime.onMessage.addListener((
   sender: chrome.runtime.MessageSender,
   sendResponse: (r?: unknown) => void
 ) => {
-  switch (message.type) {
+  switch (message?.type) {
+    case "AI_CONNECTION_ENSURE_INITIALIZED":
+    case "AI_CONNECTION_GET_ACTIVE_METADATA":
+    case "AI_CONNECTION_APPLY_LEGACY_SETTINGS":
+      void handleAIConnectionCommand(message).then(sendResponse);
+      return true;
     case "CAPTURE_TAB_SCREENSHOT":
       captureTab(sender, sendResponse);
       return true; // keep channel open for async response

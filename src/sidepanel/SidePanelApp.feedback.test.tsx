@@ -15,6 +15,7 @@ import type {
 } from "@/shared/types";
 import type * as ParseRouter from "@/shared/utils/parseRouter";
 import { loadSettings } from "@/shared/utils/storage";
+import { getAIConnectionReadiness } from "@/shared/utils/legacyRuntimeSettingsCompat";
 import { readProtectedWorkOwners } from "@/shared/auth/protectedWorkOwner";
 import { SidePanelApp } from "./SidePanelApp";
 
@@ -256,6 +257,7 @@ describe("UI-04 real App/actions/bridge/hydration feedback wiring", () => {
   });
   it("RF01-FB05 PROVIDER_NOT_CONFIGURED", async () => {
     await mount();
+    vi.mocked(getAIConnectionReadiness).mockResolvedValueOnce({ ready: false, code: "AI_CREDENTIAL_REQUIRED" });
     vi.mocked(loadSettings).mockResolvedValueOnce({
       language: "en",
       providerId: "anthropic",
@@ -385,3 +387,17 @@ describe("UI-04 real App/actions/bridge/hydration feedback wiring", () => {
     expect(feedback()).toBeNull();
   });
 });
+
+vi.mock("@/shared/utils/legacyRuntimeSettingsCompat", async () => {
+  const storage = await import("@/shared/utils/storage");
+  const { getProvider } = await import("@/shared/ai/providers");
+  return {
+    loadLegacyRuntimeSettingsCompat: () => storage.loadSettings(),
+    getAIConnectionReadiness: vi.fn(async () => {
+      const fixture = await storage.loadSettings();
+      return { ready: getProvider(fixture.providerId).keyOptional === true || Boolean(fixture.apiKey?.trim()) };
+    }),
+  };
+});
+
+vi.mock("@/shared/utils/aiConnectionClient", () => ({ ensureAIConnectionAuthorityReady: vi.fn(async () => ({ ok: true })) }));

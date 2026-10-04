@@ -1,3 +1,4 @@
+import { ensureAIConnectionAuthorityReady } from "@/shared/utils/aiConnectionClient";
 import React, { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
@@ -57,7 +58,7 @@ export const SettingsTab: React.FC<{
 
   useEffect(() => {
     let disposed = false;
-    void loadSettings().then((settings) => {
+    void ensureAIConnectionAuthorityReady().then(() => loadSettings()).then((settings) => {
       if (disposed) return;
       setProviderId((settings.providerId as ProviderId) ?? "anthropic");
       setApiKey(settings.apiKey ?? "");
@@ -71,7 +72,7 @@ export const SettingsTab: React.FC<{
       setDeviceId(settings.deviceId ?? "");
       // Auth identity is owned by the shared session coordinator inside
       // useAuthController; storage values never establish "signed in" here.
-    });
+    }).catch(() => { /* Failed initialization leaves the form unconfigured; no legacy fallback. */ });
     return () => {
       disposed = true;
     };
@@ -143,22 +144,27 @@ export const SettingsTab: React.FC<{
   };
 
   const handleSave = async () => {
-    await saveSettings({
-      providerId,
-      apiKey: apiKey.trim(),
-      apiModel: model || provider.defaultModel,
-      preferredRoute: route,
-      customBaseUrl: customUrl || undefined,
-      analyticsBaseUrl: analyticsBaseUrl.trim() || DEFAULT_ANALYTICS_BASE_URL,
-      enableAnalytics,
-      customProviderProtocol: customProtocol,
-      language: lang,
-    });
-    logEvent("settings_saved", { providerId, route });
-    if (apiKey.trim()) logEvent("api_key_set", { providerId });
-    onLanguageChange(lang);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    try {
+      await saveSettings({
+        providerId,
+        apiKey: apiKey.trim(),
+        apiModel: model || provider.defaultModel,
+        preferredRoute: route,
+        customBaseUrl: customUrl || undefined,
+        analyticsBaseUrl: analyticsBaseUrl.trim() || DEFAULT_ANALYTICS_BASE_URL,
+        enableAnalytics,
+        customProviderProtocol: customProtocol,
+        language: lang,
+      });
+      logEvent("settings_saved", { providerId, route });
+      if (apiKey.trim()) logEvent("api_key_set", { providerId });
+      onLanguageChange(lang);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (error) {
+      setSaved(false);
+      setTestResult(mapUserFacingError(error, isEn ? "en" : "zh", { context: "general" }));
+    }
   };
 
   const handleTest = async () => {

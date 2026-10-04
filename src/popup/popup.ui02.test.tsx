@@ -1092,3 +1092,15 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
     expect(POPUP_COPY.en.connected("Claude")).toBe("Claude");
   });
 });
+
+vi.mock("@/shared/utils/legacyRuntimeSettingsCompat", async () => {
+  const storage = await import("@/shared/utils/storage");
+  const { getProvider } = await import("@/shared/ai/providers");
+  return {
+    loadLegacyRuntimeSettingsCompat: () => storage.loadSettings(),
+    getAIConnectionReadiness: async () => {
+      const fixture = await storage.loadSettings();
+      return { ready: getProvider(fixture.providerId).keyOptional === true || Boolean(fixture.apiKey?.trim()) };
+    },
+  };
+});

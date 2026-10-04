@@ -422,3 +422,17 @@ describe("SidePanelApp auth-loss watchdog", () => {
     await waitFor(() => expect(document.documentElement.lang).toBe("zh-CN"), { timeout: UI_TIMEOUT });
   });
 });
+
+vi.mock("@/shared/utils/legacyRuntimeSettingsCompat", async () => {
+  const storage = await import("@/shared/utils/storage");
+  const { getProvider } = await import("@/shared/ai/providers");
+  return {
+    loadLegacyRuntimeSettingsCompat: () => storage.loadSettings(),
+    getAIConnectionReadiness: async () => {
+      const fixture = await storage.loadSettings();
+      return { ready: getProvider(fixture.providerId).keyOptional === true || Boolean(fixture.apiKey?.trim()) };
+    },
+  };
+});
+
+vi.mock("@/shared/utils/aiConnectionClient", () => ({ ensureAIConnectionAuthorityReady: vi.fn(async () => ({ ok: true })) }));

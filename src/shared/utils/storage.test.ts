@@ -13,6 +13,9 @@ import {
   saveSettings,
 } from "./storage";
 import { DEFAULT_SETTINGS } from "../types";
+import { installMemoryStorage } from "../../test/memoryStorage";
+import { loadAIConnectionState } from "./aiConnectionState";
+import { resolveCredentialForRuntime } from "./credentialStore";
 import { ENCRYPTED_VALUE_PREFIX, encryptValue } from "./encryption";
 import type { HistoryEntry, ParseResult, QuestionBlock } from "../types";
 
@@ -85,6 +88,15 @@ function createLargeHistoryEntry(id: string): HistoryEntry {
   };
 }
 
+async function authorityStorage(settings: Record<string, unknown> = {}) {
+  vi.resetModules();
+  const memory = installMemoryStorage();
+  memory.store.set("appSettings", { ...DEFAULT_SETTINGS, deviceId: "test-device", analyticsConsentVersion: 1, ...settings });
+  const { handleAIConnectionCommand } = await import("../../background/aiConnectionAuthority");
+  vi.mocked(chrome.runtime.sendMessage).mockImplementation((message) => handleAIConnectionCommand(message) as never);
+  return memory;
+}
+
 describe("storage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -93,19 +105,15 @@ describe("storage", () => {
 
   describe("saveSettings", () => {
     it("merges with existing settings and encrypts sensitive settings", async () => {
-      const existingSettings = { ...DEFAULT_SETTINGS, apiKey: "old-key" };
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: existingSettings,
-      } as never);
-
-      await saveSettings({ apiKey: "new-key", authToken: "auth-token-123" });
-
-      expect(chrome.storage.local.set).toHaveBeenCalled();
-      const savedSettings = vi.mocked(chrome.storage.local.set).mock.calls[0][0].appSettings;
-      expect(savedSettings.apiKey).not.toBe("new-key");
-      expect(savedSettings.authToken).not.toBe("auth-token-123");
-      expect(savedSettings.providerId).toBe(existingSettings.providerId);
-      expect(savedSettings.apiModel).toBe(existingSettings.apiModel);
+      await authorityStorage({ apiKey: "old-test-key" });
+      await saveSettings({ apiKey: "new-test-key", authToken: "auth-token-123" });
+      const saved = lastAppSettingsWrite();
+      expect(saved).not.toHaveProperty("apiKey");
+      expect(saved.authToken).toMatch(/^qse:v1:/);
+      const state = (await loadAIConnectionState())!;
+      const ref = state.connections[state.activeConnectionId!].credentialRef!;
+      expect(state.credentials[ref].encryptedValue).toMatch(/^qse:v1:/);
+      expect(await resolveCredentialForRuntime(ref)).toBe("new-test-key");
     });
 
     it("AUTH_CORE_14_STORAGE_PARTIAL_SAVE preserves the cached auth token when the field is absent", async () => {
@@ -190,15 +198,16 @@ describe("storage", () => {
       expect(settings.apiKey).toBe(legacyPlaintextKey);
     });
 
-    it("KEY_05_NORMAL_SAVE_NEVER_STORES_PLAINTEXT_API_KEY writes a versioned envelope", async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({} as never);
-
+    it("KEY_05_NORMAL_SAVE_NEVER_STORES_PLAINTEXT_API_KEY writes only the authoritative envelope", async () => {
+      await authorityStorage();
       const fakePlainApiKey = ["fake", "plain", "api", "key"].join("-");
       await saveSettings({ apiKey: fakePlainApiKey });
-
-      const savedSettings = lastAppSettingsWrite();
-      expect(savedSettings.apiKey).not.toBe(fakePlainApiKey);
-      expect(String(savedSettings.apiKey).startsWith(ENCRYPTED_VALUE_PREFIX)).toBe(true);
+      expect(lastAppSettingsWrite()).not.toHaveProperty("apiKey");
+      const state = (await loadAIConnectionState())!;
+      const ref = state.connections[state.activeConnectionId!].credentialRef!;
+      expect(state.credentials[ref].encryptedValue).toMatch(/^qse:v1:/);
+      expect(state.credentials[ref].encryptedValue).not.toContain(fakePlainApiKey);
+      expect(await resolveCredentialForRuntime(ref)).toBe(fakePlainApiKey);
     });
 
     it("KEY_06_AUTH_TOKEN_NORMAL_SAVE_NEVER_STORES_PLAINTEXT writes a versioned envelope", async () => {
@@ -212,30 +221,17 @@ describe("storage", () => {
       expect(String(savedSettings.authToken).startsWith(ENCRYPTED_VALUE_PREFIX)).toBe(true);
     });
 
-    it("KEY_07_BASE64_LIKE_PLAINTEXT_NOT_MISCLASSIFIED preserves and migrates custom keys", async () => {
+    it("KEY_07_BASE64_LIKE_PLAINTEXT_NOT_MISCLASSIFIED migrates through background without a mirror", async () => {
       const legacyPlaintextKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { apiKey: legacyPlaintextKey },
-      } as never);
-
-      const settings = await loadSettings();
-      expect(settings.apiKey).toBe(legacyPlaintextKey);
-
-      // Loading never rewrites credentials to storage.
-      vi.mocked(chrome.storage.local.set).mockClear();
-      expect(hasEnvelopeCredentialWriteback()).toBe(false);
-
-      // The next save of any setting is the canonical migration point.
-      await saveSettings({ language: "en" });
-      const savedSettings = lastAppSettingsWrite();
-      expect(String(savedSettings.apiKey).startsWith(ENCRYPTED_VALUE_PREFIX)).toBe(true);
-      expect(savedSettings.apiKey).not.toContain(legacyPlaintextKey);
-
-      // Reload returns the original plaintext.
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({ appSettings: savedSettings } as never);
+      await authorityStorage({ apiKey: legacyPlaintextKey });
+      expect((await loadSettings()).apiKey).toBe(legacyPlaintextKey);
+      await saveSettings({ apiKey: legacyPlaintextKey, language: "en" });
+      const state = (await loadAIConnectionState())!;
+      const ref = state.connections[state.activeConnectionId!].credentialRef!;
+      expect(await resolveCredentialForRuntime(ref)).toBe(legacyPlaintextKey);
+      expect(lastAppSettingsWrite()).not.toHaveProperty("apiKey");
       __resetStorageCacheForTests();
-      const reloaded = await loadSettings();
-      expect(reloaded.apiKey).toBe(legacyPlaintextKey);
+      expect((await loadSettings()).apiKey).toBe("");
     });
 
     it("KEY_08_LEGACY_UNVERSIONED_CIPHERTEXT_COMPAT decrypts and migrates on next save", async () => {
@@ -277,7 +273,7 @@ describe("storage", () => {
 
       expect(first.providerId).toBe("gemini");
       expect(second.providerId).toBe("gemini");
-      expect(chrome.storage.local.get).toHaveBeenCalledTimes(1);
+      expect(chrome.storage.local.get).toHaveBeenCalledTimes(2);
     });
   });
 

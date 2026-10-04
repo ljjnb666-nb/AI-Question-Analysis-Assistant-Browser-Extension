@@ -1,9 +1,9 @@
+import { loadLegacyRuntimeSettingsCompat, getAIConnectionReadiness } from "@/shared/utils/legacyRuntimeSettingsCompat";
 import { useCallback, useRef } from "react";
 import type { CandidateOrigin, DetectedCandidate } from "@/shared/types";
 import { addHistoryEntryIfCurrent, loadSettings } from "@/shared/utils/storage";
 import {
   getAutoSolveNotConfiguredMessage,
-  isProviderRuntimeConfigured,
 } from "@/shared/ai/parseResultAuthority";
 import { getProvider, hasSufficientPreviewText, parseQuestion } from "@/shared/utils/parseRouter";
 import { mapKnownCodeFeedback, mapUserFacingError, userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
@@ -273,7 +273,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     if (!options.candidates.some((candidate) => candidate.selected)) return;
     options.setIsBatchParsing(true);
     await runBatchParse(options.candidates, {
-      loadSettings,
+      loadSettings: loadLegacyRuntimeSettingsCompat,
       getProvider,
       parseQuestion: (block, settings) => parseQuestion(block, settings, undefined, { deferSuccessTelemetry: true }),
       requestBlockImage,
@@ -298,7 +298,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   const handleRetryVision = useCallback(async (candidate: DetectedCandidate) => {
     if (!requireAuthenticatedAction()) return;
     await runRetryVision(candidate, {
-      loadSettings,
+      loadSettings: loadLegacyRuntimeSettingsCompat,
       getProvider,
       requestBlockImage,
       parseQuestion: (block, settings) => parseQuestion(block, settings, undefined, { deferSuccessTelemetry: true }),
@@ -332,7 +332,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
 
     options.setIsRetryingRisky(true);
     await runRetryRisky(options.candidates, isRiskyCandidate, {
-      loadSettings,
+      loadSettings: loadLegacyRuntimeSettingsCompat,
       getProvider,
       requestBlockImage,
       parseQuestion: (block, settings) => parseQuestion(block, settings, undefined, { deferSuccessTelemetry: true }),
@@ -426,7 +426,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     // provider. The content-side entry guard and the fill-core provenance
     // gate remain as the second and third layers.
     const settings = await loadSettings();
-    if (!isProviderRuntimeConfigured(getProvider(settings.providerId ?? "anthropic"), settings)) {
+    if (!(await getAIConnectionReadiness()).ready) {
       options.setFillFeedback(
         mapKnownCodeFeedback("PROVIDER_NOT_CONFIGURED", options.uiLang)
         ?? userFeedback("warning", getAutoSolveNotConfiguredMessage(settings.language)),
