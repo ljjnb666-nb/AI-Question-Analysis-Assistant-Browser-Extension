@@ -6,7 +6,7 @@ import {
 } from "@/shared/utils/messaging";
 import type { ExtMessage } from "@/shared/types";
 import { getProviderShortName } from "@/shared/ai/providers";
-import { getAIConnectionReadiness } from "@/shared/utils/legacyRuntimeSettingsCompat";
+import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
 import { logEvent } from "@/shared/utils/analytics";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { useAuthController } from "@/shared/auth/useAuthController";

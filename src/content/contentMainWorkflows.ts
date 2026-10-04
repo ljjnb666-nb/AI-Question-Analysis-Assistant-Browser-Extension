@@ -1,8 +1,8 @@
-import { loadLegacyRuntimeSettingsCompat, getAIConnectionReadiness } from "@/shared/utils/legacyRuntimeSettingsCompat";
+import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
+import { loadParsePreferences, getAIConnectionReadiness, getRuntimeCaptureInfo } from "@/shared/utils/aiSolvePreferences";
 import type { BoundingBox, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import { cropScreenshot } from "@/shared/utils/cropImage";
 import {
-  getProvider,
   getProviderNotConfiguredMessage,
 } from "@/shared/utils/parseRouter";
 import { addHistoryEntry, loadHistory, loadSettings } from "@/shared/utils/storage";
@@ -58,9 +58,10 @@ type CreateContentMainWorkflowsOptions = {
   manualParsePipelineTimeoutMs: number;
   parseWithTieredRetries: (
     block: QuestionBlock,
-    settings: Awaited<ReturnType<typeof loadSettings>>,
+    settings: Awaited<ReturnType<typeof loadParsePreferences>>,
     providerSupportsVision: boolean,
     onStream: (partial: string) => void,
+    runtimeContext?: ParseQuestionRuntimeContext,
   ) => Promise<ParseResult>;
   screenshotWithRetry: () => Promise<string | null>;
   clickNextQuestionButton: () => boolean;
@@ -251,8 +252,8 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         extractQuestionImageUrlFromBBox: options.extractQuestionImageUrlFromBBox,
         screenshotWithRetry: options.screenshotWithRetry,
         cropScreenshot,
-        loadSettings: loadLegacyRuntimeSettingsCompat,
-        getProvider,
+        loadSettings: loadParsePreferences,
+        getRuntimeCaptureInfo,
         parseWithTieredRetries: options.parseWithTieredRetries,
         withTimeout: options.withTimeout,
         addHistoryEntry,

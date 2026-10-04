@@ -34,7 +34,7 @@ export function getSystemPrompt(): string {
   return SYSTEM_PROMPT;
 }
 
-export function buildUserQuestionPrompt(block: QuestionBlock, route: RouteUsed, settings: AppSettings): string {
+export function buildUserQuestionPrompt(block: QuestionBlock, route: RouteUsed, settings: Pick<AppSettings, "language">): string {
   const questionText = buildPreferredQuestionText(block).trim();
   const routeHint = route === "text"
     ? "Current route: text-only"

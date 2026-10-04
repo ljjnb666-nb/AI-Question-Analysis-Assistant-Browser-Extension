@@ -19,8 +19,7 @@
  *     -> provider adapter
  *
  * Fail-closed policy: UNKNOWN in any REQUIRED dimension rejects the media
- * path. This module is pure and is NOT yet wired into `parseQuestion` (no
- * authority cutover in E2A).
+ * path. This pure module is enforced by `parseQuestion` after E2B2A.
  */
 
 import type {

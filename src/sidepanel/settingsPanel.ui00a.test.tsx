@@ -58,6 +58,7 @@ import { SettingsTab } from "./settingsPanel";
 import * as storage from "@/shared/utils/storage";
 
 function mockStoredSettings(providerId: string, apiKey: string) {
+  vi.spyOn(storage, "saveSettings").mockResolvedValue(undefined);
   vi.spyOn(storage, "loadSettings").mockResolvedValue({
     providerId,
     apiKey,
@@ -155,3 +156,11 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
 });
 
 vi.mock("@/shared/utils/aiConnectionClient", () => ({ ensureAIConnectionAuthorityReady: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/shared/utils/aiSolvePreferences", async () => {
+  const storage = await import("@/shared/utils/storage");
+  return { getAIConnectionReadiness: async () => {
+    const fixture = await storage.loadSettings();
+    return fixture.providerId === "ollama" || Boolean(fixture.apiKey)
+      ? { ready: true } : { ready: false, code: "AI_CREDENTIAL_REQUIRED" };
+  } };
+});

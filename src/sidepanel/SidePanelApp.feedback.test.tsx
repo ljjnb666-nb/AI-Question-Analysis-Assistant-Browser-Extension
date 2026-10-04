@@ -15,7 +15,7 @@ import type {
 } from "@/shared/types";
 import type * as ParseRouter from "@/shared/utils/parseRouter";
 import { loadSettings } from "@/shared/utils/storage";
-import { getAIConnectionReadiness } from "@/shared/utils/legacyRuntimeSettingsCompat";
+import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
 import { readProtectedWorkOwners } from "@/shared/auth/protectedWorkOwner";
 import { SidePanelApp } from "./SidePanelApp";
 
@@ -388,11 +388,12 @@ describe("UI-04 real App/actions/bridge/hydration feedback wiring", () => {
   });
 });
 
-vi.mock("@/shared/utils/legacyRuntimeSettingsCompat", async () => {
+vi.mock("@/shared/utils/aiSolvePreferences", async () => {
   const storage = await import("@/shared/utils/storage");
   const { getProvider } = await import("@/shared/ai/providers");
   return {
-    loadLegacyRuntimeSettingsCompat: () => storage.loadSettings(),
+    loadParsePreferences: async () => { const { preferredRoute, language } = await storage.loadSettings(); return { preferredRoute, language }; },
+    getRuntimeCaptureInfo: async () => { const fixture = await storage.loadSettings(); return getProvider(fixture.providerId); },
     getAIConnectionReadiness: vi.fn(async () => {
       const fixture = await storage.loadSettings();
       return { ready: getProvider(fixture.providerId).keyOptional === true || Boolean(fixture.apiKey?.trim()) };

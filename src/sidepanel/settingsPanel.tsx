@@ -1,3 +1,4 @@
+import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
 import { ensureAIConnectionAuthorityReady } from "@/shared/utils/aiConnectionClient";
 import React, { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
@@ -5,7 +6,7 @@ import { useGSAP } from "@gsap/react";
 import type { QuestionBlock } from "@/shared/types";
 import { DEFAULT_ANALYTICS_BASE_URL } from "@/shared/constants/analytics";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
-import { getConnectionTestNotConfiguredMessage, isProviderRuntimeConfigured } from "@/shared/ai/parseResultAuthority";
+import { getConnectionTestNotConfiguredMessage } from "@/shared/ai/parseResultAuthority";
 import { mapUserFacingError, userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
 import { getProvider, parseQuestion } from "@/shared/utils/parseRouter";
 import { logEvent } from "@/shared/utils/analytics";
@@ -144,9 +145,7 @@ export const SettingsTab: React.FC<{
     setTestResult(null);
   };
 
-  const handleSave = async () => {
-    try {
-      await saveSettings({
+  const saveCurrentDraft = () => saveSettings({
         providerId,
         apiKey: apiKey.trim(),
         apiModel: model || provider.defaultModel,
@@ -156,7 +155,11 @@ export const SettingsTab: React.FC<{
         enableAnalytics,
         customProviderProtocol: customProtocol,
         language: lang,
-      });
+  });
+
+  const handleSave = async () => {
+    try {
+      await saveCurrentDraft();
       logEvent("settings_saved", { providerId, route });
       if (apiKey.trim()) logEvent("api_key_set", { providerId });
       onLanguageChange(lang);
@@ -172,37 +175,22 @@ export const SettingsTab: React.FC<{
     setTesting(true);
     setTestResult(null);
     try {
-      const currentProvider = getProvider(providerId);
-      // UI-00A: a required-key provider without a key must never report a
-      // successful connection (the old path silently returned a mock result).
-      // key-optional providers such as Ollama keep testing normally.
-      if (!isProviderRuntimeConfigured(currentProvider, { apiKey: apiKey.trim() })) {
-        setTestResult(userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), { code: "PROVIDER_NOT_CONFIGURED" }));
-        setTesting(false);
+      await saveCurrentDraft();
+      const readiness = await getAIConnectionReadiness();
+      if (!readiness.ready) {
+        setTestResult(userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), { code: readiness.code }));
         return;
       }
-      const settings = await loadSettings();
       const testBlock: QuestionBlock = {
         id: "test",
         bbox: { x: 0, y: 0, width: 100, height: 50 },
         previewText: "1+1=? A.1 B.2 C.3 D.4",
-        hasImage: !!currentProvider.supportsVision,
-        imageDataUrl: currentProvider.supportsVision
-          ? "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-          : undefined,
+        hasImage: false,
         questionTypeGuess: "single_choice",
         confidence: 1,
         source: "manual_capture",
       };
-      const result = await parseQuestion(testBlock, {
-        ...settings,
-        providerId,
-        apiKey: apiKey.trim(),
-        apiModel: model || currentProvider.defaultModel,
-        preferredRoute: currentProvider.supportsVision ? "vision" : "text",
-        customBaseUrl: customUrl || undefined,
-        customProviderProtocol: customProtocol,
-      });
+      const result = await parseQuestion(testBlock, { preferredRoute: "text", language: lang });
       const routeLabel =
         result.routeUsed === "vision"
           ? isEn
@@ -226,8 +214,7 @@ export const SettingsTab: React.FC<{
       // UI-00B PART H: classified, safe copy; the raw provider text only
       // survives as technical detail and is not displayed by default.
       setTestResult(mapUserFacingError(error, isEn ? "en" : "zh", { context: "connection-test" }));
-    }
-    setTesting(false);
+    } finally { setTesting(false); }
   };
 
   if (authOnly) {

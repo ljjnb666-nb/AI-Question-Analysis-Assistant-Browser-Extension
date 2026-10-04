@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserContext } from "@playwright/test";
 import { chromium } from "@playwright/test";
+import { installCanonicalOpenAIFixtureRoute } from "./aiConnectionHarness";
 
 const extensionPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "dist");
 const userDataDirs = new WeakMap<BrowserContext, string>();
@@ -19,6 +20,7 @@ export async function launchExtensionContext(): Promise<BrowserContext> {
       ],
     });
     userDataDirs.set(context, userDataDir);
+    await installCanonicalOpenAIFixtureRoute(context);
     return context;
   } catch (error) {
     await fs.rm(userDataDir, { recursive: true, force: true });
@@ -35,6 +37,9 @@ export async function resolveExtensionId(context: BrowserContext): Promise<strin
 export async function closeExtensionContext(context: BrowserContext): Promise<void> {
   const userDataDir = userDataDirs.get(context);
   try {
+    // A held provider response may intentionally remain pending at test end.
+    // Remove fixture handlers before disposing their request context.
+    await context.unrouteAll({ behavior: "ignoreErrors" });
     await context.close();
   } finally {
     userDataDirs.delete(context);

@@ -5,7 +5,7 @@ import type { BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext, resolveExtensionId } from "./helpers/extensionHarness";
 import { startTestAnalyticsBackend, type TestAnalyticsBackend } from "./helpers/authUiHarness";
-import { seedAIConnection } from "./helpers/aiConnectionHarness";
+import { seedAIConnection, routeCanonicalOpenAIToFixture, fulfillOpenAIJSON } from "./helpers/aiConnectionHarness";
 
 // Mock values are assembled at runtime so security scanners do not mistake
 // synthetic test fixtures for committed credentials.
@@ -164,7 +164,8 @@ async function startProductionAutoSolve(context: BrowserContext, extensionId: st
       analyticsBaseUrl: baseOrigin,
     },
   }), { baseOrigin: origin, analyticsOptIn });
-  await seedAIConnection(driver, { providerId: "custom", apiModel: "qwen3-vl", customBaseUrl: `${origin}/api`, customProviderProtocol: "openai", credential: { action: "REPLACE", value: "e2e-key" } });
+  await routeCanonicalOpenAIToFixture(context, origin);
+  await seedAIConnection(driver, { providerId: "openai", apiModel: "gpt-5.5", credential: { action: "REPLACE", value: "e2e-key" } });
 
   const tabId = await driver.evaluate(async (baseOrigin: string) => {
     const [tab] = await chrome.tabs.query({ url: `${baseOrigin}/*` });
@@ -210,11 +211,7 @@ async function installControlledProvider(context: BrowserContext) {
       optionSelections: { B: true },
       warning: null,
     });
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ choices: [{ message: { content: modelJson } }] }),
-    });
+    await fulfillOpenAIJSON(route, { choices: [{ message: { content: modelJson } }] });
   });
 
   return {

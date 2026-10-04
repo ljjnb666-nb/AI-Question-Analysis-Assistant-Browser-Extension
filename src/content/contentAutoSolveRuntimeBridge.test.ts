@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, type AppSettings, type HistoryEntry, type ParseResult, type QuestionBlock } from "@/shared/types";
+import { DEFAULT_SETTINGS, type HistoryEntry, type ParseResult, type QuestionBlock } from "@/shared/types";
 import { logEvent } from "@/shared/utils/analytics";
 import { createAutoSolveRuntimeBridge } from "./contentAutoSolveRuntimeBridge";
 import { activeQuestionRevisionAttempt } from "./revision/questionRevisionRuntime";
@@ -56,11 +56,11 @@ function createBridge(
 ) {
   const autoSolveParsingDeps = {
     loadSettings: async () => ({ ...DEFAULT_SETTINGS, preferredRoute: "text" as const }),
-    getProvider: () => ({ supportsVision: false }),
+    getRuntimeCaptureInfo: async () => ({ supportsVision: false }),
     tryCaptureBlockImageForAutoSolve: async () => null,
     parseWithTieredRetries: (
       _block: QuestionBlock,
-      _settings: AppSettings,
+      _settings: Pick<typeof DEFAULT_SETTINGS, "preferredRoute" | "language">,
       _supportsVision: boolean,
       _onStream: (partial: string) => void,
       runtimeContext?: ParseQuestionRuntimeContext,
@@ -154,9 +154,9 @@ describe("auto-solve history commit telemetry", () => {
     expect(activeQuestionRevisionAttempt()).toBeNull();
     provider.resolve(result);
 
-    const lateResult = await pending;
-    expect(bridge.isCurrentAutoSolveResult(block, lateResult)).toBe(false);
-    await expect(bridge.recordAutoSolveHistory(history, block, lateResult)).resolves.toBe(false);
+    await expect(pending).rejects.toThrow("STALE_QUESTION_REVISION");
+    expect(bridge.isCurrentAutoSolveResult(block, result)).toBe(false);
+    await expect(bridge.recordAutoSolveHistory(history, block, result)).resolves.toBe(false);
     expect(addHistoryEntryIfCurrent).not.toHaveBeenCalled();
     expect(history).toEqual([]);
   });

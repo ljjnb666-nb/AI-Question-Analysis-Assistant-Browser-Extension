@@ -24,7 +24,7 @@
  *   MalformedAIConnectionStateError) never escape this boundary: they are
  *   translated to stable codes (AI_CREDENTIAL_UNAVAILABLE,
  *   AI_CONNECTION_MALFORMED).
- * - NOT yet consumed by `parseQuestion` — no authority cutover in E2A.
+ * - Consumed by `parseQuestion` after E2B2A; metadata remains non-secret.
  */
 
 import type { AIConnectionRuntimeConfig, Connection, EncryptedCredentialRecord } from "../types/connection";

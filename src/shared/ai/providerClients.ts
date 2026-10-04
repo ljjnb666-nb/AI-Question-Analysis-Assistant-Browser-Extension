@@ -1,7 +1,7 @@
-﻿import type { AppSettings, ParseResult, QuestionBlock, RouteUsed } from "../types";
+﻿import type { ParseResult, QuestionBlock, RouteUsed } from "../types";
 import { buildUserQuestionPrompt, getSystemPrompt } from "./prompts";
-import { getProvider } from "./providers";
-import type { ProviderConfig } from "./providers";
+import { applyRuntimeAuth, redactRequestSecret, safeRequestLabel } from "./runtimeRequest";
+import type { ProviderRequestContext } from "./runtimeRequest";
 import { buildResult } from "./parseResult";
 import { buildPreferredQuestionText } from "./questionPromptText";
 import { buildSolverRequestContent } from "./questionPackage";
@@ -9,52 +9,83 @@ import type { SolverContentPart, SolverQuestionPackage } from "./questionPackage
 import { logError, logWarn } from "../utils/errorLogger";
 
 const REQUEST_TIMEOUT_MS = 30_000;
-export async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+export async function fetchWithTimeout(url: string, init: RequestInit, context: ProviderRequestContext): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
+  const signal = context.signal ? AbortSignal.any([controller.signal, context.signal]) : controller.signal;
+  const request = { ...init, redirect: "error" as const, signal };
   try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
-    return res;
+    await context.beforeDispatch();
+    return await fetch(url, request);
   } catch (err) {
-    if ((err as Error).name === "AbortError") {
-      const timeoutError = new Error(`Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
-      logError("Request timeout", timeoutError, "fetchWithTimeout", { url });
-      throw timeoutError;
-    }
-    logError("Fetch failed", err, "fetchWithTimeout", { url });
-    throw err;
+    const code = err && typeof err === "object" && "code" in err && typeof err.code === "string" ? err.code : undefined;
+    const message = code?.startsWith("AI_") ? code : timedOut ? `Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
+      : redactRequestSecret(err instanceof Error ? err.message : String(err), context.credential);
+    const safeError = new Error(message);
+    if (code) Object.assign(safeError, { code });
+    safeError.name = err instanceof Error ? redactRequestSecret(err.name, context.credential) : "Error";
+    logError(timedOut ? "Request timeout" : "Fetch failed", safeError, "fetchWithTimeout", { url: redactRequestSecret(safeRequestLabel(new URL(url)), context.credential) });
+    throw safeError;
   } finally {
     clearTimeout(timer);
   }
 }
 
-export function buildApiUrl(baseUrlRaw: string, endpoint: string): string {
-  const baseUrl = String(baseUrlRaw || "").trim().replace(/\/+$/, "");
-  const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+async function readProviderJson<T>(response: Response): Promise<T> {
+  try { return await response.json() as T; }
+  catch { throw new Error("AI_PROVIDER_RESPONSE_INVALID"); }
+}
 
-  if (baseUrl.endsWith(normalizedEndpoint)) return baseUrl;
-  if (baseUrl.endsWith("/v1") && normalizedEndpoint.startsWith("/v1/")) {
-    return `${baseUrl}${normalizedEndpoint.slice(3)}`;
+async function boundedResponseError(res: Response, context: ProviderRequestContext): Promise<Error> {
+  const reader = res.body?.getReader();
+  let text = "";
+  if (reader) {
+    const decoder = new TextDecoder();
+    let remaining = 8192;
+    try {
+      while (remaining > 0) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value.subarray(0, remaining), { stream: true });
+        remaining -= value.byteLength;
+      }
+    } finally { await reader.cancel(); }
   }
-  if (baseUrl.endsWith("/v1beta") && normalizedEndpoint.startsWith("/v1beta/")) {
-    return `${baseUrl}${normalizedEndpoint.slice(7)}`;
+  return new Error(`${context.runtime.protocol} API ${res.status}: ${redactRequestSecret(text, context.credential)}`);
+}
+
+function requestAuth(urlString: string, context: ProviderRequestContext, extraHeaders: Record<string, string> = {}) {
+  const url = new URL(urlString);
+  const headers = { "Content-Type": "application/json", ...extraHeaders };
+  applyRuntimeAuth(url, headers, context);
+  return { url: url.href, headers };
+}
+
+export function buildApiUrl(baseUrlRaw: string, endpoint: string): string {
+  const url = new URL(baseUrlRaw);
+  const path = url.pathname.replace(/\/+$/, "");
+  const suffix = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  if (!path.endsWith(suffix)) {
+    const prefix = path.endsWith("/v1") && suffix.startsWith("/v1/") ? 3
+      : path.endsWith("/v1beta") && suffix.startsWith("/v1beta/") ? 7 : 0;
+    url.pathname = `${path}${suffix.slice(prefix)}`;
   }
-  return `${baseUrl}${normalizedEndpoint}`;
+  return url.href;
 }
 // ---- Anthropic ----
 
 export async function callAnthropic(
   block: QuestionBlock,
   route: RouteUsed,
-  settings: AppSettings,
+  context: ProviderRequestContext,
   onStream?: (partial: string) => void,
   questionPackage?: SolverQuestionPackage,
 ): Promise<ParseResult> {
-  const provider = getProvider("anthropic");
-  const baseUrl = settings.customBaseUrl || provider.baseUrl;
+  const baseUrl = context.runtime.endpoint;
   const content: unknown[] = [];
 
-  const prompt = buildUserQuestionPrompt(block, route, settings);
+  const prompt = buildUserQuestionPrompt(block, route, context);
   if ((route === "vision" || route === "hybrid") && questionPackage) {
     for (const item of buildSolverRequestContent(prompt, questionPackage.media)) {
       if (item.type === "text") content.push({ type: "text", text: item.text });
@@ -71,55 +102,26 @@ export async function callAnthropic(
 
   // Some custom Anthropic-compatible gateways keep SSE connections open,
   // causing UI-side hangs. Prefer non-stream mode for custom provider.
-  const useStream = !!onStream && settings.providerId !== "custom";
+  const useStream = !!onStream && context.runtime.presetId !== "custom";
   const requestBody = JSON.stringify({
-    model: settings.apiModel || provider.defaultModel,
+    model: context.runtime.selectedModelId,
     max_tokens: 1024,
     stream: useStream,
     system: getSystemPrompt(),
     messages: [{ role: "user", content }],
   });
 
-  const requestWithAuthMode = async (authMode: "x-api-key" | "bearer") => {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "anthropic-version": "2023-06-01",
-    };
-    if (authMode === "x-api-key") headers["x-api-key"] = settings.apiKey;
-    else headers.Authorization = `Bearer ${settings.apiKey}`;
-
-    return fetchWithTimeout(buildApiUrl(baseUrl, "/v1/messages"), {
-      method: "POST",
-      headers,
-      body: requestBody,
-    });
-  };
-
-  let res = await requestWithAuthMode("x-api-key");
-  if (!res.ok) {
-    const errText = await res.text();
-    const isCustomAnthropic = settings.providerId === "custom" && settings.customProviderProtocol === "anthropic";
-    const shouldRetryBearer =
-      isCustomAnthropic &&
-      res.status === 401 &&
-      /invalid x-api-key|x-api-key|api key/i.test(errText);
-    if (shouldRetryBearer) {
-      res = await requestWithAuthMode("bearer");
-      if (!res.ok) {
-        throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
-      }
-    } else {
-      throw new Error(`Anthropic API ${res.status}: ${errText}`);
-    }
-  }
+  const auth = requestAuth(buildApiUrl(baseUrl, "/v1/messages"), context, { "anthropic-version": "2023-06-01" });
+  const res = await fetchWithTimeout(auth.url, { method: "POST", headers: auth.headers, body: requestBody }, context);
+  if (!res.ok) throw await boundedResponseError(res, context);
 
   if (useStream && res.body) {
-    const text = await consumeAnthropicStream(res.body, onStream!);
-    return buildResult(block, route, text);
+    const text = await consumeAnthropicStream(res.body, partial => onStream!(redactRequestSecret(partial, context.credential)));
+    return buildResult(block, route, redactRequestSecret(text, context.credential));
   }
 
-  const data = await res.json() as { content: Array<{ type: string; text?: string }> };
-  return buildResult(block, route, data.content.find(c => c.type === "text")?.text ?? "{}");
+  const data = await readProviderJson<{ content: Array<{ type: string; text?: string }> }>(res);
+  return buildResult(block, route, redactRequestSecret(data.content.find(c => c.type === "text")?.text ?? "{}", context.credential));
 }
 
 async function consumeAnthropicStream(
@@ -144,8 +146,8 @@ async function consumeAnthropicStream(
           fullText += evt.delta.text ?? "";
           onStream(fullText);
         }
-      } catch (parseErr) {
-        logWarn("Malformed SSE event", "consumeAnthropicStream", { line, error: String(parseErr) });
+      } catch {
+        logWarn("Malformed SSE event", "consumeAnthropicStream");
       }
     }
   }
@@ -157,43 +159,38 @@ async function consumeAnthropicStream(
 export async function callOpenAICompat(
   block: QuestionBlock,
   route: RouteUsed,
-  settings: AppSettings,
-  provider: ProviderConfig,
+  context: ProviderRequestContext,
   onStream?: (partial: string) => void,
   questionPackage?: SolverQuestionPackage,
 ): Promise<ParseResult> {
-  const useVision = provider.supportsVision && (route === "vision" || route === "hybrid");
+  const useVision = (route === "vision" || route === "hybrid");
   // Custom OpenAI-compatible endpoints may not fully support SSE semantics.
   // Disable stream for custom provider to avoid indefinite pending.
-  const useStream = !!onStream && settings.providerId !== "custom";
+  const useStream = !!onStream && context.runtime.presetId !== "custom";
 
   // For non-vision providers, use simple string content
   let userContent: unknown;
   if (useVision && questionPackage) {
     const contentArray: unknown[] = [];
-    for (const item of buildSolverRequestContent(buildUserQuestionPrompt(block, route, settings), questionPackage.media)) {
+    for (const item of buildSolverRequestContent(buildUserQuestionPrompt(block, route, context), questionPackage.media)) {
       if (item.type === "text") contentArray.push({ type: "text", text: item.text });
-      else contentArray.push({ type: "image_url", image_url: { url: await asOpenAIImageUrl(item, provider.supportsRemoteImageUrl), detail: "high" } });
+      else contentArray.push({ type: "image_url", image_url: { url: await asOpenAIImageUrl(item, context.runtime.transportCapabilities.remoteImageUrl.value === true), detail: "high" } });
     }
     userContent = contentArray;
   } else if (useVision && block.imageDataUrl) {
     const contentArray: unknown[] = [];
     contentArray.push({ type: "image_url", image_url: { url: block.imageDataUrl, detail: "high" } });
-    contentArray.push({ type: "text", text: buildUserQuestionPrompt(block, route, settings) });
+    contentArray.push({ type: "text", text: buildUserQuestionPrompt(block, route, context) });
     userContent = contentArray;
   } else {
     // Simple string content for text-only providers
-    userContent = buildUserQuestionPrompt(block, route, settings);
+    userContent = buildUserQuestionPrompt(block, route, context);
   }
 
-  const baseUrl = settings.customBaseUrl || provider.baseUrl;
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (provider.authHeader === "bearer" && settings.apiKey) {
-    headers["Authorization"] = `Bearer ${settings.apiKey}`;
-  }
+  const auth = requestAuth(buildApiUrl(context.runtime.endpoint, "/v1/chat/completions"), context);
 
   const requestBody: Record<string, unknown> = {
-    model: settings.apiModel || provider.defaultModel,
+    model: context.runtime.selectedModelId,
     stream: useStream,
     messages: [
       { role: "system", content: getSystemPrompt() },
@@ -201,7 +198,7 @@ export async function callOpenAICompat(
     ],
   };
 
-  if (provider.id === "minimax") {
+  if (context.runtime.presetId === "minimax") {
     if (isMiniMaxCodeProblem(block)) {
       requestBody.max_completion_tokens = 2048;
     } else {
@@ -213,21 +210,21 @@ export async function callOpenAICompat(
     requestBody.max_tokens = 1024;
   }
 
-  const res = await fetchWithTimeout(buildApiUrl(baseUrl, "/v1/chat/completions"), {
+  const res = await fetchWithTimeout(auth.url, {
     method: "POST",
-    headers,
+    headers: auth.headers,
     body: JSON.stringify(requestBody),
-  });
+  }, context);
 
-  if (!res.ok) throw new Error(`${provider.name} API ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw await boundedResponseError(res, context);
 
   if (useStream && res.body) {
-    const text = await consumeOpenAIStream(res.body, onStream!);
-    return buildResult(block, route, text);
+    const text = await consumeOpenAIStream(res.body, partial => onStream!(redactRequestSecret(partial, context.credential)));
+    return buildResult(block, route, redactRequestSecret(text, context.credential));
   }
 
-  const data = await res.json() as { choices: Array<{ message: { content: string } }> };
-  return buildResult(block, route, data.choices?.[0]?.message?.content ?? "{}");
+  const data = await readProviderJson<{ choices: Array<{ message: { content: string } }> }>(res);
+  return buildResult(block, route, redactRequestSecret(data.choices?.[0]?.message?.content ?? "{}", context.credential));
 }
 
 function isMiniMaxCodeProblem(block: QuestionBlock): boolean {
@@ -256,8 +253,8 @@ async function consumeOpenAIStream(
         const evt = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
         const delta = evt.choices?.[0]?.delta?.content;
         if (delta) { fullText += delta; onStream(fullText); }
-      } catch (parseErr) {
-        logWarn("Malformed OpenAI SSE event", "consumeOpenAIStream", { line, error: String(parseErr) });
+      } catch {
+        logWarn("Malformed OpenAI SSE event", "consumeOpenAIStream");
       }
     }
   }
@@ -269,15 +266,14 @@ async function consumeOpenAIStream(
 export async function callGemini(
   block: QuestionBlock,
   route: RouteUsed,
-  settings: AppSettings,
+  context: ProviderRequestContext,
   questionPackage?: SolverQuestionPackage,
 ): Promise<ParseResult> {
-  const provider = getProvider("gemini");
-  const model = settings.apiModel || provider.defaultModel;
-  const url = `${provider.baseUrl}/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
+  const model = context.runtime.selectedModelId;
+  const auth = requestAuth(buildApiUrl(context.runtime.endpoint, `/v1beta/models/${encodeURIComponent(model)}:generateContent`), context);
 
   const parts: unknown[] = [];
-  const prompt = `${getSystemPrompt()}\n\n${buildUserQuestionPrompt(block, route, settings)}`;
+  const prompt = `${getSystemPrompt()}\n\n${buildUserQuestionPrompt(block, route, context)}`;
   if ((route === "vision" || route === "hybrid") && questionPackage) {
     for (const item of buildSolverRequestContent(prompt, questionPackage.media)) {
       if (item.type === "text") parts.push({ text: item.text });
@@ -292,18 +288,18 @@ export async function callGemini(
     parts.push({ text: prompt });
   } else parts.push({ text: prompt });
 
-  const res = await fetchWithTimeout(url, {
+  const res = await fetchWithTimeout(auth.url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: auth.headers,
     body: JSON.stringify({
       contents: [{ parts }],
       generationConfig: { maxOutputTokens: 1024, temperature: 0.1 },
     }),
-  });
+  }, context);
 
-  if (!res.ok) throw new Error(`Gemini API ${res.status}: ${await res.text()}`);
-  const data = await res.json() as { candidates: Array<{ content: { parts: Array<{ text: string }> } }> };
-  return buildResult(block, route, data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}");
+  if (!res.ok) throw await boundedResponseError(res, context);
+  const data = await readProviderJson<{ candidates: Array<{ content: { parts: Array<{ text: string }> } }> }>(res);
+  return buildResult(block, route, redactRequestSecret(data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}", context.credential));
 }
 
 async function asOpenAIImageUrl(item: Extract<SolverContentPart, { type: "image" }>, supportsRemote: boolean): Promise<string> {

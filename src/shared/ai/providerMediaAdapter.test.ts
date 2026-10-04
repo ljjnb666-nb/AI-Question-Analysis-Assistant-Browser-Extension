@@ -1,5 +1,9 @@
+import { parseConfiguredQuestion as parseQuestion, parseConfiguredQuestionPackage as parseQuestionPackage } from "../../test/aiConnectionFixture";
+import { beforeEach } from "vitest";
+import { installMemoryStorage } from "../../test/memoryStorage";
+beforeEach(() => { installMemoryStorage(); });
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseQuestion, parseQuestionPackage } from "@/shared/utils/parseRouter";
+
 import { DEFAULT_SETTINGS, type MediaAssetRef, type QuestionBlock } from "@/shared/types";
 import type { SolverQuestionPackage } from "./questionPackage";
 
@@ -13,7 +17,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("provider media adapters", () => {
   it("OpenAI sends every labeled image and preserves a remote URL", async () => {
     const fetchMock = vi.fn(async () => response()); vi.stubGlobal("fetch", fetchMock);
-    await parseQuestionPackage({ ...pkg, media: [{ ...pkg.media[0], source: { kind: "remote-url", url: "https://example.test/diagram.jpg" } }, ...pkg.media.slice(1)] }, block, { ...DEFAULT_SETTINGS, providerId: "openai", apiKey: "key", preferredRoute: "vision" });
+    await parseQuestionPackage({ ...pkg, media: [{ ...pkg.media[0], source: { kind: "remote-url", url: "https://example.test/diagram.jpg" } }, ...pkg.media.slice(1)] }, block, { ...DEFAULT_SETTINGS, providerId: "openai", apiModel: "gpt-5.5", apiKey: "key", preferredRoute: "vision" });
     const [, request] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]; const body = JSON.parse(String(request.body)); const content = body.messages[1].content;
     expect(content.filter((part: { type: string }) => part.type === "image_url")).toHaveLength(5);
     expect(content.map((part: { text?: string }) => part.text).filter(Boolean)).toEqual(expect.arrayContaining(["Option A image:", "Option B image:", "Option C image:", "Option D image:"]));
@@ -28,7 +32,7 @@ describe("provider media adapters", () => {
   });
   it("Gemini sends N inline_data image parts", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"questionType":"single_choice","answer":"A","confidence":1}' }] } }] }), { status: 200 })); vi.stubGlobal("fetch", fetchMock);
-    await parseQuestionPackage(pkg, block, { ...DEFAULT_SETTINGS, providerId: "gemini", apiKey: "key", preferredRoute: "vision" });
+    await parseQuestionPackage(pkg, block, { ...DEFAULT_SETTINGS, providerId: "gemini", apiModel: "gemini-2.5-flash", apiKey: "key", preferredRoute: "vision" });
     const [, request] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]; const parts = JSON.parse(String(request.body)).contents[0].parts;
     expect(parts.filter((part: { inline_data?: unknown }) => part.inline_data)).toHaveLength(5);
     expect(parts.find((part: { inline_data?: { mime_type: string } }) => part.inline_data)?.inline_data.mime_type).toBe("image/jpeg");
@@ -36,7 +40,7 @@ describe("provider media adapters", () => {
   it("P4-12/P4-13/G4 never calls a provider for blocked required canonical media", async () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     const blocked: MediaAssetRef = { schemaVersion: 1, assetId: "blocked", contentFingerprint: "blocked", kind: "canvas", sourceKind: "canvas-snapshot", availability: "tainted", ownership: { role: "stem", confidence: 1, reasons: ["STEM_ANCESTRY"] } };
-    await expect(parseQuestion({ ...block, mediaAssets: [blocked], completeness: { state: "complete", boundaryComplete: true, stemComplete: true, optionsComplete: true, visualComplete: true, controlsComplete: true, confidence: 1, reasons: [] } }, { ...DEFAULT_SETTINGS, providerId: "openai", apiKey: "key", preferredRoute: "vision" })).rejects.toThrow("MEDIA_BLOCKED");
+    await expect(parseQuestion({ ...block, mediaAssets: [blocked], completeness: { state: "complete", boundaryComplete: true, stemComplete: true, optionsComplete: true, visualComplete: true, controlsComplete: true, confidence: 1, reasons: [] } }, { ...DEFAULT_SETTINGS, providerId: "openai", apiModel: "gpt-5.5", apiKey: "key", preferredRoute: "vision" })).rejects.toThrow("MEDIA_BLOCKED");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

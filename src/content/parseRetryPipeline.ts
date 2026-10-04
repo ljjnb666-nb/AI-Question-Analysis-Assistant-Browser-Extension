@@ -1,6 +1,8 @@
-import type { AppSettings, ParseResult, QuestionBlock } from "@/shared/types";
+import { withParseTimeout } from "@/shared/utils/parseTimeout";
+import type { ParsePreferences } from "@/shared/ai/runtimeRequest";
+import type { ParseResult, QuestionBlock } from "@/shared/types";
 import type { AnalyticsEvent } from "@/shared/utils/analytics";
-import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
+import { withSolveAuthorityLease, type ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import { isProviderNotConfiguredError, isStaleQuestionRevisionError } from "@/shared/utils/parseAttemptErrors";
 
 type StreamCallback = (partial: string) => void;
@@ -9,7 +11,7 @@ type ParseRetryDeps = {
   logEvent: (event: AnalyticsEvent, payload?: Record<string, unknown>) => void;
   parseQuestion: (
     block: QuestionBlock,
-    settings: AppSettings,
+    settings: ParsePreferences,
     onStream?: StreamCallback,
     runtimeContext?: ParseQuestionRuntimeContext,
   ) => Promise<ParseResult>;
@@ -19,40 +21,42 @@ type ParseRetryDeps = {
 
 export async function parseWithStreamingFallback(
   block: QuestionBlock,
-  settings: AppSettings,
+  settings: ParsePreferences,
   onStream: StreamCallback,
   timeoutMs: number,
   deps: ParseRetryDeps,
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
+  runtimeContext = withSolveAuthorityLease(runtimeContext);
   try {
-    return await deps.withTimeout(
-      deps.parseQuestion(block, settings, onStream, runtimeContext),
+    return await withParseTimeout(
+      (context) => deps.parseQuestion(block, settings, (partial) => { if (!context.signal?.aborted) onStream(partial); }, context),
       timeoutMs,
-      "stream_timeout",
+      "stream_timeout", deps.withTimeout, runtimeContext,
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (!/stream_timeout/i.test(msg)) throw err;
+    if (runtimeContext.signal?.aborted || !/^stream_timeout$/i.test(msg)) throw err;
     deps.logEvent("parse_stream_timeout_fallback", { blockId: block.id, timeoutMs });
     deps.setStreamingText("流式响应超时，正在切换为普通请求重试...");
-    return deps.withTimeout(
-      deps.parseQuestion(block, settings, undefined, runtimeContext),
+    return withParseTimeout(
+      (context) => deps.parseQuestion(block, settings, undefined, context),
       Math.max(8_000, Math.floor(timeoutMs * 0.9)),
-      "non_stream_timeout",
+      "non_stream_timeout", deps.withTimeout, runtimeContext,
     );
   }
 }
 
 export async function parseWithTieredRetries(
   block: QuestionBlock,
-  settings: AppSettings,
+  settings: ParsePreferences,
   providerSupportsVision: boolean,
   onStream: StreamCallback,
   tierTimeoutsMs: readonly number[],
   deps: ParseRetryDeps,
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
+  runtimeContext = withSolveAuthorityLease(runtimeContext);
   const preferred = settings.preferredRoute;
   const routePlan: Array<"text" | "auto" | "vision"> = [];
   if (preferred === "text") {
@@ -115,7 +119,9 @@ export async function parseWithTieredRetries(
       return result;
     } catch (err) {
       lastErr = err;
+      if (runtimeContext.signal?.aborted) throw err;
       if (isStaleQuestionRevisionError(err)) throw err;
+      if (err && typeof err === "object" && "code" in err && String(err.code).startsWith("AI_")) throw err;
       // UI-00A: retrying cannot fix a missing API Key — surface it immediately.
       if (isProviderNotConfiguredError(err)) throw err;
       const msg = err instanceof Error ? err.message : String(err);
@@ -146,5 +152,5 @@ export async function parseWithTieredRetries(
 }
 
 export function isNonRetryableParseError(message: string): boolean {
-  return /^(?:MEDIA_SOURCE_UNAVAILABLE|MEDIA_BLOCKED|MEDIA_BUDGET_EXCEEDED|STALE_QUESTION_REVISION|CANONICAL_MEDIA_REQUIRES_VISION|MEDIA_REQUIRES_VISION|QUESTION_NOT_ELIGIBLE)/.test(message);
+  return /^(?:AI_|MEDIA_SOURCE_UNAVAILABLE|MEDIA_BLOCKED|MEDIA_BUDGET_EXCEEDED|STALE_QUESTION_REVISION|CANONICAL_MEDIA_REQUIRES_VISION|MEDIA_REQUIRES_VISION|QUESTION_NOT_ELIGIBLE)/.test(message);
 }

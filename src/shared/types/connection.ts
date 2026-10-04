@@ -7,10 +7,9 @@
  * credential-store/storage helpers.
  *
  * E1 staging note: legacy AI fields in `AppSettings` (providerId, apiKey,
- * apiModel, customBaseUrl, customProviderProtocol) remain the runtime
- * authority until the E2 parseRouter cutover. E1 shipped the foundation and
- * migration primitive only; production migration remains disabled until E2
- * cutover. The legacy fields must not be dual-written anywhere.
+ * apiModel, customBaseUrl, customProviderProtocol) are inert compatibility
+ * fields after the E2B2A parseRouter cutover. E1 shipped the foundation and
+ * migration primitive only; production initialization moved to the background owner in E2B1. The legacy fields must not be dual-written anywhere.
  */
 
 /**
@@ -180,8 +179,7 @@ export type ModelClassification = "known" | "unknown";
 
 /**
  * E2A model capability authority. Replaces (at cutover) the
- * `provider.supportsVision` + `isLikelyTextOnlyModel` heuristic; the legacy
- * heuristic remains in parseRouter until E2B.
+ * `provider.supportsVision` + `isLikelyTextOnlyModel` heuristic; solve requests consume this assessment after E2B2A.
  */
 export interface ModelCapabilityAssessment {
   classification: ModelClassification;
