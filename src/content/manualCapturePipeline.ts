@@ -1,3 +1,4 @@
+import { withSolveAuthorityLease, type ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import type { ParsePreferences } from "@/shared/ai/runtimeRequest";
 import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import type { AnalyticsEvent } from "@/shared/utils/analytics";
@@ -33,6 +34,7 @@ type ManualCaptureDeps = {
     settings: ParsePreferences,
     providerSupportsVision: boolean,
     onStream: (partial: string) => void,
+    runtimeContext?: ParseQuestionRuntimeContext,
   ) => Promise<ParseResult>;
   withTimeout: <T>(promise: Promise<T>, timeoutMs: number, timeoutReason: string) => Promise<T>;
   addHistoryEntry: (entry: HistoryEntry) => Promise<void>;
@@ -59,10 +61,12 @@ export async function runManualCapturePipeline(
   deps: ManualCaptureDeps,
 ): Promise<void> {
   const { forceVision, pipelineTimeoutMs } = options;
+  const controller = new AbortController();
+  const runtimeContext = withSolveAuthorityLease({ signal: controller.signal, isQuestionRevisionCurrent: () => options.isRuntimeCurrent?.() ?? true });
   const isRuntimeCurrent = options.isRuntimeCurrent ?? (() => true);
   if (!isRuntimeCurrent()) return;
   const setStreamingText = (text: string) => {
-    if (isRuntimeCurrent()) deps.floatingMgr.setStreamingText(text);
+    if (!controller.signal.aborted && isRuntimeCurrent()) deps.floatingMgr.setStreamingText(text);
   };
   const resolved = deps.resolveQuestionBlockFromBBox(bbox);
   const refinedBBox = resolved.refinedBBox;
@@ -129,9 +133,10 @@ export async function runManualCapturePipeline(
           block,
           effectiveSettings,
           provider.supportsVision,
-          setStreamingText,
+          setStreamingText, runtimeContext,
         );
 
+        controller.signal.throwIfAborted();
         let pickedResult = firstPassResult;
         const shouldRetryWithVision =
           !forceVision &&
@@ -152,8 +157,9 @@ export async function runManualCapturePipeline(
             visionBlock,
             visionSettings,
             true,
-            setStreamingText,
+            setStreamingText, runtimeContext,
           );
+          controller.signal.throwIfAborted();
           if (!isRuntimeCurrent()) return firstPassResult;
 
           if (deps.shouldPreferVisionResult(firstPassResult, visionResult)) {
@@ -188,8 +194,9 @@ export async function runManualCapturePipeline(
             secondVisionBlock,
             { ...settings, preferredRoute: "vision" as const },
             true,
-            setStreamingText,
+            setStreamingText, runtimeContext,
           );
+          controller.signal.throwIfAborted();
           if (!isRuntimeCurrent()) return pickedResult;
           if (deps.shouldPreferSecondVisionResult(pickedResult, secondVisionResult, block)) {
             pickedResult = secondVisionResult;
@@ -210,7 +217,10 @@ export async function runManualCapturePipeline(
       })(),
       pipelineTimeoutMs,
       "manual_pipeline_timeout",
-    );
+    ).catch((error: unknown) => {
+      if (error instanceof Error && error.message === "manual_pipeline_timeout") controller.abort();
+      throw error;
+    });
 
     if (!isRuntimeCurrent()) return;
     deps.floatingMgr.setResult(finalResult);
@@ -246,14 +256,14 @@ export async function runManualCapturePipeline(
       Boolean(block.imageDataUrl) &&
       !forceVision;
 
-    if (canRetryWithVision && /text[- ]?only|鏂囨湰妯″瀷|鏂囨湰璺嚎|image question/i.test(msg)) {
+    if (!controller.signal.aborted && canRetryWithVision && /text[- ]?only|鏂囨湰妯″瀷|鏂囨湰璺嚎|image question/i.test(msg)) {
       try {
         setStreamingText("检测到当前配置与图片题不匹配，正在自动切换视觉解析...");
         const visionResult = await deps.parseWithTieredRetries(
           { ...block, hasImage: true },
           { ...settings, preferredRoute: "vision" as const },
           true,
-          setStreamingText,
+          setStreamingText, runtimeContext,
         );
         if (!isRuntimeCurrent()) return;
         deps.floatingMgr.setResult(visionResult);

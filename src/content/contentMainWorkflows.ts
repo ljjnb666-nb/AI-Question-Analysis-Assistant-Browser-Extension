@@ -1,3 +1,4 @@
+import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import { loadParsePreferences, getAIConnectionReadiness, getRuntimeCaptureInfo } from "@/shared/utils/aiSolvePreferences";
 import type { BoundingBox, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import { cropScreenshot } from "@/shared/utils/cropImage";
@@ -60,6 +61,7 @@ type CreateContentMainWorkflowsOptions = {
     settings: Awaited<ReturnType<typeof loadParsePreferences>>,
     providerSupportsVision: boolean,
     onStream: (partial: string) => void,
+    runtimeContext?: ParseQuestionRuntimeContext,
   ) => Promise<ParseResult>;
   screenshotWithRetry: () => Promise<string | null>;
   clickNextQuestionButton: () => boolean;

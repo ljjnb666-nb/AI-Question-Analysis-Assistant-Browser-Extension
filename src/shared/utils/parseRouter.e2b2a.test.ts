@@ -1,3 +1,5 @@
+import * as providerClients from "../ai/providerClients";
+import { parseWithStreamingFallback, parseWithTieredRetries } from "@/content/parseRetryPipeline";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installMemoryStorage } from "../../test/memoryStorage";
 import type { Connection, ProviderPresetId } from "../types/connection";
@@ -260,4 +262,112 @@ describe("E2B2A authoritative data plane", () => {
       expect(value).not.toContain(key);
     }
   });
+});
+
+
+describe("RF01 real retry helper authority and cancellation", () => {
+  function controlledTimeout() {
+    let rejectTimeout!: (error: Error) => void;
+    let calls = 0;
+    return {
+      trigger: () => rejectTimeout(new Error("stream_timeout")),
+      withTimeout: <T>(promise: Promise<T>): Promise<T> => ++calls === 1
+        ? Promise.race([promise, new Promise<T>((_, reject) => { rejectTimeout = reject; })])
+        : promise,
+    };
+  }
+  async function switchToB() {
+    await updateAIConnectionState(state => {
+      state.connections.second = { ...state.connections.active, id: "second", endpointOverride: "https://b.example/v1/chat/completions" };
+      state.activeConnectionId = "second";
+      return state;
+    });
+  }
+  it("RF01-STREAM authority A times out after actual state switch; B never dispatches", async () => {
+    await seed("openai");
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => {
+      entered(); init.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const timer = controlledTimeout();
+    const assertion = expect(parseWithStreamingFallback(block, prefs, () => {}, 100, {
+      parseQuestion, logEvent: vi.fn(), setStreamingText: vi.fn(), withTimeout: timer.withTimeout,
+    })).rejects.toMatchObject({ code: "AI_RUNTIME_CONFIG_STALE" });
+    await started; await switchToB(); timer.trigger(); await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("b.example"))).toHaveLength(0);
+    expect(fetchMock.mock.calls[0][1].signal!.aborted).toBe(true);
+  });
+  it("RF01-TIER fences the first runtime after state changes between actual tier calls", async () => {
+    await seed("openai");
+    const fetchMock = vi.fn(async () => response("openai")); vi.stubGlobal("fetch", fetchMock);
+    let calls = 0;
+    await expect(parseWithTieredRetries(block, prefs, false, () => {}, [100, 100], {
+      parseQuestion, logEvent: vi.fn(), setStreamingText: vi.fn(),
+      withTimeout: async <T>(promise: Promise<T>) => {
+        const value = await promise;
+        if (++calls === 1) { await switchToB(); throw new Error("retryable network failure"); }
+        return value;
+      },
+    })).rejects.toMatchObject({ code: "AI_RUNTIME_CONFIG_STALE" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it("RF01-TIMEOUT aborts first fetch before replacement; maximum live fetch count is one", async () => {
+    await seed("openai");
+    let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
+    let live = 0; let maxLive = 0; let firstSignal!: AbortSignal;
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      live++; maxLive = Math.max(maxLive, live);
+      if (fetchMock.mock.calls.length === 1) {
+        firstSignal = init.signal!;
+        return new Promise<Response>((_, reject) => {
+          entered(); firstSignal.addEventListener("abort", () => { live--; reject(new DOMException("aborted", "AbortError")); }, { once: true });
+        });
+      }
+      expect(firstSignal.aborted).toBe(true); live--;
+      return Promise.resolve(response("openai"));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const timer = controlledTimeout();
+    const running = parseWithStreamingFallback(block, prefs, () => {}, 100, {
+      parseQuestion, logEvent: vi.fn(), setStreamingText: vi.fn(), withTimeout: timer.withTimeout,
+    });
+    await started; timer.trigger(); expect((await running).answer).toBe("2");
+    expect(fetchMock).toHaveBeenCalledTimes(2); expect(maxLive).toBe(1); expect(live).toBe(0);
+  });
+  it("RF01-PARENT abort still cancels actual fetch and cannot start fallback", async () => {
+    await seed("openai");
+    let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
+    const parent = new AbortController();
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => {
+      entered(); init.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+    })); vi.stubGlobal("fetch", fetchMock);
+    const assertion = expect(parseWithStreamingFallback(block, prefs, () => {}, 100, {
+      parseQuestion, logEvent: vi.fn(), setStreamingText: vi.fn(), withTimeout: promise => promise,
+    }, { signal: parent.signal })).rejects.toThrow("STALE_QUESTION_REVISION");
+    await started; parent.abort(); await assertion; expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+it("RF01 internal retry re-resolves credentials from the same runtime and clears the previous attempt", async () => {
+  await seed("openai");
+  const resolveSecret = vi.spyOn(runtimeResolver, "resolveRuntimeCredential");
+  const finalFence = vi.spyOn(runtimeResolver, "assertRuntimeConfigCurrent");
+  const contexts: Array<Parameters<typeof callOpenAICompat>[2]> = [];
+  const original = providerClients.callOpenAICompat;
+  vi.spyOn(providerClients, "callOpenAICompat").mockImplementation(async (...args) => {
+    if (contexts.length) expect(contexts[0].credential).toBeNull();
+    contexts.push(args[2]); return original(...args);
+  });
+  const fetchMock = vi.fn().mockResolvedValueOnce(new Response("temporary failure", { status: 503 }))
+    .mockResolvedValueOnce(response("openai")); vi.stubGlobal("fetch", fetchMock);
+  expect((await parseQuestion(block, prefs)).answer).toBe("2");
+  expect(resolveSecret).toHaveBeenCalledTimes(2);
+  expect(resolveSecret.mock.calls[0][0]).toBe(resolveSecret.mock.calls[1][0]);
+  expect(finalFence).toHaveBeenCalledTimes(2);
+  expect(contexts[0].runtime).toBe(contexts[1].runtime);
+  expect(contexts.every(context => context.credential === null)).toBe(true);
 });

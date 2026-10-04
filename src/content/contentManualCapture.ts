@@ -1,3 +1,4 @@
+import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import type { ParsePreferences } from "@/shared/ai/runtimeRequest";
 import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import type { AnalyticsEvent } from "@/shared/utils/analytics";
@@ -35,6 +36,7 @@ type ManualCapturePipelineDeps = {
     settings: ParsePreferences,
     providerSupportsVision: boolean,
     onStream: (partial: string) => void,
+    runtimeContext?: ParseQuestionRuntimeContext,
   ) => Promise<ParseResult>;
   withTimeout: <T>(promise: Promise<T>, timeoutMs: number, timeoutReason: string) => Promise<T>;
   addHistoryEntry: (entry: HistoryEntry) => Promise<void>;

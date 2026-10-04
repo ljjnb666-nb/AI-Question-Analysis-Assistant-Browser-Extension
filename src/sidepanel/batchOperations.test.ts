@@ -283,7 +283,7 @@ describe("Side Panel result commit authority", () => {
     await runBatchParse([stale, current], { ...deps, setCandidates: store.setCandidates });
 
     expect(deps.parseQuestion).toHaveBeenCalledTimes(1);
-    expect(deps.parseQuestion).toHaveBeenCalledWith(current.block, expect.any(Object));
+    expect(deps.parseQuestion).toHaveBeenCalledWith(current.block, expect.any(Object), expect.objectContaining({ authorityLease: expect.any(Object) }));
     expect(history).toHaveLength(1);
     expect((history[0] as { result: ParseResult }).result.blockId).toBe("q-current");
     expect(store.getState().find((item) => item.block.id === "q-current")?.result?.answer).toBe("answer:q-current");

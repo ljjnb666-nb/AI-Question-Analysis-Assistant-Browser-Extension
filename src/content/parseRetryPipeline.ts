@@ -1,7 +1,8 @@
+import { withParseTimeout } from "@/shared/utils/parseTimeout";
 import type { ParsePreferences } from "@/shared/ai/runtimeRequest";
 import type { ParseResult, QuestionBlock } from "@/shared/types";
 import type { AnalyticsEvent } from "@/shared/utils/analytics";
-import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
+import { withSolveAuthorityLease, type ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import { isProviderNotConfiguredError, isStaleQuestionRevisionError } from "@/shared/utils/parseAttemptErrors";
 
 type StreamCallback = (partial: string) => void;
@@ -26,21 +27,22 @@ export async function parseWithStreamingFallback(
   deps: ParseRetryDeps,
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
+  runtimeContext = withSolveAuthorityLease(runtimeContext);
   try {
-    return await deps.withTimeout(
-      deps.parseQuestion(block, settings, onStream, runtimeContext),
+    return await withParseTimeout(
+      (context) => deps.parseQuestion(block, settings, (partial) => { if (!context.signal?.aborted) onStream(partial); }, context),
       timeoutMs,
-      "stream_timeout",
+      "stream_timeout", deps.withTimeout, runtimeContext,
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (!/stream_timeout/i.test(msg)) throw err;
+    if (runtimeContext.signal?.aborted || !/^stream_timeout$/i.test(msg)) throw err;
     deps.logEvent("parse_stream_timeout_fallback", { blockId: block.id, timeoutMs });
     deps.setStreamingText("流式响应超时，正在切换为普通请求重试...");
-    return deps.withTimeout(
-      deps.parseQuestion(block, settings, undefined, runtimeContext),
+    return withParseTimeout(
+      (context) => deps.parseQuestion(block, settings, undefined, context),
       Math.max(8_000, Math.floor(timeoutMs * 0.9)),
-      "non_stream_timeout",
+      "non_stream_timeout", deps.withTimeout, runtimeContext,
     );
   }
 }
@@ -54,6 +56,7 @@ export async function parseWithTieredRetries(
   deps: ParseRetryDeps,
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
+  runtimeContext = withSolveAuthorityLease(runtimeContext);
   const preferred = settings.preferredRoute;
   const routePlan: Array<"text" | "auto" | "vision"> = [];
   if (preferred === "text") {
@@ -116,6 +119,7 @@ export async function parseWithTieredRetries(
       return result;
     } catch (err) {
       lastErr = err;
+      if (runtimeContext.signal?.aborted) throw err;
       if (isStaleQuestionRevisionError(err)) throw err;
       if (err && typeof err === "object" && "code" in err && String(err.code).startsWith("AI_")) throw err;
       // UI-00A: retrying cannot fix a missing API Key — surface it immediately.

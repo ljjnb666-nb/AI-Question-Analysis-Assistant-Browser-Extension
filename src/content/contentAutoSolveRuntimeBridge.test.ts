@@ -154,9 +154,9 @@ describe("auto-solve history commit telemetry", () => {
     expect(activeQuestionRevisionAttempt()).toBeNull();
     provider.resolve(result);
 
-    const lateResult = await pending;
-    expect(bridge.isCurrentAutoSolveResult(block, lateResult)).toBe(false);
-    await expect(bridge.recordAutoSolveHistory(history, block, lateResult)).resolves.toBe(false);
+    await expect(pending).rejects.toThrow("STALE_QUESTION_REVISION");
+    expect(bridge.isCurrentAutoSolveResult(block, result)).toBe(false);
+    await expect(bridge.recordAutoSolveHistory(history, block, result)).resolves.toBe(false);
     expect(addHistoryEntryIfCurrent).not.toHaveBeenCalled();
     expect(history).toEqual([]);
   });

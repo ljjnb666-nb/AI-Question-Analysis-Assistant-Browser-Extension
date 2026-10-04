@@ -45,7 +45,15 @@ export { PROVIDER_NOT_CONFIGURED, ProviderNotConfiguredError, isProviderNotConfi
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1_000;
+export type SolveAuthorityLease = Readonly<{ kind: "solve-authority" }>;
+const solveRuntimes = new WeakMap<SolveAuthorityLease, AIConnectionRuntimeConfig>();
+
+export function withSolveAuthorityLease(context?: ParseQuestionRuntimeContext): ParseQuestionRuntimeContext {
+  return { ...context, authorityLease: context?.authorityLease ?? Object.freeze({ kind: "solve-authority" as const }) };
+}
+
 export type ParseQuestionRuntimeContext = {
+  authorityLease?: SolveAuthorityLease;
   signal?: AbortSignal;
   screenshotFallback?: QuestionScreenshotFallback;
   isQuestionRevisionCurrent?: (identity: { questionId: string; contentFingerprint: string }) => boolean;
@@ -216,9 +224,14 @@ async function parseQuestionCore(
 async function resolveSolveRuntime(settings: ParsePreferences, context?: ParseQuestionRuntimeContext): Promise<AIConnectionRuntimeConfig | null> {
   try {
     await ensureAIConnectionAuthorityReady();
-    const runtime = await resolveActiveAIConnectionRuntimeMetadata();
+    const expected = context?.authorityLease && solveRuntimes.get(context.authorityLease);
+    if (expected) await assertRuntimeConfigCurrent(expected);
+    const current = await resolveActiveAIConnectionRuntimeMetadata();
+    if (expected) await assertRuntimeConfigCurrent(expected);
+    const runtime = expected ?? current;
     validateRuntimeEndpoint(runtime.endpoint);
     validateRuntimeAuth(runtime);
+    if (context?.authorityLease && !expected) solveRuntimes.set(context.authorityLease, runtime);
     return runtime;
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";

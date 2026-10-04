@@ -19,7 +19,7 @@ export async function fetchWithTimeout(url: string, init: RequestInit, context: 
     await context.beforeDispatch();
     return await fetch(url, request);
   } catch (err) {
-    const code = err && typeof err === "object" && "code" in err && typeof err.code === "string" ? redactRequestSecret(err.code, context.credential) : undefined;
+    const code = err && typeof err === "object" && "code" in err && typeof err.code === "string" ? err.code : undefined;
     const message = code?.startsWith("AI_") ? code : timedOut ? `Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
       : redactRequestSecret(err instanceof Error ? err.message : String(err), context.credential);
     const safeError = new Error(message);

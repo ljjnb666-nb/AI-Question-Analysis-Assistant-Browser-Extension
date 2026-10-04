@@ -104,7 +104,7 @@ fenced. Malformed/semantic/config/capability/endpoint errors do not trigger
 request retries or tier fallback. Question abort/currentness and late-result
 discard remain in place. Only successful real provider execution gets
 `resultSource: "provider"`. Demo output still needs explicit `allowDemo` and
-never rescues malformed or insecure authority.
+never dispatches a provider request and never rescues malformed authority. Missing credentials may select explicit demo before endpoint validation; this does not establish endpoint security.
 
 An already dispatched question request cancelled as stale retains the existing
 `provider_result_discarded_stale` diagnostic, marked as cancelled, without any
@@ -151,3 +151,23 @@ Validation includes actual storage/revision races, protocol/auth/endpoint cases,
 wire media assertions, real Settings Save-and-Test, static closure checks, full
 check/build/artifact gates, real extension E2E, and exact-head push/PR CI. Exact
 counts and SHA evidence belong in `UI05R_E2B2A_REPORT` after the final gates.
+
+
+## RF01 retry ownership
+
+**ONE LOGICAL SOLVE RETRY CHAIN = ONE NON-SECRET AI RUNTIME AUTHORITY LEASE**
+
+The first parse binds a validated runtime snapshot before media preparation or credential resolution. Subsequent parses fence that original snapshot before reading current metadata and again after reading it. Route and timing strategy may change; provider, model, endpoint, protocol, auth and credential authority cannot silently rebind. The opaque lease holds no plaintext; the parser retains its non-secret snapshot in a WeakMap. Each dispatch resolves the exact credential anew and retains the final pre-fetch currentness fence.
+
+| Path | Classification | Lease boundary |
+| --- | --- | --- |
+| Streaming to ordinary fallback | SAME_LOGICAL_SOLVE | Both attempts share the lease |
+| Text/vision/auto route tiers | SAME_LOGICAL_SOLVE | All tiers and fallbacks share the lease |
+| Batch error/incomplete/automatic vision retry | SAME_LOGICAL_SOLVE | One lease per candidate in a batch invocation |
+| Explicit vision retry / risky retry | NEW_LOGICAL_SOLVE | One fresh lease per candidate; its incomplete-result review shares it |
+| Manual capture automatic vision retry and second review | SAME_LOGICAL_SOLVE | One lease for the entire capture pipeline, including error recovery |
+| Auto Solve automatic vision retry | SAME_LOGICAL_SOLVE | Shares initial parse lease |
+| Auto Solve review | NEW_LOGICAL_SOLVE | New review invocation; its own vision retry shares that lease |
+| Auto Solve quick review | NEW_LOGICAL_SOLVE | New quick review invocation |
+
+Each timeout-managed parse owns a child AbortController composed with the parent signal. The timeout wrapper revokes the child in its finally block before returning rejection to a fallback caller. Streaming callbacks check attempt ownership. Parser result and success telemetry checks reject aborted attempts. Auto Solve outer timeouts also cancel their nested tier chain. Manual pipeline timeout cancels the shared pipeline controller before any recovery; runtime-current checks and the parser question fence retain route-disposal authority. Timed-out results cannot reach history or fill through the owning rejected promise.

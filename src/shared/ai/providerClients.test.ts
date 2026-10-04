@@ -132,3 +132,11 @@ describe("E2B2A bounded provider attempt", () => {
     expect(JSON.parse(String(init?.body)).model).toBe("authoritative-model");
   });
 });
+
+
+it("RF01 preserves stable error code even when synthetic credential overlaps it", async () => {
+  const context = requestContextFixture("openai", "AI");
+  context.beforeDispatch = async () => { throw Object.assign(new Error("AI_RUNTIME_CONFIG_STALE"), { code: "AI_RUNTIME_CONFIG_STALE" }); };
+  await expect(callOpenAICompat(block, "text", context)).rejects.toMatchObject({ code: "AI_RUNTIME_CONFIG_STALE" });
+  expect(captured).toHaveLength(0);
+});

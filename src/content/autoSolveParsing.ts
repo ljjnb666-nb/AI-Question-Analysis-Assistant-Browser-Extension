@@ -1,6 +1,7 @@
+import { withParseTimeout } from "@/shared/utils/parseTimeout";
 import type { ParsePreferences } from "@/shared/ai/runtimeRequest";
 import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
-import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
+import { withSolveAuthorityLease, type ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import { sanitizeQuestionBlockForSerialization } from "@/shared/utils/mediaSerialization";
 import {
   shouldRetryWithVisionForAuto,
@@ -61,6 +62,7 @@ export async function parseBlockForAutoSolve(
   deps: AutoSolveParsingDeps,
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
+  runtimeContext = withSolveAuthorityLease(runtimeContext);
   const settings = await deps.loadSettings();
   const provider = await deps.getRuntimeCaptureInfo();
   const wantsVision = provider.supportsVision && shouldUseVisionForAutoSolve(block, settings.preferredRoute);
@@ -75,25 +77,25 @@ export async function parseBlockForAutoSolve(
     ? { ...settings, preferredRoute: "vision" as const }
     : { ...settings, preferredRoute: "auto" as const };
 
-  let result = await deps.withTimeout(
-    deps.parseWithTieredRetries(parseBlock, firstPassSettings, provider.supportsVision, () => {}, withScreenshotFallback(parseBlock, runtimeContext)),
+  let result = await withParseTimeout(
+    (attemptContext) => deps.parseWithTieredRetries(parseBlock, firstPassSettings, provider.supportsVision, () => {}, withScreenshotFallback(parseBlock, attemptContext)),
     timeouts.parseTimeoutMs,
-    "auto_solve_parse_timeout",
+    "auto_solve_parse_timeout", deps.withTimeout, runtimeContext,
   );
 
   if (provider.supportsVision && shouldRetryWithVisionForAuto(result, block)) {
     const imageDataUrl = parseBlock.imageDataUrl || await deps.tryCaptureBlockImageForAutoSolve(block.bbox);
     if (imageDataUrl) {
       parseBlock = { ...block, hasImage: true, imageDataUrl };
-      result = await deps.withTimeout(
-        deps.parseWithTieredRetries(
+      result = await withParseTimeout(
+        (attemptContext) => deps.parseWithTieredRetries(
           parseBlock,
           { ...settings, preferredRoute: "vision" as const },
           provider.supportsVision,
-          () => {}, withScreenshotFallback(parseBlock, runtimeContext),
+          () => {}, withScreenshotFallback(parseBlock, attemptContext),
         ),
         timeouts.parseTimeoutMs,
-        "auto_solve_vision_retry_timeout",
+        "auto_solve_vision_retry_timeout", deps.withTimeout, runtimeContext,
       );
     }
   }
@@ -108,6 +110,7 @@ export async function parseBlockForAutoSolveReview(
   deps: AutoSolveParsingDeps,
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
+  runtimeContext = withSolveAuthorityLease(runtimeContext);
   const settings = await deps.loadSettings();
   const provider = await deps.getRuntimeCaptureInfo();
   const reviewSettings = { ...settings, preferredRoute: "auto" as const };
@@ -120,10 +123,10 @@ export async function parseBlockForAutoSolveReview(
     deps.tryCaptureBlockImageForAutoSolve,
   );
 
-  let result = await deps.withTimeout(
-    deps.parseWithTieredRetries(parseBlock, reviewSettings, provider.supportsVision, () => {}, withScreenshotFallback(parseBlock, runtimeContext)),
+  let result = await withParseTimeout(
+    (attemptContext) => deps.parseWithTieredRetries(parseBlock, reviewSettings, provider.supportsVision, () => {}, withScreenshotFallback(parseBlock, attemptContext)),
     timeouts.reviewTimeoutMs,
-    "auto_solve_review_timeout",
+    "auto_solve_review_timeout", deps.withTimeout, runtimeContext,
   );
 
   if (
@@ -132,15 +135,15 @@ export async function parseBlockForAutoSolveReview(
     (shouldRetryWithVisionForAuto(result, block)
       || (previousResult && (result.confidence ?? 0) < Math.max(previousResult.confidence ?? 0, timeouts.reviewConfidenceThreshold)))
   ) {
-    result = await deps.withTimeout(
-      deps.parseWithTieredRetries(
+    result = await withParseTimeout(
+      (attemptContext) => deps.parseWithTieredRetries(
         { ...block, hasImage: true, imageDataUrl: parseBlock.imageDataUrl },
         { ...reviewSettings, preferredRoute: "vision" as const },
         provider.supportsVision,
-        () => {}, withScreenshotFallback(parseBlock, runtimeContext),
+        () => {}, withScreenshotFallback(parseBlock, attemptContext),
       ),
       timeouts.reviewTimeoutMs,
-      "auto_solve_review_vision_timeout",
+      "auto_solve_review_vision_timeout", deps.withTimeout, runtimeContext,
     );
   }
 
@@ -153,6 +156,7 @@ export async function parseBlockForAutoSolveQuickReview(
   deps: AutoSolveParsingDeps,
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
+  runtimeContext = withSolveAuthorityLease(runtimeContext);
   const settings = await deps.loadSettings();
   const provider = await deps.getRuntimeCaptureInfo();
   const quickReviewSettings = {
@@ -168,10 +172,10 @@ export async function parseBlockForAutoSolveQuickReview(
     deps.tryCaptureBlockImageForAutoSolve,
   );
 
-  return deps.withTimeout(
-    deps.parseQuestion(parseBlock, quickReviewSettings, undefined, withScreenshotFallback(parseBlock, runtimeContext)),
+  return withParseTimeout(
+    (attemptContext) => deps.parseQuestion(parseBlock, quickReviewSettings, undefined, withScreenshotFallback(parseBlock, attemptContext)),
     timeouts.quickReviewTimeoutMs,
-    "auto_solve_quick_review_timeout",
+    "auto_solve_quick_review_timeout", deps.withTimeout, runtimeContext,
   );
 }
 
