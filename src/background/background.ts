@@ -11,11 +11,22 @@
 
 import type { ExtMessage } from "@/shared/types";
 import { logEvent } from "@/shared/utils/analytics";
+import { migrateLegacyAIConnectionState } from "@/shared/utils/aiConnectionMigration";
 import { injectContentScriptIntoTab, isInjectablePageUrl, shouldBootstrapContentScript } from "@/shared/utils/messaging";
 import { getOrCreateDeviceId } from "@/shared/utils/storage";
+import { logError } from "@/shared/utils/errorLogger";
 
 chrome.runtime.onInstalled.addListener((details) => {
   void getOrCreateDeviceId();
+  // UI05R-E1 shadow migration: creates aiConnectionState once; the legacy AI
+  // settings remain the runtime authority until the E2 parseRouter cutover.
+  void migrateLegacyAIConnectionState().then((result) => {
+    if (result.status === "failed") {
+      logError("AI connection state migration failed", undefined, "migrateLegacyAIConnectionState", {
+        code: result.code,
+      });
+    }
+  });
   if (details.reason === "install") {
     logEvent("extension_installed", { reason: details.reason });
   }
