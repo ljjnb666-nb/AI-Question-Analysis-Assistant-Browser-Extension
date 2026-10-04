@@ -237,18 +237,31 @@ describe("UI-02 Popup Commercial View Integration", () => {
     await loadSettings();
     render(<PopupApp />);
 
-    // Wait for the asynchronous background normalization/session load before interacting.
-    await waitFor(() => expect(screen.queryAllByText(/正在检查|Checking/)).toHaveLength(0));
-    // In register view by default, switch to login view
-    const switchToLoginBtn = await screen.findByText(/已有账号？去登录|Sign in/);
-    await act(async () => {
-      fireEvent.click(switchToLoginBtn);
+    // Settled signed-out state: the session gate is gone AND the login view tab
+    // is rendered but not selected. A late storage-driven re-validation (which
+    // swaps in the validating gate) keeps this condition false, so interaction
+    // starts only on a stable form.
+    await waitFor(() => {
+      expect(screen.queryAllByText(/正在检查|Checking/)).toHaveLength(0);
+      expect(screen.getByRole("button", { name: /^登录$|^Sign In$/ })).toHaveAttribute("aria-pressed", "false");
     });
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /^登录$|^Sign In$/ })).toBeInTheDocument());
-    expect(await screen.findByRole("button", { name: /^登录账号$|^Sign In to Account$/ })).toBeInTheDocument();
-    expect(screen.getByLabelText(/邮箱|Email/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/密码|Password/)).toBeInTheDocument();
+    // Drive the register→login transition through the view tab itself. The tab
+    // exists in both views, so only its aria-pressed flip is authoritative
+    // transition evidence — its mere presence proves nothing.
+    fireEvent.click(screen.getByRole("button", { name: /^登录$|^Sign In$/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^登录$|^Sign In$/ })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    // Query and assertion run synchronously inside each waitFor poll, so a
+    // transient gate re-render can never strand a detached element reference
+    // between find and assert.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^登录账号$|^Sign In to Account$/ })).toBeInTheDocument();
+      expect(screen.getByLabelText(/邮箱|Email/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/密码|Password/)).toBeInTheDocument();
+    });
 
     // Protected actions not visible
     expect(screen.queryByText(/解析并填答/)).toBeNull();
