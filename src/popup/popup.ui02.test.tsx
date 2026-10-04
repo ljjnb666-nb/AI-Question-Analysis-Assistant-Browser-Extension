@@ -1,3 +1,4 @@
+import { installSettingsMessaging } from "../test/settingsMessaging";
 import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,7 +13,7 @@ import { SettingsAccountSection } from "@/sidepanel/settingsSections";
 import { setKeyboardModalityForTesting } from "@/shared/ui/orbitFocus";
 import { orbitColors } from "@/shared/ui/orbitTokens";
 import { userFeedback } from "@/shared/ui/userFeedback";
-import { __resetStorageCacheForTests } from "@/shared/utils/storage";
+import { loadSettings, __resetStorageCacheForTests } from "@/shared/utils/storage";
 
 // Test fixtures routed through named constants: the workspace Mimosa gate
 // rejects inline string literals on credential-named fields, and these values
@@ -79,7 +80,7 @@ const sessionApi = {
 };
 
 (globalThis as unknown as { chrome: unknown }).chrome = {
-  runtime: { id: "test-extension-id" },
+  runtime: { id: "test-extension-id", sendMessage: vi.fn(), getURL: (path: string) => `chrome-extension://test-extension-id/${path.replace(/^\//, "")}` },
   storage: {
     local: storageApi,
     session: sessionApi,
@@ -129,6 +130,7 @@ const createFetchMock = () =>
 vi.stubGlobal("fetch", createFetchMock());
 
 beforeEach(() => {
+  installSettingsMessaging();
   sentRuntimeMessages.length = 0;
   sentTabTargets.length = 0;
   store.clear();
@@ -230,8 +232,12 @@ describe("UI-02 Popup Commercial View Integration", () => {
   it("UI02-A02: signed out shows accessible auth form without protected actions", async () => {
     sessionResponse = { ok: false };
     store.set("appSettings", { userId: undefined, authToken: undefined });
+    // This form interaction test starts from an already normalized signed-out fixture.
+    await loadSettings();
     render(<PopupApp />);
 
+    // Wait for the asynchronous background normalization/session load before interacting.
+    await waitFor(() => expect(screen.queryAllByText(/正在检查|Checking/)).toHaveLength(0));
     // In register view by default, switch to login view
     const switchToLoginBtn = await screen.findByText(/已有账号？去登录|Sign in/);
     await act(async () => {
@@ -240,7 +246,7 @@ describe("UI-02 Popup Commercial View Integration", () => {
 
     const loginTabBtn = await screen.findByRole("button", { name: /^登录$|^Sign In$/ });
     expect(loginTabBtn).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^登录账号$|^Sign In to Account$/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^登录账号$|^Sign In to Account$/ })).toBeInTheDocument();
     expect(screen.getByLabelText(/邮箱|Email/)).toBeInTheDocument();
     expect(screen.getByLabelText(/密码|Password/)).toBeInTheDocument();
 
@@ -724,6 +730,7 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
     render(<PopupApp />);
     const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await waitFor(() => expect(solveBtn).toBeEnabled());
     await act(async () => {
       fireEvent.click(solveBtn);
     });
@@ -880,6 +887,7 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
     render(<PopupApp />);
     const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await waitFor(() => expect(solveBtn).toBeEnabled());
     await act(async () => {
       fireEvent.click(solveBtn);
     });
@@ -913,6 +921,7 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
     render(<PopupApp />);
     const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await waitFor(() => expect(solveBtn).toBeEnabled());
     await act(async () => {
       fireEvent.click(solveBtn);
     });
@@ -966,6 +975,7 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
     render(<PopupApp />);
     const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await waitFor(() => expect(solveBtn).toBeEnabled());
     await act(async () => {
       fireEvent.click(solveBtn);
     });

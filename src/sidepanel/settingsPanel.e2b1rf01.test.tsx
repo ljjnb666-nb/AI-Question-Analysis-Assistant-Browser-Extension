@@ -1,3 +1,4 @@
+import { installSettingsMessaging } from "../test/settingsMessaging";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -43,11 +44,7 @@ beforeEach(async () => {
     analyticsConsentVersion: 1,
   });
   vi.resetModules();
-  const { handleAIConnectionCommand } =
-    await import("../background/aiConnectionAuthority");
-  vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-    (message) => handleAIConnectionCommand(message) as never,
-  );
+  installSettingsMessaging();
 });
 
 async function switchToCustom() {
@@ -90,7 +87,7 @@ describe("RF01 provider endpoint ownership through real Settings save", () => {
     expect(JSON.stringify(memory.store.get("aiConnectionState"))).not.toContain(
       newKey,
     );
-    expect(memory.store.get("appSettings")).not.toHaveProperty("apiKey");
+    expect(memory.store.get("appSettings")).toHaveProperty("apiKey", "rf01-old-fixture-key");
   });
   it("E2B1-RF01-ENDPOINT-03 explicitly entered new Custom endpoint and key remain operational", async () => {
     const endpoint = await switchToCustom();

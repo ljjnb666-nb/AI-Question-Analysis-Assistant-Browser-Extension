@@ -1,3 +1,7 @@
+import { sendAppSettingsCommand } from "./appSettingsClient";
+import type { AppSettingsUpdatePatch } from "../types/appSettingsMessages";
+import { CURRENT_ANALYTICS_CONSENT_VERSION, normalizeAnalyticsBaseUrl as normalizeBaseUrl } from "./appSettingsPolicy";
+export { CURRENT_ANALYTICS_CONSENT_VERSION } from "./appSettingsPolicy";
 import { loadAIConnectionState, toConnectionMetadata } from "./aiConnectionState";
 import { ensureAIConnectionAuthorityReady, sendAIConnectionCommand } from "./aiConnectionClient";
 import type { LegacyAISettingsPatch } from "../types/aiConnectionMessages";
@@ -6,7 +10,6 @@ import { DEFAULT_SETTINGS } from "../types";
 import { logError } from "./errorLogger";
 import {
   decryptValue,
-  encryptValue,
   isCredentialEnvelope,
   isEncrypted,
   tryDecryptLegacyValue,
@@ -15,7 +18,6 @@ import {
 import { sanitizeQuestionBlockForSerialization } from "./mediaSerialization";
 import { flushAnalyticsWork, invalidateAnalyticsConsent } from "./analyticsState";
 
-export const CURRENT_ANALYTICS_CONSENT_VERSION = 1;
 
 const KEYS = {
   floatingState: "floatingWindowState",
@@ -47,28 +49,9 @@ let cachedSettings: AppSettings | null = null;
 let settingsLoadPromise: Promise<AppSettings> | null = null;
 let settingsListenerRegistered = false;
 
-function createDeviceIdValue(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `dev-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function normalizeBaseUrl(value: string | undefined): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return DEFAULT_SETTINGS.analyticsBaseUrl;
-  return raw.replace(/\/+$/, "");
-}
-
 function isExtensionContextInvalidatedError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err || "");
   return /Extension context invalidated/i.test(message);
-}
-
-function createErrorWithCause(message: string, cause: unknown): Error {
-  const error = new Error(message) as Error & { cause?: unknown };
-  error.cause = cause;
-  return error;
 }
 
 function cloneSettings(settings: AppSettings): AppSettings {
@@ -109,33 +92,16 @@ function ensureSettingsCacheListener(): void {
 async function readSettingsFromStorage(): Promise<AppSettings> {
   const generation = settingsCacheGeneration;
   const authority = await loadAIConnectionState();
-  const result = await chrome.storage.local.get(KEYS.settings);
-  const rawStored = (result[KEYS.settings] as Partial<AppSettings> ?? {});
+  let result = await chrome.storage.local.get(KEYS.settings);
+  let rawStored = (result[KEYS.settings] as Partial<AppSettings> ?? {});
+  if (rawStored.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION || !rawStored.deviceId || !rawStored.analyticsBaseUrl) {
+    const ack = await sendAppSettingsCommand({ type: "APP_SETTINGS_ENSURE_NORMALIZED" });
+    if (ack.analyticsDisabled) invalidateAnalyticsConsent();
+    result = await chrome.storage.local.get(KEYS.settings);
+    rawStored = (result[KEYS.settings] as Partial<AppSettings> ?? {});
+  }
   const stored = { ...DEFAULT_SETTINGS, ...rawStored };
-
-  const requiresConsentMigration = rawStored.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION;
-  if (requiresConsentMigration) {
-    stored.enableAnalytics = false;
-    stored.analyticsConsentVersion = CURRENT_ANALYTICS_CONSENT_VERSION;
-  }
-  if (!stored.deviceId) stored.deviceId = createDeviceIdValue();
-
   stored.analyticsBaseUrl = normalizeBaseUrl(stored.analyticsBaseUrl);
-
-  if (requiresConsentMigration || !rawStored.deviceId || !rawStored.analyticsBaseUrl) {
-    await chrome.storage.local.set({
-      [KEYS.settings]: {
-        ...(authority ? withoutAISettings(rawStored) : rawStored),
-        ...(requiresConsentMigration ? { enableAnalytics: false, analyticsConsentVersion: CURRENT_ANALYTICS_CONSENT_VERSION } : {}),
-        deviceId: stored.deviceId,
-        analyticsBaseUrl: stored.analyticsBaseUrl,
-      },
-    });
-    if (requiresConsentMigration) {
-      invalidateAnalyticsConsent();
-      await chrome.storage.local.remove(KEYS.analytics);
-    }
-  }
 
   if (authority) {
     const connection = authority.activeConnectionId ? authority.connections[authority.activeConnectionId] : undefined;
@@ -150,8 +116,8 @@ async function readSettingsFromStorage(): Promise<AppSettings> {
 
   // Credential read path. `qse:v1:` envelopes decrypt and fail closed on
   // tampering; unknown `qse:*` versions fail closed as well; legacy strings
-  // (no marker) are decoded leniently and never cleared. Loading never
-  // writes credentials back to storage. AI migration is background-owned;
+  // (no marker) are decoded leniently and never cleared. Credential persistence is background-owned; a normalization command may
+  // secure an old authToken, but this reader never performs a raw write. AI migration is background-owned;
   // only account/session credentials remain on the ordinary settings path.
   for (const key of SENSITIVE_SETTINGS_KEYS) {
     const value = stored[key];
@@ -214,39 +180,14 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<void
     await sendAIConnectionCommand({ type: "AI_CONNECTION_APPLY_LEGACY_SETTINGS", settings: patch });
     invalidateSettingsCache();
   }
-  const existing = await loadSettings();
-  const authority = await loadAIConnectionState();
-  const merged = { ...existing, ...withoutAISettings(settings) };
-  merged.analyticsConsentVersion = CURRENT_ANALYTICS_CONSENT_VERSION;
-  merged.deviceId = merged.deviceId || existing.deviceId || createDeviceIdValue();
-  merged.analyticsBaseUrl = normalizeBaseUrl(merged.analyticsBaseUrl);
-
-  // Account/session tokens retain their existing encrypted storage contract.
-  // AI secrets have already committed through the background command.
-  for (const key of ["authToken"] as const) {
-    const value = merged[key];
-    if (!value) continue;
-    try {
-      merged[key] = await encryptValue(value);
-    } catch (err) {
-      logError(`Failed to encrypt ${key}`, err, "saveSettings");
-      throw createErrorWithCause(`Failed to save ${key} securely`, err);
-    }
+  const patch: AppSettingsUpdatePatch = withoutAISettings(settings);
+  // Undefined account fields are omitted by Chrome JSON messaging; send explicit clears.
+  for (const key of ["authToken", "userId", "userEmail"] as const) {
+    if (hasOwnSetting(settings, key) && settings[key] === undefined) patch[key] = null;
   }
-
-  // Before first authority initialization, preserve historical migration input
-  // unchanged; after it exists, ordinary writes opportunistically omit AI data.
-  const raw = await chrome.storage.local.get(KEYS.settings);
-  const persisted = authority ? withoutAISettings(merged) : { ...raw[KEYS.settings], ...withoutAISettings(merged) };
-  const generation = settingsCacheGeneration;
-  await chrome.storage.local.set({ [KEYS.settings]: persisted });
-  // Do not publish the earlier AI snapshot after an asynchronous write:
-  // another authority mutation may have invalidated it while this save ran.
-  if (generation === settingsCacheGeneration) {
-    setCachedSettings({ ...merged, apiKey: authority ? "" : existing.apiKey,
-      authToken: hasOwnSetting(settings, "authToken") ? settings.authToken : existing.authToken });
-  }
-  if (existing.enableAnalytics && !merged.enableAnalytics) {
+  const ack = await sendAppSettingsCommand({ type: "APP_SETTINGS_UPDATE", patch });
+  invalidateSettingsCache();
+  if (ack.analyticsDisabled) {
     invalidateAnalyticsConsent();
     await flushAnalyticsWork();
     await chrome.storage.local.remove(KEYS.analytics);
@@ -352,29 +293,8 @@ export async function loadSettings(): Promise<AppSettings> {
 
 export async function getOrCreateDeviceId(): Promise<string> {
   ensureSettingsCacheListener();
-  if (cachedSettings?.deviceId) return cachedSettings.deviceId;
-  const result = await chrome.storage.local.get(KEYS.settings);
-  const rawStored = (result[KEYS.settings] as Partial<AppSettings> ?? {});
-  const existingDeviceId = String(rawStored.deviceId || "").trim();
-  if (existingDeviceId) return existingDeviceId;
-
-  const deviceId = createDeviceIdValue();
-  await chrome.storage.local.set({
-    [KEYS.settings]: {
-      ...withoutAISettings(DEFAULT_SETTINGS),
-      ...rawStored,
-      deviceId,
-      analyticsBaseUrl: normalizeBaseUrl(rawStored.analyticsBaseUrl),
-    },
-  });
-  if (cachedSettings) {
-    setCachedSettings({
-      ...cachedSettings,
-      deviceId,
-      analyticsBaseUrl: normalizeBaseUrl(rawStored.analyticsBaseUrl || cachedSettings.analyticsBaseUrl),
-    });
-  }
-  return deviceId;
+  const ack = await sendAppSettingsCommand({ type: "APP_SETTINGS_GET_OR_CREATE_DEVICE_ID" });
+  return ack.deviceId;
 }
 
 export async function addHistoryEntry(entry: HistoryEntry): Promise<void> {

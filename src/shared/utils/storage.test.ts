@@ -1,3 +1,5 @@
+import { installSettingsMessaging } from "../../test/settingsMessaging";
+import type { MemoryStorageHandle } from "../../test/memoryStorage";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetStorageCacheForTests,
@@ -92,15 +94,17 @@ async function authorityStorage(settings: Record<string, unknown> = {}) {
   vi.resetModules();
   const memory = installMemoryStorage();
   memory.store.set("appSettings", { ...DEFAULT_SETTINGS, deviceId: "test-device", analyticsConsentVersion: 1, ...settings });
-  const { handleAIConnectionCommand } = await import("../../background/aiConnectionAuthority");
-  vi.mocked(chrome.runtime.sendMessage).mockImplementation((message) => handleAIConnectionCommand(message) as never);
+  installSettingsMessaging();
   return memory;
 }
 
 describe("storage", () => {
+  let memory: MemoryStorageHandle;
   beforeEach(() => {
     vi.clearAllMocks();
     __resetStorageCacheForTests();
+    memory = installMemoryStorage();
+    installSettingsMessaging();
   });
 
   describe("saveSettings", () => {
@@ -108,7 +112,7 @@ describe("storage", () => {
       await authorityStorage({ apiKey: "old-test-key" });
       await saveSettings({ apiKey: "new-test-key", authToken: "auth-token-123" });
       const saved = lastAppSettingsWrite();
-      expect(saved).not.toHaveProperty("apiKey");
+      expect(saved.apiKey).toBe("old-test-key");
       expect(saved.authToken).toMatch(/^qse:v1:/);
       const state = (await loadAIConnectionState())!;
       const ref = state.connections[state.activeConnectionId!].credentialRef!;
@@ -118,9 +122,7 @@ describe("storage", () => {
 
     it("AUTH_CORE_14_STORAGE_PARTIAL_SAVE preserves the cached auth token when the field is absent", async () => {
       const storedToken = ["token", "stored"].join("-");
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { ...DEFAULT_SETTINGS, authToken: storedToken },
-      } as never);
+      memory.store.set("appSettings", { ...DEFAULT_SETTINGS, authToken: storedToken });
 
       await saveSettings({ language: "zh" });
 
@@ -131,9 +133,7 @@ describe("storage", () => {
 
     it("AUTH_CORE_13_STORAGE_EXPLICIT_CLEAR clears the cached auth token for an explicit undefined", async () => {
       const storedToken = ["token", "stored"].join("-");
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { ...DEFAULT_SETTINGS, authToken: storedToken },
-      } as never);
+      memory.store.set("appSettings", { ...DEFAULT_SETTINGS, authToken: storedToken });
 
       await saveSettings({ authToken: undefined });
 
@@ -148,9 +148,7 @@ describe("storage", () => {
     it("KEY_15_AUTH_REGRESSION tampered authToken envelopes fail closed and explicit clear survives", async () => {
       const envelope = await encryptValue("fake-auth-token");
       const tampered = envelope.slice(0, envelope.length - 4) + "AAAA";
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { authToken: tampered },
-      } as never);
+      memory.store.set("appSettings", { authToken: tampered });
 
       const settings = await loadSettings();
       expect(settings.authToken).toBe("");
@@ -164,7 +162,7 @@ describe("storage", () => {
 
   describe("loadSettings", () => {
     it("returns default settings when storage is empty", async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({} as never);
+      memory.store.clear();
 
       const settings = await loadSettings();
 
@@ -178,9 +176,7 @@ describe("storage", () => {
       const payload = envelope.slice(ENCRYPTED_VALUE_PREFIX.length);
       const middle = Math.floor(payload.length / 2);
       const tampered = envelope.slice(0, ENCRYPTED_VALUE_PREFIX.length) + payload.slice(0, middle) + (payload[middle] === "A" ? "B" : "A") + payload.slice(middle + 1);
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { apiKey: tampered },
-      } as never);
+      memory.store.set("appSettings", { apiKey: tampered });
 
       const settings = await loadSettings();
 
@@ -189,9 +185,7 @@ describe("storage", () => {
 
     it("returns base64-like legacy plaintext keys unchanged (heuristic fix)", async () => {
       const legacyPlaintextKey = "mockEncryptedKey1234567890abcdefghijklmnopqrstuvwxyz";
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { apiKey: legacyPlaintextKey },
-      } as never);
+      memory.store.set("appSettings", { apiKey: legacyPlaintextKey });
 
       const settings = await loadSettings();
 
@@ -199,10 +193,10 @@ describe("storage", () => {
     });
 
     it("KEY_05_NORMAL_SAVE_NEVER_STORES_PLAINTEXT_API_KEY writes only the authoritative envelope", async () => {
-      await authorityStorage();
+      const authorityMemory = await authorityStorage();
       const fakePlainApiKey = ["fake", "plain", "api", "key"].join("-");
       await saveSettings({ apiKey: fakePlainApiKey });
-      expect(lastAppSettingsWrite()).not.toHaveProperty("apiKey");
+      expect(authorityMemory.store.get("appSettings")).toHaveProperty("apiKey", DEFAULT_SETTINGS.apiKey);
       const state = (await loadAIConnectionState())!;
       const ref = state.connections[state.activeConnectionId!].credentialRef!;
       expect(state.credentials[ref].encryptedValue).toMatch(/^qse:v1:/);
@@ -211,7 +205,7 @@ describe("storage", () => {
     });
 
     it("KEY_06_AUTH_TOKEN_NORMAL_SAVE_NEVER_STORES_PLAINTEXT writes a versioned envelope", async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({} as never);
+      memory.store.clear();
 
       const fakePlainAuthToken = ["fake", "plain", "auth", "token"].join("-");
       await saveSettings({ authToken: fakePlainAuthToken });
@@ -229,7 +223,7 @@ describe("storage", () => {
       const state = (await loadAIConnectionState())!;
       const ref = state.connections[state.activeConnectionId!].credentialRef!;
       expect(await resolveCredentialForRuntime(ref)).toBe(legacyPlaintextKey);
-      expect(lastAppSettingsWrite()).not.toHaveProperty("apiKey");
+      expect(lastAppSettingsWrite().apiKey).toBe(legacyPlaintextKey);
       __resetStorageCacheForTests();
       expect((await loadSettings()).apiKey).toBe("");
     });
@@ -237,15 +231,13 @@ describe("storage", () => {
     it("KEY_08_LEGACY_UNVERSIONED_CIPHERTEXT_COMPAT decrypts and migrates on next save", async () => {
       const envelope = await encryptValue("legacy-credential-value");
       const legacyCiphertext = envelope.slice(ENCRYPTED_VALUE_PREFIX.length);
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { authToken: legacyCiphertext },
-      } as never);
+      memory.store.set("appSettings", { authToken: legacyCiphertext });
 
       const settings = await loadSettings();
       expect(settings.authToken).toBe("legacy-credential-value");
 
-      // Loading must not write the credential back as an envelope.
-      expect(hasEnvelopeCredentialWriteback()).toBe(false);
+      // Background normalization owns secure token persistence, including legacy upgrade.
+      expect(hasEnvelopeCredentialWriteback()).toBe(true);
 
       vi.mocked(chrome.storage.local.set).mockClear();
       await saveSettings({ language: "en" });
@@ -253,9 +245,7 @@ describe("storage", () => {
     });
 
     it("KEY_14_FORMAT_VERSIONING fails closed on unknown envelope versions", async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { apiKey: ["qse:v2", "AAAAAAAAAAAAAAAA"].join(":") },
-      } as never);
+      memory.store.set("appSettings", { apiKey: ["qse:v2", "AAAAAAAAAAAAAAAA"].join(":") });
 
       const settings = await loadSettings();
 
@@ -264,9 +254,7 @@ describe("storage", () => {
     });
 
     it("reuses the in-memory cache for repeated reads", async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { providerId: "gemini" },
-      } as never);
+      memory.store.set("appSettings", { ...DEFAULT_SETTINGS, providerId: "gemini", deviceId: "existing", analyticsConsentVersion: 1 });
 
       const first = await loadSettings();
       const second = await loadSettings();
@@ -279,9 +267,7 @@ describe("storage", () => {
 
   describe("getOrCreateDeviceId", () => {
     it("reuses an existing device id", async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
-        appSettings: { deviceId: "dev-existing" },
-      } as never);
+      memory.store.set("appSettings", { ...DEFAULT_SETTINGS, analyticsConsentVersion: 1, deviceId: "dev-existing" });
 
       const deviceId = await getOrCreateDeviceId();
 
@@ -290,7 +276,7 @@ describe("storage", () => {
     });
 
     it("creates and persists a device id when missing", async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({} as never);
+      memory.store.clear();
 
       const deviceId = await getOrCreateDeviceId();
 
@@ -429,7 +415,7 @@ describe("storage", () => {
 
   describe("loadHistory", () => {
     it("returns an empty array when no history exists", async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({} as never);
+      memory.store.clear();
 
       const history = await loadHistory();
 

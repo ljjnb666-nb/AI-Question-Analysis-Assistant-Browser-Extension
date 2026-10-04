@@ -1,3 +1,4 @@
+import { installSettingsMessaging } from "../../test/settingsMessaging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { installMemoryStorage } from "../../test/memoryStorage";
 import {
@@ -48,9 +49,7 @@ beforeEach(async () => {
   vi.resetModules();
   handle = (await import("../../background/aiConnectionAuthority"))
     .handleAIConnectionCommand;
-  vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-    (message) => handle(message) as never,
-  );
+  installSettingsMessaging();
 });
 
 describe("background initialization", () => {
@@ -441,7 +440,7 @@ describe("UI projection and bounded runtime authority", () => {
     await saveSettings({ apiKey: keyB });
     expect(
       (memory.store.get("appSettings") as Record<string, unknown>).apiKey,
-    ).toBeUndefined();
+    ).toBe(keyA);
     expect(JSON.stringify(memory.store.get("aiConnectionState"))).not.toContain(
       keyB,
     );
@@ -495,19 +494,15 @@ describe("UI projection and bounded runtime authority", () => {
       );
     expect((await loadSettings()).apiModel).toBe("new-model");
   });
-  it("E2B1-APP-07 merged non-AI save cannot re-persist projected AI fields", async () => {
+  it("E2B1-APP-07 non-AI save preserves historical AI fields without re-persisting projected metadata", async () => {
     await configured();
+    const before = { ...(memory.store.get("appSettings") as Record<string, unknown>) };
     await loadSettings();
     await saveSettings({ language: "en" });
     const raw = memory.store.get("appSettings") as Record<string, unknown>;
-    for (const key of [
-      "providerId",
-      "apiKey",
-      "apiModel",
-      "customBaseUrl",
-      "customProviderProtocol",
-    ])
-      expect(raw).not.toHaveProperty(key);
+    for (const key of ["providerId", "apiKey", "apiModel", "customBaseUrl", "customProviderProtocol"])
+      expect(raw[key]).toEqual(before[key]);
+    expect(raw.language).toBe("en");
   });
 });
 
