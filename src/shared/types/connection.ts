@@ -159,11 +159,20 @@ export interface AIConnectionState {
  */
 export type CapabilityConfidence = "known_static" | "legacy_declared" | "unknown";
 
-/** One capability dimension: `value` is null exactly when confidence is `unknown`. */
-export interface CapabilityAssessment {
-  value: boolean | null;
-  confidence: CapabilityConfidence;
-}
+/**
+ * One capability dimension. Type-safe invariant: `value` is `null` exactly
+ * when confidence is `unknown`; a boolean value always carries an explicit
+ * evidence confidence.
+ */
+export type CapabilityAssessment =
+  | {
+      value: boolean;
+      confidence: "known_static" | "legacy_declared";
+    }
+  | {
+      value: null;
+      confidence: "unknown";
+    };
 
 /** Whether a model ID is explicitly classified in the capability catalog. */
 export type ModelClassification = "known" | "unknown";
@@ -182,12 +191,52 @@ export interface ModelCapabilityAssessment {
 }
 
 /**
- * E2A transport/media encoding authority for a protocol (+ provider endpoint
- * behavior). Separate from model capability: adapters decide HOW media is
- * encoded, models decide WHETHER media can be understood.
+ * Where a connection's endpoint comes from, and therefore how much transport
+ * knowledge applies to it:
+ * - `canonical_builtin_endpoint`: built-in preset on its canonical endpoint —
+ *   legacy-declared provider transport knowledge applies.
+ * - `overridden_endpoint`: built-in preset with an endpoint override — the
+ *   endpoint is no longer the canonical provider service; endpoint-dependent
+ *   acceptance is unknown.
+ * - `custom_endpoint`: user-defined endpoint (custom preset) — never
+ *   conformance-verified; endpoint-dependent acceptance is unknown.
+ * - `unknown`: provenance cannot be determined; fails closed.
+ */
+export type EndpointProvenance =
+  | "canonical_builtin_endpoint"
+  | "overridden_endpoint"
+  | "custom_endpoint"
+  | "unknown";
+
+/** What the wire ADAPTER can encode, independent of any endpoint (protocol ground truth). */
+export interface AdapterEncodingCapability {
+  inlineBase64: CapabilityAssessment;
+  remoteImageUrl: CapabilityAssessment;
+  multipleImages: CapabilityAssessment;
+}
+
+/**
+ * What the concrete ENDPOINT accepts. Endpoint-dependent and only trusted for
+ * canonical built-in endpoints (legacy_declared) — overridden and custom
+ * endpoints are unknown until conformance evidence exists.
+ */
+export interface EndpointAcceptanceCapability {
+  inlineBase64: CapabilityAssessment;
+  remoteImageUrl: CapabilityAssessment;
+  multipleImages: CapabilityAssessment;
+}
+
+/**
+ * E2A transport/media capability authority. Two layers are kept separate and
+ * must BOTH be known-supported for effective support; the effective dimensions
+ * are the combination and are never more confident than their weakest layer.
  */
 export interface TransportMediaCapabilityAssessment {
   protocol: ProtocolId;
+  endpointProvenance: EndpointProvenance;
+  adapterEncoding: AdapterEncodingCapability;
+  endpointAcceptance: EndpointAcceptanceCapability;
+  /** Effective: adapterEncoding ∧ endpointAcceptance per dimension. */
   inlineBase64: CapabilityAssessment;
   remoteImageUrl: CapabilityAssessment;
   multipleImages: CapabilityAssessment;
@@ -205,6 +254,7 @@ export interface AIConnectionRuntimeConfig {
   presetId: ProviderPresetId;
   protocol: ProtocolId;
   endpoint: string;
+  endpointProvenance: EndpointProvenance;
   authScheme: AuthScheme;
   /** False only for `authScheme.kind === "none"` connections. */
   requiresCredential: boolean;

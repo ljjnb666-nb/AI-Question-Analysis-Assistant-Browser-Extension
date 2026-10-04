@@ -13,29 +13,38 @@
  *   and no legacy fallback inside this resolver.
  * - Secret boundary: this resolver returns NON-SECRET metadata only.
  *   Credential material is resolved separately, only when a real provider
- *   request is about to execute, via `resolveRuntimeCredential` (which
- *   delegates to `resolveCredentialForRuntime`). Plaintext is never cached,
- *   never persisted, and never appears in errors, logs, or serialized
- *   metadata.
+ *   request is about to execute, via `resolveRuntimeCredential`. That path is
+ *   REVISION-FENCED: the current state is re-read and the runtime snapshot is
+ *   verified still-current (active connection id, connection revision,
+ *   credential ref, credential revision) before any plaintext is produced —
+ *   a stale snapshot must never be silently rebound to a new secret. Plaintext
+ *   is never cached, never persisted, and never appears in errors, logs, or
+ *   serialized metadata.
+ * - Low-level contract errors (CredentialNotFoundError, raw decrypt errors,
+ *   MalformedAIConnectionStateError) never escape this boundary: they are
+ *   translated to stable codes (AI_CREDENTIAL_UNAVAILABLE,
+ *   AI_CONNECTION_MALFORMED).
  * - NOT yet consumed by `parseQuestion` — no authority cutover in E2A.
  */
 
 import type { AIConnectionRuntimeConfig } from "../types/connection";
 import { assessModelCapabilities } from "../ai/modelCapabilityCatalog";
-import { resolveTransportMediaCapabilities } from "../ai/transportMediaCapabilities";
-import { resolveConnectionEndpoint, resolveConnectionProtocol } from "./aiConnectionPresets";
 import {
-  MalformedAIConnectionStateError,
-  loadAIConnectionState,
-} from "./aiConnectionState";
-import { resolveCredentialForRuntime } from "./credentialStore";
+  resolveEndpointProvenance,
+  resolveTransportMediaCapabilities,
+} from "../ai/transportMediaCapabilities";
+import { resolveConnectionEndpoint, resolveConnectionProtocol } from "./aiConnectionPresets";
+import { CredentialNotFoundError, resolveCredentialForRuntime } from "./credentialStore";
+import { MalformedAIConnectionStateError, loadAIConnectionState } from "./aiConnectionState";
 
 export type AIRuntimeResolutionErrorCode =
   | "AI_CONNECTION_NOT_INITIALIZED"
   | "AI_CONNECTION_MALFORMED"
   | "AI_ACTIVE_CONNECTION_MISSING"
   | "AI_MODEL_MISSING"
-  | "AI_CREDENTIAL_REQUIRED";
+  | "AI_CREDENTIAL_REQUIRED"
+  | "AI_CREDENTIAL_UNAVAILABLE"
+  | "AI_RUNTIME_CONFIG_STALE";
 
 /** Stable, machine-readable resolution failure. Never carries secret material. */
 export class AIRuntimeResolutionError extends Error {
@@ -112,32 +121,47 @@ export async function resolveActiveAIConnectionRuntimeMetadata(): Promise<AIConn
     credentialRevision = state.credentials[connection.credentialRef].revision;
   }
 
+  const protocol = resolveConnectionProtocol(connection);
+  const endpointProvenance = resolveEndpointProvenance(connection);
+
   return {
     connectionId: connection.id,
     connectionRevision: connection.connectionRevision,
     presetId: connection.presetId,
-    protocol: resolveConnectionProtocol(connection),
+    protocol,
     endpoint: resolveConnectionEndpoint(connection),
+    endpointProvenance,
     authScheme: connection.authScheme,
     requiresCredential,
     credentialRef: connection.credentialRef,
     credentialRevision,
     selectedModelId: connection.selectedModelId,
     modelCapabilityAssessment: assessModelCapabilities(connection.presetId, connection.selectedModelId),
-    transportCapabilities: resolveTransportMediaCapabilities(
-      connection.presetId,
-      resolveConnectionProtocol(connection),
-    ),
+    transportCapabilities: resolveTransportMediaCapabilities({
+      presetId: connection.presetId,
+      protocol,
+      endpointProvenance,
+    }),
   };
 }
 
 /**
- * Secret resolution boundary. Call only when a real provider request is about
- * to execute. Returns null for connections that require no credential
- * (`authScheme.kind === "none"`); throws AI_CREDENTIAL_REQUIRED when a
- * required credential reference is absent; otherwise delegates to the E1
- * `resolveCredentialForRuntime` decrypt path (fail closed on tampering).
- * Plaintext is never cached or persisted here.
+ * Secret resolution boundary with a revision fence. Call only when a real
+ * provider request is about to execute.
+ *
+ * The current AIConnectionState is re-read and the runtime snapshot verified
+ * against it before any plaintext is produced:
+ * - state still exists and is valid;
+ * - `activeConnectionId` still points at `config.connectionId`;
+ * - that connection still exists with the same `connectionRevision`;
+ * - its `credentialRef` still matches;
+ * - the referenced credential still has `config.credentialRevision`.
+ *
+ * Any mismatch fails with `AI_RUNTIME_CONFIG_STALE` — a stale snapshot is
+ * never silently rebound to a new secret. Errors are translated to stable
+ * codes: `AI_CREDENTIAL_REQUIRED` (missing reference), `AI_CREDENTIAL_UNAVAILABLE`
+ * (unknown credential or fail-closed decryption), `AI_CONNECTION_MALFORMED`
+ * (invalid state). Plaintext is never cached or persisted here.
  */
 export async function resolveRuntimeCredential(config: AIConnectionRuntimeConfig): Promise<string | null> {
   if (!config.requiresCredential) return null;
@@ -147,5 +171,61 @@ export async function resolveRuntimeCredential(config: AIConnectionRuntimeConfig
       `Connection "${config.connectionId}" requires a credential but has no credential reference`,
     );
   }
-  return resolveCredentialForRuntime(config.credentialRef);
+
+  const state = await loadAIConnectionState().catch((error: unknown) => {
+    if (error instanceof MalformedAIConnectionStateError) {
+      throw new AIRuntimeResolutionError(
+        "AI_CONNECTION_MALFORMED",
+        "Stored AI connection state failed schemaVersion-1 validation",
+      );
+    }
+    throw error;
+  });
+  if (!state) {
+    throw new AIRuntimeResolutionError(
+      "AI_RUNTIME_CONFIG_STALE",
+      "AI connection state no longer exists; the runtime snapshot is stale",
+    );
+  }
+
+  const stale = (detail: string) =>
+    new AIRuntimeResolutionError("AI_RUNTIME_CONFIG_STALE", `Runtime snapshot is stale: ${detail}`);
+
+  if (state.activeConnectionId !== config.connectionId) {
+    throw stale("active connection changed");
+  }
+  const connection = state.connections[config.connectionId];
+  if (!connection) {
+    throw stale("resolved connection no longer exists");
+  }
+  if (connection.connectionRevision !== config.connectionRevision) {
+    throw stale("connection revision changed");
+  }
+  if (connection.credentialRef !== config.credentialRef) {
+    throw stale("credential reference changed");
+  }
+  const credential = state.credentials[config.credentialRef];
+  if (!credential || credential.revision !== config.credentialRevision) {
+    throw stale("credential revision changed");
+  }
+
+  try {
+    return await resolveCredentialForRuntime(config.credentialRef);
+  } catch (error) {
+    if (error instanceof AIRuntimeResolutionError) throw error;
+    if (error instanceof CredentialNotFoundError) {
+      throw new AIRuntimeResolutionError(
+        "AI_CREDENTIAL_UNAVAILABLE",
+        `Credential for connection "${config.connectionId}" is no longer available`,
+      );
+    }
+    // Decrypt failures (tampered envelopes, unsupported versions, wrong
+    // extension context) fail closed under a stable code; no raw low-level
+    // error and no material escapes this boundary.
+    const name = error instanceof Error ? error.name : "unknown error";
+    throw new AIRuntimeResolutionError(
+      "AI_CREDENTIAL_UNAVAILABLE",
+      `Credential for connection "${config.connectionId}" could not be decrypted (${name})`,
+    );
+  }
 }

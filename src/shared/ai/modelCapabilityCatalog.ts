@@ -6,18 +6,23 @@
  * capability authority; `ProviderConfig.supportsVision` and the
  * `isLikelyTextOnlyModel` regex remain the production authority until the E2B
  * cutover and are used here ONLY as a clearly labeled `legacy_declared`
- * evidence source for the shipped IDs.
+ * evidence source for shipped models on their canonical provider.
  *
  * Rules encoded here:
  * - Capabilities are keyed by (presetId, modelId). An arbitrary manually
- *   entered model (typically under `custom`) is `unknown` — no vision
- *   inference from names like "vision"/"vl"/"gpt"/"claude"/"gemini" happens in
- *   this authority.
+ *   entered model is `unknown` — no vision inference from names like
+ *   "vision"/"vl"/"gpt"/"claude"/"gemini" happens in this authority.
+ * - Custom preset model IDs are ALWAYS unknown: the default model string of
+ *   the custom preset does not prove an arbitrary endpoint is actually
+ *   serving that official model. Custom model capability stays unknown until
+ *   an explicit verified capability source exists.
  * - Unknown vision must fail closed (see `effectiveMediaCapability.ts`).
  * - `reasoning`/`structuredOutput` have insufficient repository evidence for
- *   every shipped model and are therefore `unknown` — not invented.
- * - The drift gate test (`E2A-CAP-07`) forces every new built-in model to
- *   receive an explicit catalog decision.
+ *   every model and are therefore `unknown` — not invented.
+ * - The drift gate (`auditBuiltinModelClassification` + `E2A-CAP-07`) forces
+ *   every built-in model to be explicitly classified (known or explicitly
+ *   unknown) and flags stale catalog entries with no current built-in model
+ *   unless they are marked `deprecated`.
  */
 
 import { PROVIDERS } from "./providers";
@@ -35,13 +40,19 @@ const UNKNOWN_CAPABILITY: CapabilityAssessment = { value: null, confidence: "unk
 interface CatalogEntry {
   /** Current registry vision declaration for this shipped model. */
   vision: boolean;
+  /**
+   * Stale-entry escape hatch: deprecated entries are kept out of the stale
+   * audit but never resolve as known capability for new decisions.
+   */
+  deprecated?: true;
 }
 
 /**
  * Explicit per-model vision classification, mirroring the CURRENT runtime
  * decision (provider `supportsVision` declaration downgraded by the
  * `isLikelyTextOnlyModel` heuristic in parseRouter). Source:
- * `legacy_declared`.
+ * `legacy_declared`. Custom preset models are deliberately absent — they are
+ * explicitly unknown (see EXPLICITLY_UNKNOWN_BUILTIN_MODELS).
  */
 const BUILTIN_MODEL_CATALOG: Record<string, CatalogEntry> = {
   "anthropic::claude-opus-4.8": { vision: true },
@@ -85,27 +96,37 @@ const BUILTIN_MODEL_CATALOG: Record<string, CatalogEntry> = {
   "ollama::gemma4": { vision: true },
   "ollama::llama3.2-vision": { vision: true },
   "ollama::llava": { vision: true },
-
-  "custom::gpt-5.4-mini": { vision: true },
 };
+
+/**
+ * Built-in shipped models that are EXPLICITLY classified as unknown — a
+ * decision, not an omission. A custom endpoint's default model string does
+ * not prove the endpoint serves the official model, so its capability stays
+ * unknown until an explicit verified capability source exists.
+ */
+const EXPLICITLY_UNKNOWN_BUILTIN_MODELS: ReadonlySet<string> = new Set([
+  "custom::gpt-5.4-mini",
+]);
 
 function catalogKey(presetId: ProviderPresetId, modelId: string): string {
   return `${presetId}::${modelId}`;
 }
 
 /**
- * Assess one model. Exact (presetId, modelId) matches are `known` with
- * `legacy_declared` vision; anything else is `unknown` and fails closed on
+ * Assess one model. Exact (presetId, modelId) matches on non-deprecated
+ * catalog entries are `known` with `legacy_declared` vision; anything else —
+ * including every custom-preset model — is `unknown` and fails closed on
  * vision downstream.
  */
 export function assessModelCapabilities(
   presetId: ProviderPresetId,
   modelId: string,
 ): ModelCapabilityAssessment {
-  const entry = BUILTIN_MODEL_CATALOG[catalogKey(presetId, modelId)];
-  if (!entry) {
+  const key = catalogKey(presetId, modelId);
+  const entry = BUILTIN_MODEL_CATALOG[key];
+  if (!entry || entry.deprecated) {
     return {
-      classification: "unknown",
+      classification: "unknown" satisfies ModelClassification,
       text: UNKNOWN_CAPABILITY,
       vision: UNKNOWN_CAPABILITY,
       reasoning: UNKNOWN_CAPABILITY,
@@ -121,25 +142,32 @@ export function assessModelCapabilities(
   };
 }
 
-/** Every explicitly cataloged (presetId, modelId) pair, for drift-gate tests. */
+/** Every known-catalog (presetId, modelId) pair, for drift-gate tests. */
 export function listCatalogedModelKeys(): string[] {
   return Object.keys(BUILTIN_MODEL_CATALOG);
 }
 
 /**
- * Drift gate helper: every model currently shipped in PROVIDERS[].models must
- * have an explicit catalog entry. A missing entry means a developer added a
- * provider model without a capability decision — the drift test fails and
- * forces one.
+ * Exact drift audit. Every current built-in model must appear in exactly one
+ * classification (known catalog or explicit-unknown); every catalog entry
+ * must correspond to a current built-in model unless marked `deprecated`.
  */
-export function findUnclassifiedBuiltinModels(): Array<{ presetId: ProviderPresetId; modelId: string }> {
-  const missing: Array<{ presetId: ProviderPresetId; modelId: string }> = [];
+export function auditBuiltinModelClassification(): {
+  unclassified: Array<{ presetId: ProviderPresetId; modelId: string }>;
+  stale: string[];
+} {
+  const unclassified: Array<{ presetId: ProviderPresetId; modelId: string }> = [];
+  const currentKeys = new Set<string>();
   for (const provider of PROVIDERS) {
     for (const modelId of provider.models) {
-      if (!(catalogKey(provider.id, modelId) in BUILTIN_MODEL_CATALOG)) {
-        missing.push({ presetId: provider.id, modelId });
+      const key = catalogKey(provider.id, modelId);
+      currentKeys.add(key);
+      if (!(key in BUILTIN_MODEL_CATALOG) && !EXPLICITLY_UNKNOWN_BUILTIN_MODELS.has(key)) {
+        unclassified.push({ presetId: provider.id, modelId });
       }
     }
   }
-  return missing;
+  const stale = [...Object.keys(BUILTIN_MODEL_CATALOG), ...EXPLICITLY_UNKNOWN_BUILTIN_MODELS]
+    .filter((key) => !currentKeys.has(key) && !BUILTIN_MODEL_CATALOG[key]?.deprecated);
+  return { unclassified, stale };
 }

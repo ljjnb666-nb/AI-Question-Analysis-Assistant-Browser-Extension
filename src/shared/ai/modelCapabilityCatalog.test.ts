@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PROVIDERS } from "./providers";
 import {
   assessModelCapabilities,
-  findUnclassifiedBuiltinModels,
+  auditBuiltinModelClassification,
 } from "./modelCapabilityCatalog";
 
 describe("modelCapabilityCatalog", () => {
@@ -43,6 +43,14 @@ describe("modelCapabilityCatalog", () => {
     expect(assessModelCapabilities("custom", "claude-opus-4.8").classification).toBe("unknown");
   });
 
+  it("custom model identity is never trusted by its string, including the preset default", () => {
+    // The custom preset's default model string does not prove an arbitrary
+    // endpoint is serving the official OpenAI model.
+    const assessment = assessModelCapabilities("custom", "gpt-5.4-mini");
+    expect(assessment.classification).toBe("unknown");
+    expect(assessment.vision).toEqual({ value: null, confidence: "unknown" });
+  });
+
   it("leaves reasoning/structuredOutput unknown for every model (no invented capabilities)", () => {
     for (const provider of PROVIDERS) {
       for (const modelId of provider.models) {
@@ -53,8 +61,10 @@ describe("modelCapabilityCatalog", () => {
     }
   });
 
-  it("E2A-CAP-07 drift gate: every built-in PROVIDERS model has an explicit catalog outcome", () => {
-    expect(findUnclassifiedBuiltinModels()).toEqual([]);
+  it("E2A-CAP-07 exact drift gate: every built-in model classified, no stale entries", () => {
+    const audit = auditBuiltinModelClassification();
+    expect(audit.unclassified).toEqual([]);
+    expect(audit.stale).toEqual([]);
     for (const provider of PROVIDERS) {
       for (const modelId of provider.models) {
         const assessment = assessModelCapabilities(provider.id, modelId);

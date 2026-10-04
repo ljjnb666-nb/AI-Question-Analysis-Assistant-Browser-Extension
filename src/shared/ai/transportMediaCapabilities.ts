@@ -1,50 +1,81 @@
 /**
- * UI05R-E2A — Transport/media encoding capability authority.
+ * UI05R-E2A — Transport/media capability authority (two layers).
  *
- * Transport capability is a property of the PROTOCOL adapter plus the known
- * provider endpoint behavior — not of the model. Ground truth audited from
- * the current wire adapters:
- *
+ * ADAPTER ENCODING is protocol ground truth — what the wire adapter can
+ * encode, audited from the current implementations (`providerClients.ts`):
  * - `anthropic_messages` (callAnthropic): images are always sent as inline
- *   base64 content blocks; the adapter never consumes remote image URLs
- *   directly (remote media are downloaded into data URLs by
- *   prepareQuestionPackageForProvider beforehand). Multiple image blocks are
- *   structurally supported.
+ *   base64 content blocks; the adapter never emits a remote image URL.
  * - `gemini_generate_content` (callGemini): images are always sent as
- *   `inline_data` base64 parts; remote URLs are never sent. Multiple parts
- *   supported.
+ *   `inline_data` base64 parts; the adapter never emits a remote image URL.
  * - `openai_chat_completions` (callOpenAICompat): images travel as
- *   `image_url` content parts — a remote URL when the provider is declared to
- *   accept them, otherwise a data URL. Per-provider acceptance therefore
- *   differs and is taken from the current registry as `legacy_declared`.
- *   Arbitrary custom OpenAI-compatible endpoints have UNKNOWN transport
- *   support and fail closed — no overclaiming.
+ *   `image_url` parts — the adapter CAN emit a remote URL and otherwise sends
+ *   a data URL; multiple parts are structurally supported.
  *
- * No "everything supported" fallback exists: every protocol receives an
- * explicit outcome (drift gate `E2A-CAP-08`).
+ * ENDPOINT ACCEPTANCE is what the concrete endpoint actually accepts. It is
+ * only trusted (legacy_declared) for built-in presets on their CANONICAL
+ * endpoint. An endpoint override stops the endpoint from being the canonical
+ * provider service, and a custom endpoint is never conformance-verified —
+ * selecting "Anthropic-compatible" does NOT prove an arbitrary remote server
+ * accepts Anthropic encodings. Acceptance is therefore UNKNOWN for overridden
+ * and custom endpoints, and effective transport support requires BOTH layers,
+ * so it degrades to unknown (fail closed downstream). No overconfident
+ * boolean collapse.
+ *
+ * Remote SOURCE media are NOT remote WIRE media: production acquires remote
+ * sources into data URLs unless the endpoint is known to accept remote URLs
+ * (see `planWireMediaDelivery`).
+ *
+ * Protocol handling is exhaustive (`switch` + `assertNever`): every
+ * `ProtocolId` has an explicit branch and a newly added protocol fails to
+ * compile until handled.
  */
 
 import type {
+  AdapterEncodingCapability,
   CapabilityAssessment,
+  EndpointAcceptanceCapability,
+  EndpointProvenance,
   ProtocolId,
   ProviderPresetId,
   TransportMediaCapabilityAssessment,
 } from "../types/connection";
-import { PROVIDERS } from "./providers";
 
 const KNOWN_TRUE: CapabilityAssessment = { value: true, confidence: "known_static" };
 const KNOWN_FALSE: CapabilityAssessment = { value: false, confidence: "known_static" };
 const UNKNOWN: CapabilityAssessment = { value: null, confidence: "unknown" };
 
-interface ProviderTransportDeclaration {
+function assertNeverProtocol(value: never): never {
+  throw new Error(`Unhandled ProtocolId in transport resolver: ${String(value)}`);
+}
+
+/**
+ * Layer 1 — adapter encoding, per protocol. Exhaustive over `ProtocolId`.
+ */
+export function resolveAdapterEncodingCapability(protocol: ProtocolId): AdapterEncodingCapability {
+  switch (protocol) {
+    case "anthropic_messages":
+      // Adapter always inlines base64 blocks and never emits remote URLs.
+      return { inlineBase64: KNOWN_TRUE, remoteImageUrl: KNOWN_FALSE, multipleImages: KNOWN_TRUE };
+    case "gemini_generate_content":
+      // Adapter always inlines base64 `inline_data` parts, never remote URLs.
+      return { inlineBase64: KNOWN_TRUE, remoteImageUrl: KNOWN_FALSE, multipleImages: KNOWN_TRUE };
+    case "openai_chat_completions":
+      // Adapter sends remote URLs when declared+available, else data URLs.
+      return { inlineBase64: KNOWN_TRUE, remoteImageUrl: KNOWN_TRUE, multipleImages: KNOWN_TRUE };
+    default:
+      return assertNeverProtocol(protocol);
+  }
+}
+
+/** Current canonical-endpoint registry declarations per openai-compat provider. */
+interface CanonicalEndpointDeclaration {
   remoteImageUrl: boolean;
   multipleImages: boolean;
   /** false = the provider preset currently rejects media entirely. */
   acceptsMedia: boolean;
 }
 
-/** Current registry declarations per openai-compat provider (`legacy_declared`). */
-const OPENAI_COMPAT_TRANSPORT: Partial<Record<ProviderPresetId, ProviderTransportDeclaration>> = {
+const CANONICAL_OPENAI_COMPAT_ACCEPTANCE: Partial<Record<ProviderPresetId, CanonicalEndpointDeclaration>> = {
   openai: { remoteImageUrl: true, multipleImages: true, acceptsMedia: true },
   deepseek: { remoteImageUrl: false, multipleImages: false, acceptsMedia: false },
   qwen: { remoteImageUrl: true, multipleImages: true, acceptsMedia: true },
@@ -55,65 +86,91 @@ const OPENAI_COMPAT_TRANSPORT: Partial<Record<ProviderPresetId, ProviderTranspor
 };
 
 /**
- * Explicit transport outcome per protocol (+ provider endpoint behavior).
- * `presetId` refines `openai_chat_completions`; an unknown combination yields
- * explicit `unknown` dimensions, which fail closed downstream.
+ * Layer 2 — endpoint acceptance. Only canonical built-in endpoints carry
+ * legacy-declared knowledge; overridden and custom endpoints are unknown in
+ * every endpoint-dependent dimension.
  */
-export function resolveTransportMediaCapabilities(
+export function resolveEndpointAcceptanceCapability(
   presetId: ProviderPresetId,
   protocol: ProtocolId,
-): TransportMediaCapabilityAssessment {
-  if (protocol === "anthropic_messages") {
-    // Adapter always inlines base64 and never consumes remote URLs.
-    return { protocol, inlineBase64: KNOWN_TRUE, remoteImageUrl: KNOWN_FALSE, multipleImages: KNOWN_TRUE };
-  }
-  if (protocol === "gemini_generate_content") {
-    // Adapter always inlines base64 as inline_data parts.
-    if (presetId === "gemini") {
-      return { protocol, inlineBase64: KNOWN_TRUE, remoteImageUrl: KNOWN_FALSE, multipleImages: KNOWN_TRUE };
-    }
-    // No current runtime evidence for other presets on the Gemini wire format.
-    return { protocol, inlineBase64: UNKNOWN, remoteImageUrl: UNKNOWN, multipleImages: UNKNOWN };
+  endpointProvenance: EndpointProvenance,
+): EndpointAcceptanceCapability {
+  if (endpointProvenance !== "canonical_builtin_endpoint") {
+    // Overridden and custom endpoints have no conformance evidence: adapter
+    // encoding shape may be known, endpoint acceptance is not.
+    return { inlineBase64: UNKNOWN, remoteImageUrl: UNKNOWN, multipleImages: UNKNOWN };
   }
 
-  // openai_chat_completions: per-provider endpoint behavior.
-  const declaration = OPENAI_COMPAT_TRANSPORT[presetId];
-  if (!declaration) {
-    // Custom (and any unknown) OpenAI-compatible endpoint: transport support
-    // is unknown and must fail closed instead of being overclaimed.
-    return { protocol, inlineBase64: UNKNOWN, remoteImageUrl: UNKNOWN, multipleImages: UNKNOWN };
+  switch (protocol) {
+    case "anthropic_messages":
+      // Canonical Anthropic service (legacy_declared registry knowledge).
+      return { inlineBase64: { value: true, confidence: "legacy_declared" }, remoteImageUrl: { value: false, confidence: "legacy_declared" }, multipleImages: { value: true, confidence: "legacy_declared" } };
+    case "gemini_generate_content":
+      if (presetId !== "gemini") {
+        // No canonical evidence for the Gemini wire format under another preset.
+        return { inlineBase64: UNKNOWN, remoteImageUrl: UNKNOWN, multipleImages: UNKNOWN };
+      }
+      return { inlineBase64: { value: true, confidence: "legacy_declared" }, remoteImageUrl: { value: false, confidence: "legacy_declared" }, multipleImages: { value: true, confidence: "legacy_declared" } };
+    case "openai_chat_completions": {
+      const declaration = CANONICAL_OPENAI_COMPAT_ACCEPTANCE[presetId];
+      if (!declaration) {
+        return { inlineBase64: UNKNOWN, remoteImageUrl: UNKNOWN, multipleImages: UNKNOWN };
+      }
+      if (!declaration.acceptsMedia) {
+        const declaredFalse: CapabilityAssessment = { value: false, confidence: "legacy_declared" };
+        return { inlineBase64: declaredFalse, remoteImageUrl: declaredFalse, multipleImages: declaredFalse };
+      }
+      return {
+        inlineBase64: { value: true, confidence: "legacy_declared" },
+        remoteImageUrl: { value: declaration.remoteImageUrl, confidence: "legacy_declared" },
+        multipleImages: { value: declaration.multipleImages, confidence: "legacy_declared" },
+      };
+    }
+    default:
+      return assertNeverProtocol(protocol);
   }
-  if (!declaration.acceptsMedia) {
-    // The preset's current registry declaration rejects media entirely
-    // (legacy_declared evidence, not adapter-structural knowledge).
-    const declaredFalse: CapabilityAssessment = { value: false, confidence: "legacy_declared" };
-    return { protocol, inlineBase64: declaredFalse, remoteImageUrl: declaredFalse, multipleImages: declaredFalse };
-  }
-  // Data-URL image parts are what the adapter sends whenever it does not send
-  // a remote URL, so inline transport is adapter behavior (known_static);
-  // remote acceptance is per-endpoint registry knowledge (legacy_declared).
+}
+
+/** Effective = adapter encoding ∧ endpoint acceptance; never more confident than the weakest layer. */
+function combineCapability(adapter: CapabilityAssessment, acceptance: CapabilityAssessment): CapabilityAssessment {
+  if (adapter.confidence === "unknown" || acceptance.confidence === "unknown") return UNKNOWN;
   return {
-    protocol,
-    inlineBase64: KNOWN_TRUE,
-    remoteImageUrl: { value: declaration.remoteImageUrl, confidence: "legacy_declared" },
-    multipleImages: { value: declaration.multipleImages, confidence: "legacy_declared" },
+    value: adapter.value && acceptance.value,
+    confidence: adapter.confidence === "known_static" && acceptance.confidence === "known_static" ? "known_static" : "legacy_declared",
   };
 }
 
+export interface TransportResolutionInput {
+  presetId: ProviderPresetId;
+  protocol: ProtocolId;
+  endpointProvenance: EndpointProvenance;
+}
+
 /**
- * Drift gate helper: every protocol currently reachable from the provider
- * registry must resolve to an explicit outcome (never an implicit fallback).
+ * Resolve the layered transport assessment. Effective dimensions require BOTH
+ * adapter encoding and endpoint acceptance to be known-supported; unknown in
+ * either layer degrades the effective dimension to unknown (fail closed).
  */
-export function listProtocolCoverage(): Array<{ presetId: ProviderPresetId; protocol: ProtocolId }> {
-  const covered = new Map<string, { presetId: ProviderPresetId; protocol: ProtocolId }>();
-  for (const provider of PROVIDERS) {
-    const protocol =
-      provider.id === "anthropic"
-        ? "anthropic_messages"
-        : provider.id === "gemini"
-          ? "gemini_generate_content"
-          : "openai_chat_completions";
-    covered.set(protocol, { presetId: provider.id, protocol });
-  }
-  return [...covered.values()];
+export function resolveTransportMediaCapabilities(input: TransportResolutionInput): TransportMediaCapabilityAssessment {
+  const adapterEncoding = resolveAdapterEncodingCapability(input.protocol);
+  const endpointAcceptance = resolveEndpointAcceptanceCapability(input.presetId, input.protocol, input.endpointProvenance);
+  return {
+    protocol: input.protocol,
+    endpointProvenance: input.endpointProvenance,
+    adapterEncoding,
+    endpointAcceptance,
+    inlineBase64: combineCapability(adapterEncoding.inlineBase64, endpointAcceptance.inlineBase64),
+    remoteImageUrl: combineCapability(adapterEncoding.remoteImageUrl, endpointAcceptance.remoteImageUrl),
+    multipleImages: combineCapability(adapterEncoding.multipleImages, endpointAcceptance.multipleImages),
+  };
+}
+
+/** Provenance of a connection's endpoint from its persisted shape. */
+export function resolveEndpointProvenance(connection: {
+  presetId: ProviderPresetId;
+  endpointOverride?: string;
+}): EndpointProvenance {
+  if (connection.presetId === "custom") return "custom_endpoint";
+  if (connection.endpointOverride) return "overridden_endpoint";
+  return "canonical_builtin_endpoint";
 }
