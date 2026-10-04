@@ -56,8 +56,8 @@ export function resolvePresetProtocol(
 /**
  * Preset default auth scheme, mirroring current runtime credential
  * presentation:
- * - Anthropic: `x-api-key` header (the bearer retry on specific rejections is
- *   wire-adapter behavior, not the scheme identity).
+ * - Anthropic Messages: `x-api-key` only, according to AuthScheme authority;
+ *   no bearer fallback or silent auth relocation.
  * - Custom + anthropic_messages: same `x-api-key` presentation.
  * - Gemini: `key` query parameter.
  * - Ollama: no auth.

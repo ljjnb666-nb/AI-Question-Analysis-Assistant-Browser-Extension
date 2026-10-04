@@ -7,6 +7,7 @@ import { SettingsTab } from "./settingsPanel";
 import { DEFAULT_SETTINGS } from "@/shared/types";
 import { getProvider } from "@/shared/ai/providers";
 import { loadAIConnectionState } from "@/shared/utils/aiConnectionState";
+import { ensureAIConnectionAuthorityReady, updateActiveAIConnection } from "@/shared/utils/aiConnectionClient";
 import {
   __resetStorageCacheForTests,
   loadSettings,
@@ -151,5 +152,52 @@ describe("E2B2A committed Save-and-Test", () => {
     expect(state.connections[state.activeConnectionId!].credentialRef).toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(memory.store.has("history")).toBe(false);
+  });
+});
+
+describe("E2B2B RF01 Custom protocol draft semantics", () => {
+  it("official Anthropic to Custom defaults to OpenAI without touching protocol", async () => {
+    await ensureAIConnectionAuthorityReady();
+    expect(await resolveActiveAIConnectionRuntimeMetadata()).toMatchObject({ presetId: "anthropic", protocol: "anthropic_messages" });
+    await switchToCustom();
+    expect(screen.getByRole("radio", { name: "OpenAI 兼容" })).toBeChecked();
+    fireEvent.change(screen.getByPlaceholderText("your_api_key"), { target: { value: newKey } });
+    expect(await save()).toMatchObject({ presetId: "custom", protocolOverride: "openai_chat_completions" });
+    expect(await resolveActiveAIConnectionRuntimeMetadata()).toMatchObject({ protocol: "openai_chat_completions" });
+  });
+
+  it("official Anthropic to Custom connection test uses OpenAI wire and the new endpoint/key only", async () => {
+    await ensureAIConnectionAuthorityReady();
+    const endpoint = await switchToCustom();
+    fireEvent.change(endpoint, { target: { value: "https://rf01-openai.example" } });
+    fireEvent.change(screen.getByPlaceholderText("your_api_key"), { target: { value: newKey } });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      expect(String(url)).toBe("https://rf01-openai.example/v1/chat/completions");
+      const headers = new Headers(init?.headers);
+      expect(headers.get("authorization")).toBe(`Bearer ${newKey}`);
+      expect(headers.has("x-api-key")).toBe(false);
+      expect(headers.has("anthropic-version")).toBe(false);
+      const body = JSON.parse(String(init?.body));
+      expect(body.messages).toEqual(expect.arrayContaining([expect.objectContaining({ role: "user" })]));
+      expect(body).not.toHaveProperty("system");
+      expect((await resolveActiveAIConnectionRuntimeMetadata()).protocol).toBe("openai_chat_completions");
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"questionType":"single_choice","answer":"B","confidence":1}' } }] }), { status: 200 });
+    });
+    fireEvent.click(screen.getByRole("button", { name: /连接测试/ }));
+    await waitFor(() => expect(screen.getByText(/连接成功/)).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const state = (await loadAIConnectionState())!;
+    expect(state.connections[state.activeConnectionId!]).toMatchObject({ presetId: "custom", protocolOverride: "openai_chat_completions", endpointOverride: "https://rf01-openai.example" });
+  });
+
+  it("existing Custom Anthropic reloads its radio and retains protocol on unchanged save", async () => {
+    await ensureAIConnectionAuthorityReady();
+    await updateActiveAIConnection({ presetId: "custom", protocolOverride: "anthropic_messages", endpointOverride: oldEndpoint, credential: { action: "REPLACE", value: newKey } });
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Claude 兼容" })).toBeChecked());
+    expect(await save()).toMatchObject({ presetId: "custom", protocolOverride: "anthropic_messages" });
+    const runtime = await resolveActiveAIConnectionRuntimeMetadata();
+    expect(runtime.protocol).toBe("anthropic_messages");
+    expect(await resolveRuntimeCredential(runtime)).toBe(newKey);
   });
 });

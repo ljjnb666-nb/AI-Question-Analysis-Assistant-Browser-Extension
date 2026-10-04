@@ -71,7 +71,7 @@ export const SettingsTab: React.FC<{
       setCustomUrl(editor.endpointOverride ?? "");
       setAnalyticsBaseUrl(settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL);
       setEnableAnalytics(settings.enableAnalytics ?? false);
-      setCustomProtocol(editor.protocol === "anthropic_messages" ? "anthropic" : "openai");
+      setCustomProtocol(editor.presetId === "custom" && editor.protocol === "anthropic_messages" ? "anthropic" : "openai");
       setLang(settings.language ?? "zh");
       setDeviceId(settings.deviceId ?? "");
       // Auth identity is owned by the shared session coordinator inside
