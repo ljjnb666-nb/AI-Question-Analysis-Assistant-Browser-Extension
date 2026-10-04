@@ -594,6 +594,12 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
   it("RF02-12: language switch persists -> reopen reads selected language", async () => {
     render(<PopupApp />);
+    // Let the mount-time background normalization write land BEFORE toggling
+    // so the toggle's save is the last writer to appSettings; a late
+    // normalizer read-modify-write would otherwise clobber language back.
+    await waitFor(() => {
+      expect((store.get("appSettings") as Record<string, unknown>)?.analyticsConsentVersion).toBe(1);
+    });
     const menuBtn = await screen.findByRole("button", { name: "产品菜单" });
     await act(async () => {
       fireEvent.click(menuBtn);
@@ -611,6 +617,10 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
   it("RF02-13: html lang follows selected language", async () => {
     render(<PopupApp />);
+    // Let the popup's async settings load settle its document.lang side effect
+    // (zh -> zh-CN) BEFORE toggling, so the toggle is the last writer and a
+    // late load cannot clobber the asserted state (CI run 37218167859).
+    await waitFor(() => expect(document.documentElement.lang).toBe("zh-CN"));
     const menuBtn = await screen.findByRole("button", { name: "产品菜单" });
     await act(async () => {
       fireEvent.click(menuBtn);
