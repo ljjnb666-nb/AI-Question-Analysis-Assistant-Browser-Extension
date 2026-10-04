@@ -5,8 +5,8 @@ import {
   sendToTabWithBootstrap,
 } from "@/shared/utils/messaging";
 import type { ExtMessage } from "@/shared/types";
-import { getProvider, getProviderShortName } from "@/shared/ai/providers";
-import { isProviderRuntimeConfigured } from "@/shared/ai/parseResultAuthority";
+import { getProviderShortName } from "@/shared/ai/providers";
+import { getAIConnectionReadiness } from "@/shared/utils/legacyRuntimeSettingsCompat";
 import { logEvent } from "@/shared/utils/analytics";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { useAuthController } from "@/shared/auth/useAuthController";
@@ -80,8 +80,7 @@ const shellStyle: React.CSSProperties = {
 
 export const PopupApp: React.FC = () => {
   const [feedback, setFeedback] = useState<UserFeedback | null>(null);
-  const [apiKey, setApiKey] = useState("");
-  const [providerId, setProviderId] = useState("anthropic");
+  const [aiReady, setAIReady] = useState(false);
   const [providerName, setProviderName] = useState("Claude");
   const [lang, setLang] = useState<PopupLang>("zh");
   const [_loaded, setLoaded] = useState(false);
@@ -127,20 +126,19 @@ export const PopupApp: React.FC = () => {
 
   useEffect(() => {
     let disposed = false;
-    void loadSettings().then((settings) => {
+    void getAIConnectionReadiness().then(async (readiness) => {
+      const settings = await loadSettings();
       if (disposed) return;
-      const key = settings.apiKey ?? "";
+      setAIReady(readiness.ready);
       const nextProviderId = settings.providerId ?? "anthropic";
       const nextLang = settings.language ?? "zh";
-      setApiKey(key);
-      setProviderId(nextProviderId);
       setProviderName(getProviderShortName(nextProviderId));
       setLang(nextLang);
       if (typeof document !== "undefined") {
         document.documentElement.lang = nextLang === "zh" ? "zh-CN" : "en";
       }
       setLoaded(true);
-    });
+    }).catch(() => { if (!disposed) { setAIReady(false); setLoaded(true); } });
     return () => {
       disposed = true;
     };
@@ -170,7 +168,7 @@ export const PopupApp: React.FC = () => {
   }, []);
 
   // UI-00A: shared provider-contract check
-  const hasApiKey = isProviderRuntimeConfigured(getProvider(providerId), { apiKey });
+  const hasApiKey = aiReady;
 
   const viewState = derivePopupViewState({
     authStatus: auth.status,

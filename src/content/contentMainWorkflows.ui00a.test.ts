@@ -162,3 +162,15 @@ describe("Auto Solve provider configuration entry guard (UI-00A, UI00A-06)", () 
     expect(options.fillParsedAnswerInPage).not.toHaveBeenCalled();
   });
 });
+
+vi.mock("@/shared/utils/legacyRuntimeSettingsCompat", async () => {
+  const storage = await import("@/shared/utils/storage");
+  const { getProvider } = await import("@/shared/ai/providers");
+  return {
+    loadLegacyRuntimeSettingsCompat: () => storage.loadSettings(),
+    getAIConnectionReadiness: async () => {
+      const fixture = await storage.loadSettings();
+      return { ready: getProvider(fixture.providerId).keyOptional === true || Boolean(fixture.apiKey?.trim()) };
+    },
+  };
+});

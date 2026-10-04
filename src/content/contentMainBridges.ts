@@ -1,9 +1,10 @@
+import { loadLegacyRuntimeSettingsCompat } from "@/shared/utils/legacyRuntimeSettingsCompat";
 import type { QuestionBlock } from "@/shared/types";
 import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import { cropScreenshot } from "@/shared/utils/cropImage";
 import { logEvent } from "@/shared/utils/analytics";
 import { getProvider, parseQuestion } from "@/shared/utils/parseRouter";
-import { addHistoryEntryIfCurrent, loadSettings } from "@/shared/utils/storage";
+import { addHistoryEntryIfCurrent } from "@/shared/utils/storage";
 import { createAutoSolveRuntimeBridge } from "./contentAutoSolveRuntimeBridge";
 import { createCaptureBridge, sendToBackgroundWithTimeout } from "./contentCaptureBridge";
 import { createContentDetectionBridge } from "./contentDetectionBridge";
@@ -110,7 +111,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
 
   async function parseWithTieredRetries(
     block: QuestionBlock,
-    settings: Awaited<ReturnType<typeof loadSettings>>,
+    settings: Awaited<ReturnType<typeof loadLegacyRuntimeSettingsCompat>>,
     providerSupportsVision: boolean,
     onStream: (partial: string) => void,
     runtimeContext?: ParseQuestionRuntimeContext,
@@ -132,7 +133,7 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
   });
 
   const autoSolveParsingDeps = {
-    loadSettings,
+    loadSettings: loadLegacyRuntimeSettingsCompat,
     getProvider,
     tryCaptureBlockImageForAutoSolve,
     parseWithTieredRetries,

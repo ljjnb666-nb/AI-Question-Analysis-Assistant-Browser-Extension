@@ -153,3 +153,5 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
     expect(screen.queryByText(/mock demo data/i)).toBeNull();
   });
 });
+
+vi.mock("@/shared/utils/aiConnectionClient", () => ({ ensureAIConnectionAuthorityReady: vi.fn(async () => ({ ok: true })) }));

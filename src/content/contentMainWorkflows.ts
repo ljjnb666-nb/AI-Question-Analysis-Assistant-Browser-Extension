@@ -1,9 +1,9 @@
+import { loadLegacyRuntimeSettingsCompat, getAIConnectionReadiness } from "@/shared/utils/legacyRuntimeSettingsCompat";
 import type { BoundingBox, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import { cropScreenshot } from "@/shared/utils/cropImage";
 import {
   getProvider,
   getProviderNotConfiguredMessage,
-  isProviderRuntimeConfigured,
 } from "@/shared/utils/parseRouter";
 import { addHistoryEntry, loadHistory, loadSettings } from "@/shared/utils/storage";
 import { logEvent } from "@/shared/utils/analytics";
@@ -251,7 +251,7 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         extractQuestionImageUrlFromBBox: options.extractQuestionImageUrlFromBBox,
         screenshotWithRetry: options.screenshotWithRetry,
         cropScreenshot,
-        loadSettings,
+        loadSettings: loadLegacyRuntimeSettingsCompat,
         getProvider,
         parseWithTieredRetries: options.parseWithTieredRetries,
         withTimeout: options.withTimeout,
@@ -281,7 +281,7 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
     // provenance gate keeps real-page mutation at zero.
     const autoSolveSettings = await loadSettings();
     if (!isRunCurrent()) return;
-    if (!isProviderRuntimeConfigured(getProvider(autoSolveSettings.providerId ?? "anthropic"), autoSolveSettings)) {
+    if (!(await getAIConnectionReadiness()).ready) {
       options.sendAutoSolveDone({
         ok: false,
         solved: 0,
