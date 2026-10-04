@@ -10,7 +10,7 @@ import {
   __resetStorageCacheForTests,
   loadSettings,
 } from "@/shared/utils/storage";
-import { loadLegacyRuntimeSettingsCompat } from "@/shared/utils/legacyRuntimeSettingsCompat";
+import { resolveActiveAIConnectionRuntimeMetadata, resolveRuntimeCredential } from "@/shared/utils/aiRuntimeResolver";
 import type * as SettingsSections from "./settingsSections";
 
 vi.mock("gsap", () => ({ default: { registerPlugin: vi.fn() } }));
@@ -84,9 +84,9 @@ describe("RF01 provider endpoint ownership through real Settings save", () => {
       target: { value: newKey },
     });
     expect((await save()).endpointOverride).toBeUndefined();
-    const runtime = await loadLegacyRuntimeSettingsCompat();
-    expect(runtime.apiKey).toBe(newKey);
-    expect(runtime.customBaseUrl).not.toBe(oldEndpoint);
+    const runtime = await resolveActiveAIConnectionRuntimeMetadata();
+    expect(await resolveRuntimeCredential(runtime)).toBe(newKey);
+    expect(runtime.endpoint).not.toBe(oldEndpoint);
     expect(JSON.stringify(memory.store.get("aiConnectionState"))).not.toContain(
       newKey,
     );
@@ -101,9 +101,58 @@ describe("RF01 provider endpoint ownership through real Settings save", () => {
       target: { value: newKey },
     });
     expect((await save()).endpointOverride).toBe("https://new-custom.example");
-    expect(await loadLegacyRuntimeSettingsCompat()).toMatchObject({
-      apiKey: newKey,
-      customBaseUrl: "https://new-custom.example",
+    const runtime = await resolveActiveAIConnectionRuntimeMetadata();
+    expect(runtime.endpoint).toBe("https://new-custom.example");
+    expect(await resolveRuntimeCredential(runtime)).toBe(newKey);
+  });
+});
+
+describe("E2B2A committed Save-and-Test", () => {
+  const providerReply = (protocol: "anthropic" | "openai") => new Response(JSON.stringify(protocol === "anthropic"
+    ? { content: [{ type: "text", text: '{"questionType":"single_choice","answer":"B","confidence":1}' }] }
+    : { choices: [{ message: { content: '{"questionType":"single_choice","answer":"B","confidence":1}' } }] }), { status: 200 });
+
+  it("TEST-01/02 blank visible key keeps stored credential and runs a text request without React plaintext", async () => {
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByDisplayValue(oldEndpoint)).toBeInTheDocument());
+    expect(screen.getByPlaceholderText(getProvider("anthropic").keyPlaceholder)).toHaveValue("");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      expect(JSON.stringify(document.body.innerHTML)).not.toContain("rf01-old-fixture-key");
+      expect((await loadSettings()).apiKey).toBe("");
+      expect((init?.headers as Record<string, string>)["x-api-key"]).toBe("rf01-old-fixture-key");
+      expect(JSON.parse(String(init?.body)).messages[0].content.every((part: { type: string }) => part.type === "text")).toBe(true);
+      return providerReply("anthropic");
     });
+    fireEvent.click(screen.getByRole("button", { name: /连接测试/ }));
+    await waitFor(() => expect(screen.getByText(/连接成功/)).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(memory.store.has("history")).toBe(false);
+  });
+  it("TEST-03 changing provider commits B before B's request", async () => {
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByDisplayValue(oldEndpoint)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^OpenAI/ }));
+    fireEvent.change(screen.getByPlaceholderText(getProvider("openai").keyPlaceholder), { target: { value: newKey } });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const state = (await loadAIConnectionState())!;
+      expect(state.connections[state.activeConnectionId!].presetId).toBe("openai");
+      expect(String(url)).toContain("https://api.openai.com/");
+      expect((init?.headers as Record<string, string>).Authorization).toBe(`Bearer ${newKey}`);
+      return providerReply("openai");
+    });
+    fireEvent.click(screen.getByRole("button", { name: /连接测试/ }));
+    await waitFor(() => expect(screen.getByText(/连接成功/)).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it("TEST-04/05 provider switch with missing credential commits safely and dispatches no request", async () => {
+    await switchToCustom();
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fireEvent.click(screen.getByRole("button", { name: /连接测试/ }));
+    await waitFor(() => expect(screen.getByText(/请先填写 API Key，再测试连接/)).toBeInTheDocument());
+    const state = (await loadAIConnectionState())!;
+    expect(state.connections[state.activeConnectionId!].presetId).toBe("custom");
+    expect(state.connections[state.activeConnectionId!].credentialRef).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(memory.store.has("history")).toBe(false);
   });
 });

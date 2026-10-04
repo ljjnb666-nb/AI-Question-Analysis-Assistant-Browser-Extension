@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, type AppSettings, type HistoryEntry, type ParseResult, type QuestionBlock } from "@/shared/types";
+import { DEFAULT_SETTINGS, type HistoryEntry, type ParseResult, type QuestionBlock } from "@/shared/types";
 import { logEvent } from "@/shared/utils/analytics";
 import { createAutoSolveRuntimeBridge } from "./contentAutoSolveRuntimeBridge";
 import { activeQuestionRevisionAttempt } from "./revision/questionRevisionRuntime";
@@ -56,11 +56,11 @@ function createBridge(
 ) {
   const autoSolveParsingDeps = {
     loadSettings: async () => ({ ...DEFAULT_SETTINGS, preferredRoute: "text" as const }),
-    getProvider: () => ({ supportsVision: false }),
+    getRuntimeCaptureInfo: async () => ({ supportsVision: false }),
     tryCaptureBlockImageForAutoSolve: async () => null,
     parseWithTieredRetries: (
       _block: QuestionBlock,
-      _settings: AppSettings,
+      _settings: Pick<typeof DEFAULT_SETTINGS, "preferredRoute" | "language">,
       _supportsVision: boolean,
       _onStream: (partial: string) => void,
       runtimeContext?: ParseQuestionRuntimeContext,

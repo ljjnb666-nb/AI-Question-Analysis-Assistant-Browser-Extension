@@ -1,6 +1,7 @@
+import { requestContextFixture } from "../ai/runtimeRequest.testFixture";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { callGemini } from "../ai/providerClients";
-import { DEFAULT_SETTINGS, type QuestionBlock } from "../types";
+import { type QuestionBlock } from "../types";
 import {
   clearErrorLogs,
   exportErrorLogs,
@@ -57,16 +58,11 @@ afterEach(() => {
 });
 
 describe("error log secret redaction", () => {
-  it("P_REL_SEC_01_GEMINI_TIMEOUT keeps the request key but redacts every error-log boundary", async () => {
+  it("P_REL_SEC_01_GEMINI_FETCH_ABORT keeps the request key but redacts every error-log boundary", async () => {
     const fetchMock = vi.fn().mockRejectedValue(Object.assign(new Error("aborted"), { name: "AbortError" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(callGemini(QUESTION_BLOCK, "text", {
-      ...DEFAULT_SETTINGS,
-      providerId: "gemini",
-      apiKey: GEMINI_SECRET,
-      apiModel: "gemini-2.5-flash",
-    })).rejects.toThrow("Request timed out");
+    await expect(callGemini(QUESTION_BLOCK, "text", requestContextFixture("gemini", GEMINI_SECRET))).rejects.toThrow("aborted");
 
     const requestUrl = fetchMock.mock.calls[0][0] as string;
     expect(requestUrl).toBe(
@@ -76,7 +72,7 @@ describe("error log secret redaction", () => {
     const inMemoryLogs = getErrorLogs();
     expect(JSON.stringify(inMemoryLogs)).not.toContain(GEMINI_SECRET);
     const loggedUrl = inMemoryLogs[0].data?.url as string;
-    expect(new URL(loggedUrl).searchParams.get("key")).toBe("[REDACTED]");
+    expect(new URL(loggedUrl).search).toBe("");
 
     const exported = await exportErrorLogs();
     expect(JSON.stringify(localStorageData.errorLog)).not.toContain(GEMINI_SECRET);

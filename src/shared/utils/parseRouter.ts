@@ -2,8 +2,8 @@
  * Parse Router (M5 - Multi-Provider + Timeout + Retry + Streaming)
  */
 
-import type { AppSettings, ParseResult, QuestionBlock } from "../types";
-import { PROVIDERS, getProvider, resolveEffectiveProviderMediaCapabilities } from "../ai/providers";
+import type { ParseResult, QuestionBlock } from "../types";
+import { PROVIDERS, getProvider } from "../ai/providers";
 import type { ProviderConfig, ProviderId } from "../ai/providers";
 import { buildResult } from "../ai/parseResult";
 import { callAnthropic, callGemini, callOpenAICompat } from "../ai/providerClients";
@@ -15,7 +15,13 @@ import {
   isProviderRuntimeConfigured,
 } from "../ai/parseResultAuthority";
 import { classifyAnalyticsFailure, logEvent } from "./analytics";
-import { detectVisualKeywords } from "./ocr";
+import { ensureAIConnectionAuthorityReady } from "./aiConnectionClient";
+import { resolveActiveAIConnectionRuntimeMetadata, resolveRuntimeCredential, assertRuntimeConfigCurrent } from "./aiRuntimeResolver";
+import type { AIConnectionRuntimeConfig } from "../types/connection";
+import type { ParsePreferences, ProviderRequestContext } from "../ai/runtimeRequest";
+import { AIRequestBoundaryError, redactRequestSecret, validateRuntimeEndpoint, validateRuntimeAuth } from "../ai/runtimeRequest";
+import { planWireMediaDelivery, resolveEffectiveMediaCapability } from "../ai/effectiveMediaCapability";
+export type { ParsePreferences } from "../ai/runtimeRequest";
 import type { SolverQuestionPackage } from "../ai/questionPackage";
 import type { QuestionScreenshotFallback } from "../ai/questionPackage";
 import { buildSolverQuestionPackage } from "../../content/solver/questionPackageBuilder";
@@ -55,10 +61,12 @@ export type ParseQuestionRuntimeContext = {
 
 export async function parseQuestion(
   block: QuestionBlock,
-  settings: AppSettings,
+  settings: ParsePreferences,
   onStream?: (partial: string) => void,
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
+  if (isRuntimeContextStale(block, runtimeContext)) throw new StaleQuestionRevisionError();
+  const runtime = await resolveSolveRuntime(settings, runtimeContext);
   // Canonical auto-detected questions must hydrate their owned media before a
   // provider call. Manual/legacy capture intentionally remains on its old path.
   if (block.source !== "manual_capture" && block.mediaAssets?.length) {
@@ -66,79 +74,70 @@ export async function parseQuestion(
     const built = await buildSolverQuestionPackage(block, { signal: runtimeContext?.signal });
     if (isRuntimeContextStale(block, runtimeContext)) throw new StaleQuestionRevisionError();
     if (!built.ok) throw new Error(built.code);
-    return parseQuestionPackage(built.package, block, settings, onStream, runtimeContext);
+    return parseQuestionCore(block, settings, onStream, built.package, runtimeContext, runtime);
   }
-  return parseQuestionCore(block, settings, onStream, undefined, runtimeContext);
+  return parseQuestionCore(block, settings, onStream, undefined, runtimeContext, runtime);
 }
 
 export async function parseQuestionPackage(
   questionPackage: SolverQuestionPackage,
   block: QuestionBlock,
-  settings: AppSettings,
+  settings: ParsePreferences,
   onStream?: (partial: string) => void,
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
-  return parseQuestionCore(block, settings, onStream, questionPackage, runtimeContext);
+  if (isRuntimeContextStale(block, runtimeContext, questionPackage)) throw new StaleQuestionRevisionError();
+  return parseQuestionCore(block, settings, onStream, questionPackage, runtimeContext, await resolveSolveRuntime(settings, runtimeContext));
 }
 
 async function parseQuestionCore(
   block: QuestionBlock,
-  settings: AppSettings,
-  onStream?: (partial: string) => void,
-  questionPackage?: SolverQuestionPackage,
-  runtimeContext?: ParseQuestionRuntimeContext,
+  settings: ParsePreferences,
+  onStream: ((partial: string) => void) | undefined,
+  questionPackage: SolverQuestionPackage | undefined,
+  runtimeContext: ParseQuestionRuntimeContext | undefined,
+  runtime: AIConnectionRuntimeConfig | null,
 ): Promise<ParseResult> {
-  const route = await decideRoute(block, settings);
+  let route = await decideRoute(block, settings);
   if (isRuntimeContextStale(block, runtimeContext, questionPackage)) throw new StaleQuestionRevisionError();
-  const provider = getProvider(settings.providerId ?? "anthropic");
-  const modelName = String(settings.apiModel || provider.defaultModel || "").toLowerCase();
-  const imageQuestion =
-    Boolean(block.hasImage) ||
-    Boolean(block.imageDataUrl) || Boolean(questionPackage?.media.length) ||
-    detectVisualKeywords(block.previewText || "");
-  const modelLikelyTextOnly = isLikelyTextOnlyModel(modelName);
-
+  if (!runtime) {
+    const result = await mockParse(block, route);
+    if (isRuntimeContextStale(block, runtimeContext, questionPackage)) throw new StaleQuestionRevisionError();
+    return result;
+  }
+  const provider = { id: runtime.presetId };
+  const canonicalMedia = Boolean(questionPackage?.media.length);
+  if (canonicalMedia && settings.preferredRoute === "text") throw new Error("CANONICAL_MEDIA_REQUIRES_VISION");
+  if (canonicalMedia && settings.preferredRoute === "auto") route = "vision";
+  if (!questionPackage && block.imageDataUrl && route !== "text") {
+    questionPackage = {
+      schemaVersion: 1, questionId: block.identity?.stableId ?? block.id,
+      contentFingerprint: block.identity?.contentFingerprint ?? block.id,
+      questionType: block.questionTypeGuess, text: block.previewText,
+      media: [{ assetId: "manual-capture", role: "stem", contentFingerprint: block.identity?.contentFingerprint ?? block.id,
+        source: { kind: "data-url", dataUrl: block.imageDataUrl } }],
+    };
+  }
   if (questionPackage?.media.length) {
-    if (settings.preferredRoute === "text") throw new Error("CANONICAL_MEDIA_REQUIRES_VISION");
-    if (!provider.supportsVision || modelLikelyTextOnly) throw new Error("MEDIA_REQUIRES_VISION");
-    const effectiveProvider = resolveEffectiveProviderMediaCapabilities(provider, settings.customProviderProtocol);
-    const prepared = await prepareQuestionPackageForProvider(questionPackage, effectiveProvider, runtimeContext);
+    const remoteSourceCount = questionPackage.media.filter(part => part.source.kind === "remote-url").length;
+    const plan = planWireMediaDelivery({ inlineSourceCount: questionPackage.media.length - remoteSourceCount, remoteSourceCount }, runtime.transportCapabilities);
+    const capability = resolveEffectiveMediaCapability({ model: runtime.modelCapabilityAssessment, transport: runtime.transportCapabilities, ...plan });
+    if (!capability.canProcess) throw new AIRequestBoundaryError(capability.failCode!);
+    const prepared = await prepareQuestionPackageForProvider(questionPackage, plan, runtimeContext);
     if (!prepared.ok) throw new Error(prepared.code);
     questionPackage = prepared.package;
+    const actualRemote = questionPackage.media.filter(part => part.source.kind === "remote-url").length;
+    const actualCapability = resolveEffectiveMediaCapability({ model: runtime.modelCapabilityAssessment, transport: runtime.transportCapabilities,
+      wireInlineImageCount: questionPackage.media.length - actualRemote, wireRemoteImageCount: actualRemote });
+    if (!actualCapability.canProcess) throw new AIRequestBoundaryError(actualCapability.failCode!);
+  } else if (settings.preferredRoute === "vision" || (route !== "text" && block.hasImage)) {
+    const vision = runtime.modelCapabilityAssessment.vision;
+    if (vision.value === null) throw new AIRequestBoundaryError("AI_MODEL_CAPABILITY_UNKNOWN");
+    if (!vision.value) throw new AIRequestBoundaryError("AI_MODEL_VISION_UNSUPPORTED");
+    if (route === "vision" && block.hasImage) throw new Error(getMissingScreenshotMessage(settings.language));
   }
-
-  if (route === "text" && imageQuestion && !hasSufficientPreviewText(block.previewText)) {
-    if (provider.supportsVision) {
-      throw new Error(getImageRouteMismatchMessage(settings.language));
-    }
-    throw new Error(getTextOnlyProviderMessage(settings.language, provider.name));
-  }
-
-  if (imageQuestion && modelLikelyTextOnly) {
-    throw new Error(
-      getTextOnlyModelMessage(settings.language, settings.apiModel || provider.defaultModel),
-    );
-  }
-
-  if (imageQuestion && provider.supportsVision && route === "vision" && !block.imageDataUrl && !questionPackage?.media.length) {
-    throw new Error(getMissingScreenshotMessage(settings.language));
-  }
-
-  logEvent(`route_used_${route}` as "route_used_text", { blockId: block.id, provider: provider.id });
-
-  // UI-00A: an unconfigured required-key provider fails explicitly. Mock
-  // output exists only behind an explicit demo opt-in and is stamped as such.
-  if (!isProviderRuntimeConfigured(provider, settings)) {
-    if (runtimeContext?.allowDemo === true) {
-      const result = await mockParse(block, route);
-      if (isRuntimeContextStale(block, runtimeContext, questionPackage)) {
-        logEvent("provider_result_discarded_stale", { blockId: block.id, source: "mock" });
-        throw new StaleQuestionRevisionError();
-      }
-      return result;
-    }
-    throw new ProviderNotConfiguredError(getProviderNotConfiguredMessage(settings.language));
-  }
+  if (isRuntimeContextStale(block, runtimeContext, questionPackage)) throw new StaleQuestionRevisionError();
+  logEvent(`route_used_${route}` as "route_used_text", { blockId: block.id, provider: runtime.presetId });
 
   const startTime = Date.now();
   let lastError: Error | null = null;
@@ -150,19 +149,31 @@ async function parseQuestionCore(
     }
 
     let providerResultAvailable = false;
+    let providerDispatchStarted = false;
     try {
       if (isRuntimeContextStale(block, runtimeContext, questionPackage)) throw new Error("STALE_QUESTION_REVISION");
       let result: ParseResult;
-      const useCustomAnthropic =
-        provider.id === "custom" && settings.customProviderProtocol === "anthropic";
-
-      if (provider.id === "anthropic" || useCustomAnthropic) {
-        result = await callAnthropic(block, route, settings, onStream, questionPackage);
-      } else if (provider.id === "gemini") {
-        result = await callGemini(block, route, settings, questionPackage);
-      } else {
-        result = await callOpenAICompat(block, route, settings, provider, onStream, questionPackage);
-      }
+      const context: ProviderRequestContext = {
+        runtime, credential: await resolveRuntimeCredential(runtime), language: settings.language,
+        signal: runtimeContext?.signal,
+        beforeDispatch: async () => {
+          await assertRuntimeConfigCurrent(runtime);
+          if (isRuntimeContextStale(block, runtimeContext, questionPackage)) throw new StaleQuestionRevisionError();
+          providerDispatchStarted = true;
+        },
+      };
+      try {
+        switch (runtime.protocol) {
+          case "anthropic_messages": result = await callAnthropic(block, route, context, onStream, questionPackage); break;
+          case "gemini_generate_content": result = await callGemini(block, route, context, questionPackage); break;
+          case "openai_chat_completions": result = await callOpenAICompat(block, route, context, onStream, questionPackage); break;
+          default: throw new AIRequestBoundaryError("AI_PROTOCOL_UNSUPPORTED");
+        }
+      } catch (error) {
+        const safe = new Error(redactRequestSecret(error instanceof Error ? error.message : "AI_REQUEST_FAILED", context.credential));
+        if (error && typeof error === "object" && "code" in error) Object.assign(safe, { code: error.code });
+        throw safe;
+      } finally { context.credential = null; }
       // UI-00A single provenance boundary: only a result that survived a real
       // provider execution becomes fill-authoritative. Adapters never stamp
       // this themselves.
@@ -180,13 +191,16 @@ async function parseQuestionCore(
       return result;
     } catch (err) {
       if (isRuntimeContextStale(block, runtimeContext, questionPackage)) {
-        if (providerResultAvailable && !(err instanceof StaleQuestionRevisionError)) {
-          logEvent("provider_result_discarded_stale", { blockId: block.id, route, provider: provider.id });
+        if ((providerResultAvailable || providerDispatchStarted) && !(err instanceof StaleQuestionRevisionError)) {
+          // Aborting an already dispatched stale request also discards its
+          // transport result; retain the existing diagnostic without success.
+          logEvent("provider_result_discarded_stale", { blockId: block.id, route, provider: provider.id, cancelled: !providerResultAvailable });
         }
         lastError = new StaleQuestionRevisionError();
         break;
       }
-      lastError = normalizeNetworkError(err, provider, settings);
+      lastError = err instanceof Error ? err : new Error("AI_REQUEST_FAILED");
+      if (/^AI_/.test(lastError.message) || (err && typeof err === "object" && "code" in err && String(err.code).startsWith("AI_"))) break;
       if (/^(?:MEDIA_SOURCE_UNAVAILABLE|MEDIA_BLOCKED|MEDIA_BUDGET_EXCEEDED|STALE_QUESTION_REVISION|CANONICAL_MEDIA_REQUIRES_VISION|MEDIA_REQUIRES_VISION|QUESTION_NOT_ELIGIBLE)/.test(lastError.message)) break;
       const is4xx = lastError.message.includes(" 4") && !lastError.message.includes("429");
       if (is4xx) break;
@@ -197,6 +211,23 @@ async function parseQuestionCore(
     logEvent("parse_error", { category: classifyAnalyticsFailure(lastError), exhausted: true });
   }
   throw lastError ?? new Error("Parse failed after retries");
+}
+
+async function resolveSolveRuntime(settings: ParsePreferences, context?: ParseQuestionRuntimeContext): Promise<AIConnectionRuntimeConfig | null> {
+  try {
+    await ensureAIConnectionAuthorityReady();
+    const runtime = await resolveActiveAIConnectionRuntimeMetadata();
+    validateRuntimeEndpoint(runtime.endpoint);
+    validateRuntimeAuth(runtime);
+    return runtime;
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+    if (["AI_CREDENTIAL_REQUIRED", "AI_ACTIVE_CONNECTION_MISSING"].includes(code)) {
+      if (context?.allowDemo === true) return null;
+      throw new ProviderNotConfiguredError(getProviderNotConfiguredMessage(settings.language));
+    }
+    throw error;
+  }
 }
 
 function isRuntimeContextStale(
@@ -214,8 +245,8 @@ function isRuntimeContextStale(
 
 export function normalizeNetworkError(
   err: unknown,
-  provider: ProviderConfig,
-  settings: AppSettings,
+  runtime: Pick<AIConnectionRuntimeConfig, "endpoint" | "presetId">,
+  settings: ParsePreferences,
 ): Error {
   const error = err instanceof Error ? err : new Error(String(err));
   const message = String(error.message || "");
@@ -224,7 +255,7 @@ export function normalizeNetworkError(
   }
 
   const language = settings.language;
-  const baseUrl = String(settings.customBaseUrl || provider.baseUrl || "").trim();
+  const baseUrl = runtime.endpoint.trim();
   const usingLocalhost = /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?/i.test(baseUrl);
   const usingHttp = /^http:\/\//i.test(baseUrl);
   const host = getEndpointHostLabel(baseUrl);
@@ -232,31 +263,31 @@ export function normalizeNetworkError(
   if (language === "en") {
     if (usingLocalhost) {
       return new Error(
-        `Network request failed (provider: ${provider.name}, endpoint: ${host}). Local service seems unreachable. Verify local API service is running and base URL is correct.`,
+        `Network request failed (provider: ${runtime.presetId}, endpoint: ${host}). Local service seems unreachable. Verify local API service is running and base URL is correct.`,
       );
     }
     if (usingHttp) {
       return new Error(
-        `Network request failed (provider: ${provider.name}, endpoint: ${host}). Insecure HTTP endpoint may be blocked. Prefer HTTPS endpoint.`,
+        `Network request failed (provider: ${runtime.presetId}, endpoint: ${host}). Insecure HTTP endpoint may be blocked. Prefer HTTPS endpoint.`,
       );
     }
     return new Error(
-      `Network request failed (provider: ${provider.name}, endpoint: ${host}). Check API endpoint, API key, and current network.`,
+      `Network request failed (provider: ${runtime.presetId}, endpoint: ${host}). Check API endpoint, API key, and current network.`,
     );
   }
 
   if (usingLocalhost) {
     return new Error(
-      `网络请求失败（提供商：${provider.name}，地址：${host}）。本地服务似乎不可达，请确认本地 API 服务已启动且 Base URL 正确。`,
+      `网络请求失败（提供商：${runtime.presetId}，地址：${host}）。本地服务似乎不可达，请确认本地 API 服务已启动且 Base URL 正确。`,
     );
   }
   if (usingHttp) {
     return new Error(
-      `网络请求失败（提供商：${provider.name}，地址：${host}）。HTTP 明文地址可能被拦截，建议改为 HTTPS。`,
+      `网络请求失败（提供商：${runtime.presetId}，地址：${host}）。HTTP 明文地址可能被拦截，建议改为 HTTPS。`,
     );
   }
   return new Error(
-    `网络请求失败（提供商：${provider.name}，地址：${host}）。请检查 API 地址、API Key 与当前网络连接。`,
+    `网络请求失败（提供商：${runtime.presetId}，地址：${host}）。请检查 API 地址、API Key 与当前网络连接。`,
   );
 }
 
@@ -303,40 +334,13 @@ export function isLikelyTextOnlyModel(name: string): boolean {
 
 function getEndpointHostLabel(baseUrl: string): string {
   try {
-    return new URL(baseUrl).host || baseUrl;
+    return new URL(baseUrl).host || "(unknown)";
   } catch {
-    return baseUrl || "(unknown)";
+    return "(unknown)";
   }
 }
 
-function getImageRouteMismatchMessage(language: AppSettings["language"]): string {
-  if (language === "en") {
-    return "This question includes an image. Current route is text-only. Switch to Auto/Vision route or a multimodal model.";
-  }
-  return "检测到该题包含图片，但当前是纯文本路线。请切换到“自动判断 / 视觉优先”或使用多模态模型。";
-}
-
-function getTextOnlyProviderMessage(
-  language: AppSettings["language"],
-  providerName: string,
-): string {
-  if (language === "en") {
-    return `Current provider/model is text-only (${providerName}) and cannot parse image questions. Please switch to a multimodal provider/model.`;
-  }
-  return `当前提供商/模型为纯文本模型（${providerName}），无法解析图片题。请切换到支持视觉的多模态模型。`;
-}
-
-function getTextOnlyModelMessage(
-  language: AppSettings["language"],
-  modelName: string,
-): string {
-  if (language === "en") {
-    return `Current model (${modelName}) appears text-only and cannot reliably parse image questions. Please switch to a multimodal model.`;
-  }
-  return `当前模型（${modelName}）疑似为纯文本模型，无法可靠解析图片题。请切换到多模态模型。`;
-}
-
-function getMissingScreenshotMessage(language: AppSettings["language"]): string {
+function getMissingScreenshotMessage(language: ParsePreferences["language"]): string {
   if (language === "en") {
     return "Image question detected but screenshot capture failed, so image was not sent to model. Please retry.";
   }

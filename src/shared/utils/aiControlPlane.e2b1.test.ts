@@ -5,10 +5,9 @@ import {
   saveSettings,
   __resetStorageCacheForTests,
 } from "./storage";
-import {
-  loadLegacyRuntimeSettingsCompat,
-  getAIConnectionReadiness,
-} from "./legacyRuntimeSettingsCompat";
+import { getAIConnectionReadiness, loadParsePreferences } from "./aiSolvePreferences";
+import { resolveActiveAIConnectionRuntimeMetadata, resolveRuntimeCredential } from "./aiRuntimeResolver";
+async function testCredential() { await ensure(); return resolveRuntimeCredential(await resolveActiveAIConnectionRuntimeMetadata()); }
 import {
   loadAIConnectionState,
   updateAIConnectionState,
@@ -87,7 +86,7 @@ describe("background initialization", () => {
     expect(
       (await restarted({ type: "AI_CONNECTION_ENSURE_INITIALIZED" })).ok,
     ).toBe(true);
-    expect((await loadLegacyRuntimeSettingsCompat()).apiKey).toBe(keyA);
+    expect(await testCredential()).toBe(keyA);
   });
   it("E2B1-INIT-04 malformed state fails closed and preserves legacy", async () => {
     memory.store.set("aiConnectionState", { schemaVersion: 1 });
@@ -192,7 +191,7 @@ describe("writer and credential intent", () => {
       apiModel: "gpt-5.5",
     });
     expect((await main()).presetId).toBe("openai");
-    expect((await loadLegacyRuntimeSettingsCompat()).apiKey).toBe(keyB);
+    expect(await testCredential()).toBe(keyB);
     expect(JSON.stringify(memory.store.get("aiConnectionState"))).not.toContain(
       keyA,
     );
@@ -276,8 +275,8 @@ describe("writer and credential intent", () => {
   });
 });
 
-describe("UI projection and runtime compatibility", () => {
-  it("legacy request remains operational with authoritative model, endpoint and key", async () => {
+describe("UI projection and bounded runtime authority", () => {
+  it("authoritative request remains operational with authoritative model, endpoint and key", async () => {
     await saveSettings({
       providerId: "custom",
       apiModel: "fixture-model",
@@ -311,7 +310,7 @@ describe("UI projection and runtime compatibility", () => {
         confidence: 1,
         source: "manual_capture",
       },
-      { ...(await loadLegacyRuntimeSettingsCompat()), preferredRoute: "text" },
+      { ...(await loadParsePreferences()), preferredRoute: "text" },
     );
     expect(result).toMatchObject({ answer: "B", resultSource: "provider" });
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -323,27 +322,19 @@ describe("UI projection and runtime compatibility", () => {
     expect(JSON.parse(init!.body as string).model).toBe("fixture-model");
     expect((await loadSettings()).apiKey).toBe("");
   });
-  it.each(["protocol", "auth"])(
-    "unsupported custom %s cannot be silently reinterpreted",
-    async (kind) => {
-      await saveSettings({ providerId: "custom", apiKey: keyB });
-      await updateAIConnectionState((value) => {
-        const connection = value.connections[value.activeConnectionId!];
-        if (kind === "protocol")
-          connection.protocolOverride = "gemini_generate_content";
-        else connection.authScheme = { kind: "none" };
-        connection.connectionRevision += 1;
-        return value;
-      });
-      expect(await getAIConnectionReadiness()).toEqual({
-        ready: false,
-        code: "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
-      });
-      await expect(loadLegacyRuntimeSettingsCompat()).rejects.toThrow(
-        "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
-      );
-    },
-  );
+  it.each(["protocol", "auth"])("custom %s readiness supports the new authoritative adapters", async kind => {
+    await saveSettings({ providerId: "custom", apiKey: keyB });
+    await updateAIConnectionState(value => {
+      const connection = value.connections[value.activeConnectionId!];
+      if (kind === "protocol") connection.protocolOverride = "gemini_generate_content";
+      else connection.authScheme = { kind: "none" };
+      connection.connectionRevision += 1;
+      return value;
+    });
+    expect(await getAIConnectionReadiness()).toEqual({ ready: true });
+    const runtime = await resolveActiveAIConnectionRuntimeMetadata();
+    expect(kind === "protocol" ? runtime.protocol : runtime.authScheme.kind).toBe(kind === "protocol" ? "gemini_generate_content" : "none");
+  });
   it("AI mutation during a non-AI save cannot republish the old projection cache", async () => {
     await configured();
     await loadSettings();
@@ -363,8 +354,8 @@ describe("UI projection and runtime compatibility", () => {
     await saveSettings({ language: "en" });
     expect((await loadSettings()).apiModel).toBe("concurrent-model");
   });
-  it("E2B1-COMPAT-RUN-01 runtime projection materializes only authoritative key", async () => {
-    expect((await loadLegacyRuntimeSettingsCompat()).apiKey).toBe(keyA);
+  it("E2B1-COMPAT-RUN-01 bounded runtime resolver decrypts only authoritative key", async () => {
+    expect(await testCredential()).toBe(keyA);
   });
   it("E2B1-COMPAT-RUN-02 ordinary Settings never receives authoritative plaintext", async () => {
     await configured();
@@ -373,27 +364,26 @@ describe("UI projection and runtime compatibility", () => {
   it("E2B1-COMPAT-RUN-03 transient key is never persisted or globally cached", async () => {
     await configured();
     memory.set.mockClear();
-    const runtime = await loadLegacyRuntimeSettingsCompat();
-    expect(runtime.apiKey).toBe(keyA);
+    const credential = await testCredential();
+    expect(credential).toBe(keyA);
     expect((await loadSettings()).apiKey).toBe("");
     expect(JSON.stringify(memory.set.mock.calls)).not.toContain(keyA);
   });
-  it("E2B1-COMPAT-RUN-04 Ollama runtime uses no key", async () => {
+  it("E2B1-COMPAT-RUN-04 Ollama runtime resolves no key", async () => {
     await saveSettings({ providerId: "ollama", apiKey: "" });
-    expect((await loadLegacyRuntimeSettingsCompat()).apiKey).toBe("");
+    expect(await testCredential()).toBeNull();
   });
-  it("E2B1-COMPAT-RUN-05 custom protocol retains legacy representation", async () => {
+  it("E2B1-COMPAT-RUN-05 custom protocol metadata retains committed authority", async () => {
     await saveSettings({
       providerId: "custom",
       customProviderProtocol: "anthropic",
       customBaseUrl: "https://custom.example",
       apiKey: keyB,
     });
-    expect(await loadLegacyRuntimeSettingsCompat()).toMatchObject({
-      customProviderProtocol: "anthropic",
-      customBaseUrl: "https://custom.example",
-      apiKey: keyB,
+    expect(await resolveActiveAIConnectionRuntimeMetadata()).toMatchObject({
+      protocol: "anthropic_messages", endpoint: "https://custom.example",
     });
+    expect(await testCredential()).toBe(keyB);
   });
   it("E2B1-COMPAT-RUN-06 stored legacy differs but runtime uses authoritative key", async () => {
     await configured();
@@ -401,11 +391,11 @@ describe("UI projection and runtime compatibility", () => {
       ...DEFAULT_SETTINGS,
       apiKey: "inert-legacy-other-key",
     });
-    expect((await loadLegacyRuntimeSettingsCompat()).apiKey).toBe(keyA);
+    expect(await testCredential()).toBe(keyA);
   });
   it("E2B1-COMPAT-RUN-07 malformed state never falls back to legacy", async () => {
     memory.store.set("aiConnectionState", { schemaVersion: 1 });
-    await expect(loadLegacyRuntimeSettingsCompat()).rejects.toThrow();
+    await expect(loadParsePreferences()).rejects.toThrow();
   });
   it("E2B1-READY-01 readiness never invokes the secret resolver", async () => {
     await configured();
@@ -521,7 +511,7 @@ describe("UI projection and runtime compatibility", () => {
   });
 });
 
-describe("RF01 Gemini legacy compatibility representability", () => {
+describe("Gemini endpoint authority after runtime cutover", () => {
   async function existingGeminiOverride() {
     await saveSettings({ providerId: "gemini", apiKey: keyB });
     await updateAIConnectionState((value) => {
@@ -550,24 +540,19 @@ describe("RF01 Gemini legacy compatibility representability", () => {
     expect(JSON.stringify(memory.store.get("appSettings"))).toBe(nonAI);
     expect((await main()).endpointOverride).toBeUndefined();
   });
-  it("E2B1-RF01-GEMINI-02 existing override readiness fails closed without resolving a secret", async () => {
+  it("E2B2A Gemini override readiness uses metadata without a secret", async () => {
     await existingGeminiOverride();
     const secret = vi.spyOn(credentials, "resolveCredentialRecordForRuntime");
-    expect(await getAIConnectionReadiness()).toEqual({
-      ready: false,
-      code: "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
-    });
+    expect(await getAIConnectionReadiness()).toEqual({ ready: true });
     expect(secret).not.toHaveBeenCalled();
   });
-  it("E2B1-RF01-GEMINI-03 existing override cannot enter runtime compatibility settings", async () => {
+  it("E2B2A Gemini override metadata retains committed endpoint", async () => {
     await existingGeminiOverride();
-    await expect(loadLegacyRuntimeSettingsCompat()).rejects.toMatchObject({
-      code: "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
-    });
+    expect(await resolveActiveAIConnectionRuntimeMetadata()).toMatchObject({ endpoint: "https://gemini-proxy.example" });
   });
   it("E2B1-RF01-GEMINI-04 override cannot silently dispatch to the canonical endpoint", async () => {
     await existingGeminiOverride();
-    const fetch = vi.spyOn(globalThis, "fetch");
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"answer":"B","confidence":1}' }] } }] }), { status: 200 }));
     const { parseQuestion } = await import("./parseRouter");
     const solve = async () =>
       parseQuestion(
@@ -580,12 +565,10 @@ describe("RF01 Gemini legacy compatibility representability", () => {
           confidence: 1,
           source: "manual_capture",
         },
-        await loadLegacyRuntimeSettingsCompat(),
+        { ...(await loadParsePreferences()), preferredRoute: "text" },
       );
-    await expect(solve()).rejects.toMatchObject({
-      code: "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
-    });
-    expect(fetch).not.toHaveBeenCalled();
+    expect(await solve()).toMatchObject({ answer: "B", resultSource: "provider" });
+    expect(String(fetch.mock.calls[0][0])).toContain("https://gemini-proxy.example/v1beta/models/");
   });
   it("switching to Gemini clears prior endpoints even when the old form resubmits one", async () => {
     await saveSettings({
@@ -600,11 +583,8 @@ describe("RF01 Gemini legacy compatibility representability", () => {
     });
     expect((await main()).endpointOverride).toBeUndefined();
     expect(await getAIConnectionReadiness()).toEqual({ ready: true });
-    expect(await loadLegacyRuntimeSettingsCompat()).toMatchObject({
-      providerId: "gemini",
-      apiKey: keyB,
-      customBaseUrl: undefined,
-    });
+    expect(await resolveActiveAIConnectionRuntimeMetadata()).toMatchObject({ presetId: "gemini", endpointProvenance: "canonical_builtin_endpoint" });
+    expect(await testCredential()).toBe(keyB);
   });
 });
 

@@ -1,11 +1,11 @@
-import { loadLegacyRuntimeSettingsCompat, getAIConnectionReadiness } from "@/shared/utils/legacyRuntimeSettingsCompat";
+import { loadParsePreferences, getAIConnectionReadiness, getRuntimeCaptureInfo } from "@/shared/utils/aiSolvePreferences";
 import { useCallback, useRef } from "react";
 import type { CandidateOrigin, DetectedCandidate } from "@/shared/types";
 import { addHistoryEntryIfCurrent, loadSettings } from "@/shared/utils/storage";
 import {
   getAutoSolveNotConfiguredMessage,
 } from "@/shared/ai/parseResultAuthority";
-import { getProvider, hasSufficientPreviewText, parseQuestion } from "@/shared/utils/parseRouter";
+import { hasSufficientPreviewText, parseQuestion } from "@/shared/utils/parseRouter";
 import { mapKnownCodeFeedback, mapUserFacingError, userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
 import { logEvent } from "@/shared/utils/analytics";
 import { readProtectedWorkOwners, clearProtectedWorkOwner } from "@/shared/auth/protectedWorkOwner";
@@ -13,7 +13,6 @@ import {
   isChoiceLikeResult,
   isRiskyCandidate,
   langSafe,
-  pickBatchReviewModel,
   preferBatchRetryResult,
   preferVisionResult,
   shouldRetryBatchParseAfterError,
@@ -273,8 +272,8 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     if (!options.candidates.some((candidate) => candidate.selected)) return;
     options.setIsBatchParsing(true);
     await runBatchParse(options.candidates, {
-      loadSettings: loadLegacyRuntimeSettingsCompat,
-      getProvider,
+      loadSettings: loadParsePreferences,
+      getRuntimeCaptureInfo,
       parseQuestion: (block, settings) => parseQuestion(block, settings, undefined, { deferSuccessTelemetry: true }),
       requestBlockImage,
       addHistoryEntryIfCurrent,
@@ -282,8 +281,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       logDiscardedStaleResult: (candidate, result) => logEvent("provider_result_discarded_stale", { blockId: candidate.block.id, route: result.routeUsed, source: "sidepanel_commit" }),
       attempts: candidateAttempts,
       isCandidateCurrent,
-      pickBatchReviewModel,
-      shouldRetryBatchParseAfterError,
+          shouldRetryBatchParseAfterError,
       shouldRetryWithVision,
       preferVisionResult,
       hasSufficientPreviewText,
@@ -298,8 +296,8 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   const handleRetryVision = useCallback(async (candidate: DetectedCandidate) => {
     if (!requireAuthenticatedAction()) return;
     await runRetryVision(candidate, {
-      loadSettings: loadLegacyRuntimeSettingsCompat,
-      getProvider,
+      loadSettings: loadParsePreferences,
+      getRuntimeCaptureInfo,
       requestBlockImage,
       parseQuestion: (block, settings) => parseQuestion(block, settings, undefined, { deferSuccessTelemetry: true }),
       addHistoryEntryIfCurrent,
@@ -309,8 +307,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       isCandidateCurrent,
       setCandidates: options.setCandidates,
       langSafe,
-      pickBatchReviewModel,
-      shouldRetryBatchParseForIncompleteResult,
+          shouldRetryBatchParseForIncompleteResult,
       preferBatchRetryResult,
     });
   }, [options.setCandidates, candidateAttempts, isCandidateCurrent, requireAuthenticatedAction]);
@@ -332,8 +329,8 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
 
     options.setIsRetryingRisky(true);
     await runRetryRisky(options.candidates, isRiskyCandidate, {
-      loadSettings: loadLegacyRuntimeSettingsCompat,
-      getProvider,
+      loadSettings: loadParsePreferences,
+      getRuntimeCaptureInfo,
       requestBlockImage,
       parseQuestion: (block, settings) => parseQuestion(block, settings, undefined, { deferSuccessTelemetry: true }),
       addHistoryEntryIfCurrent,
@@ -343,8 +340,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       isCandidateCurrent,
       setCandidates: options.setCandidates,
       langSafe,
-      pickBatchReviewModel,
-      shouldRetryBatchParseForIncompleteResult,
+          shouldRetryBatchParseForIncompleteResult,
       preferBatchRetryResult,
     });
     options.setIsRetryingRisky(false);

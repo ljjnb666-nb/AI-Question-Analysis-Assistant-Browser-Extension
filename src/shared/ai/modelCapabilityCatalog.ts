@@ -2,11 +2,10 @@
  * UI05R-E2A — Static V1 model capability catalog.
  *
  * Explicit classification for every CURRENTLY shipped built-in model ID
- * (`PROVIDERS[].models` in `providers.ts`). This is the future model
- * capability authority; `ProviderConfig.supportsVision` and the
- * `isLikelyTextOnlyModel` regex remain the production authority until the E2B
- * cutover and are used here ONLY as a clearly labeled `legacy_declared`
- * evidence source for shipped models on their canonical provider.
+ * (`PROVIDERS[].models` in `providers.ts`). This is the production model
+ * capability authority after E2B2A. Catalog decisions retain their clearly
+ * labeled `legacy_declared` evidence for shipped models on canonical endpoints;
+ * provider booleans and model-name heuristics no longer decide solve authority.
  *
  * Rules encoded here:
  * - Capabilities are keyed by (presetId, modelId). An arbitrary manually

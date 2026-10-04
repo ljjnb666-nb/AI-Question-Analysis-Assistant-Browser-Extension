@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from "../types";
 import { __resetStorageCacheForTests, loadSettings, saveSettings, CURRENT_ANALYTICS_CONSENT_VERSION } from "./storage";
 import { __resetAnalyticsForTests, flushAnalytics, getSessionLog, getStoredLog, logEvent } from "./analytics";
 import { loginWithEmail } from "./auth";
-import { parseQuestion } from "./parseRouter";
+import { parseConfiguredQuestion as parseQuestion } from "../../test/aiConnectionFixture";
 import type { QuestionBlock } from "../types";
 
 // Mock values are assembled at runtime so security scanners do not mistake

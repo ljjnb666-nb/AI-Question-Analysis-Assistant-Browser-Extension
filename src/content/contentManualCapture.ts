@@ -1,4 +1,5 @@
-import type { AppSettings, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
+import type { ParsePreferences } from "@/shared/ai/runtimeRequest";
+import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import type { AnalyticsEvent } from "@/shared/utils/analytics";
 import { CaptureOverlay } from "./overlay/CaptureOverlay";
 import { runManualCapturePipeline } from "./manualCapturePipeline";
@@ -27,11 +28,11 @@ type ManualCapturePipelineDeps = {
   extractQuestionImageUrlFromBBox: (bbox: QuestionBlock["bbox"]) => string | null;
   screenshotWithRetry: () => Promise<string | null>;
   cropScreenshot: (dataUrl: string, bbox: QuestionBlock["bbox"], scale: number) => Promise<string>;
-  loadSettings: () => Promise<AppSettings>;
-  getProvider: (providerId: string) => ProviderInfo;
+  loadSettings: () => Promise<ParsePreferences>;
+  getRuntimeCaptureInfo: () => Promise<ProviderInfo>;
   parseWithTieredRetries: (
     block: QuestionBlock,
-    settings: AppSettings,
+    settings: ParsePreferences,
     providerSupportsVision: boolean,
     onStream: (partial: string) => void,
   ) => Promise<ParseResult>;

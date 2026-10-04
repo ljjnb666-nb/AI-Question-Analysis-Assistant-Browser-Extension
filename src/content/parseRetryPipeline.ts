@@ -1,4 +1,5 @@
-import type { AppSettings, ParseResult, QuestionBlock } from "@/shared/types";
+import type { ParsePreferences } from "@/shared/ai/runtimeRequest";
+import type { ParseResult, QuestionBlock } from "@/shared/types";
 import type { AnalyticsEvent } from "@/shared/utils/analytics";
 import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import { isProviderNotConfiguredError, isStaleQuestionRevisionError } from "@/shared/utils/parseAttemptErrors";
@@ -9,7 +10,7 @@ type ParseRetryDeps = {
   logEvent: (event: AnalyticsEvent, payload?: Record<string, unknown>) => void;
   parseQuestion: (
     block: QuestionBlock,
-    settings: AppSettings,
+    settings: ParsePreferences,
     onStream?: StreamCallback,
     runtimeContext?: ParseQuestionRuntimeContext,
   ) => Promise<ParseResult>;
@@ -19,7 +20,7 @@ type ParseRetryDeps = {
 
 export async function parseWithStreamingFallback(
   block: QuestionBlock,
-  settings: AppSettings,
+  settings: ParsePreferences,
   onStream: StreamCallback,
   timeoutMs: number,
   deps: ParseRetryDeps,
@@ -46,7 +47,7 @@ export async function parseWithStreamingFallback(
 
 export async function parseWithTieredRetries(
   block: QuestionBlock,
-  settings: AppSettings,
+  settings: ParsePreferences,
   providerSupportsVision: boolean,
   onStream: StreamCallback,
   tierTimeoutsMs: readonly number[],
@@ -116,6 +117,7 @@ export async function parseWithTieredRetries(
     } catch (err) {
       lastErr = err;
       if (isStaleQuestionRevisionError(err)) throw err;
+      if (err && typeof err === "object" && "code" in err && String(err.code).startsWith("AI_")) throw err;
       // UI-00A: retrying cannot fix a missing API Key — surface it immediately.
       if (isProviderNotConfiguredError(err)) throw err;
       const msg = err instanceof Error ? err.message : String(err);
@@ -146,5 +148,5 @@ export async function parseWithTieredRetries(
 }
 
 export function isNonRetryableParseError(message: string): boolean {
-  return /^(?:MEDIA_SOURCE_UNAVAILABLE|MEDIA_BLOCKED|MEDIA_BUDGET_EXCEEDED|STALE_QUESTION_REVISION|CANONICAL_MEDIA_REQUIRES_VISION|MEDIA_REQUIRES_VISION|QUESTION_NOT_ELIGIBLE)/.test(message);
+  return /^(?:AI_|MEDIA_SOURCE_UNAVAILABLE|MEDIA_BLOCKED|MEDIA_BUDGET_EXCEEDED|STALE_QUESTION_REVISION|CANONICAL_MEDIA_REQUIRES_VISION|MEDIA_REQUIRES_VISION|QUESTION_NOT_ELIGIBLE)/.test(message);
 }

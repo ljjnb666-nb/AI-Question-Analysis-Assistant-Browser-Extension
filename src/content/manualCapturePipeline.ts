@@ -1,4 +1,5 @@
-import type { AppSettings, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
+import type { ParsePreferences } from "@/shared/ai/runtimeRequest";
+import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import type { AnalyticsEvent } from "@/shared/utils/analytics";
 
 type ProviderInfo = {
@@ -25,11 +26,11 @@ type ManualCaptureDeps = {
   extractQuestionImageUrlFromBBox: (bbox: QuestionBlock["bbox"]) => string | null;
   screenshotWithRetry: () => Promise<string | null>;
   cropScreenshot: (dataUrl: string, bbox: QuestionBlock["bbox"], scale: number) => Promise<string>;
-  loadSettings: () => Promise<AppSettings>;
-  getProvider: (providerId: string) => ProviderInfo;
+  loadSettings: () => Promise<ParsePreferences>;
+  getRuntimeCaptureInfo: () => Promise<ProviderInfo>;
   parseWithTieredRetries: (
     block: QuestionBlock,
-    settings: AppSettings,
+    settings: ParsePreferences,
     providerSupportsVision: boolean,
     onStream: (partial: string) => void,
   ) => Promise<ParseResult>;
@@ -108,7 +109,7 @@ export async function runManualCapturePipeline(
     if (!isRuntimeCurrent()) return;
     const settings = await deps.loadSettings();
     if (!isRuntimeCurrent()) return;
-    const provider = deps.getProvider(settings.providerId ?? "anthropic");
+    const provider = await deps.getRuntimeCaptureInfo();
     const hasCapturedImage = Boolean(block.imageDataUrl);
     const forceNonTextRoute =
       provider.supportsVision &&
@@ -227,11 +228,11 @@ export async function runManualCapturePipeline(
     let msg = err instanceof Error ? err.message : String(err);
     const settings = await deps.loadSettings();
     if (!isRuntimeCurrent()) return;
-    const provider = deps.getProvider(settings.providerId ?? "anthropic");
+    const provider = await deps.getRuntimeCaptureInfo();
     if (/manual_pipeline_timeout/i.test(msg)) {
       msg = "解析超时：已尝试多次请求但未收到可用结果。请重试，或切换其他模型/路由。";
     } else if (/failed to fetch/i.test(msg)) {
-      const baseUrlRaw = settings.customBaseUrl || provider.baseUrl;
+      const baseUrlRaw = provider.baseUrl;
       let host = String(baseUrlRaw || "");
       try {
         host = new URL(host).host || host;

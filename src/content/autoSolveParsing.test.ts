@@ -58,7 +58,7 @@ function createDeps() {
   const withTimeout = <T>(promise: Promise<T>) => promise;
   return {
     loadSettings: vi.fn(async () => makeSettings()),
-    getProvider: vi.fn(() => ({ supportsVision: true })),
+    getRuntimeCaptureInfo: vi.fn(async () => ({ supportsVision: true })),
     tryCaptureBlockImageForAutoSolve: vi.fn(async () => "data:image/png;base64,abc"),
     parseWithTieredRetries: vi.fn(async () => makeResult()),
     withTimeout,

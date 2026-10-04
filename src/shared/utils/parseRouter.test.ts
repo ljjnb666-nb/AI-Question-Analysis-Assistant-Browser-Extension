@@ -1,9 +1,12 @@
-﻿import { describe, it, expect, vi, afterEach } from "vitest";
+import { parseConfiguredQuestion as parseQuestion } from "../../test/aiConnectionFixture";
+import { beforeEach } from "vitest";
+import { installMemoryStorage } from "../../test/memoryStorage";
+beforeEach(() => { installMemoryStorage(); });
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   getProvider,
   buildResult,
   decideRoute,
-  parseQuestion,
   PROVIDERS,
   isLikelyTextOnlyModel,
   normalizeNetworkError,
@@ -685,8 +688,9 @@ describe("parseRouter", () => {
       expect(route).toBe("vision");
     });
 
-    it("returns text for non-vision providers", async () => {
-      const route = await decideRoute(mockBlock, { ...mockSettings, providerId: "deepseek" });
+    it("plans sufficient text without legacy provider authority", async () => {
+      const forgedSettings = { ...mockSettings, providerId: "deepseek" };
+      const route = await decideRoute(mockBlock, forgedSettings);
       expect(route).toBe("text");
     });
 
@@ -767,14 +771,13 @@ describe("parseRouter", () => {
 
       const settings: AppSettings = {
         ...DEFAULT_SETTINGS,
-        providerId: "custom",
+        providerId: "openai",
         apiKey: TEST_API_KEY,
-        apiModel: "claude-haiku-4.5",
+        apiModel: "gpt-5.5",
         preferredRoute: "vision",
         language: "zh",
         enableAnalytics: true,
         analyticsConsentVersion: 1,
-        customBaseUrl: "http://127.0.0.1:3000",
         customProviderProtocol: "openai",
       };
 
@@ -1070,11 +1073,10 @@ describe("parseRouter", () => {
     it("normalizes localhost failed-fetch errors in Chinese", () => {
       const error = normalizeNetworkError(
         new Error("Failed to fetch"),
-        getProvider("ollama"),
+        { presetId: "ollama", endpoint: "http://127.0.0.1:11434" },
         {
           ...DEFAULT_SETTINGS,
           language: "zh",
-          customBaseUrl: "http://127.0.0.1:11434",
         },
       );
 
@@ -1085,11 +1087,10 @@ describe("parseRouter", () => {
     it("normalizes insecure http failed-fetch errors in English", () => {
       const error = normalizeNetworkError(
         new Error("Failed to fetch"),
-        getProvider("custom"),
+        { presetId: "custom", endpoint: "http://example.com/v1" },
         {
           ...DEFAULT_SETTINGS,
           language: "en",
-          customBaseUrl: "http://example.com/v1",
         },
       );
 
@@ -1099,7 +1100,7 @@ describe("parseRouter", () => {
 
     it("keeps non-network errors unchanged", () => {
       const original = new Error("401 Unauthorized");
-      const error = normalizeNetworkError(original, getProvider("openai"), DEFAULT_SETTINGS);
+      const error = normalizeNetworkError(original, { presetId: "openai", endpoint: "https://api.openai.com" }, DEFAULT_SETTINGS);
       expect(error).toBe(original);
     });
 

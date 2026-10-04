@@ -94,7 +94,7 @@ describe("runtime late completion fences", () => {
         screenshotWithRetry: async () => null,
         cropScreenshot: async () => "",
         loadSettings: async () => ({ ...DEFAULT_SETTINGS, preferredRoute: "text" }),
-        getProvider: () => ({ name: "test", baseUrl: "https://example.com", supportsVision: false }),
+        getRuntimeCaptureInfo: async () => ({ name: "test", baseUrl: "https://example.com", supportsVision: false }),
         parseWithTieredRetries,
         withTimeout: <T>(promise: Promise<T>) => promise,
         addHistoryEntry,

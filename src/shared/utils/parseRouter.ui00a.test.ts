@@ -1,7 +1,11 @@
+import { parseConfiguredQuestion as parseQuestion } from "../../test/aiConnectionFixture";
+import { beforeEach } from "vitest";
+import { installMemoryStorage } from "../../test/memoryStorage";
+beforeEach(() => { installMemoryStorage(); });
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, type AppSettings, type QuestionBlock } from "../types";
 import { isProviderNotConfiguredError, ProviderNotConfiguredError } from "./parseAttemptErrors";
-import { mockParse, parseQuestion } from "./parseRouter";
+import { mockParse } from "./parseRouter";
 
 // Assembled at runtime so security scanners do not mistake this synthetic
 // test fixture for a committed credential.

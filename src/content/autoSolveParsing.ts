@@ -1,9 +1,8 @@
-import type { AppSettings, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
+import type { ParsePreferences } from "@/shared/ai/runtimeRequest";
+import type { HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import { sanitizeQuestionBlockForSerialization } from "@/shared/utils/mediaSerialization";
 import {
-  buildAutoSolveReviewSettings,
-  pickAutoSolveReviewModel,
   shouldRetryWithVisionForAuto,
   shouldUseVisionForAutoSolve,
 } from "./autoSolveHeuristics";
@@ -13,18 +12,18 @@ type ProviderInfo = {
 };
 
 type AutoSolveParsingDeps = {
-  loadSettings: () => Promise<AppSettings>;
-  getProvider: (providerId: string) => ProviderInfo;
+  loadSettings: () => Promise<ParsePreferences>;
+  getRuntimeCaptureInfo: () => Promise<ProviderInfo>;
   tryCaptureBlockImageForAutoSolve: (bbox: QuestionBlock["bbox"]) => Promise<string | null>;
   parseWithTieredRetries: (
     block: QuestionBlock,
-    settings: AppSettings,
+    settings: ParsePreferences,
     providerSupportsVision: boolean,
     onStream: (partial: string) => void,
     runtimeContext?: ParseQuestionRuntimeContext,
   ) => Promise<ParseResult>;
   withTimeout: <T>(promise: Promise<T>, timeoutMs: number, timeoutReason: string) => Promise<T>;
-  parseQuestion: (block: QuestionBlock, settings: AppSettings, onStream?: (partial: string) => void, runtimeContext?: ParseQuestionRuntimeContext) => Promise<ParseResult>;
+  parseQuestion: (block: QuestionBlock, settings: ParsePreferences, onStream?: (partial: string) => void, runtimeContext?: ParseQuestionRuntimeContext) => Promise<ParseResult>;
   addHistoryEntryIfCurrent: (entry: HistoryEntry, isCurrent: () => boolean) => Promise<boolean>;
 };
 
@@ -63,7 +62,7 @@ export async function parseBlockForAutoSolve(
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   const settings = await deps.loadSettings();
-  const provider = deps.getProvider(settings.providerId ?? "anthropic");
+  const provider = await deps.getRuntimeCaptureInfo();
   const wantsVision = provider.supportsVision && shouldUseVisionForAutoSolve(block, settings.preferredRoute);
   let parseBlock = await maybeAttachVisionImage(
     block,
@@ -110,8 +109,8 @@ export async function parseBlockForAutoSolveReview(
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   const settings = await deps.loadSettings();
-  const provider = deps.getProvider(settings.providerId ?? "anthropic");
-  const reviewSettings = buildAutoSolveReviewSettings(settings);
+  const provider = await deps.getRuntimeCaptureInfo();
+  const reviewSettings = { ...settings, preferredRoute: "auto" as const };
   const shouldAttachForReview =
     provider.supportsVision && shouldUseVisionForAutoSolve(block, reviewSettings.preferredRoute);
   const parseBlock = await maybeAttachVisionImage(
@@ -155,10 +154,9 @@ export async function parseBlockForAutoSolveQuickReview(
   runtimeContext?: ParseQuestionRuntimeContext,
 ): Promise<ParseResult> {
   const settings = await deps.loadSettings();
-  const provider = deps.getProvider(settings.providerId ?? "anthropic");
+  const provider = await deps.getRuntimeCaptureInfo();
   const quickReviewSettings = {
     ...settings,
-    apiModel: pickAutoSolveReviewModel(settings.providerId, settings.apiModel),
     preferredRoute: "auto" as const,
   };
   const shouldAttachForQuickReview =

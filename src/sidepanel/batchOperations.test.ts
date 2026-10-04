@@ -89,7 +89,7 @@ function createDeps(overrides: Record<string, unknown> = {}) {
       return true;
     }),
     loadSettings: async () => DEFAULT_SETTINGS,
-    getProvider: () => ({ supportsVision: true }),
+    getRuntimeCaptureInfo: async () => ({ supportsVision: true }),
     requestBlockImage: vi.fn(async (tabId: number) => {
       expect(tabId).toBe(origin.tabId);
       return "data:image/png;base64,abc";
@@ -196,7 +196,7 @@ describe("Side Panel result commit authority", () => {
     const historyDispatched = deferred<void>();
     let current = true;
     const { deps, history } = createDeps({
-      getProvider: () => ({ supportsVision: false }),
+      getRuntimeCaptureInfo: async () => ({ supportsVision: false }),
       isCandidateCurrent: vi.fn(async () => current),
       parseQuestion: vi.fn(async () => makeResult({ blockId: candidate.block.id, answer: "committed answer" })),
       addHistoryEntryIfCurrent: vi.fn(async (entry: unknown, isAuthorized: () => Promise<boolean>) => {
@@ -274,7 +274,7 @@ describe("Side Panel result commit authority", () => {
     const current = makeCandidate("q-current", { selected: true, status: "idle", result: undefined });
     const store = createSetCandidates([stale, current]);
     const { deps, history } = createDeps({
-      getProvider: () => ({ supportsVision: false }),
+      getRuntimeCaptureInfo: async () => ({ supportsVision: false }),
       requestBlockImage: vi.fn(),
       isCandidateCurrent: vi.fn(async (candidate: DetectedCandidate) => candidate.block.id !== "q-stale"),
       parseQuestion: vi.fn(async (block: QuestionBlock) => makeResult({ blockId: block.id, answer: `answer:${block.id}` })),
