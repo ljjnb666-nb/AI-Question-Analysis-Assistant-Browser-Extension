@@ -1,4 +1,5 @@
 export * from "./capture";
+export * from "./connection";
 export * from "./messages";
 export * from "./parse";
 export * from "./question";
