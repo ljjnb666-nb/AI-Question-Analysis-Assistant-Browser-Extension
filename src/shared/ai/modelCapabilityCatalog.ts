@@ -32,6 +32,7 @@ import type {
   ModelCapabilityAssessment,
   ModelClassification,
   ProviderPresetId,
+  EndpointProvenance,
 } from "../types/connection";
 
 const TEXT_KNOWN: CapabilityAssessment = { value: true, confidence: "known_static" };
@@ -114,17 +115,18 @@ function catalogKey(presetId: ProviderPresetId, modelId: string): string {
 
 /**
  * Assess one model. Exact (presetId, modelId) matches on non-deprecated
- * catalog entries are `known` with `legacy_declared` vision; anything else —
+ * catalog entries on canonical built-in endpoints are `known` with `legacy_declared` vision; anything else —
  * including every custom-preset model — is `unknown` and fails closed on
  * vision downstream.
  */
-export function assessModelCapabilities(
-  presetId: ProviderPresetId,
-  modelId: string,
-): ModelCapabilityAssessment {
+export function assessModelCapabilities({ presetId, modelId, endpointProvenance }: {
+  presetId: ProviderPresetId;
+  modelId: string;
+  endpointProvenance: EndpointProvenance;
+}): ModelCapabilityAssessment {
   const key = catalogKey(presetId, modelId);
   const entry = BUILTIN_MODEL_CATALOG[key];
-  if (!entry || entry.deprecated) {
+  if (endpointProvenance !== "canonical_builtin_endpoint" || presetId === "custom" || !entry || entry.deprecated) {
     return {
       classification: "unknown" satisfies ModelClassification,
       text: UNKNOWN_CAPABILITY,

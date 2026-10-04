@@ -20,21 +20,21 @@
  *   a stale snapshot must never be silently rebound to a new secret. Plaintext
  *   is never cached, never persisted, and never appears in errors, logs, or
  *   serialized metadata.
- * - Low-level contract errors (CredentialNotFoundError, raw decrypt errors,
+ * - Low-level contract errors (raw decrypt errors,
  *   MalformedAIConnectionStateError) never escape this boundary: they are
  *   translated to stable codes (AI_CREDENTIAL_UNAVAILABLE,
  *   AI_CONNECTION_MALFORMED).
  * - NOT yet consumed by `parseQuestion` — no authority cutover in E2A.
  */
 
-import type { AIConnectionRuntimeConfig } from "../types/connection";
+import type { AIConnectionRuntimeConfig, AIConnectionState } from "../types/connection";
 import { assessModelCapabilities } from "../ai/modelCapabilityCatalog";
 import {
   resolveEndpointProvenance,
   resolveTransportMediaCapabilities,
 } from "../ai/transportMediaCapabilities";
 import { resolveConnectionEndpoint, resolveConnectionProtocol } from "./aiConnectionPresets";
-import { CredentialNotFoundError, resolveCredentialForRuntime } from "./credentialStore";
+import { resolveCredentialRecordForRuntime } from "./credentialStore";
 import { MalformedAIConnectionStateError, loadAIConnectionState } from "./aiConnectionState";
 
 export type AIRuntimeResolutionErrorCode =
@@ -136,7 +136,7 @@ export async function resolveActiveAIConnectionRuntimeMetadata(): Promise<AIConn
     credentialRef: connection.credentialRef,
     credentialRevision,
     selectedModelId: connection.selectedModelId,
-    modelCapabilityAssessment: assessModelCapabilities(connection.presetId, connection.selectedModelId),
+    modelCapabilityAssessment: assessModelCapabilities({ presetId: connection.presetId, modelId: connection.selectedModelId, endpointProvenance }),
     transportCapabilities: resolveTransportMediaCapabilities({
       presetId: connection.presetId,
       protocol,
@@ -146,26 +146,24 @@ export async function resolveActiveAIConnectionRuntimeMetadata(): Promise<AIConn
 }
 
 /**
- * Secret resolution boundary with a revision fence. Call only when a real
- * provider request is about to execute.
+ * General currentness fence, including no-auth configurations. E2B must call
+ * this at the last responsible moment immediately before request dispatch.
  *
  * The current AIConnectionState is re-read and the runtime snapshot verified
  * against it before any plaintext is produced:
  * - state still exists and is valid;
  * - `activeConnectionId` still points at `config.connectionId`;
  * - that connection still exists with the same `connectionRevision`;
- * - its `credentialRef` still matches;
- * - the referenced credential still has `config.credentialRevision`.
+ * - if a credential is required, its ref and revision still match.
  *
  * Any mismatch fails with `AI_RUNTIME_CONFIG_STALE` — a stale snapshot is
  * never silently rebound to a new secret. Errors are translated to stable
- * codes: `AI_CREDENTIAL_REQUIRED` (missing reference), `AI_CREDENTIAL_UNAVAILABLE`
- * (unknown credential or fail-closed decryption), `AI_CONNECTION_MALFORMED`
- * (invalid state). Plaintext is never cached or persisted here.
+ * codes: `AI_CREDENTIAL_REQUIRED` (missing required reference) and
+ * `AI_CONNECTION_MALFORMED` (invalid state). The returned snapshot is internal
+ * to the secret boundary; callers must never serialize or log it.
  */
-export async function resolveRuntimeCredential(config: AIConnectionRuntimeConfig): Promise<string | null> {
-  if (!config.requiresCredential) return null;
-  if (!config.credentialRef) {
+export async function assertRuntimeConfigCurrent(config: AIConnectionRuntimeConfig): Promise<AIConnectionState> {
+  if (config.requiresCredential && !config.credentialRef) {
     throw new AIRuntimeResolutionError(
       "AI_CREDENTIAL_REQUIRED",
       `Connection "${config.connectionId}" requires a credential but has no credential reference`,
@@ -201,31 +199,37 @@ export async function resolveRuntimeCredential(config: AIConnectionRuntimeConfig
   if (connection.connectionRevision !== config.connectionRevision) {
     throw stale("connection revision changed");
   }
-  if (connection.credentialRef !== config.credentialRef) {
-    throw stale("credential reference changed");
+  if (config.requiresCredential) {
+    if (connection.credentialRef !== config.credentialRef) {
+      throw stale("credential reference changed");
+    }
+    const credential = state.credentials[config.credentialRef!];
+    if (!credential || credential.revision !== config.credentialRevision) {
+      throw stale("credential revision changed");
+    }
   }
-  const credential = state.credentials[config.credentialRef];
-  if (!credential || credential.revision !== config.credentialRevision) {
-    throw stale("credential revision changed");
-  }
+  return state;
+}
+
+/**
+ * Validate currentness, then decrypt the exact fenced credential snapshot.
+ * No second state read by ref. No-auth configurations are also fenced.
+ * E2B must fence again immediately before dispatch, even after this succeeds.
+ */
+export async function resolveRuntimeCredential(config: AIConnectionRuntimeConfig): Promise<string | null> {
+  const state = await assertRuntimeConfigCurrent(config);
+  if (!config.requiresCredential) return null;
 
   try {
-    return await resolveCredentialForRuntime(config.credentialRef);
+    return await resolveCredentialRecordForRuntime(state.credentials[config.credentialRef!]);
   } catch (error) {
     if (error instanceof AIRuntimeResolutionError) throw error;
-    if (error instanceof CredentialNotFoundError) {
-      throw new AIRuntimeResolutionError(
-        "AI_CREDENTIAL_UNAVAILABLE",
-        `Credential for connection "${config.connectionId}" is no longer available`,
-      );
-    }
     // Decrypt failures (tampered envelopes, unsupported versions, wrong
     // extension context) fail closed under a stable code; no raw low-level
     // error and no material escapes this boundary.
-    const name = error instanceof Error ? error.name : "unknown error";
     throw new AIRuntimeResolutionError(
       "AI_CREDENTIAL_UNAVAILABLE",
-      `Credential for connection "${config.connectionId}" could not be decrypted (${name})`,
+      `Credential for connection "${config.connectionId}" could not be decrypted`,
     );
   }
 }

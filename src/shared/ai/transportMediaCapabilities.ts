@@ -18,7 +18,7 @@
  * selecting "Anthropic-compatible" does NOT prove an arbitrary remote server
  * accepts Anthropic encodings. Acceptance is therefore UNKNOWN for overridden
  * and custom endpoints, and effective transport support requires BOTH layers,
- * so it degrades to unknown (fail closed downstream). No overconfident
+ * so positive support degrades to unknown (fail closed downstream). No overconfident
  * boolean collapse.
  *
  * Remote SOURCE media are NOT remote WIRE media: production acquires remote
@@ -131,8 +131,10 @@ export function resolveEndpointAcceptanceCapability(
   }
 }
 
-/** Effective = adapter encoding ∧ endpoint acceptance; never more confident than the weakest layer. */
+/** Three-valued AND: false is decisive; otherwise confidence follows the weakest layer. */
 function combineCapability(adapter: CapabilityAssessment, acceptance: CapabilityAssessment): CapabilityAssessment {
+  if (adapter.value === false && acceptance.value === null) return adapter;
+  if (acceptance.value === false && adapter.value === null) return acceptance;
   if (adapter.confidence === "unknown" || acceptance.confidence === "unknown") return UNKNOWN;
   return {
     value: adapter.value && acceptance.value,
@@ -149,7 +151,7 @@ export interface TransportResolutionInput {
 /**
  * Resolve the layered transport assessment. Effective dimensions require BOTH
  * adapter encoding and endpoint acceptance to be known-supported; unknown in
- * either layer degrades the effective dimension to unknown (fail closed).
+ * either layer degrades support to unknown unless the other layer is known-false.
  */
 export function resolveTransportMediaCapabilities(input: TransportResolutionInput): TransportMediaCapabilityAssessment {
   const adapterEncoding = resolveAdapterEncodingCapability(input.protocol);

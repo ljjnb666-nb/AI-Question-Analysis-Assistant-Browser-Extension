@@ -1,6 +1,6 @@
 # UI05R-E2A — Runtime Contract + Capability Resolver
 
-> **Status**: IMPLEMENTED (E2A scope, Review Fix 01 applied)
+> **Status**: IMPLEMENTED (E2A scope, Review Fix 02 applied)
 > **Branch**: `feat/ui05r-e2a-runtime-contract` (based on `main` @ `6082fbd`)
 > **Engineering owner**: Codex · **Frontend owner**: Gemini (untouched) · **Gatekeeper**: ChatGPT
 > **PR policy**: OPEN / DRAFT / UNMERGED — do not merge from this document alone.
@@ -55,7 +55,7 @@ Stable error codes (class `AIRuntimeResolutionError`, machine-readable `code`):
 There is **no silent fallback to Anthropic** and no legacy fallback inside the
 resolver. Malformed state never repairs itself.
 
-## 3. Secret resolution boundary — revision fenced (Review Fix 01)
+## 3. Secret resolution boundary — exact snapshot fenced (Review Fix 02)
 
 Metadata and secrets are separate:
 
@@ -70,11 +70,13 @@ Metadata and secrets are separate:
   `config.credentialRevision`. Any mismatch throws `AI_RUNTIME_CONFIG_STALE` —
   a stale snapshot is never silently rebound to a new secret.
 - Low-level errors never escape the boundary: `MalformedAIConnectionStateError`
-  → `AI_CONNECTION_MALFORMED`; `CredentialNotFoundError` and decrypt failures
+  → `AI_CONNECTION_MALFORMED`; decrypt failures
   (tampered envelope, unsupported version) → `AI_CREDENTIAL_UNAVAILABLE`.
+  Missing or replaced records fail the fence as `AI_RUNTIME_CONFIG_STALE`.
   Messages contain no material.
 - `authScheme.kind === "none"` connections need no secret: the boundary
-  returns `null` without touching storage. Plaintext is never cached, never
+  first validates active connection and connection revision, then returns
+  `null`. Plaintext is never cached, never
   persisted, and never included in errors, logs, or serialized metadata.
 
 ## 4. Required-credential semantics
@@ -88,7 +90,7 @@ Metadata and secrets are separate:
 
 ## 5. Model capability authority
 
-`assessModelCapabilities(presetId, modelId)` — explicit static catalog keyed by
+`assessModelCapabilities({ presetId, modelId, endpointProvenance })` — explicit static catalog keyed by
 (presetId, modelId):
 
 - Every CURRENT shipped model ID in `PROVIDERS[].models` is explicitly
@@ -130,9 +132,11 @@ Transport support is the combination of two explicitly separated layers:
 | `unknown` | Undeterminable | Unknown |
 
 Effective dimensions (`inlineBase64`, `remoteImageUrl`, `multipleImages`) =
-adapter encoding ∧ endpoint acceptance, with confidence never higher than the
-weakest layer — an unknown acceptance layer degrades the effective dimension
-to unknown (fail closed). Adapter encoding shape may be known while endpoint
+adapter encoding ∧ endpoint acceptance. Known positive support takes the
+weakest layer confidence. Unknown acceptance degrades support to unknown unless
+the other layer is known-false: `false AND unknown = false` with the decisive
+false layer confidence; `true AND unknown = unknown`. Adapter encoding shape
+may be known while endpoint
 acceptance is unknown; the two are never collapsed into one overconfident
 boolean.
 
@@ -222,3 +226,46 @@ provider request executes, E2B MUST apply endpoint security validation:
   custom anthropic), custom model identity unknown, exact model drift gate
   (unclassified + stale), and the `CapabilityAssessment` invariant enforced by
   the type system.
+
+## 11. Review Fix 02 boundary contract
+
+`assertRuntimeConfigCurrent(config)` re-reads current state and validates active
+connection ID, connection existence and connectionRevision for every config,
+including no-auth. Required credentials additionally bind credentialRef and
+credentialRevision. A mismatch yields `AI_RUNTIME_CONFIG_STALE`; malformed
+state yields `AI_CONNECTION_MALFORMED`. The returned state snapshot stays inside
+the secret boundary and must never be serialized or logged.
+
+`resolveRuntimeCredential(config)` runs that fence first and decrypts only the
+exact credential record in its returned snapshot through the bounded
+`resolveCredentialRecordForRuntime(record)` helper. The helper never re-reads
+AIConnectionState by ref, never logs material and translates decryption failure
+safely. A replacement after the fence can therefore never combine old metadata
+with revision-2 plaintext. No-auth also runs the fence before returning null.
+
+Model catalog declarations apply only to `canonical_builtin_endpoint`.
+`overridden_endpoint`, `custom_endpoint` and `unknown` provenance produce
+UNKNOWN in every model dimension, even for known-looking GPT, Claude, Gemini
+or Qwen IDs. No model-name inference is permitted.
+
+**Mandatory E2B pre-dispatch order (documentation only; no E2B cutover here):**
+
+```
+resolve metadata
+  -> media planning / model and transport capability checks
+  -> resolve exact fenced credential snapshot if required
+  -> assertRuntimeConfigCurrent(config) immediately before request dispatch
+  -> provider request
+```
+
+E2B MUST call `assertRuntimeConfigCurrent(config)` at the last responsible
+moment immediately before request dispatch. The final fence remains required
+when secret resolution already checked currentness: state may change after
+plaintext resolution and before fetch dispatch.
+
+RF02 coverage: `E2A-RF02-RACE-01` replaces revision 1 with revision 2 at the
+post-fence decryption boundary; `E2A-RF02-NOAUTH-01...03` cover active switch,
+connection revision change and unchanged Ollama; `E2A-RF02-MODEL-01...04`
+cover canonical OpenAI, overridden OpenAI/Anthropic and custom model identity.
+RF01-RACE-03 now resolves original metadata before the actual active switch.
+Transport coverage proves decisive false while preserving both provenance layers.

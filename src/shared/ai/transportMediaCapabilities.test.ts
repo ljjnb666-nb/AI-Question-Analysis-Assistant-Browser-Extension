@@ -11,6 +11,12 @@ const canonical = (presetId: Parameters<typeof resolveTransportMediaCapabilities
   resolveTransportMediaCapabilities({ presetId, protocol, endpointProvenance: "canonical_builtin_endpoint" });
 
 describe("transportMediaCapabilities", () => {
+  it.each(["anthropic_messages", "gemini_generate_content"] as const)("false AND unknown is false for %s", (protocol) => {
+    const result = resolveTransportMediaCapabilities({ presetId: "custom", protocol, endpointProvenance: "custom_endpoint" });
+    expect(result.endpointAcceptance.remoteImageUrl).toEqual({ value: null, confidence: "unknown" });
+    expect(result.remoteImageUrl).toEqual({ value: false, confidence: "known_static" });
+    expect(result.inlineBase64).toEqual({ value: null, confidence: "unknown" });
+  });
   it("exposes both capability layers for canonical anthropic_messages", () => {
     const transport = canonical("anthropic", "anthropic_messages");
     // Adapter layer: protocol ground truth (inline base64, never remote URLs).
@@ -40,7 +46,7 @@ describe("transportMediaCapabilities", () => {
     // ...but an arbitrary remote server is not conformance-verified.
     expect(transport.endpointAcceptance.inlineBase64).toEqual({ value: null, confidence: "unknown" });
     expect(transport.inlineBase64).toEqual({ value: null, confidence: "unknown" });
-    expect(transport.remoteImageUrl).toEqual({ value: null, confidence: "unknown" });
+    expect(transport.remoteImageUrl).toEqual({ value: false, confidence: "known_static" });
     expect(transport.multipleImages).toEqual({ value: null, confidence: "unknown" });
   });
 

@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as credentialStore from "./credentialStore";
 import { ENCRYPTED_VALUE_PREFIX, encryptValue } from "./encryption";
 import {
   AIRuntimeResolutionError,
+  assertRuntimeConfigCurrent,
   resolveActiveAIConnectionRuntimeMetadata,
   resolveRuntimeCredential,
 } from "./aiRuntimeResolver";
@@ -64,6 +66,56 @@ async function expectErrorCode(promise: Promise<unknown>, code: string): Promise
   expect((error as AIRuntimeResolutionError).code).toBe(code);
   return error as AIRuntimeResolutionError;
 }
+
+describe("Review Fix 02 runtime boundaries", () => {
+  beforeEach(() => { installMemoryStorage(); });
+
+  async function resolveOllama() {
+    await seedState(makeConnection({ presetId: "ollama", authScheme: { kind: "none" }, credentialRef: undefined, selectedModelId: "qwen3-vl" }), { withCredential: false });
+    return resolveActiveAIConnectionRuntimeMetadata();
+  }
+
+  it("E2A-RF02-NOAUTH-01 rejects original Ollama metadata after active switch", async () => {
+    const config = await resolveOllama();
+    await updateAIConnectionState((state) => {
+      state.connections.conn_second = { ...state.connections.conn_main, id: "conn_second" };
+      state.activeConnectionId = "conn_second";
+      return state;
+    });
+    await expectErrorCode(assertRuntimeConfigCurrent(config), "AI_RUNTIME_CONFIG_STALE");
+    await expectErrorCode(resolveRuntimeCredential(config), "AI_RUNTIME_CONFIG_STALE");
+  });
+
+  it("E2A-RF02-NOAUTH-02 rejects original Ollama metadata after revision change", async () => {
+    const config = await resolveOllama();
+    await updateAIConnectionState((state) => {
+      state.connections.conn_main.connectionRevision += 1;
+      return state;
+    });
+    await expectErrorCode(assertRuntimeConfigCurrent(config), "AI_RUNTIME_CONFIG_STALE");
+    await expectErrorCode(resolveRuntimeCredential(config), "AI_RUNTIME_CONFIG_STALE");
+  });
+
+  it("E2A-RF02-NOAUTH-03 fences unchanged Ollama metadata and returns null", async () => {
+    const config = await resolveOllama();
+    expect((await assertRuntimeConfigCurrent(config)).activeConnectionId).toBe(config.connectionId);
+    expect(await resolveRuntimeCredential(config)).toBeNull();
+  });
+
+  it.each([
+    ["E2A-RF02-MODEL-01", "openai", "gpt-5.5", undefined, "known"],
+    ["E2A-RF02-MODEL-02", "openai", "gpt-5.5", "https://proxy.example", "unknown"],
+    ["E2A-RF02-MODEL-03", "anthropic", "claude-sonnet-4.6", "https://proxy.example", "unknown"],
+    ["E2A-RF02-MODEL-04", "custom", "gpt-5.5", "https://proxy.example", "unknown"],
+  ] as const)("%s resolves model capability with endpoint provenance", async (_id, presetId, selectedModelId, endpointOverride, classification) => {
+    await seedState(makeConnection({ presetId, selectedModelId, endpointOverride }));
+    const config = await resolveActiveAIConnectionRuntimeMetadata();
+    expect(config.modelCapabilityAssessment.classification).toBe(classification);
+    expect(config.modelCapabilityAssessment.vision).toEqual(classification === "known"
+      ? { value: true, confidence: "legacy_declared" }
+      : { value: null, confidence: "unknown" });
+  });
+});
 
 describe("resolveActiveAIConnectionRuntimeMetadata", () => {
   let memory: ReturnType<typeof installMemoryStorage>;
@@ -310,6 +362,25 @@ describe("resolveRuntimeCredential secret boundary", () => {
     });
   });
 
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("E2A-RF02-RACE-01 decrypts revision 1 after replacement at the post-fence boundary", async () => {
+    const config = await resolveActiveAIConnectionRuntimeMetadata();
+    expect(config.credentialRevision).toBe(1);
+    const decryptSnapshot = credentialStore.resolveCredentialRecordForRuntime;
+    const boundary = vi.spyOn(credentialStore, "resolveCredentialRecordForRuntime").mockImplementationOnce(async (record) => {
+      // This helper is invoked after the currentness fence succeeded.
+      expect(record.revision).toBe(1);
+      await replaceCredential("cred_main", "sk-rf02-revision-2");
+      expect((await loadAIConnectionState())?.credentials.cred_main.revision).toBe(2);
+      return decryptSnapshot(record);
+    });
+    expect(await resolveRuntimeCredential(config)).toBe(PLAINTEXT_CREDENTIAL);
+    expect(boundary).toHaveBeenCalledTimes(1);
+    // The mandatory pre-dispatch fence detects rotation after plaintext resolution.
+    await expectErrorCode(assertRuntimeConfigCurrent(config), "AI_RUNTIME_CONFIG_STALE");
+  });
+
   it("E2A-RF01-RACE-04 resolves plaintext when the snapshot is still current", async () => {
     const config = await resolveActiveAIConnectionRuntimeMetadata();
     expect(await resolveRuntimeCredential(config)).toBe(PLAINTEXT_CREDENTIAL);
@@ -338,6 +409,7 @@ describe("resolveRuntimeCredential secret boundary", () => {
   });
 
   it("E2A-RF01-RACE-03 fails stale when the active connection switched", async () => {
+    const config = await resolveActiveAIConnectionRuntimeMetadata();
     // Add a second connection, then switch the active pointer.
     await updateAIConnectionState((state) => {
       const current = state.connections.conn_main;
@@ -353,18 +425,7 @@ describe("resolveRuntimeCredential secret boundary", () => {
       return state;
     });
 
-    const config = await resolveActiveAIConnectionRuntimeMetadata();
-    // Build a stale snapshot of the ORIGINAL connection and resolve against it.
-    const staleSnapshot = {
-      ...config,
-      connectionId: "conn_main",
-      presetId: "anthropic" as const,
-      protocol: "anthropic_messages" as const,
-      requiresCredential: true,
-      credentialRef: "cred_main",
-      credentialRevision: 1,
-    };
-    await expectErrorCode(resolveRuntimeCredential(staleSnapshot), "AI_RUNTIME_CONFIG_STALE");
+    await expectErrorCode(resolveRuntimeCredential(config), "AI_RUNTIME_CONFIG_STALE");
   });
 
   it("translates low-level errors: unavailable credential and malformed state", async () => {

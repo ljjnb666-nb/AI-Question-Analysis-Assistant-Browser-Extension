@@ -8,8 +8,9 @@
  *
  * E1 staging note: legacy AI fields in `AppSettings` (providerId, apiKey,
  * apiModel, customBaseUrl, customProviderProtocol) remain the runtime
- * authority until the E2 parseRouter cutover. In E1 this state is created and
- * migrated as a shadow; the legacy fields must not be dual-written anywhere.
+ * authority until the E2 parseRouter cutover. E1 shipped the foundation and
+ * migration primitive only; production migration remains disabled until E2
+ * cutover. The legacy fields must not be dual-written anywhere.
  */
 
 /**
@@ -229,7 +230,8 @@ export interface EndpointAcceptanceCapability {
 /**
  * E2A transport/media capability authority. Two layers are kept separate and
  * must BOTH be known-supported for effective support; the effective dimensions
- * are the combination and are never more confident than their weakest layer.
+ * use three-valued AND: a known-false layer is decisive; positive support
+ * requires both layers and takes their weakest confidence.
  */
 export interface TransportMediaCapabilityAssessment {
   protocol: ProtocolId;

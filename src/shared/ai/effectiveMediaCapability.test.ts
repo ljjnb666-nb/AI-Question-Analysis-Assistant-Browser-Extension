@@ -6,9 +6,9 @@ import {
 } from "./effectiveMediaCapability";
 import { resolveTransportMediaCapabilities } from "./transportMediaCapabilities";
 
-const VISION_MODEL = assessModelCapabilities("anthropic", "claude-opus-4.8");
-const TEXT_MODEL = assessModelCapabilities("deepseek", "deepseek-v4-flash");
-const UNKNOWN_MODEL = assessModelCapabilities("custom", "my-arbitrary-model");
+const VISION_MODEL = assessModelCapabilities({ presetId: "anthropic", modelId: "claude-opus-4.8", endpointProvenance: "canonical_builtin_endpoint" });
+const TEXT_MODEL = assessModelCapabilities({ presetId: "deepseek", modelId: "deepseek-v4-flash", endpointProvenance: "canonical_builtin_endpoint" });
+const UNKNOWN_MODEL = assessModelCapabilities({ presetId: "custom", modelId: "my-arbitrary-model", endpointProvenance: "canonical_builtin_endpoint" });
 const ANTHROPIC_TRANSPORT = resolveTransportMediaCapabilities({
   presetId: "anthropic",
   protocol: "anthropic_messages",
