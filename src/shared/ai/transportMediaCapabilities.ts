@@ -103,6 +103,9 @@ export function resolveEndpointAcceptanceCapability(
 
   switch (protocol) {
     case "anthropic_messages":
+      if (presetId !== "anthropic") {
+        return { inlineBase64: UNKNOWN, remoteImageUrl: UNKNOWN, multipleImages: UNKNOWN };
+      }
       // Canonical Anthropic service (legacy_declared registry knowledge).
       return { inlineBase64: { value: true, confidence: "legacy_declared" }, remoteImageUrl: { value: false, confidence: "legacy_declared" }, multipleImages: { value: true, confidence: "legacy_declared" } };
     case "gemini_generate_content":

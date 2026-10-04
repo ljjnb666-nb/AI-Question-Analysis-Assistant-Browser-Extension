@@ -11,6 +11,13 @@ const canonical = (presetId: Parameters<typeof resolveTransportMediaCapabilities
   resolveTransportMediaCapabilities({ presetId, protocol, endpointProvenance: "canonical_builtin_endpoint" });
 
 describe("transportMediaCapabilities", () => {
+  it.each(["anthropic_messages", "gemini_generate_content"] as const)("foreign preset cannot claim canonical %s acceptance", (protocol) => {
+    expect(resolveEndpointAcceptanceCapability("openai", protocol, "canonical_builtin_endpoint")).toEqual({
+      inlineBase64: { value: null, confidence: "unknown" },
+      remoteImageUrl: { value: null, confidence: "unknown" },
+      multipleImages: { value: null, confidence: "unknown" },
+    });
+  });
   it.each(["anthropic_messages", "gemini_generate_content"] as const)("false AND unknown is false for %s", (protocol) => {
     const result = resolveTransportMediaCapabilities({ presetId: "custom", protocol, endpointProvenance: "custom_endpoint" });
     expect(result.endpointAcceptance.remoteImageUrl).toEqual({ value: null, confidence: "unknown" });

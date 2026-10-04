@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as credentialStore from "./credentialStore";
+import { PROVIDER_PRESET_IDS, resolvePresetAuthScheme, resolvePresetProtocol } from "./aiConnectionPresets";
+import { migrateLegacyAIConnectionState } from "./aiConnectionMigration";
 import { ENCRYPTED_VALUE_PREFIX, encryptValue } from "./encryption";
 import {
   AIRuntimeResolutionError,
@@ -98,7 +100,7 @@ describe("Review Fix 02 runtime boundaries", () => {
 
   it("E2A-RF02-NOAUTH-03 fences unchanged Ollama metadata and returns null", async () => {
     const config = await resolveOllama();
-    expect((await assertRuntimeConfigCurrent(config)).activeConnectionId).toBe(config.connectionId);
+    expect(await assertRuntimeConfigCurrent(config)).toBeUndefined();
     expect(await resolveRuntimeCredential(config)).toBeNull();
   });
 
@@ -108,12 +110,90 @@ describe("Review Fix 02 runtime boundaries", () => {
     ["E2A-RF02-MODEL-03", "anthropic", "claude-sonnet-4.6", "https://proxy.example", "unknown"],
     ["E2A-RF02-MODEL-04", "custom", "gpt-5.5", "https://proxy.example", "unknown"],
   ] as const)("%s resolves model capability with endpoint provenance", async (_id, presetId, selectedModelId, endpointOverride, classification) => {
-    await seedState(makeConnection({ presetId, selectedModelId, endpointOverride }));
+    await seedState(makeConnection({ presetId, selectedModelId, endpointOverride, authScheme: resolvePresetAuthScheme(presetId) }));
     const config = await resolveActiveAIConnectionRuntimeMetadata();
     expect(config.modelCapabilityAssessment.classification).toBe(classification);
     expect(config.modelCapabilityAssessment.vision).toEqual(classification === "known"
       ? { value: true, confidence: "legacy_declared" }
       : { value: null, confidence: "unknown" });
+  });
+});
+
+describe("Review Fix 03 secret and semantic contracts", () => {
+  let memory: ReturnType<typeof installMemoryStorage>;
+  beforeEach(() => { memory = installMemoryStorage(); });
+
+  it("E2A-RF03-SECRET-01 public fence returns undefined, including with stored credential collections", async () => {
+    await seedState();
+    const config = await resolveActiveAIConnectionRuntimeMetadata();
+    const result: void = await assertRuntimeConfigCurrent(config);
+    expect(result).toBeUndefined();
+  });
+
+  it.each([
+    ["E2A-RF03-SEM-01", { presetId: "openai", protocolOverride: "anthropic_messages", authScheme: { kind: "bearer" } }],
+    ["E2A-RF03-SEM-02", { protocolOverride: "openai_chat_completions" }],
+    ["E2A-RF03-SEM-03", { presetId: "openai", authScheme: { kind: "none" } }],
+    ["E2A-RF03-SEM-04", { presetId: "openai", authScheme: { kind: "query", parameterName: "key" } }],
+    ["E2A-RF03-SEM-05", { presetId: "ollama", authScheme: { kind: "bearer" } }],
+    ["gemini foreign protocol", { presetId: "gemini", protocolOverride: "openai_chat_completions", authScheme: { kind: "query", parameterName: "key" } }],
+    ["ollama foreign protocol", { presetId: "ollama", protocolOverride: "anthropic_messages", authScheme: { kind: "none" } }],
+    ["anthropic bearer", { authScheme: { kind: "bearer" } }],
+    ["anthropic wrong header", { authScheme: { kind: "header", headerName: "Authorization" } }],
+    ["gemini bearer", { presetId: "gemini", authScheme: { kind: "bearer" } }],
+    ["gemini wrong parameter", { presetId: "gemini", authScheme: { kind: "query", parameterName: "token" } }],
+  ] satisfies Array<[string, Partial<Connection>]> )("%s rejects structurally valid unsupported connections", async (_id, overrides) => {
+    await seedState(makeConnection(overrides));
+    // Structural V1 storage remains valid, but runtime semantics fail closed.
+    expect(await loadAIConnectionState()).not.toBeNull();
+    await expectErrorCode(resolveActiveAIConnectionRuntimeMetadata(), "AI_CONNECTION_SEMANTIC_INVALID");
+  });
+
+  it.each(PROVIDER_PRESET_IDS.filter((preset) => preset !== "custom"))("official %s rejects even an override equal to its canonical protocol", async (presetId) => {
+    await seedState(makeConnection({ presetId, protocolOverride: resolvePresetProtocol(presetId), authScheme: resolvePresetAuthScheme(presetId) }));
+    await expectErrorCode(resolveActiveAIConnectionRuntimeMetadata(), "AI_CONNECTION_SEMANTIC_INVALID");
+  });
+
+  it.each([
+    ["E2A-RF03-SEM-06", "openai_chat_completions", { kind: "bearer" }],
+    ["E2A-RF03-SEM-07", "anthropic_messages", { kind: "header", headerName: "x-api-key" }],
+    ["custom query", "gemini_generate_content", { kind: "query", parameterName: "token" }],
+    ["custom none", "openai_chat_completions", { kind: "none" }],
+  ] satisfies Array<[string, Connection["protocolOverride"], Connection["authScheme"]]> )("%s remains valid", async (_id, protocolOverride, authScheme) => {
+    await seedState(makeConnection({ presetId: "custom", protocolOverride, authScheme, endpointOverride: "https://custom.example" }));
+    const config = await resolveActiveAIConnectionRuntimeMetadata();
+    expect(config.protocol).toBe(protocolOverride);
+    expect(config.authScheme).toEqual(authScheme);
+    expect(config.endpointProvenance).toBe("custom_endpoint");
+    expect(await assertRuntimeConfigCurrent(config)).toBeUndefined();
+  });
+
+  it("both public and secret fences reject semantic corruption after metadata resolution", async () => {
+    await seedState();
+    const config = await resolveActiveAIConnectionRuntimeMetadata();
+    await updateAIConnectionState((state) => {
+      state.connections.conn_main.authScheme = { kind: "bearer" };
+      return state;
+    });
+    await expectErrorCode(assertRuntimeConfigCurrent(config), "AI_CONNECTION_SEMANTIC_INVALID");
+    await expectErrorCode(resolveRuntimeCredential(config), "AI_CONNECTION_SEMANTIC_INVALID");
+  });
+
+  it.each([
+    ...PROVIDER_PRESET_IDS.map((providerId) => [providerId, "openai"] as const),
+    ["custom", "anthropic"] as const,
+  ])("legacy migration output for %s / %s remains runtime-valid", async (providerId, customProviderProtocol) => {
+    memory.store.set("appSettings", { providerId, customProviderProtocol, customBaseUrl: "https://legacy.example", apiKey: PLAINTEXT_CREDENTIAL });
+    const result = await migrateLegacyAIConnectionState();
+    expect(result.status).toBe("migrated");
+    if (result.status !== "migrated") throw new Error("Migration did not succeed");
+    const connection = result.state.connections[result.state.activeConnectionId!];
+    const config = await resolveActiveAIConnectionRuntimeMetadata();
+    expect(config.presetId).toBe(providerId);
+    expect(config.authScheme).toEqual(resolvePresetAuthScheme(providerId, connection.protocolOverride));
+    expect(await assertRuntimeConfigCurrent(config)).toBeUndefined();
+    expect(await resolveRuntimeCredential(config)).toBe(connection.authScheme.kind === "none" ? null : PLAINTEXT_CREDENTIAL);
+    expect(config.endpointProvenance).toBe(providerId === "custom" ? "custom_endpoint" : providerId === "gemini" ? "canonical_builtin_endpoint" : "overridden_endpoint");
   });
 });
 

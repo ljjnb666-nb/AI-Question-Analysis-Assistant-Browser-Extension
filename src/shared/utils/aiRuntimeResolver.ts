@@ -27,19 +27,20 @@
  * - NOT yet consumed by `parseQuestion` — no authority cutover in E2A.
  */
 
-import type { AIConnectionRuntimeConfig, AIConnectionState } from "../types/connection";
+import type { AIConnectionRuntimeConfig, Connection, EncryptedCredentialRecord } from "../types/connection";
 import { assessModelCapabilities } from "../ai/modelCapabilityCatalog";
 import {
   resolveEndpointProvenance,
   resolveTransportMediaCapabilities,
 } from "../ai/transportMediaCapabilities";
-import { resolveConnectionEndpoint, resolveConnectionProtocol } from "./aiConnectionPresets";
+import { resolveConnectionEndpoint, resolveConnectionProtocol, resolvePresetAuthScheme } from "./aiConnectionPresets";
 import { resolveCredentialRecordForRuntime } from "./credentialStore";
 import { MalformedAIConnectionStateError, loadAIConnectionState } from "./aiConnectionState";
 
 export type AIRuntimeResolutionErrorCode =
   | "AI_CONNECTION_NOT_INITIALIZED"
   | "AI_CONNECTION_MALFORMED"
+  | "AI_CONNECTION_SEMANTIC_INVALID"
   | "AI_ACTIVE_CONNECTION_MISSING"
   | "AI_MODEL_MISSING"
   | "AI_CREDENTIAL_REQUIRED"
@@ -54,6 +55,22 @@ export class AIRuntimeResolutionError extends Error {
     super(message);
     this.name = "AIRuntimeResolutionError";
     this.code = code;
+  }
+}
+
+/** Runtime-only semantic guard; storage and migration keep their V1 structural contract. */
+function assertConnectionSemantics(connection: Connection): void {
+  if (connection.presetId === "custom") return;
+  const expected = resolvePresetAuthScheme(connection.presetId);
+  const actual = connection.authScheme;
+  const authMatches = actual.kind === expected.kind
+    && (expected.kind !== "header" || (actual.kind === "header" && actual.headerName === expected.headerName))
+    && (expected.kind !== "query" || (actual.kind === "query" && actual.parameterName === expected.parameterName));
+  if (connection.protocolOverride !== undefined || !authMatches) {
+    throw new AIRuntimeResolutionError(
+      "AI_CONNECTION_SEMANTIC_INVALID",
+      "Official AI connection must use its preset protocol and canonical auth scheme",
+    );
   }
 }
 
@@ -99,6 +116,7 @@ export async function resolveActiveAIConnectionRuntimeMetadata(): Promise<AIConn
       "Active connection reference does not resolve to a stored connection",
     );
   }
+  assertConnectionSemantics(connection);
   if (!connection.selectedModelId) {
     throw new AIRuntimeResolutionError(
       "AI_MODEL_MISSING",
@@ -159,10 +177,10 @@ export async function resolveActiveAIConnectionRuntimeMetadata(): Promise<AIConn
  * Any mismatch fails with `AI_RUNTIME_CONFIG_STALE` — a stale snapshot is
  * never silently rebound to a new secret. Errors are translated to stable
  * codes: `AI_CREDENTIAL_REQUIRED` (missing required reference) and
- * `AI_CONNECTION_MALFORMED` (invalid state). The returned snapshot is internal
- * to the secret boundary; callers must never serialize or log it.
+ * `AI_CONNECTION_MALFORMED` (invalid state). Only the exact required credential
+ * record is returned, internally to this module; never the whole state.
  */
-export async function assertRuntimeConfigCurrent(config: AIConnectionRuntimeConfig): Promise<AIConnectionState> {
+async function fenceRuntimeConfig(config: AIConnectionRuntimeConfig): Promise<EncryptedCredentialRecord | null> {
   if (config.requiresCredential && !config.credentialRef) {
     throw new AIRuntimeResolutionError(
       "AI_CREDENTIAL_REQUIRED",
@@ -199,6 +217,7 @@ export async function assertRuntimeConfigCurrent(config: AIConnectionRuntimeConf
   if (connection.connectionRevision !== config.connectionRevision) {
     throw stale("connection revision changed");
   }
+  assertConnectionSemantics(connection);
   if (config.requiresCredential) {
     if (connection.credentialRef !== config.credentialRef) {
       throw stale("credential reference changed");
@@ -207,8 +226,14 @@ export async function assertRuntimeConfigCurrent(config: AIConnectionRuntimeConf
     if (!credential || credential.revision !== config.credentialRevision) {
       throw stale("credential revision changed");
     }
+    return credential;
   }
-  return state;
+  return null;
+}
+
+/** Public pre-dispatch fence: success returns no state or credential material. */
+export async function assertRuntimeConfigCurrent(config: AIConnectionRuntimeConfig): Promise<void> {
+  await fenceRuntimeConfig(config);
 }
 
 /**
@@ -217,11 +242,11 @@ export async function assertRuntimeConfigCurrent(config: AIConnectionRuntimeConf
  * E2B must fence again immediately before dispatch, even after this succeeds.
  */
 export async function resolveRuntimeCredential(config: AIConnectionRuntimeConfig): Promise<string | null> {
-  const state = await assertRuntimeConfigCurrent(config);
-  if (!config.requiresCredential) return null;
+  const credential = await fenceRuntimeConfig(config);
+  if (!credential) return null;
 
   try {
-    return await resolveCredentialRecordForRuntime(state.credentials[config.credentialRef!]);
+    return await resolveCredentialRecordForRuntime(credential);
   } catch (error) {
     if (error instanceof AIRuntimeResolutionError) throw error;
     // Decrypt failures (tampered envelopes, unsupported versions, wrong

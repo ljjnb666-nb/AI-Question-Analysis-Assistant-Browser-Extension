@@ -1,6 +1,6 @@
 # UI05R-E2A — Runtime Contract + Capability Resolver
 
-> **Status**: IMPLEMENTED (E2A scope, Review Fix 02 applied)
+> **Status**: IMPLEMENTED (E2A scope, Review Fix 02/03 applied)
 > **Branch**: `feat/ui05r-e2a-runtime-contract` (based on `main` @ `6082fbd`)
 > **Engineering owner**: Codex · **Frontend owner**: Gemini (untouched) · **Gatekeeper**: ChatGPT
 > **PR policy**: OPEN / DRAFT / UNMERGED — do not merge from this document alone.
@@ -23,7 +23,7 @@ tests, and this document:
 | `src/shared/ai/modelCapabilityCatalog.ts` | Explicit static catalog for every shipped model ID; custom model identity stays unknown |
 | `src/shared/ai/transportMediaCapabilities.ts` | Two-layer transport authority: adapter encoding ∧ endpoint acceptance, per endpoint provenance; exhaustive protocol switch |
 | `src/shared/ai/effectiveMediaCapability.ts` | `planWireMediaDelivery` (source→wire separation) + `resolveEffectiveMediaCapability` (fail closed) |
-| `src/shared/utils/aiRuntimeResolver.ts` | `resolveActiveAIConnectionRuntimeMetadata` + revision-fenced `resolveRuntimeCredential` secret boundary |
+| `src/shared/utils/aiRuntimeResolver.ts` | `resolveActiveAIConnectionRuntimeMetadata` + secret-free public fence + private exact-snapshot secret boundary |
 
 Nothing else changes: no provider clients, no parseRouter, no Settings UI, no
 background writer, no migration execution.
@@ -233,11 +233,12 @@ provider request executes, E2B MUST apply endpoint security validation:
 connection ID, connection existence and connectionRevision for every config,
 including no-auth. Required credentials additionally bind credentialRef and
 credentialRevision. A mismatch yields `AI_RUNTIME_CONFIG_STALE`; malformed
-state yields `AI_CONNECTION_MALFORMED`. The returned state snapshot stays inside
-the secret boundary and must never be serialized or logged.
+state yields `AI_CONNECTION_MALFORMED`. The public fence returns `Promise<void>`
+and never exposes state, encrypted records or credential collections.
 
 `resolveRuntimeCredential(config)` runs that fence first and decrypts only the
-exact credential record in its returned snapshot through the bounded
+exact credential record returned internally by private `fenceRuntimeConfig`
+through the bounded
 `resolveCredentialRecordForRuntime(record)` helper. The helper never re-reads
 AIConnectionState by ref, never logs material and translates decryption failure
 safely. A replacement after the fence can therefore never combine old metadata
@@ -269,3 +270,42 @@ connection revision change and unchanged Ollama; `E2A-RF02-MODEL-01...04`
 cover canonical OpenAI, overridden OpenAI/Anthropic and custom model identity.
 RF01-RACE-03 now resolves original metadata before the actual active switch.
 Transport coverage proves decisive false while preserving both provenance layers.
+
+## 12. Review Fix 03 semantic compatibility and secret-free public fence
+
+The public `assertRuntimeConfigCurrent(config): Promise<void>` discards the
+private fence result. Only module-private `fenceRuntimeConfig` receives the
+current state and returns the exact required credential record (or null for
+no-auth) to `resolveRuntimeCredential`. No broad state snapshot is exported.
+The RF02 post-fence rotation regression remains mandatory and unchanged.
+
+Semantic validation is **runtime-only**, after structural V1 state validation.
+Storage continues to preserve structurally valid data and the E1 migration
+primitive is unchanged. Such state is not necessarily executable: both metadata
+resolution and the private currentness fence reject unsupported active connections
+with stable `AI_CONNECTION_SEMANTIC_INVALID` before producing runtime metadata
+or decrypting a secret. This avoids changing storage/migration authority in E2A.
+
+For all official presets, `protocolOverride` must be undefined, even when it
+names the canonical protocol. Anthropic uses anthropic_messages and header
+x-api-key; Gemini uses gemini_generate_content and query key; Ollama uses
+openai_chat_completions and none. OpenAI, DeepSeek, Qwen, Moonshot, Zhipu and
+MiniMax use openai_chat_completions and bearer. Custom connections retain every
+protocol/auth combination allowed by the Connection schema.
+
+Official endpointOverride remains allowed. Its overridden_endpoint provenance
+keeps model and endpoint acceptance UNKNOWN. Legacy migration output is tested
+through metadata, public fence and secret resolution for every preset, including
+both legacy custom protocols, without repairing the migrated connection.
+
+Transport defense in depth separately rejects canonical Anthropic acceptance
+unless presetId is anthropic, and canonical Gemini acceptance unless presetId is
+gemini. Foreign presets receive UNKNOWN acceptance in every dimension even when
+passed canonical_builtin_endpoint provenance. The adapter/endpoint layers and
+RF02 decisive-false semantics remain intact.
+
+RF03 coverage: E2A-RF03-SECRET-01 proves the public result is undefined;
+E2A-RF03-SEM-01...07 prove required invalid/valid combinations. Additional tests
+cover all official presets rejecting protocolOverride, exact header/query names,
+custom query and no-auth, semantic corruption at both fences, foreign canonical
+acceptance, and direct legacy migration output for every preset.
