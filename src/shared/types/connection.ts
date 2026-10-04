@@ -8,8 +8,9 @@
  *
  * E1 staging note: legacy AI fields in `AppSettings` (providerId, apiKey,
  * apiModel, customBaseUrl, customProviderProtocol) remain the runtime
- * authority until the E2 parseRouter cutover. In E1 this state is created and
- * migrated as a shadow; the legacy fields must not be dual-written anywhere.
+ * authority until the E2 parseRouter cutover. E1 shipped the foundation and
+ * migration primitive only; production migration remains disabled until E2
+ * cutover. The legacy fields must not be dual-written anywhere.
  */
 
 /**
@@ -147,6 +148,123 @@ export interface AIConnectionState {
   activeConnectionId: string | null;
   connections: Record<string, Connection>;
   credentials: Record<string, EncryptedCredentialRecord>;
+}
+
+/**
+ * How confident the capability authority is about a capability value.
+ * - `known_static`: explicit catalog decision (e.g. text support of every
+ *   shipped model, or protocol adapter encoding behavior).
+ * - `legacy_declared`: derived from the CURRENT runtime registry/adapter
+ *   behavior, clearly labeled as the legacy source until the E2 cutover.
+ * - `unknown`: no sufficient evidence. Unknown vision/transport fails closed.
+ */
+export type CapabilityConfidence = "known_static" | "legacy_declared" | "unknown";
+
+/**
+ * One capability dimension. Type-safe invariant: `value` is `null` exactly
+ * when confidence is `unknown`; a boolean value always carries an explicit
+ * evidence confidence.
+ */
+export type CapabilityAssessment =
+  | {
+      value: boolean;
+      confidence: "known_static" | "legacy_declared";
+    }
+  | {
+      value: null;
+      confidence: "unknown";
+    };
+
+/** Whether a model ID is explicitly classified in the capability catalog. */
+export type ModelClassification = "known" | "unknown";
+
+/**
+ * E2A model capability authority. Replaces (at cutover) the
+ * `provider.supportsVision` + `isLikelyTextOnlyModel` heuristic; the legacy
+ * heuristic remains in parseRouter until E2B.
+ */
+export interface ModelCapabilityAssessment {
+  classification: ModelClassification;
+  text: CapabilityAssessment;
+  vision: CapabilityAssessment;
+  reasoning: CapabilityAssessment;
+  structuredOutput: CapabilityAssessment;
+}
+
+/**
+ * Where a connection's endpoint comes from, and therefore how much transport
+ * knowledge applies to it:
+ * - `canonical_builtin_endpoint`: built-in preset on its canonical endpoint —
+ *   legacy-declared provider transport knowledge applies.
+ * - `overridden_endpoint`: built-in preset with an endpoint override — the
+ *   endpoint is no longer the canonical provider service; endpoint-dependent
+ *   acceptance is unknown.
+ * - `custom_endpoint`: user-defined endpoint (custom preset) — never
+ *   conformance-verified; endpoint-dependent acceptance is unknown.
+ * - `unknown`: provenance cannot be determined; fails closed.
+ */
+export type EndpointProvenance =
+  | "canonical_builtin_endpoint"
+  | "overridden_endpoint"
+  | "custom_endpoint"
+  | "unknown";
+
+/** What the wire ADAPTER can encode, independent of any endpoint (protocol ground truth). */
+export interface AdapterEncodingCapability {
+  inlineBase64: CapabilityAssessment;
+  remoteImageUrl: CapabilityAssessment;
+  multipleImages: CapabilityAssessment;
+}
+
+/**
+ * What the concrete ENDPOINT accepts. Endpoint-dependent and only trusted for
+ * canonical built-in endpoints (legacy_declared) — overridden and custom
+ * endpoints are unknown until conformance evidence exists.
+ */
+export interface EndpointAcceptanceCapability {
+  inlineBase64: CapabilityAssessment;
+  remoteImageUrl: CapabilityAssessment;
+  multipleImages: CapabilityAssessment;
+}
+
+/**
+ * E2A transport/media capability authority. Two layers are kept separate and
+ * must BOTH be known-supported for effective support; the effective dimensions
+ * use three-valued AND: a known-false layer is decisive; positive support
+ * requires both layers and takes their weakest confidence.
+ */
+export interface TransportMediaCapabilityAssessment {
+  protocol: ProtocolId;
+  endpointProvenance: EndpointProvenance;
+  adapterEncoding: AdapterEncodingCapability;
+  endpointAcceptance: EndpointAcceptanceCapability;
+  /** Effective: adapterEncoding ∧ endpointAcceptance per dimension. */
+  inlineBase64: CapabilityAssessment;
+  remoteImageUrl: CapabilityAssessment;
+  multipleImages: CapabilityAssessment;
+}
+
+/**
+ * Runtime-only, non-secret projection of the active connection for a solve
+ * operation. Never contains encrypted or plaintext credential material —
+ * secret resolution is a separate boundary step taken only when a real
+ * provider request is about to execute.
+ */
+export interface AIConnectionRuntimeConfig {
+  connectionId: string;
+  connectionRevision: number;
+  presetId: ProviderPresetId;
+  protocol: ProtocolId;
+  endpoint: string;
+  endpointProvenance: EndpointProvenance;
+  authScheme: AuthScheme;
+  /** False only for `authScheme.kind === "none"` connections. */
+  requiresCredential: boolean;
+  credentialRef?: string;
+  credentialRevision?: number;
+  selectedModelId: string;
+  modelCapabilityAssessment: ModelCapabilityAssessment;
+  transportCapabilities: TransportMediaCapabilityAssessment;
 }
 
 /**

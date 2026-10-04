@@ -2,7 +2,7 @@
  * UI05R-E1 — Bounded credential store API over the AIConnectionState SSOT.
  *
  * Security contract:
- * - Only `resolveCredentialForRuntime` may decrypt persisted credential
+ * - Only the bounded runtime credential helpers may decrypt persisted credential
  *   material, and only for normal runtime use.
  * - General connection readers (metadata APIs) never return plaintext.
  * - Write results expose committed non-secret metadata only (ref, revision,
@@ -17,7 +17,7 @@
  * auto-initialize absent state.
  */
 
-import { decryptValue, encryptValue } from "./encryption";
+import { decryptValue, encryptValue, ENCRYPTED_VALUE_PREFIX } from "./encryption";
 import type { EncryptedCredentialRecord } from "../types/connection";
 import {
   invalidateConnectionValidation,
@@ -121,7 +121,7 @@ export async function clearCredential(ref: string): Promise<void> {
 }
 
 /**
- * The only path that decrypts persisted credential material for normal
+ * Ref-based entry to the bounded runtime decryption helpers for normal
  * runtime use. Fails closed: unknown refs throw, tampered `qse:v1` envelopes
  * throw, unknown `qse:*` envelope versions throw. Never returns a fallback
  * value and never logs plaintext.
@@ -130,5 +130,19 @@ export async function resolveCredentialForRuntime(ref: string): Promise<string> 
   const state = await loadAIConnectionState();
   const record = state?.credentials[ref];
   if (!record) throw new CredentialNotFoundError(ref);
-  return decryptValue(record.encryptedValue);
+  return resolveCredentialRecordForRuntime(record);
+}
+
+/** Decrypt only this exact snapshot; never look up its ref again or log material. */
+export async function resolveCredentialRecordForRuntime(record: Readonly<EncryptedCredentialRecord>): Promise<string> {
+  const encryptedValue = record.encryptedValue;
+  try {
+    if (!encryptedValue.startsWith(ENCRYPTED_VALUE_PREFIX)) {
+      throw new Error("Unsupported credential snapshot");
+    }
+    return await decryptValue(encryptedValue);
+  } catch {
+    // Raw crypto errors may contain implementation details; never expose them.
+    throw new Error("Credential snapshot could not be decrypted");
+  }
 }

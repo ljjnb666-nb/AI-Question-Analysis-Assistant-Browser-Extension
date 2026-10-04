@@ -6,6 +6,7 @@ import {
   getCredentialPresence,
   replaceCredential,
   resolveCredentialForRuntime,
+  resolveCredentialRecordForRuntime,
 } from "./credentialStore";
 import {
   AI_CONNECTION_STATE_STORAGE_KEY,
@@ -198,6 +199,19 @@ describe("credentialStore", () => {
   });
 
   describe("resolveCredentialForRuntime fails closed", () => {
+    it("decrypts an exact snapshot without reading connection storage after rotation", async () => {
+      await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
+      const record = (await loadAIConnectionState())!.credentials.cred_main;
+      await replaceCredential("cred_main", "sk-new-snapshot-secret");
+      memory.get.mockClear();
+      expect(await resolveCredentialRecordForRuntime(record)).toBe(PLAINTEXT_CREDENTIAL);
+      expect(memory.get.mock.calls.some(([key]) => key === AI_CONNECTION_STATE_STORAGE_KEY)).toBe(false);
+    });
+
+    it.each(["", "plaintext-secret", "qse:v9:QUJD"])("rejects unsupported snapshot material safely: %s", async (encryptedValue) => {
+      const record = { ref: "cred_main", type: "api_key" as const, encryptedValue, revision: 1, updatedAt: 1 };
+      await expect(resolveCredentialRecordForRuntime(record)).rejects.toThrow("Credential snapshot could not be decrypted");
+    });
     it("throws on an unknown ref instead of returning empty material", async () => {
       await expect(resolveCredentialForRuntime("cred_missing")).rejects.toBeInstanceOf(CredentialNotFoundError);
     });
