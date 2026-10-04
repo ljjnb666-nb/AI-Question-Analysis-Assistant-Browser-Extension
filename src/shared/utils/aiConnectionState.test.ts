@@ -1,16 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AIConnectionState, Connection } from "../types/connection";
 import {
-  AIConnectionStateConflictError,
   AI_CONNECTION_STATE_STORAGE_KEY,
+  AIConnectionStateNotInitializedError,
   MalformedAIConnectionStateError,
   createEmptyAIConnectionState,
   getActiveConnectionMetadata,
   getConnectionMetadata,
+  invalidateConnectionValidation,
   loadAIConnectionState,
-  saveAIConnectionState,
+  persistAIConnectionState,
   updateAIConnectionState,
   validateAIConnectionState,
+  withAIConnectionStateWriteLock,
 } from "./aiConnectionState";
 import { dumpStoreJson, installMemoryStorage, type MemoryStorageHandle } from "../../test/memoryStorage";
 
@@ -57,7 +59,7 @@ describe("aiConnectionState", () => {
 
     it("round-trips a valid state", async () => {
       const state = makeState();
-      await saveAIConnectionState(state);
+      await persistAIConnectionState(state);
       const loaded = await loadAIConnectionState();
       expect(loaded).toEqual(state);
     });
@@ -85,7 +87,7 @@ describe("aiConnectionState", () => {
 
     it("rejects unknown preset ids, protocols, and auth schemes", () => {
       expect(() =>
-        validateAIConnectionState(makeState({ connections: { conn_test: makeConnection({ presetId: "openai" as never, authScheme: { kind: "bogus" } as never }) } })),
+        validateAIConnectionState(makeState({ connections: { conn_test: makeConnection({ authScheme: { kind: "bogus" } as never }) } })),
       ).toThrow(MalformedAIConnectionStateError);
       expect(() =>
         validateAIConnectionState(makeState({ connections: { conn_test: makeConnection({ protocolOverride: "gpt_wire" as never }) } })),
@@ -114,14 +116,44 @@ describe("aiConnectionState", () => {
         },
       });
       expect(() => validateAIConnectionState(plaintextState)).toThrow(MalformedAIConnectionStateError);
-      await expect(saveAIConnectionState(plaintextState)).rejects.toBeInstanceOf(MalformedAIConnectionStateError);
+      await expect(persistAIConnectionState(plaintextState)).rejects.toBeInstanceOf(MalformedAIConnectionStateError);
       expect(memory.store.has(AI_CONNECTION_STATE_STORAGE_KEY)).toBe(false);
+    });
+
+    it("E1-RF01-ENV-01 rejects unknown qse envelope versions in schemaVersion-1 state", () => {
+      const futureEnvelopeState = makeState({
+        credentials: {
+          cred_test: {
+            ref: "cred_test",
+            type: "api_key",
+            encryptedValue: "qse:v9:QUJD",
+            revision: 1,
+            updatedAt: 1,
+          },
+        },
+      });
+      futureEnvelopeState.connections.conn_test.credentialRef = "cred_test";
+      expect(() => validateAIConnectionState(futureEnvelopeState)).toThrow(MalformedAIConnectionStateError);
+      // The exact current envelope remains valid.
+      const currentEnvelopeState = makeState({
+        credentials: {
+          cred_test: {
+            ref: "cred_test",
+            type: "api_key",
+            encryptedValue: "qse:v1:QUJDREVGRw",
+            revision: 1,
+            updatedAt: 1,
+          },
+        },
+      });
+      currentEnvelopeState.connections.conn_test.credentialRef = "cred_test";
+      expect(() => validateAIConnectionState(currentEnvelopeState)).not.toThrow();
     });
   });
 
   describe("metadata APIs", () => {
     it("expose resolved protocol/endpoint and credential presence, never secret material", async () => {
-      await saveAIConnectionState({
+      await persistAIConnectionState({
         schemaVersion: 1,
         revision: 1,
         activeConnectionId: "conn_custom",
@@ -165,14 +197,14 @@ describe("aiConnectionState", () => {
 
     it("returns null when no state or no active connection exists", async () => {
       expect(await getActiveConnectionMetadata()).toBeNull();
-      await saveAIConnectionState(createEmptyAIConnectionState());
+      await persistAIConnectionState(createEmptyAIConnectionState());
       expect(await getActiveConnectionMetadata()).toBeNull();
     });
   });
 
   describe("updateAIConnectionState", () => {
     it("applies the mutator and bumps the whole-state revision", async () => {
-      await saveAIConnectionState(makeState());
+      await persistAIConnectionState(makeState());
       const result = await updateAIConnectionState((state) => {
         const connection = state.connections.conn_test;
         connection.selectedModelId = "claude-sonnet-4.6";
@@ -186,7 +218,7 @@ describe("aiConnectionState", () => {
     });
 
     it("writes nothing when the mutator returns null", async () => {
-      await saveAIConnectionState(makeState());
+      await persistAIConnectionState(makeState());
       const writesBefore = vi.mocked(memory.set).mock.calls.length;
       expect(await updateAIConnectionState(() => null)).toBeNull();
       expect(vi.mocked(memory.set).mock.calls.length).toBe(writesBefore);
@@ -200,77 +232,103 @@ describe("aiConnectionState", () => {
       expect(memory.store.get(AI_CONNECTION_STATE_STORAGE_KEY)).toEqual({ schemaVersion: 1 });
     });
 
-    it("retries on a concurrent revision change and re-applies on top of the newer base", async () => {
-      await saveAIConnectionState(makeState());
-      let getCalls = 0;
-      const readStateRecord = async (): Promise<Record<string, unknown>> => {
-        const raw = memory.store.get(AI_CONNECTION_STATE_STORAGE_KEY);
-        return raw === undefined ? {} : { [AI_CONNECTION_STATE_STORAGE_KEY]: JSON.parse(JSON.stringify(raw)) };
-      };
-      memory.get.mockImplementation(async () => {
-        getCalls += 1;
-        // Per attempt the helper performs get(observed) then get(CAS re-read).
-        // On the first CAS re-read, simulate a competing context committing
-        // its own newer state.
-        if (getCalls === 2) {
-          const current = JSON.parse(JSON.stringify(memory.store.get(AI_CONNECTION_STATE_STORAGE_KEY))) as AIConnectionState;
-          current.revision = 7;
-          current.credentials.cred_other = {
-            ref: "cred_other",
-            type: "api_key",
-            encryptedValue: "qse:v1:QUJDREVGRw",
-            revision: 1,
-            updatedAt: 9,
-          };
-          memory.store.set(AI_CONNECTION_STATE_STORAGE_KEY, current);
-        }
-        return readStateRecord();
-      });
+    it("E1-RF01-INIT (state layer) refuses to mutate absent state instead of auto-initializing", async () => {
+      await expect(updateAIConnectionState((state) => state)).rejects.toBeInstanceOf(
+        AIConnectionStateNotInitializedError,
+      );
+      expect(memory.store.has(AI_CONNECTION_STATE_STORAGE_KEY)).toBe(false);
+    });
+  });
 
+  describe("E1-RF01-CONC owner-context write lock", () => {
+    it("E1-RF01-CONC-01 serializes concurrent same-owner mutations so no update is lost", async () => {
+      await persistAIConnectionState(makeState());
+
+      // Without serialization both mutations would read revision 1 and the
+      // second write would clobber the first ("A" lost).
+      const [, second] = await Promise.all([
+        updateAIConnectionState((state) => {
+          state.connections.conn_test.name = "A";
+          return state;
+        }),
+        updateAIConnectionState((state) => {
+          state.connections.conn_test.name = `${state.connections.conn_test.name}-B`;
+          return state;
+        }),
+      ]);
+
+      const stored = await loadAIConnectionState();
+      // The second mutation observed the first one's committed result.
+      expect(second?.connections.conn_test?.name).toBe("A-B");
+      expect(stored?.connections.conn_test?.name).toBe("A-B");
+      expect(stored?.revision).toBe(3);
+    });
+
+    it("E1-RF01-CONC-02 keeps the queue usable after a mutation rejects", async () => {
+      await persistAIConnectionState(makeState());
+
+      await expect(
+        updateAIConnectionState(() => {
+          throw new Error("boom");
+        }),
+      ).rejects.toThrow("boom");
+      // The failed mutation wrote nothing...
+      expect((await loadAIConnectionState())?.revision).toBe(1);
+
+      // ...and the next mutation still executes.
       const result = await updateAIConnectionState((state) => {
         state.connections.conn_test.selectedModelId = "claude-haiku-4.5";
         return state;
       });
-
+      expect(result?.revision).toBe(2);
       const stored = await loadAIConnectionState();
-      expect(stored?.revision).toBe(8);
-      // The concurrent writer's change survived (no silent clobber)...
-      expect(stored?.credentials.cred_other?.ref).toBe("cred_other");
-      // ...and this mutator was re-applied on top of the newer base.
       expect(stored?.connections.conn_test?.selectedModelId).toBe("claude-haiku-4.5");
-      expect(result?.revision).toBe(8);
     });
 
-    it("throws AIConnectionStateConflictError instead of clobbering when conflicts never settle", async () => {
-      await saveAIConnectionState(makeState());
-      const beforeRevision = ((await loadAIConnectionState()) as AIConnectionState).revision;
-      let getCalls = 0;
-      const readStateRecord = async (): Promise<Record<string, unknown>> => {
-        const raw = memory.store.get(AI_CONNECTION_STATE_STORAGE_KEY);
-        return raw === undefined ? {} : { [AI_CONNECTION_STATE_STORAGE_KEY]: JSON.parse(JSON.stringify(raw)) };
-      };
-      memory.get.mockImplementation(async () => {
-        getCalls += 1;
-        // Every CAS re-read (the even call of each attempt) is greeted by a
-        // competing writer that has bumped the stored revision.
-        if (getCalls % 2 === 0) {
-          const current = JSON.parse(JSON.stringify(memory.store.get(AI_CONNECTION_STATE_STORAGE_KEY))) as AIConnectionState;
-          current.revision += 1;
-          memory.store.set(AI_CONNECTION_STATE_STORAGE_KEY, current);
-        }
-        return readStateRecord();
-      });
-      await expect(
-        updateAIConnectionState((state) => {
-          state.connections.conn_test.name = "MUTATOR_MARKER";
-          return state;
-        }, { maxAttempts: 3 }),
-      ).rejects.toBeInstanceOf(AIConnectionStateConflictError);
-      const stored = (await loadAIConnectionState()) as AIConnectionState;
-      // The stored revision only moved by the competing writer (one bump per
-      // attempt); the losing mutation was never committed over it.
-      expect(stored.revision).toBe(beforeRevision + 3);
-      expect(stored.connections.conn_test?.name).not.toBe("MUTATOR_MARKER");
+    it("serializes lock users that do not go through updateAIConnectionState", async () => {
+      const order: string[] = [];
+      await Promise.all([
+        withAIConnectionStateWriteLock(async () => {
+          order.push("first-start");
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          order.push("first-end");
+        }),
+        withAIConnectionStateWriteLock(async () => {
+          order.push("second-start");
+        }),
+      ]);
+      expect(order).toEqual(["first-start", "first-end", "second-start"]);
+    });
+  });
+
+  describe("invalidateConnectionValidation", () => {
+    it("demotes current authorities (validated/failed/testing/stale) to stale and clears bound data", () => {
+      for (const status of ["validated", "failed", "testing", "stale"] as const) {
+        const connection = makeConnection({
+          validation: {
+            status,
+            generation: 4,
+            validatedConnectionRevision: 2,
+            validatedCredentialRevision: 3,
+            validatedAt: 12345,
+            errorCode: status === "validated" ? undefined : "SOME_CODE",
+          },
+        });
+        invalidateConnectionValidation(connection);
+        expect(connection.validation.status).toBe("stale");
+        expect(connection.validation.generation).toBe(5);
+        expect(connection.validation).not.toHaveProperty("validatedConnectionRevision");
+        expect(connection.validation).not.toHaveProperty("validatedCredentialRevision");
+        expect(connection.validation).not.toHaveProperty("validatedAt");
+        expect(connection.validation).not.toHaveProperty("errorCode");
+      }
+    });
+
+    it("keeps never_tested but still increments generation for consistent semantics", () => {
+      const connection = makeConnection({ validation: { status: "never_tested", generation: 2 } });
+      invalidateConnectionValidation(connection);
+      expect(connection.validation.status).toBe("never_tested");
+      expect(connection.validation.generation).toBe(3);
     });
   });
 
@@ -289,7 +347,7 @@ describe("aiConnectionState", () => {
         },
       });
       state.connections.conn_test.credentialRef = "cred_test";
-      await saveAIConnectionState(state);
+      await persistAIConnectionState(state);
       expect(dumpStoreJson(memory.store)).not.toContain(plaintext);
       expect(dumpStoreJson(memory.store)).toContain("qse:v1:");
     });

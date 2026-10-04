@@ -18,10 +18,21 @@
  *   ciphertext or legacy plaintext), then encrypted.
  * An existing `qse:v1` envelope is never double-encrypted.
  *
- * Authority staging: this is a shadow migration. Legacy AppSettings AI fields
- * stay the runtime authority until the E2 parseRouter cutover; E1 must not
- * dual-write. After E2, AIConnectionState becomes authoritative and the legacy
- * AI fields degrade to a compatibility projection.
+ * Authority staging: E1 ships this migration as a CONTROLLED CUTOVER
+ * PRIMITIVE ONLY — it is not executed anywhere in production during E1
+ * (behavior-neutral). At the E2 authority-cutover boundary the background
+ * service worker (the single writer authority) invokes it against the
+ * then-current legacy authority, so no production legacy drift can occur
+ * before that point. Legacy AppSettings AI fields stay the runtime authority
+ * until that cutover; after it, AIConnectionState becomes authoritative and
+ * the legacy AI fields degrade to a compatibility projection.
+ *
+ * Idempotence and fail-closed behavior are guaranteed for repeated
+ * invocations from the owning (single-writer) context. There is no atomic
+ * multi-context claim: chrome.storage.local has no compare-and-swap, so the
+ * marker re-check before the final write is a best-effort guard, not a
+ * transactional guarantee. Production safety comes from running migration
+ * only in the single writer context.
  */
 
 import type { AIConnectionState, Connection, ProtocolId, ProviderPresetId } from "../types/connection";
@@ -33,7 +44,7 @@ import {
 } from "./aiConnectionPresets";
 import {
   loadAIConnectionState,
-  saveAIConnectionState,
+  persistAIConnectionState,
 } from "./aiConnectionState";
 import { decryptValue, encryptValue, isCredentialEnvelope, tryDecryptLegacyValue } from "./encryption";
 
@@ -133,10 +144,11 @@ export function buildLegacyConnectionParts(snapshot: LegacyAISettingsSnapshot): 
 }
 
 /**
- * Run the idempotent legacy migration. Safe to call repeatedly and from
- * multiple contexts: the state-key marker plus a re-read before the final
- * write make every outcome deterministic (at most one legacy connection is
- * ever created, and a valid existing state is never rewritten).
+ * Run the idempotent legacy migration. Safe to call repeatedly: the state-key
+ * marker makes every outcome deterministic (at most one legacy connection is
+ * ever created, and a valid existing state is never rewritten). Production
+ * invocation is reserved for the E2 cutover in the single-writer background
+ * context; no atomic multi-context behavior is claimed.
  */
 export async function migrateLegacyAIConnectionState(): Promise<AIConnectionMigrationResult> {
   // Marker check. A valid state is authoritative: no-op, no rewrite.
@@ -207,8 +219,9 @@ export async function migrateLegacyAIConnectionState(): Promise<AIConnectionMigr
       : {},
   };
 
-  // Defer to a concurrent winner: if state appeared meanwhile, keep it and
-  // never overwrite (idempotence across contexts and retries).
+  // Idempotence guard, not a transactional guarantee: if state appeared
+  // meanwhile, keep it and never overwrite. Production runs this only in the
+  // single-writer context, so the guard is expected to be decisive there.
   const latest = await loadAIConnectionState().catch((err: unknown): AIConnectionState | null | Error =>
     err instanceof Error ? err : new Error(String(err)),
   );
@@ -221,7 +234,7 @@ export async function migrateLegacyAIConnectionState(): Promise<AIConnectionMigr
   if (latest) return { status: "already_migrated", state: latest };
 
   try {
-    await saveAIConnectionState(state);
+    await persistAIConnectionState(state);
   } catch (err) {
     return failure(
       "AI_CONNECTION_STATE_MALFORMED",

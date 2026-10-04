@@ -5,21 +5,32 @@
  * ONE `chrome.storage.local` key: `aiConnectionState`. There is no separately
  * writable connection store or credential store beside it.
  *
- * Concurrency model (documented contract, tested in aiConnectionState.test.ts):
- * - `chrome.storage.local` has no transactions or compare-and-swap.
- * - Within one extension context, JavaScript execution is event-loop
- *   serialized, so a load→save sequence cannot interleave.
- * - Across contexts (e.g. background service worker vs side panel), a plain
- *   read-modify-write could silently clobber newer state. `updateAIConnectionState`
- *   closes this: it re-reads the stored revision immediately before writing,
- *   retries the mutator on top of a newer base (bounded attempts), and throws
- *   `AIConnectionStateConflictError` instead of clobbering when attempts are
- *   exhausted.
+ * Ownership model (frozen contract):
+ * - AIConnectionState WRITES = single writer authority. From E2 onward the
+ *   background service worker is the only production mutation authority;
+ *   Settings and other surfaces send mutation commands to it, and direct UI
+ *   writes are forbidden. Other extension contexts are read-only for state
+ *   metadata.
+ * - `chrome.storage.local` has no atomic compare-and-swap. Cross-context
+ *   lost-update safety therefore comes ONLY from the single-writer ownership
+ *   rule — not from any read/write interleaving trick. Nothing here claims to
+ *   close the gap between a read and a write across contexts.
+ * - Inside the owning context, `withAIConnectionStateWriteLock` strictly
+ *   serializes mutations (async interleaving across awaits is real even in
+ *   one context). The lock is an owner-context convenience only and does NOT
+ *   solve cross-context concurrency.
  *
- * Authority staging: until the E2 parseRouter cutover, legacy `AppSettings`
- * AI fields remain the runtime authority; this state is a shadow created by
- * migration. After E2 this state becomes authoritative and the legacy fields
- * become a compatibility projection only.
+ * Initialization rule: only the explicit migration/initialization path may
+ * create the first AIConnectionState. Ordinary mutation on absent state fails
+ * with `AIConnectionStateNotInitializedError` so the absent key keeps its
+ * meaning as the migration eligibility marker.
+ *
+ * Authority staging: E1 is a storage foundation only — no production
+ * migration execution and no production writer exist yet. At the E2
+ * authority-cutover boundary the background service worker runs the migration
+ * against the then-current legacy authority and becomes the mutation
+ * authority; legacy `AppSettings` AI fields degrade to a compatibility
+ * projection.
  */
 
 import type {
@@ -39,6 +50,7 @@ import {
   resolveConnectionEndpoint,
   resolveConnectionProtocol,
 } from "./aiConnectionPresets";
+import { ENCRYPTED_VALUE_PREFIX } from "./encryption";
 
 export const AI_CONNECTION_STATE_STORAGE_KEY = "aiConnectionState";
 
@@ -50,9 +62,6 @@ const VALIDATION_STATUSES: readonly ValidationStatus[] = [
   "stale",
 ];
 
-/** Namespace every credential envelope version shares (`qse:*`). */
-const CREDENTIAL_ENVELOPE_NAMESPACE = "qse:";
-
 /** Thrown when stored state claims the key but fails schemaVersion-1 validation. */
 export class MalformedAIConnectionStateError extends Error {
   constructor(reason: string) {
@@ -61,13 +70,18 @@ export class MalformedAIConnectionStateError extends Error {
   }
 }
 
-/** Thrown when a bounded revision-conflict retry loop cannot commit a mutation. */
-export class AIConnectionStateConflictError extends Error {
-  constructor(attempts: number) {
+/**
+ * Thrown when a mutation targets a context where no AIConnectionState exists
+ * yet. Ordinary mutations must never auto-initialize the state: the absent
+ * key is the migration eligibility marker, and only the explicit
+ * migration/initialization path may create the first state.
+ */
+export class AIConnectionStateNotInitializedError extends Error {
+  constructor() {
     super(
-      `AI connection state changed concurrently; mutation aborted after ${attempts} attempts to avoid clobbering newer state`,
+      `No ${AI_CONNECTION_STATE_STORAGE_KEY} exists yet; only the explicit migration/initialization path may create it`,
     );
-    this.name = "AIConnectionStateConflictError";
+    this.name = "AIConnectionStateNotInitializedError";
   }
 }
 
@@ -148,11 +162,11 @@ function isEncryptedCredentialRecord(value: unknown, expectedRef: string): value
   if (!isPlainObject(value)) return false;
   if (value.ref !== expectedRef) return false;
   if (value.type !== "api_key") return false;
-  // Defense in depth: persisted credential material must always claim the
-  // `qse:*` envelope namespace. A plaintext value fails validation, so a save
-  // of plaintext credential material fails closed instead of being stored.
+  // schemaVersion 1 accepts ONLY the currently supported `qse:v1:` envelope.
+  // Unknown `qse:*` versions fail state validation instead of being treated as
+  // valid credential state; plaintext values fail for the same reason.
   if (!isNonEmptyString(value.encryptedValue)) return false;
-  if (!value.encryptedValue.startsWith(CREDENTIAL_ENVELOPE_NAMESPACE)) return false;
+  if (!value.encryptedValue.startsWith(ENCRYPTED_VALUE_PREFIX)) return false;
   if (!isInteger(value.revision, 1)) return false;
   if (!isFiniteNumber(value.updatedAt)) return false;
   return true;
@@ -206,7 +220,7 @@ function cloneState<T>(value: T): T {
 
 /**
  * Load the AI connection state.
- * - Absent key -> null (the E1 migration eligibility marker).
+ * - Absent key -> null (the migration eligibility marker).
  * - Malformed state -> throws MalformedAIConnectionStateError (fail closed);
  *   callers must never fall back to fabricating a default.
  */
@@ -217,60 +231,74 @@ export async function loadAIConnectionState(): Promise<AIConnectionState | null>
 }
 
 /**
- * Persist a complete state. The caller must have observed this state in the
- * same context turn; cross-context mutations should use
- * `updateAIConnectionState`, which is revision-aware. Validation runs before
- * the write: malformed or plaintext-bearing state fails closed.
+ * Internal persistence primitive: validated, unconditional write of a
+ * complete state. NOT a general-purpose writer. It is reserved for the
+ * explicit initialization/migration path and for `updateAIConnectionState`
+ * inside the owner-context write lock. Ordinary consumers must use
+ * `updateAIConnectionState`, and production writes belong to the single
+ * writer authority (the background service worker from E2 onward) — a bare
+ * read-modify-write across contexts would silently clobber newer state.
  */
-export async function saveAIConnectionState(state: AIConnectionState): Promise<void> {
+export async function persistAIConnectionState(state: AIConnectionState): Promise<void> {
   const validated = validateAIConnectionState(cloneState(state));
   await chrome.storage.local.set({ [AI_CONNECTION_STATE_STORAGE_KEY]: validated });
 }
 
 /**
- * Revision-aware mutation. Reads the current state (fail closed on malformed),
- * applies `mutate`, bumps the whole-state revision, re-reads immediately
- * before writing, and retries the whole sequence on a revision conflict.
- * Returning null from `mutate` aborts without writing (idempotent no-op).
- *
- * Throws MalformedAIConnectionStateError when the stored state is invalid, and
- * AIConnectionStateConflictError after exhausting attempts instead of
- * silently clobbering newer state.
+ * Owner-context write lock. Tasks are strictly serialized in submission
+ * order: a task starts only after the previous one settles. A rejected task
+ * never poisons the queue — later mutations still execute. This serializes
+ * the OWNING CONTEXT only; it does not claim to solve cross-context
+ * concurrency (that is the single-writer ownership rule's job).
+ */
+let ownerWriteQueue: Promise<unknown> = Promise.resolve();
+
+export function withAIConnectionStateWriteLock<T>(task: () => Promise<T>): Promise<T> {
+  const run = ownerWriteQueue.catch(() => undefined).then(task);
+  ownerWriteQueue = run;
+  return run;
+}
+
+/**
+ * Single-owner mutation helper. Must be called from the writer-authority
+ * context. Reads the current state (fail closed when absent — mutations never
+ * auto-initialize — and when malformed), applies `mutate`, bumps the
+ * whole-state revision, validates, and persists — all inside the
+ * owner-context write lock. Returning null from `mutate` aborts without
+ * writing (idempotent no-op).
  */
 export async function updateAIConnectionState(
   mutate: (state: AIConnectionState) => AIConnectionState | null,
-  options?: { maxAttempts?: number },
 ): Promise<AIConnectionState | null> {
-  const maxAttempts = Math.max(1, options?.maxAttempts ?? 3);
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const observedRaw = await readRawState();
-    const observedAbsent = observedRaw === undefined;
-    const base = observedAbsent ? createEmptyAIConnectionState() : validateAIConnectionState(observedRaw);
+  return withAIConnectionStateWriteLock(async () => {
+    const raw = await readRawState();
+    if (raw === undefined) throw new AIConnectionStateNotInitializedError();
+    const base = validateAIConnectionState(raw);
 
     const draft = mutate(cloneState(base));
     if (draft === null) return null;
     draft.revision = base.revision + 1;
     const validated = validateAIConnectionState(draft);
-
-    // Narrow CAS window: re-read right before the write. Chrome storage has no
-    // atomic compare-and-swap, so the remaining race window is one event-loop
-    // turn wide; the retry loop keeps it recoverable, and exhaustion throws
-    // rather than clobbering.
-    const latestRaw = await readRawState();
-    const latestAbsent = latestRaw === undefined;
-    const conflicts =
-      latestAbsent !== observedAbsent ||
-      (!latestAbsent && validateAIConnectionState(latestRaw).revision !== base.revision);
-    if (conflicts) {
-      if (attempt === maxAttempts) throw new AIConnectionStateConflictError(maxAttempts);
-      continue;
-    }
-
-    await chrome.storage.local.set({ [AI_CONNECTION_STATE_STORAGE_KEY]: validated });
+    await persistAIConnectionState(validated);
     return validated;
-  }
-  throw new AIConnectionStateConflictError(maxAttempts);
+  });
+}
+
+/**
+ * Invalidate the validation authority of a connection after a runtime-relevant
+ * configuration or credential change: prior validation knowledge must not
+ * remain current. `validated`/`failed`/`testing`/`stale` become `stale` with
+ * all bound revisions, timestamps, and error codes cleared;
+ * `never_tested` stays `never_tested`. The generation always increments so an
+ * in-flight validation for the previous configuration can never later be
+ * honored as current.
+ */
+export function invalidateConnectionValidation(connection: Connection): void {
+  const hadAuthority = connection.validation.status !== "never_tested";
+  connection.validation = {
+    status: hadAuthority ? "stale" : "never_tested",
+    generation: connection.validation.generation + 1,
+  };
 }
 
 /** Non-secret projection of a connection. Never contains credential material. */

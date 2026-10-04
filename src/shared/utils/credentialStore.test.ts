@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ENCRYPTED_VALUE_PREFIX, UnsupportedCredentialFormatError } from "./encryption";
+import { ENCRYPTED_VALUE_PREFIX, decryptValue } from "./encryption";
 import {
   CredentialNotFoundError,
   clearCredential,
@@ -7,14 +7,33 @@ import {
   replaceCredential,
   resolveCredentialForRuntime,
 } from "./credentialStore";
-import { AI_CONNECTION_STATE_STORAGE_KEY, loadAIConnectionState, saveAIConnectionState } from "./aiConnectionState";
-import type { AIConnectionState } from "../types/connection";
+import {
+  AI_CONNECTION_STATE_STORAGE_KEY,
+  AIConnectionStateNotInitializedError,
+  MalformedAIConnectionStateError,
+  loadAIConnectionState,
+  persistAIConnectionState,
+} from "./aiConnectionState";
+import { migrateLegacyAIConnectionState } from "./aiConnectionMigration";
+import type { AIConnectionState, ValidationRecord } from "../types/connection";
 import { dumpStoreJson, installMemoryStorage, type MemoryStorageHandle } from "../../test/memoryStorage";
 
 const PLAINTEXT_CREDENTIAL = "sk-fake-runtime-key-12345";
+const ENVELOPE_FIXTURE = "qse:v1:U0VFRF9FTlZFTE9QRQ";
 
-async function seedState(): Promise<void> {
-  await saveAIConnectionState({
+interface SeedOverrides {
+  validation?: ValidationRecord;
+}
+
+async function seedState(overrides: SeedOverrides = {}): Promise<void> {
+  const validation: ValidationRecord = overrides.validation ?? {
+    status: "validated",
+    generation: 1,
+    validatedConnectionRevision: 1,
+    validatedCredentialRevision: 1,
+    validatedAt: 1,
+  };
+  const state: AIConnectionState = {
     schemaVersion: 1,
     revision: 1,
     activeConnectionId: "conn_main",
@@ -27,7 +46,7 @@ async function seedState(): Promise<void> {
         credentialRef: "cred_main",
         selectedModelId: "gpt-5.5",
         connectionRevision: 1,
-        validation: { status: "validated", generation: 1, validatedConnectionRevision: 1, validatedCredentialRevision: 1 },
+        validation,
         createdAt: 1,
         updatedAt: 1,
       },
@@ -36,12 +55,13 @@ async function seedState(): Promise<void> {
       cred_main: {
         ref: "cred_main",
         type: "api_key",
-        encryptedValue: "qse:v1:U0VFRF9FTlZFTE9QRQ",
+        encryptedValue: ENVELOPE_FIXTURE,
         revision: 1,
         updatedAt: 1,
       },
     },
-  });
+  };
+  await persistAIConnectionState(state);
 }
 
 describe("credentialStore", () => {
@@ -53,10 +73,15 @@ describe("credentialStore", () => {
   });
 
   describe("replaceCredential", () => {
-    it("encrypts into a qse:v1 envelope and never persists plaintext", async () => {
-      const record = await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
-      expect(record.revision).toBe(2); // seeded record was revision 1
-      expect(record.encryptedValue.startsWith(ENCRYPTED_VALUE_PREFIX)).toBe(true);
+    it("encrypts into a qse:v1 envelope, never persists plaintext, and returns only non-secret metadata", async () => {
+      const result = await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
+      expect(result.ref).toBe("cred_main");
+      expect(result.revision).toBe(2); // seeded record was revision 1
+      // The committed updatedAt equals the stored record's updatedAt exactly.
+      const stored = await loadAIConnectionState();
+      expect(result.updatedAt).toBe(stored?.credentials.cred_main?.updatedAt);
+      // The write result never exposes the envelope.
+      expect(JSON.stringify(result)).not.toContain("qse:");
       expect(dumpStoreJson(memory.store)).not.toContain(PLAINTEXT_CREDENTIAL);
       expect(dumpStoreJson(memory.store, AI_CONNECTION_STATE_STORAGE_KEY)).toContain("qse:v1:");
     });
@@ -66,16 +91,50 @@ describe("credentialStore", () => {
       expect(await resolveCredentialForRuntime("cred_main")).toBe(PLAINTEXT_CREDENTIAL);
     });
 
-    it("increments the credential revision on replacement and marks bound validations stale", async () => {
-      await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
-      const second = await replaceCredential("cred_main", "sk-fake-rotated-key-67890");
-      expect(second.revision).toBe(3);
+    it("E1-RF01-CRED-01 invalidates a prior failed validation authority", async () => {
+      await seedState({
+        validation: {
+          status: "failed",
+          generation: 7,
+          validatedConnectionRevision: 1,
+          validatedCredentialRevision: 1,
+          validatedAt: 42,
+          errorCode: "HTTP_401",
+        },
+      });
 
-      const state = await loadAIConnectionState();
-      expect(state?.credentials.cred_main?.revision).toBe(3);
-      // A validation bound to credential revision 1 can no longer be honored.
-      expect(state?.connections.conn_main?.validation.status).toBe("stale");
-      expect(dumpStoreJson(memory.store)).not.toContain("sk-fake-rotated-key-67890");
+      await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
+
+      const connection = (await loadAIConnectionState())?.connections.conn_main;
+      expect(connection?.validation.status).toBe("stale");
+      expect(connection?.validation.generation).toBe(8);
+      expect(connection?.validation).not.toHaveProperty("errorCode");
+      expect(connection?.validation).not.toHaveProperty("validatedAt");
+      expect(connection?.validation).not.toHaveProperty("validatedCredentialRevision");
+      // Connection metadata itself did not change.
+      expect(connection?.connectionRevision).toBe(1);
+    });
+
+    it("E1-RF01-CRED-02 invalidates a testing validation and bumps its generation", async () => {
+      await seedState({ validation: { status: "testing", generation: 3 } });
+
+      await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
+
+      const connection = (await loadAIConnectionState())?.connections.conn_main;
+      expect(connection?.validation.status).toBe("stale");
+      expect(connection?.validation.generation).toBe(4);
+      expect(connection?.validation).not.toHaveProperty("validatedCredentialRevision");
+    });
+
+    it("invalidates a validated connection (stale + bound revisions cleared + generation bump)", async () => {
+      await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
+
+      const connection = (await loadAIConnectionState())?.connections.conn_main;
+      expect(connection?.validation.status).toBe("stale");
+      expect(connection?.validation.generation).toBe(2);
+      expect(connection?.validation).not.toHaveProperty("validatedConnectionRevision");
+      expect(connection?.validation).not.toHaveProperty("validatedCredentialRevision");
+      expect(connection?.validation).not.toHaveProperty("validatedAt");
     });
 
     it("refuses empty plaintext without writing", async () => {
@@ -99,7 +158,6 @@ describe("credentialStore", () => {
 
   describe("clearCredential", () => {
     it("removes the record, drops the connection reference, and is idempotent", async () => {
-      await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
       await clearCredential("cred_main");
 
       let state = await loadAIConnectionState();
@@ -111,6 +169,32 @@ describe("credentialStore", () => {
       state = await loadAIConnectionState();
       expect(state?.revision).toBe(revisionBefore);
     });
+
+    it("E1-RF01-CRED-03 increments connectionRevision of referencing connections", async () => {
+      await clearCredential("cred_main");
+      const connection = (await loadAIConnectionState())?.connections.conn_main;
+      expect(connection?.connectionRevision).toBe(2);
+    });
+
+    it("E1-RF01-CRED-04 refreshes the connection updatedAt", async () => {
+      const before = (await loadAIConnectionState())?.connections.conn_main?.updatedAt;
+      await clearCredential("cred_main");
+      const after = (await loadAIConnectionState())?.connections.conn_main?.updatedAt;
+      // The seed sets updatedAt to 1; clearing runtime-relevant metadata must
+      // actually move the timestamp forward.
+      expect(after).toBeDefined();
+      expect((after ?? 0)).toBeGreaterThan(before ?? 0);
+    });
+
+    it("E1-RF01-CRED-05 invalidates the validation authority of referencing connections", async () => {
+      await clearCredential("cred_main");
+      const connection = (await loadAIConnectionState())?.connections.conn_main;
+      expect(connection?.validation.status).toBe("stale");
+      expect(connection?.validation.generation).toBe(2);
+      expect(connection?.validation).not.toHaveProperty("validatedConnectionRevision");
+      expect(connection?.validation).not.toHaveProperty("validatedCredentialRevision");
+      expect(connection?.validation).not.toHaveProperty("validatedAt");
+    });
   });
 
   describe("resolveCredentialForRuntime fails closed", () => {
@@ -119,7 +203,9 @@ describe("credentialStore", () => {
     });
 
     it("rejects a tampered qse:v1 envelope", async () => {
-      const record = await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
+      await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
+      const state = (await loadAIConnectionState()) as AIConnectionState;
+      const record = state.credentials.cred_main;
       const payload = record.encryptedValue.slice(ENCRYPTED_VALUE_PREFIX.length);
       const middle = Math.floor(payload.length / 2);
       const tampered =
@@ -127,25 +213,52 @@ describe("credentialStore", () => {
         payload.slice(0, middle) +
         (payload[middle] === "A" ? "B" : "A") +
         payload.slice(middle + 1);
-
-      const state = (await loadAIConnectionState()) as AIConnectionState;
       state.credentials.cred_main.encryptedValue = tampered;
-      await saveAIConnectionState(state);
+      await persistAIConnectionState(state);
 
-      await expect(resolveCredentialForRuntime("cred_main")).rejects.toThrow();
-      // The stored tampered material never yields the plaintext.
-      expect(await resolveCredentialForRuntime("cred_main").catch(() => "FAILED_CLOSED")).toBe("FAILED_CLOSED");
+      const result = await resolveCredentialForRuntime("cred_main").catch(() => "FAILED_CLOSED");
+      expect(result).toBe("FAILED_CLOSED");
     });
 
-    it("rejects an unknown qse envelope version", async () => {
-      await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
-      const state = (await loadAIConnectionState()) as AIConnectionState;
-      state.credentials.cred_main.encryptedValue = "qse:v9:QUJD";
-      await saveAIConnectionState(state);
+    it("rejects an unknown qse envelope version (state validation gates before decrypt)", async () => {
+      // Corrupt storage directly (bypassing the validating write path) to
+      // simulate a future envelope version landing on disk.
+      const raw = JSON.parse(JSON.stringify(memory.store.get(AI_CONNECTION_STATE_STORAGE_KEY))) as AIConnectionState;
+      raw.credentials.cred_main.encryptedValue = "qse:v9:QUJD";
+      memory.store.set(AI_CONNECTION_STATE_STORAGE_KEY, raw);
 
-      const err = await resolveCredentialForRuntime("cred_main").catch((caught: unknown) => caught);
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error & { cause?: unknown }).cause).toBeInstanceOf(UnsupportedCredentialFormatError);
+      // Since Review Fix 01 the state validator only accepts the current
+      // qse:v1 envelope, so an unknown version fails closed at load time.
+      await expect(resolveCredentialForRuntime("cred_main")).rejects.toBeInstanceOf(
+        MalformedAIConnectionStateError,
+      );
+      // The raw decrypt path independently fails closed on unknown versions.
+      await expect(decryptValue("qse:v9:QUJD")).rejects.toThrow();
+    });
+  });
+
+  describe("E1-RF01-INIT-01 absent-state mutation cannot consume the migration marker", () => {
+    it("replaceCredential fails with a stable error, writes no state, and migration still works", async () => {
+      memory = installMemoryStorage();
+      memory.store.set("appSettings", {
+        providerId: "anthropic",
+        apiKey: PLAINTEXT_CREDENTIAL,
+        apiModel: "claude-opus-4.8",
+      });
+
+      await expect(replaceCredential("cred_new", PLAINTEXT_CREDENTIAL)).rejects.toBeInstanceOf(
+        AIConnectionStateNotInitializedError,
+      );
+      await expect(clearCredential("cred_new")).rejects.toBeInstanceOf(AIConnectionStateNotInitializedError);
+      // The absent key stays absent: the migration eligibility marker was not consumed.
+      expect(memory.store.has(AI_CONNECTION_STATE_STORAGE_KEY)).toBe(false);
+
+      // After the failed mutation, migration still runs normally from legacy AppSettings.
+      const result = await migrateLegacyAIConnectionState();
+      expect(result.status).toBe("migrated");
+      const state = await loadAIConnectionState();
+      expect(state?.activeConnectionId).toBe("conn_legacy_default");
+      expect(await resolveCredentialForRuntime("cred_legacy_default")).toBe(PLAINTEXT_CREDENTIAL);
     });
   });
 
@@ -153,12 +266,16 @@ describe("credentialStore", () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       await replaceCredential("cred_main", PLAINTEXT_CREDENTIAL);
-      const state = (await loadAIConnectionState()) as AIConnectionState;
-      state.credentials.cred_main.encryptedValue = "qse:v9:QUJD";
-      await saveAIConnectionState(state);
+      const raw = JSON.parse(JSON.stringify(memory.store.get(AI_CONNECTION_STATE_STORAGE_KEY))) as AIConnectionState;
+      raw.credentials.cred_main.encryptedValue = "qse:v9:QUJD";
+      memory.store.set(AI_CONNECTION_STATE_STORAGE_KEY, raw);
       await resolveCredentialForRuntime("cred_main").catch(() => undefined);
 
-      const logged = consoleSpy.mock.calls.map((call) => call.map((arg) => (arg instanceof Error ? `${arg.name}: ${arg.message}` : String(arg))).join(" ")).join("\n");
+      const logged = consoleSpy.mock.calls
+        .map((call) =>
+          call.map((arg) => (arg instanceof Error ? `${arg.name}: ${arg.message}` : JSON.stringify(arg) ?? String(arg))).join(" "),
+        )
+        .join("\n");
       expect(logged).not.toContain(PLAINTEXT_CREDENTIAL);
     } finally {
       consoleSpy.mockRestore();
