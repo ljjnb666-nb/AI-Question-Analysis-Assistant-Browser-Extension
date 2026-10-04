@@ -1,5 +1,7 @@
 # UI05R-E2A — Runtime Contract + Capability Resolver
 
+> Historical E2A report. E2B2A has completed runtime cutover; [E2B2B](UI05R-E2B2B-AUTHORITY-CLOSURE.md) removes the ordinary AI settings domain and legacy projection.
+
 > **Status**: IMPLEMENTED (E2A scope, Review Fix 02/03 applied)
 > **Branch**: `feat/ui05r-e2a-runtime-contract` (based on `main` @ `6082fbd`)
 > **Engineering owner**: Codex · **Frontend owner**: Gemini (untouched) · **Gatekeeper**: ChatGPT

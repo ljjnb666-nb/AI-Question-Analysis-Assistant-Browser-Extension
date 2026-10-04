@@ -1,5 +1,7 @@
 # UI05R-E1 — Connection Domain + AI Storage Authority (Engineering Foundation)
 
+> Historical phase report. Current settings domain and legacy cleanup contract: [E2B2B authority closure](UI05R-E2B2B-AUTHORITY-CLOSURE.md). AppSettings is now non-AI; historical compatibility statements below describe that phase only.
+
 > **Status**: IMPLEMENTED (E1 scope, Review Fix 01 applied)
 > **Branch**: `feat/ui05r-e1-connection-storage` (based on `main`)
 > **Frontend owner**: Gemini (untouched by this branch)

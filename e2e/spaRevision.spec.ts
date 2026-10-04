@@ -165,7 +165,7 @@ async function startProductionAutoSolve(context: BrowserContext, extensionId: st
     },
   }), { baseOrigin: origin, analyticsOptIn });
   await routeCanonicalOpenAIToFixture(context, origin);
-  await seedAIConnection(driver, { providerId: "openai", apiModel: "gpt-5.5", credential: { action: "REPLACE", value: "e2e-key" } });
+  await seedAIConnection(driver, { presetId: "openai", selectedModelId: "gpt-5.5", credential: { action: "REPLACE", value: "e2e-key" } });
 
   const tabId = await driver.evaluate(async (baseOrigin: string) => {
     const [tab] = await chrome.tabs.query({ url: `${baseOrigin}/*` });
@@ -258,7 +258,7 @@ async function seedAuthenticatedSidePanel(driver: Page, backend: TestAnalyticsBa
       analyticsBaseUrl,
     },
   }), { analyticsBaseUrl: backend.baseUrl, userId: account.userId, userEmail: account.email, authToken: account.authToken });
-  await seedAIConnection(driver, { providerId: "deepseek", apiModel: "deepseek-v4-flash", credential: { action: "REPLACE", value: PHASE8A_E2E_KEY } });
+  await seedAIConnection(driver, { presetId: "deepseek", selectedModelId: "deepseek-v4-flash", credential: { action: "REPLACE", value: PHASE8A_E2E_KEY } });
 }
 
 async function sendDetectToTab(driver: Page, tabId: number) {

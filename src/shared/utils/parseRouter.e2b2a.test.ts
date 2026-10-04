@@ -9,7 +9,7 @@ import { persistAIConnectionState, updateAIConnectionState } from "./aiConnectio
 import { encryptValue } from "./encryption";
 import { resolvePresetAuthScheme, resolvePresetDefaultModel } from "./aiConnectionPresets";
 import * as credentials from "./credentialStore";
-import { parseQuestion, parseQuestionPackage } from "./parseRouter";
+import { withSolveAuthorityLease, parseQuestion, parseQuestionPackage } from "./parseRouter";
 import type { SolverQuestionPackage } from "../ai/questionPackage";
 import * as runtimeResolver from "./aiRuntimeResolver";
 import * as mediaPreparation from "../ai/providerMediaPreparation";
@@ -370,4 +370,18 @@ it("RF01 internal retry re-resolves credentials from the same runtime and clears
   expect(finalFence).toHaveBeenCalledTimes(2);
   expect(contexts[0].runtime).toBe(contexts[1].runtime);
   expect(contexts.every(context => context.credential === null)).toBe(true);
+});
+
+it("E2B2B bound lease rejects switch to unconfigured B as stale without B fetch", async () => {
+  await seed("openai");
+  const context = withSolveAuthorityLease();
+  const fetchMock = vi.fn(async () => response("openai")); vi.stubGlobal("fetch", fetchMock);
+  await parseQuestion(block, prefs, undefined, context);
+  await updateAIConnectionState(state => {
+    state.connections.second = { ...state.connections.active, id: "second", credentialRef: undefined };
+    state.activeConnectionId = "second";
+    return state;
+  });
+  await expect(parseQuestion(block, prefs, undefined, context)).rejects.toMatchObject({ code: "AI_RUNTIME_CONFIG_STALE" });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });

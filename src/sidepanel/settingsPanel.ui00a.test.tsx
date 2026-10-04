@@ -57,19 +57,17 @@ import { parseQuestion } from "@/shared/utils/parseRouter";
 import { SettingsTab } from "./settingsPanel";
 import * as storage from "@/shared/utils/storage";
 
+const connectionFixture = vi.hoisted(() => ({ presetId: "anthropic", hasCredential: false }));
 function mockStoredSettings(providerId: string, apiKey: string) {
+  connectionFixture.presetId = providerId; connectionFixture.hasCredential = Boolean(apiKey);
   vi.spyOn(storage, "saveSettings").mockResolvedValue(undefined);
   vi.spyOn(storage, "loadSettings").mockResolvedValue({
-    providerId,
-    apiKey,
-    apiModel: "claude-opus-4.8",
     preferredRoute: "auto",
     language: "zh",
     enableAnalytics: true,
     analyticsConsentVersion: 1,
     deviceId: "dev-1",
     analyticsBaseUrl: DEFAULT_ANALYTICS_BASE_URL,
-    customProviderProtocol: "openai",
   });
 }
 
@@ -155,12 +153,5 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
   });
 });
 
-vi.mock("@/shared/utils/aiConnectionClient", () => ({ ensureAIConnectionAuthorityReady: vi.fn(async () => ({ ok: true })) }));
-vi.mock("@/shared/utils/aiSolvePreferences", async () => {
-  const storage = await import("@/shared/utils/storage");
-  return { getAIConnectionReadiness: async () => {
-    const fixture = await storage.loadSettings();
-    return fixture.providerId === "ollama" || Boolean(fixture.apiKey)
-      ? { ready: true } : { ready: false, code: "AI_CREDENTIAL_REQUIRED" };
-  } };
-});
+vi.mock("@/shared/utils/aiConnectionClient", () => ({ getAIConnectionEditorView: vi.fn(async () => ({ ...connectionFixture, selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages" })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/shared/utils/aiSolvePreferences", () => ({ getAIConnectionReadiness: async () => connectionFixture.presetId === "ollama" || connectionFixture.hasCredential ? { ready: true } : { ready: false, code: "AI_CREDENTIAL_REQUIRED" } }));

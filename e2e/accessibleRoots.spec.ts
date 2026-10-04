@@ -516,7 +516,7 @@ async function startProductionAutoSolve(context: BrowserContext, extensionId: st
   }));
 
   await routeCanonicalOpenAIToFixture(context, origin);
-  await seedAIConnection(driver, { providerId: "openai", apiModel: "gpt-5.5", credential: { action: "REPLACE", value: "e2e-key" } });
+  await seedAIConnection(driver, { presetId: "openai", selectedModelId: "gpt-5.5", credential: { action: "REPLACE", value: "e2e-key" } });
 
   const tabId = await driver.evaluate(async (baseOrigin: string) => {
     const [tab] = await chrome.tabs.query({ url: `${baseOrigin}/*` });

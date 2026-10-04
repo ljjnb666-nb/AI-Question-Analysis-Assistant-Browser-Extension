@@ -63,6 +63,9 @@ export function createAuthSessionCoordinator(deps: AuthSessionCoordinatorDeps) {
   let state: AuthSessionState = INITIAL_AUTH_SESSION_STATE;
   let disposed = false;
   let generation = 0;
+  // A credential-clear event can precede the corresponding server rejection
+  // result. Preserve only that non-authoritative UI hint, never session authority.
+  let clearedValidationGeneration: number | null = null;
   // Fingerprint of the session candidate this coordinator last scheduled a
   // server validation for. Null means "unknown, force a validation".
   let lastValidationFingerprint: string | null = null;
@@ -142,7 +145,14 @@ export function createAuthSessionCoordinator(deps: AuthSessionCoordinatorDeps) {
     }
     // A validation that lost a generation race (logout, re-login, newer
     // storage-driven validation) must never overwrite the newer auth state.
-    if (currentGeneration !== generation || disposed) return;
+    if (currentGeneration !== generation || disposed) {
+      if (!disposed && result.status === "unauthenticated" &&
+          clearedValidationGeneration === currentGeneration && state.status === "unauthenticated") {
+        clearedValidationGeneration = null;
+        setState({ sessionRejected: true });
+      }
+      return;
+    }
     applyValidationResult(result);
   }
 
@@ -161,6 +171,7 @@ export function createAuthSessionCoordinator(deps: AuthSessionCoordinatorDeps) {
       // Credentials disappeared (logout or a rejected session cleared them).
       // Bump the generation so any in-flight validation cannot resurrect a
       // session from stale results.
+      clearedValidationGeneration = state.status === "validating" ? generation : null;
       generation += 1;
       setState({
         status: "unauthenticated",
@@ -171,6 +182,7 @@ export function createAuthSessionCoordinator(deps: AuthSessionCoordinatorDeps) {
       });
       return;
     }
+    clearedValidationGeneration = null;
     await runValidation(fingerprint);
   }
 
@@ -197,6 +209,7 @@ export function createAuthSessionCoordinator(deps: AuthSessionCoordinatorDeps) {
   }
 
   function dispose(): void {
+    clearedValidationGeneration = null;
     disposed = true;
     generation += 1;
     unsubscribeStorage?.();
@@ -214,6 +227,7 @@ export function createAuthSessionCoordinator(deps: AuthSessionCoordinatorDeps) {
    * credentials.
    */
   async function applyAuthenticatedSession(userId: string, userEmail: string): Promise<void> {
+    clearedValidationGeneration = null;
     generation += 1;
     setState({
       status: "authenticated",
@@ -229,6 +243,7 @@ export function createAuthSessionCoordinator(deps: AuthSessionCoordinatorDeps) {
 
   /** Logout always converges to unauthenticated, whatever the server did. */
   function applyLoggedOut(): void {
+    clearedValidationGeneration = null;
     generation += 1;
     lastValidationFingerprint = "";
     setState({

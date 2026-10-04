@@ -196,7 +196,7 @@ describe("optional analytics privacy boundary", () => {
       questionType: "single_choice", answer: "B", confidence: 0.9, briefExplanation: "Two", detailedExplanation: "1+1=2",
     }) } }] }), { status: 200, headers: { "Content-Type": "application/json" } }));
 
-    const result = await parseQuestion(block, { ...DEFAULT_SETTINGS, providerId: "openai", apiKey: "provider-key" });
+    const result = await parseQuestion(block, { ...DEFAULT_SETTINGS, ...{ providerId: "openai" as const, apiKey: "provider-key" } });
     await flushAnalytics();
 
     expect(result.answer).toBe("B");

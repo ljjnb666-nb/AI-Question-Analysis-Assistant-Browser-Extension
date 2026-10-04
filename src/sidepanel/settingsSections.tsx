@@ -3,8 +3,8 @@ import { AuthPasswordField, AuthVerificationCodeInput } from "@/shared/auth/Auth
 import { DEFAULT_ANALYTICS_BASE_URL } from "@/shared/constants/analytics";
 import { SectionCard, UiButton, sectionSurfaceStyle, uiInputStyle } from "@/shared/ui/extensionUi";
 import type { UserFeedback } from "@/shared/ui/userFeedback";
-import { PROVIDERS } from "@/shared/utils/parseRouter";
-import type { ProviderId } from "@/shared/utils/parseRouter";
+import { PROVIDERS } from "@/shared/ai/providers";
+import type { ProviderId } from "@/shared/ai/providers";
 import type { UILang } from "./displayUtils";
 
 type AuthText = {
@@ -263,6 +263,7 @@ export const SettingsAccountSection: React.FC<{
 export const SettingsConfigSections: React.FC<{
   analyticsBaseUrl: string;
   apiKey: string;
+  hasCredential?: boolean;
   customProtocol: "openai" | "anthropic";
   customUrl: string;
   deviceId: string;
@@ -291,6 +292,7 @@ export const SettingsConfigSections: React.FC<{
 }> = ({
   analyticsBaseUrl,
   apiKey,
+  hasCredential = false,
   customProtocol,
   customUrl,
   deviceId,
@@ -348,7 +350,7 @@ export const SettingsConfigSections: React.FC<{
       }
     >
       <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={provider.keyPlaceholder} style={uiInputStyle} />
-      {!provider.keyOptional && !apiKey ? <div style={hintStyle}>{isEn ? "No API key is configured yet. Add one before parsing or testing the connection." : "尚未填写 API Key。配置后才能进行 AI 解析和连接测试。"}</div> : null}
+      {!provider.keyOptional && !apiKey && !hasCredential ? <div style={hintStyle}>{isEn ? "No API key is configured yet. Add one before parsing or testing the connection." : "尚未填写 API Key。配置后才能进行 AI 解析和连接测试。"}</div> : null}
       {KEY_LINKS[providerId] ? (
         <a href={KEY_LINKS[providerId][0]} target="_blank" rel="noreferrer" style={linkStyle}>
           {isEn ? `Get key from ${KEY_LINKS[providerId][1]}` : `前往 ${KEY_LINKS[providerId][1]} 获取 Key`}

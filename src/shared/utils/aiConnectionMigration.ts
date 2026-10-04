@@ -8,24 +8,9 @@
  * - Malformed state -> fail closed: nothing is written, legacy data is left
  *   untouched, and a stable error code is surfaced. Retrying is safe.
  *
- * Credential handling: `loadSettings` returns a DECRYPTED apiKey, so migration
- * reads the RAW persisted `appSettings` instead and operates on a known
- * plaintext legacy domain value before (re-)encryption:
- * - `qse:v1:` envelope  -> decrypted first, then re-encrypted. A tampered or
- *   wrong-extension envelope fails closed (stable error, no state written).
- * - other `qse:*`       -> unsupported envelope version, fails closed.
- * - unversioned value   -> decoded via tryDecryptLegacyValue (legacy
- *   ciphertext or legacy plaintext), then encrypted.
- * An existing `qse:v1` envelope is never double-encrypted.
- *
- * Authority staging: E1 ships this migration as a CONTROLLED CUTOVER
- * PRIMITIVE ONLY — it is not executed anywhere in production during E1
- * (behavior-neutral). At the E2 authority-cutover boundary the background
- * service worker (the single writer authority) invokes it against the
- * then-current legacy authority, so no production legacy drift can occur
- * before that point. Legacy AppSettings AI fields stay the runtime authority
- * until that cutover; after it, AIConnectionState becomes authoritative and
- * the legacy AI fields degrade to a compatibility projection.
+ * Migration reads RAW appSettings directly. AppSettings is non-AI; raw historical
+ * values are migration input only. AIConnectionState is the sole authority.
+ * The background owner cleans legacy fields only after a valid state exists.
  *
  * Idempotence and fail-closed behavior are guaranteed for repeated
  * invocations from the owning (single-writer) context. There is no atomic
@@ -52,7 +37,7 @@ export const LEGACY_DEFAULT_CONNECTION_ID = "conn_legacy_default";
 export const LEGACY_DEFAULT_CREDENTIAL_REF = "cred_legacy_default";
 
 /** Raw legacy AI fields exactly as persisted in `appSettings` (not decrypted). */
-export interface LegacyAISettingsSnapshot {
+interface LegacyStoredAISettings {
   providerId?: unknown;
   apiKey?: unknown;
   apiModel?: unknown;
@@ -103,7 +88,7 @@ async function decodeLegacyCredentialMaterial(rawKey: unknown): Promise<
  * Runtime IDs, endpoints, and protocol/auth behavior mirror the current
  * runtime without renaming or inventing anything.
  */
-export function buildLegacyConnectionParts(snapshot: LegacyAISettingsSnapshot): {
+function buildLegacyConnectionParts(snapshot: LegacyStoredAISettings): {
   presetId: ProviderPresetId;
   protocol: ProtocolId;
   protocolOverride: ProtocolId | undefined;
@@ -164,7 +149,7 @@ export async function migrateLegacyAIConnectionState(): Promise<AIConnectionMigr
   if (existing) return { status: "already_migrated", state: existing };
 
   const stored = await chrome.storage.local.get("appSettings");
-  const snapshot = (stored?.appSettings ?? {}) as LegacyAISettingsSnapshot;
+  const snapshot = (stored?.appSettings ?? {}) as LegacyStoredAISettings;
 
   const parts = buildLegacyConnectionParts(snapshot);
   const decoded = await decodeLegacyCredentialMaterial(snapshot.apiKey);

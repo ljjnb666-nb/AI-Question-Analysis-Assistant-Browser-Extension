@@ -1,3 +1,5 @@
+import type { AIConnectionScenarioFixture } from "@/test/aiConnectionFixture";
+import { DEFAULT_SETTINGS } from "@/shared/types";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -259,9 +261,7 @@ describe("UI-04 real App/actions/bridge/hydration feedback wiring", () => {
     await mount();
     vi.mocked(getAIConnectionReadiness).mockResolvedValueOnce({ ready: false, code: "AI_CREDENTIAL_REQUIRED" });
     vi.mocked(loadSettings).mockResolvedValueOnce({
-      language: "en",
-      providerId: "anthropic",
-      apiKey: "",
+      ...DEFAULT_SETTINGS, language: "en",
     } as Awaited<ReturnType<typeof loadSettings>>);
     fireEvent.click(screen.getByRole("button", { name: "Solve & Fill" }));
     await waitFor(() => expect(feedback()).not.toBeNull());
@@ -393,12 +393,12 @@ vi.mock("@/shared/utils/aiSolvePreferences", async () => {
   const { getProvider } = await import("@/shared/ai/providers");
   return {
     loadParsePreferences: async () => { const { preferredRoute, language } = await storage.loadSettings(); return { preferredRoute, language }; },
-    getRuntimeCaptureInfo: async () => { const fixture = await storage.loadSettings(); return getProvider(fixture.providerId); },
+    getRuntimeCaptureInfo: async () => { const fixture = await storage.loadSettings() as AIConnectionScenarioFixture; return getProvider(fixture.providerId ?? "anthropic"); },
     getAIConnectionReadiness: vi.fn(async () => {
-      const fixture = await storage.loadSettings();
-      return { ready: getProvider(fixture.providerId).keyOptional === true || Boolean(fixture.apiKey?.trim()) };
+      const fixture = await storage.loadSettings() as AIConnectionScenarioFixture;
+      return { ready: getProvider(fixture.providerId ?? "anthropic").keyOptional === true || Boolean(fixture.apiKey?.trim()) };
     }),
   };
 });
 
-vi.mock("@/shared/utils/aiConnectionClient", () => ({ ensureAIConnectionAuthorityReady: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/shared/utils/aiConnectionClient", () => ({ ensureAIConnectionAuthorityReady: vi.fn(async () => ({ ok: true })), sendAIConnectionCommand: vi.fn(async () => ({ ok: true, metadata: { presetId: "anthropic" } })), getAIConnectionEditorView: vi.fn(async () => ({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages", hasCredential: true })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));

@@ -8,6 +8,6 @@ export function installSettingsMessaging() {
       return handleAppSettingsCommand(message, { id: chrome.runtime.id, url: chrome.runtime.getURL("sidepanel/sidepanel.html") });
     }
     const { handleAIConnectionCommand } = await import("../background/aiConnectionAuthority");
-    return handleAIConnectionCommand(message);
+    return handleAIConnectionCommand(message, { id: chrome.runtime.id, url: chrome.runtime.getURL("sidepanel/sidepanel.html") });
   });
 }

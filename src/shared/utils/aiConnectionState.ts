@@ -25,12 +25,9 @@
  * with `AIConnectionStateNotInitializedError` so the absent key keeps its
  * meaning as the migration eligibility marker.
  *
- * Authority staging: E1 is a storage foundation only — no production
- * migration execution and no production writer exist yet. At the E2
- * authority-cutover boundary the background service worker runs the migration
- * against the then-current legacy authority and becomes the mutation
- * authority; legacy `AppSettings` AI fields degrade to a compatibility
- * projection.
+ * Current closure: background initializes AIConnectionState from migration-only raw
+ * input, then physically deletes legacy AI keys through the appSettings owner.
+ * AppSettings contains only ordinary preferences and account/session values.
  */
 
 import type {

@@ -1,12 +1,9 @@
+import { APP_SETTINGS_FIELDS, projectAppSettings } from "./appSettingsPolicy";
 import { sendAppSettingsCommand } from "./appSettingsClient";
 import type { AppSettingsUpdatePatch } from "../types/appSettingsMessages";
 import { CURRENT_ANALYTICS_CONSENT_VERSION, normalizeAnalyticsBaseUrl as normalizeBaseUrl } from "./appSettingsPolicy";
 export { CURRENT_ANALYTICS_CONSENT_VERSION } from "./appSettingsPolicy";
-import { loadAIConnectionState, toConnectionMetadata } from "./aiConnectionState";
-import { ensureAIConnectionAuthorityReady, sendAIConnectionCommand } from "./aiConnectionClient";
-import type { LegacyAISettingsPatch } from "../types/aiConnectionMessages";
 import type { FloatingWindowState, AppSettings, HistoryEntry, ParseResult, QuestionBlock } from "../types";
-import { DEFAULT_SETTINGS } from "../types";
 import { logError } from "./errorLogger";
 import {
   decryptValue,
@@ -25,13 +22,7 @@ const KEYS = {
   history: "parseHistory",
   analytics: "analyticsLog",
 } as const;
-const SENSITIVE_SETTINGS_KEYS = ["apiKey", "authToken"] as const;
-export const AI_SETTINGS_KEYS = ["providerId", "apiKey", "apiModel", "customBaseUrl", "customProviderProtocol"] as const;
-function withoutAISettings(value: Partial<AppSettings>): Partial<AppSettings> {
-  const result = { ...value };
-  for (const key of AI_SETTINGS_KEYS) delete result[key];
-  return result;
-}
+const SENSITIVE_SETTINGS_KEYS = ["authToken"] as const;
 
 const MAX_HISTORY = 50;
 const MAX_PREVIEW_TEXT_CHARS = 800;
@@ -77,7 +68,6 @@ export function __resetStorageCacheForTests(): void {
 function ensureSettingsCacheListener(): void {
   if (settingsListenerRegistered || !chrome.storage?.onChanged?.addListener) return;
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === "local" && changes.aiConnectionState) invalidateSettingsCache();
     if (areaName === "local" && changes[KEYS.settings]) {
       invalidateSettingsCache();
       const newSettings = changes[KEYS.settings].newValue as Partial<AppSettings> | undefined;
@@ -91,7 +81,6 @@ function ensureSettingsCacheListener(): void {
 
 async function readSettingsFromStorage(): Promise<AppSettings> {
   const generation = settingsCacheGeneration;
-  const authority = await loadAIConnectionState();
   let result = await chrome.storage.local.get(KEYS.settings);
   let rawStored = (result[KEYS.settings] as Partial<AppSettings> ?? {});
   if (rawStored.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION || !rawStored.deviceId || !rawStored.analyticsBaseUrl) {
@@ -100,19 +89,9 @@ async function readSettingsFromStorage(): Promise<AppSettings> {
     result = await chrome.storage.local.get(KEYS.settings);
     rawStored = (result[KEYS.settings] as Partial<AppSettings> ?? {});
   }
-  const stored = { ...DEFAULT_SETTINGS, ...rawStored };
+  const stored = projectAppSettings(rawStored);
   stored.analyticsBaseUrl = normalizeBaseUrl(stored.analyticsBaseUrl);
 
-  if (authority) {
-    const connection = authority.activeConnectionId ? authority.connections[authority.activeConnectionId] : undefined;
-    if (!connection) throw new Error("AI_ACTIVE_CONNECTION_MISSING");
-    const metadata = toConnectionMetadata(connection, authority);
-    stored.providerId = metadata.presetId;
-    stored.apiModel = metadata.selectedModelId;
-    stored.customBaseUrl = connection.endpointOverride;
-    stored.customProviderProtocol = metadata.presetId === "custom" && metadata.protocol === "anthropic_messages" ? "anthropic" : "openai";
-    stored.apiKey = "";
-  }
 
   // Credential read path. `qse:v1:` envelopes decrypt and fail closed on
   // tampering; unknown `qse:*` versions fail closed as well; legacy strings
@@ -165,22 +144,10 @@ function hasOwnSetting<K extends keyof AppSettings>(
 
 export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
   ensureSettingsCacheListener();
-  const hasAI = AI_SETTINGS_KEYS.some((key) => hasOwnSetting(settings, key));
-  if (hasAI) {
-    const authority = await ensureAIConnectionAuthorityReady();
-    const value = typeof settings.apiKey === "string" ? settings.apiKey.trim() : "";
-    const switched = settings.providerId !== undefined && settings.providerId !== authority.metadata?.presetId;
-    const patch: LegacyAISettingsPatch = {
-      credential: value ? { action: "REPLACE", value } : { action: switched ? "CLEAR" : "KEEP" },
-    };
-    if (hasOwnSetting(settings, "providerId")) patch.providerId = settings.providerId as LegacyAISettingsPatch["providerId"];
-    if (hasOwnSetting(settings, "apiModel")) patch.apiModel = settings.apiModel;
-    if (hasOwnSetting(settings, "customBaseUrl")) patch.customBaseUrl = settings.customBaseUrl ?? "";
-    if (hasOwnSetting(settings, "customProviderProtocol")) patch.customProviderProtocol = settings.customProviderProtocol;
-    await sendAIConnectionCommand({ type: "AI_CONNECTION_APPLY_LEGACY_SETTINGS", settings: patch });
-    invalidateSettingsCache();
+  const patch: AppSettingsUpdatePatch = {};
+  for (const key of APP_SETTINGS_FIELDS) {
+    if (hasOwnSetting(settings, key)) Object.assign(patch, { [key]: settings[key] });
   }
-  const patch: AppSettingsUpdatePatch = withoutAISettings(settings);
   // Undefined account fields are omitted by Chrome JSON messaging; send explicit clears.
   for (const key of ["authToken", "userId", "userEmail"] as const) {
     if (hasOwnSetting(settings, key) && settings[key] === undefined) patch[key] = null;

@@ -6,9 +6,11 @@ import { persistAIConnectionState } from "../shared/utils/aiConnectionState";
 import { encryptValue } from "../shared/utils/encryption";
 import { parseQuestion, parseQuestionPackage } from "../shared/utils/parseRouter";
 
+export type AIConnectionScenarioFixture = AppSettings & { providerId?: ProviderPresetId; apiKey?: string; apiModel?: string; customBaseUrl?: string; customProviderProtocol?: "openai" | "anthropic" };
+
 /** Old scenario inputs now configure actual connection authority before solving. */
-export async function seedAIConnectionFixture(settings: AppSettings) {
-  const presetId = settings.providerId as ProviderPresetId;
+export async function seedAIConnectionFixture(settings: AIConnectionScenarioFixture) {
+  const presetId = settings.providerId ?? "anthropic";
   const protocolOverride = presetId === "custom" ? settings.customProviderProtocol === "anthropic" ? "anthropic_messages" : "openai_chat_completions" : undefined;
   await persistAIConnectionState({
     schemaVersion: 1, revision: 1, activeConnectionId: "test", connections: {
@@ -25,11 +27,11 @@ export async function seedAIConnectionFixture(settings: AppSettings) {
   vi.mocked(chrome.runtime.sendMessage).mockResolvedValue({ ok: true } as never);
 }
 
-export async function parseConfiguredQuestion(block: QuestionBlock, settings: AppSettings, ...rest: Parameters<typeof parseQuestion> extends [unknown, unknown, ...infer R] ? R : never) {
+export async function parseConfiguredQuestion(block: QuestionBlock, settings: AIConnectionScenarioFixture, ...rest: Parameters<typeof parseQuestion> extends [unknown, unknown, ...infer R] ? R : never) {
   await seedAIConnectionFixture(settings);
   return parseQuestion(block, { preferredRoute: settings.preferredRoute, language: settings.language }, ...rest);
 }
-export async function parseConfiguredQuestionPackage(pkg: Parameters<typeof parseQuestionPackage>[0], block: QuestionBlock, settings: AppSettings, ...rest: Parameters<typeof parseQuestionPackage> extends [unknown, unknown, unknown, ...infer R] ? R : never) {
+export async function parseConfiguredQuestionPackage(pkg: Parameters<typeof parseQuestionPackage>[0], block: QuestionBlock, settings: AIConnectionScenarioFixture, ...rest: Parameters<typeof parseQuestionPackage> extends [unknown, unknown, unknown, ...infer R] ? R : never) {
   await seedAIConnectionFixture(settings);
   return parseQuestionPackage(pkg, block, { preferredRoute: settings.preferredRoute, language: settings.language }, ...rest);
 }

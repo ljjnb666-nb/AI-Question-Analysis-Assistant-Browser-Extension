@@ -1,21 +1,20 @@
+import { getProvider, PROVIDERS } from "../ai/providers";
+import type { AIConnectionScenarioFixture } from "@/test/aiConnectionFixture";
 import { parseConfiguredQuestion as parseQuestion } from "../../test/aiConnectionFixture";
 import { beforeEach } from "vitest";
 import { installMemoryStorage } from "../../test/memoryStorage";
 beforeEach(() => { installMemoryStorage(); });
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
-  getProvider,
   buildResult,
   decideRoute,
-  PROVIDERS,
-  isLikelyTextOnlyModel,
   normalizeNetworkError,
 } from "./parseRouter";
 
 // Assembled at runtime so security scanners do not mistake this synthetic
 // test fixture for a committed credential.
 const TEST_API_KEY = ["test", "key"].join("-");
-import { DEFAULT_SETTINGS, type QuestionBlock, type AppSettings } from "../types";
+import { DEFAULT_SETTINGS, type QuestionBlock } from "../types";
 import * as analytics from "./analytics";
 import { StaleQuestionRevisionError } from "./parseAttemptErrors";
 
@@ -672,7 +671,7 @@ describe("parseRouter", () => {
       source: "manual_capture",
     };
 
-    const mockSettings: AppSettings = {
+    const mockSettings: AIConnectionScenarioFixture = {
       ...DEFAULT_SETTINGS,
       providerId: "anthropic",
       apiKey: TEST_API_KEY,
@@ -769,7 +768,7 @@ describe("parseRouter", () => {
         source: "manual_capture",
       };
 
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
         providerId: "openai",
         apiKey: TEST_API_KEY,
@@ -832,7 +831,7 @@ describe("parseRouter", () => {
         source: "manual_capture",
       };
 
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
         providerId: "minimax",
         apiKey: TEST_API_KEY,
@@ -889,7 +888,7 @@ describe("parseRouter", () => {
         ],
       };
 
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
         providerId: "minimax",
         apiKey: TEST_API_KEY,
@@ -936,7 +935,7 @@ describe("parseRouter", () => {
         source: "manual_capture",
       };
 
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
         providerId: "minimax",
         apiKey: TEST_API_KEY,
@@ -1005,7 +1004,7 @@ describe("parseRouter", () => {
       const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { release = resolve; }));
       vi.stubGlobal("fetch", fetchMock);
       const logEvent = vi.spyOn(analytics, "logEvent");
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
         providerId: "custom",
         apiKey: TEST_API_KEY,
@@ -1050,7 +1049,7 @@ describe("parseRouter", () => {
         }) } }],
       }), { status: 200, headers: { "Content-Type": "application/json" } })));
       const logEvent = vi.spyOn(analytics, "logEvent");
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
         providerId: "custom",
         apiKey: TEST_API_KEY,
@@ -1104,11 +1103,5 @@ describe("parseRouter", () => {
       expect(error).toBe(original);
     });
 
-    it("identifies likely text-only models without flagging multimodal models", () => {
-      expect(isLikelyTextOnlyModel("qwen-plus")).toBe(true);
-      expect(isLikelyTextOnlyModel("glm-5.2")).toBe(true);
-      expect(isLikelyTextOnlyModel("qwen3-vl-plus")).toBe(false);
-      expect(isLikelyTextOnlyModel("llama3.2-vision")).toBe(false);
-    });
   });
 });

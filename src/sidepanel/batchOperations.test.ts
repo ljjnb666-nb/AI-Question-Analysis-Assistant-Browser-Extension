@@ -95,7 +95,6 @@ function createDeps(overrides: Record<string, unknown> = {}) {
       return "data:image/png;base64,abc";
     }),
     parseQuestion: vi.fn(async () => makeResult()),
-    pickBatchReviewModel: () => DEFAULT_SETTINGS.apiModel,
     shouldRetryBatchParseAfterError: () => false,
     shouldRetryWithVision: () => false,
     preferVisionResult: (_text: ParseResult, vision: ParseResult) => vision.confidence > 0.5,

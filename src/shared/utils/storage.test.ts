@@ -1,3 +1,4 @@
+import { ensureAIConnectionAuthorityReady, updateActiveAIConnection } from "./aiConnectionClient";
 import { installSettingsMessaging } from "../../test/settingsMessaging";
 import type { MemoryStorageHandle } from "../../test/memoryStorage";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -110,9 +111,10 @@ describe("storage", () => {
   describe("saveSettings", () => {
     it("merges with existing settings and encrypts sensitive settings", async () => {
       await authorityStorage({ apiKey: "old-test-key" });
-      await saveSettings({ apiKey: "new-test-key", authToken: "auth-token-123" });
+      await updateActiveAIConnection({ credential: { action: "REPLACE", value: "new-test-key" } });
+      await saveSettings({ authToken: "auth-token-123" });
       const saved = lastAppSettingsWrite();
-      expect(saved.apiKey).toBe("old-test-key");
+      expect(saved).not.toHaveProperty("apiKey");
       expect(saved.authToken).toMatch(/^qse:v1:/);
       const state = (await loadAIConnectionState())!;
       const ref = state.connections[state.activeConnectionId!].credentialRef!;
@@ -166,12 +168,12 @@ describe("storage", () => {
 
       const settings = await loadSettings();
 
-      expect(settings.providerId).toEqual(DEFAULT_SETTINGS.providerId);
+      expect(settings).not.toHaveProperty("providerId");
       expect(settings.analyticsBaseUrl).toEqual(DEFAULT_SETTINGS.analyticsBaseUrl);
       expect(settings.deviceId).toBeTruthy();
     });
 
-    it("KEY_03_VERSIONED_TAMPERED_CIPHERTEXT_FAILS_CLOSED clears the stored credential", async () => {
+    it("ordinary reads ignore malformed AI migration material", async () => {
       const envelope = await encryptValue("fake-key-do-not-use");
       const payload = envelope.slice(ENCRYPTED_VALUE_PREFIX.length);
       const middle = Math.floor(payload.length / 2);
@@ -180,23 +182,24 @@ describe("storage", () => {
 
       const settings = await loadSettings();
 
-      expect(settings.apiKey).toBe("");
+      expect(settings).not.toHaveProperty("apiKey");
     });
 
-    it("returns base64-like legacy plaintext keys unchanged (heuristic fix)", async () => {
+    it("excludes base64-like migration input and retains it raw before initialization", async () => {
       const legacyPlaintextKey = "mockEncryptedKey1234567890abcdefghijklmnopqrstuvwxyz";
       memory.store.set("appSettings", { apiKey: legacyPlaintextKey });
 
       const settings = await loadSettings();
 
-      expect(settings.apiKey).toBe(legacyPlaintextKey);
+      expect(settings).not.toHaveProperty("apiKey");
+      expect(memory.store.get("appSettings")).toHaveProperty("apiKey", legacyPlaintextKey);
     });
 
     it("KEY_05_NORMAL_SAVE_NEVER_STORES_PLAINTEXT_API_KEY writes only the authoritative envelope", async () => {
       const authorityMemory = await authorityStorage();
       const fakePlainApiKey = ["fake", "plain", "api", "key"].join("-");
-      await saveSettings({ apiKey: fakePlainApiKey });
-      expect(authorityMemory.store.get("appSettings")).toHaveProperty("apiKey", DEFAULT_SETTINGS.apiKey);
+      await updateActiveAIConnection({ credential: { action: "REPLACE", value: fakePlainApiKey } });
+      expect(authorityMemory.store.get("appSettings")).not.toHaveProperty("apiKey");
       const state = (await loadAIConnectionState())!;
       const ref = state.connections[state.activeConnectionId!].credentialRef!;
       expect(state.credentials[ref].encryptedValue).toMatch(/^qse:v1:/);
@@ -218,14 +221,15 @@ describe("storage", () => {
     it("KEY_07_BASE64_LIKE_PLAINTEXT_NOT_MISCLASSIFIED migrates through background without a mirror", async () => {
       const legacyPlaintextKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
       await authorityStorage({ apiKey: legacyPlaintextKey });
-      expect((await loadSettings()).apiKey).toBe(legacyPlaintextKey);
-      await saveSettings({ apiKey: legacyPlaintextKey, language: "en" });
+      expect(await loadSettings()).not.toHaveProperty("apiKey");
+      await ensureAIConnectionAuthorityReady();
+      await saveSettings({ language: "en" });
       const state = (await loadAIConnectionState())!;
       const ref = state.connections[state.activeConnectionId!].credentialRef!;
       expect(await resolveCredentialForRuntime(ref)).toBe(legacyPlaintextKey);
-      expect(lastAppSettingsWrite().apiKey).toBe(legacyPlaintextKey);
+      expect(lastAppSettingsWrite()).not.toHaveProperty("apiKey");
       __resetStorageCacheForTests();
-      expect((await loadSettings()).apiKey).toBe("");
+      expect(await loadSettings()).not.toHaveProperty("apiKey");
     });
 
     it("KEY_08_LEGACY_UNVERSIONED_CIPHERTEXT_COMPAT decrypts and migrates on next save", async () => {
@@ -244,12 +248,12 @@ describe("storage", () => {
       expect(String(lastAppSettingsWrite().authToken).startsWith(ENCRYPTED_VALUE_PREFIX)).toBe(true);
     });
 
-    it("KEY_14_FORMAT_VERSIONING fails closed on unknown envelope versions", async () => {
+    it("ordinary reads exclude unknown AI envelope versions", async () => {
       memory.store.set("appSettings", { apiKey: ["qse:v2", "AAAAAAAAAAAAAAAA"].join(":") });
 
       const settings = await loadSettings();
 
-      expect(settings.apiKey).toBe("");
+      expect(settings).not.toHaveProperty("apiKey");
       expect(hasEnvelopeCredentialWriteback()).toBe(false);
     });
 
@@ -259,9 +263,9 @@ describe("storage", () => {
       const first = await loadSettings();
       const second = await loadSettings();
 
-      expect(first.providerId).toBe("gemini");
-      expect(second.providerId).toBe("gemini");
-      expect(chrome.storage.local.get).toHaveBeenCalledTimes(2);
+      expect(first).not.toHaveProperty("providerId");
+      expect(second).not.toHaveProperty("providerId");
+      expect(chrome.storage.local.get).toHaveBeenCalledTimes(1);
     });
   });
 

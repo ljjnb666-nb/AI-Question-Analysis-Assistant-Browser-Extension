@@ -1,17 +1,7 @@
-/**
- * UI05R-E1 — V1 provider preset resolution for the connection domain.
- *
- * This mirrors the ground truth of `src/shared/ai/providers.ts` and the
- * current wire clients (`providerClients.ts`) WITHOUT changing them:
- * - endpoints and default models come from the existing PROVIDERS registry;
- * - protocol mapping follows the current parseRouter dispatch;
- * - auth mapping follows the current credential presentation per provider.
- *
- * E1 does not add providers, rename IDs, or implement protocol adapters.
- * Display labels remain frontend-owned (deferred).
+/** Connection-domain preset defaults and canonical protocol/auth resolution.
+ * Preserves the established providers/adapters; the UI catalog is display-only.
  */
 
-import { getProvider } from "../ai/providers";
 import type { AuthScheme, Connection, ProtocolId, ProviderPresetId } from "../types/connection";
 
 export const PROVIDER_PRESET_IDS: readonly ProviderPresetId[] = [
@@ -66,8 +56,8 @@ export function resolvePresetProtocol(
 /**
  * Preset default auth scheme, mirroring current runtime credential
  * presentation:
- * - Anthropic: `x-api-key` header (the bearer retry on specific rejections is
- *   wire-adapter behavior, not the scheme identity).
+ * - Anthropic Messages: `x-api-key` only, according to AuthScheme authority;
+ *   no bearer fallback or silent auth relocation.
  * - Custom + anthropic_messages: same `x-api-key` presentation.
  * - Gemini: `key` query parameter.
  * - Ollama: no auth.
@@ -86,12 +76,12 @@ export function resolvePresetAuthScheme(
 
 /** Preset default endpoint from the existing runtime registry (no renaming). */
 export function resolvePresetEndpoint(presetId: ProviderPresetId): string {
-  return getProvider(presetId).baseUrl;
+  return PRESET_DEFAULTS[presetId].endpoint;
 }
 
 /** Preset default model from the existing runtime registry. */
 export function resolvePresetDefaultModel(presetId: ProviderPresetId): string {
-  return getProvider(presetId).defaultModel;
+  return PRESET_DEFAULTS[presetId].model;
 }
 
 export function resolveConnectionProtocol(connection: Connection): ProtocolId {
@@ -101,3 +91,17 @@ export function resolveConnectionProtocol(connection: Connection): ProtocolId {
 export function resolveConnectionEndpoint(connection: Connection): string {
   return connection.endpointOverride ?? resolvePresetEndpoint(connection.presetId);
 }
+
+/** Connection-domain defaults; UI catalog is display-only. */
+const PRESET_DEFAULTS: Record<ProviderPresetId, { endpoint: string; model: string }> = {
+  anthropic: { endpoint: "https://api.anthropic.com", model: "claude-opus-4.8" },
+  openai: { endpoint: "https://api.openai.com", model: "gpt-5.5" },
+  deepseek: { endpoint: "https://api.deepseek.com", model: "deepseek-v4-flash" },
+  gemini: { endpoint: "https://generativelanguage.googleapis.com", model: "gemini-2.5-flash" },
+  qwen: { endpoint: "https://dashscope.aliyuncs.com/compatible-mode", model: "qwen3-vl-plus" },
+  moonshot: { endpoint: "https://api.moonshot.cn", model: "kimi-k2.6" },
+  zhipu: { endpoint: "https://open.bigmodel.cn/api/paas", model: "glm-5v-turbo" },
+  minimax: { endpoint: "https://api.minimaxi.com", model: "MiniMax-M3" },
+  ollama: { endpoint: "http://localhost:11434", model: "qwen3-vl" },
+  custom: { endpoint: "http://localhost:11434", model: "gpt-5.4-mini" },
+};

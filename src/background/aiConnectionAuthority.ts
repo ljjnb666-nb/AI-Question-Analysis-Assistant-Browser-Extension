@@ -12,10 +12,12 @@ import {
   resolvePresetAuthScheme,
   resolvePresetDefaultModel,
 } from "../shared/utils/aiConnectionPresets";
+import { cleanupLegacyAISettingsAfterAuthority } from "./appSettingsAuthority";
+import { resolveConnectionProtocol } from "../shared/utils/aiConnectionPresets";
 import { encryptValue } from "../shared/utils/encryption";
 import type {
   AIConnectionResponse,
-  LegacyAISettingsPatch,
+  AIConnectionUpdatePatch,
 } from "../shared/types/aiConnectionMessages";
 
 class AuthorityError extends Error {
@@ -30,6 +32,8 @@ export function ensureAIConnectionAuthorityInitialized() {
     initialization = withAIConnectionStateWriteLock(async () => {
       const result = await migrateLegacyAIConnectionState();
       if (result.status === "failed") throw new AuthorityError(result.code);
+      try { await cleanupLegacyAISettingsAfterAuthority(); }
+      catch { throw new AuthorityError("AI_LEGACY_SETTINGS_CLEANUP_FAILED"); }
       return {
         migrated: result.status === "migrated",
         revision: result.state.revision,
@@ -42,7 +46,7 @@ export function ensureAIConnectionAuthorityInitialized() {
   return initialization;
 }
 
-function validatePatch(value: unknown): asserts value is LegacyAISettingsPatch {
+function validatePatch(value: unknown): asserts value is AIConnectionUpdatePatch {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new AuthorityError("AI_CONNECTION_PAYLOAD_INVALID");
   const patch = value as Record<string, unknown>;
@@ -50,39 +54,40 @@ function validatePatch(value: unknown): asserts value is LegacyAISettingsPatch {
     Object.keys(patch).some(
       (key) =>
         ![
-          "providerId",
-          "apiModel",
-          "customBaseUrl",
-          "customProviderProtocol",
+          "presetId",
+          "selectedModelId",
+          "endpointOverride",
+          "protocolOverride",
           "credential",
         ].includes(key),
     )
   )
     throw new AuthorityError("AI_CONNECTION_PAYLOAD_INVALID");
-  if ("providerId" in patch && !isProviderPresetId(patch.providerId))
+  if ("presetId" in patch && !isProviderPresetId(patch.presetId))
     throw new AuthorityError("AI_CONNECTION_PAYLOAD_INVALID");
   if (
-    "apiModel" in patch &&
-    (typeof patch.apiModel !== "string" ||
-      !patch.apiModel.trim() ||
-      patch.apiModel.length > 200)
+    "selectedModelId" in patch &&
+    (typeof patch.selectedModelId !== "string" ||
+      !patch.selectedModelId.trim() ||
+      patch.selectedModelId.length > 200)
   )
     throw new AuthorityError("AI_CONNECTION_PAYLOAD_INVALID");
   if (
-    "customProviderProtocol" in patch &&
-    patch.customProviderProtocol !== "openai" &&
-    patch.customProviderProtocol !== "anthropic"
+    "protocolOverride" in patch &&
+    patch.protocolOverride !== null &&
+    patch.protocolOverride !== "openai_chat_completions" &&
+    patch.protocolOverride !== "anthropic_messages"
   )
     throw new AuthorityError("AI_CONNECTION_PAYLOAD_INVALID");
-  if ("customBaseUrl" in patch) {
+  if ("endpointOverride" in patch) {
     if (
-      typeof patch.customBaseUrl !== "string" ||
-      patch.customBaseUrl.length > 2048
+      (patch.endpointOverride !== null && typeof patch.endpointOverride !== "string") ||
+      (typeof patch.endpointOverride === "string" && patch.endpointOverride.length > 2048)
     )
       throw new AuthorityError("AI_CONNECTION_PAYLOAD_INVALID");
-    if (patch.customBaseUrl) {
+    if (patch.endpointOverride) {
       try {
-        const url = new URL(patch.customBaseUrl);
+        const url = new URL(patch.endpointOverride);
         if (
           !["https:", "http:"].includes(url.protocol) ||
           url.username ||
@@ -118,8 +123,8 @@ function validatePatch(value: unknown): asserts value is LegacyAISettingsPatch {
     throw new AuthorityError("AI_CONNECTION_PAYLOAD_INVALID");
 }
 
-async function applyLegacySettings(
-  patch: LegacyAISettingsPatch,
+async function updateActiveConnection(
+  patch: AIConnectionUpdatePatch,
 ): Promise<void> {
   // Encryption and the coherent commit share the existing owner lock.
   await updateAIConnectionState(async (state) => {
@@ -127,9 +132,9 @@ async function applyLegacySettings(
       ? state.connections[state.activeConnectionId]
       : undefined;
     if (!connection) throw new AuthorityError("AI_ACTIVE_CONNECTION_MISSING");
-    const providerId = patch.providerId ?? connection.presetId;
-    const switched = providerId !== connection.presetId;
-    if (!switched && providerId === "gemini" && patch.customBaseUrl) {
+    const presetId = patch.presetId ?? connection.presetId;
+    const switched = presetId !== connection.presetId;
+    if (!switched && presetId === "gemini" && patch.endpointOverride) {
       throw new AuthorityError("AI_RUNTIME_COMPATIBILITY_UNSUPPORTED");
     }
     const envelope = patch.credential.action === "REPLACE"
@@ -141,26 +146,26 @@ async function applyLegacySettings(
       protocolOverride: connection.protocolOverride,
       authScheme: connection.authScheme,
     });
-    connection.presetId = providerId;
+    connection.presetId = presetId;
     connection.selectedModelId =
-      patch.apiModel ??
+      patch.selectedModelId ??
       (switched
-        ? resolvePresetDefaultModel(providerId)
+        ? resolvePresetDefaultModel(presetId)
         : connection.selectedModelId);
     if (switched)
       connection.endpointOverride =
-        providerId === "custom" ? patch.customBaseUrl || undefined : undefined;
-    else if ("customBaseUrl" in patch)
-      connection.endpointOverride = patch.customBaseUrl || undefined;
-    if (providerId === "custom") {
-      if (switched || "customProviderProtocol" in patch)
+        presetId === "custom" ? patch.endpointOverride || undefined : undefined;
+    else if ("endpointOverride" in patch)
+      connection.endpointOverride = patch.endpointOverride || undefined;
+    if (presetId === "custom") {
+      if (switched || "protocolOverride" in patch)
         connection.protocolOverride =
-          patch.customProviderProtocol === "anthropic"
+          patch.protocolOverride === "anthropic_messages"
             ? "anthropic_messages"
             : "openai_chat_completions";
     } else connection.protocolOverride = undefined;
     connection.authScheme = resolvePresetAuthScheme(
-      providerId,
+      presetId,
       connection.protocolOverride,
     );
     const current = JSON.stringify({
@@ -226,34 +231,37 @@ async function applyLegacySettings(
 /** Unknown/malformed messages and every failure get a non-secret response. */
 export async function handleAIConnectionCommand(
   message: unknown,
+  sender: chrome.runtime.MessageSender,
 ): Promise<AIConnectionResponse> {
   try {
-    const input = message as { type?: unknown; settings?: unknown } | null;
+    const input = message as { type?: unknown; patch?: unknown } | null;
     if (
       !input ||
       ![
         "AI_CONNECTION_ENSURE_INITIALIZED",
         "AI_CONNECTION_GET_ACTIVE_METADATA",
-        "AI_CONNECTION_APPLY_LEGACY_SETTINGS",
+        "AI_CONNECTION_GET_EDITOR_VIEW",
+        "AI_CONNECTION_UPDATE_ACTIVE",
       ].includes(String(input.type))
     )
       throw new AuthorityError("AI_CONNECTION_COMMAND_UNKNOWN");
+    authorizeAICommand(input.type, sender);
     if (
       Object.keys(input).some(
         (key) =>
           key !== "type" &&
           !(
-            input.type === "AI_CONNECTION_APPLY_LEGACY_SETTINGS" &&
-            key === "settings"
+            input.type === "AI_CONNECTION_UPDATE_ACTIVE" &&
+            key === "patch"
           ),
       )
     )
       throw new AuthorityError("AI_CONNECTION_PAYLOAD_INVALID");
-    if (input.type === "AI_CONNECTION_APPLY_LEGACY_SETTINGS")
-      validatePatch(input.settings);
+    if (input.type === "AI_CONNECTION_UPDATE_ACTIVE")
+      validatePatch(input.patch);
     const initialized = await ensureAIConnectionAuthorityInitialized();
-    if (input.type === "AI_CONNECTION_APPLY_LEGACY_SETTINGS")
-      await applyLegacySettings(input.settings as LegacyAISettingsPatch);
+    if (input.type === "AI_CONNECTION_UPDATE_ACTIVE")
+      await updateActiveConnection(input.patch as AIConnectionUpdatePatch);
     const state = await loadAIConnectionState();
     if (!state) throw new AuthorityError("AI_CONNECTION_NOT_INITIALIZED");
     const connection = state.activeConnectionId
@@ -264,7 +272,12 @@ export async function handleAIConnectionCommand(
       initialized: true,
       migrated: initialized.migrated,
       revision: state.revision,
-      metadata: connection ? toConnectionMetadata(connection, state) : null,
+      metadata: input.type !== "AI_CONNECTION_GET_EDITOR_VIEW" && connection ? toConnectionMetadata(connection, state) : null,
+      ...(input.type === "AI_CONNECTION_GET_EDITOR_VIEW" && connection ? { editorView: {
+        presetId: connection.presetId, selectedModelId: connection.selectedModelId,
+        endpointOverride: connection.endpointOverride ?? null, protocol: resolveConnectionProtocol(connection),
+        hasCredential: Boolean(connection.credentialRef && state.credentials[connection.credentialRef]),
+      } } : {}),
     };
   } catch (error) {
     return {
@@ -275,4 +288,15 @@ export async function handleAIConnectionCommand(
           : "AI_CONNECTION_AUTHORITY_FAILED",
     };
   }
+}
+
+function authorizeAICommand(type: unknown, sender: chrome.runtime.MessageSender): void {
+  if (!sender || typeof sender.id !== "string" || sender.id !== chrome.runtime.id) throw new AuthorityError("AI_CONNECTION_SENDER_FORBIDDEN");
+  if (type !== "AI_CONNECTION_UPDATE_ACTIVE") return;
+  try {
+    const page = new URL(sender.url ?? "");
+    const own = new URL(chrome.runtime.getURL("/"));
+    if (page.protocol === own.protocol && page.host === own.host && !page.username && !page.password && page.pathname === "/sidepanel/sidepanel.html") return;
+  } catch { /* fail closed */ }
+  throw new AuthorityError("AI_CONNECTION_SENDER_FORBIDDEN");
 }
