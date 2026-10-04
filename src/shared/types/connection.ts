@@ -150,6 +150,72 @@ export interface AIConnectionState {
 }
 
 /**
+ * How confident the capability authority is about a capability value.
+ * - `known_static`: explicit catalog decision (e.g. text support of every
+ *   shipped model, or protocol adapter encoding behavior).
+ * - `legacy_declared`: derived from the CURRENT runtime registry/adapter
+ *   behavior, clearly labeled as the legacy source until the E2 cutover.
+ * - `unknown`: no sufficient evidence. Unknown vision/transport fails closed.
+ */
+export type CapabilityConfidence = "known_static" | "legacy_declared" | "unknown";
+
+/** One capability dimension: `value` is null exactly when confidence is `unknown`. */
+export interface CapabilityAssessment {
+  value: boolean | null;
+  confidence: CapabilityConfidence;
+}
+
+/** Whether a model ID is explicitly classified in the capability catalog. */
+export type ModelClassification = "known" | "unknown";
+
+/**
+ * E2A model capability authority. Replaces (at cutover) the
+ * `provider.supportsVision` + `isLikelyTextOnlyModel` heuristic; the legacy
+ * heuristic remains in parseRouter until E2B.
+ */
+export interface ModelCapabilityAssessment {
+  classification: ModelClassification;
+  text: CapabilityAssessment;
+  vision: CapabilityAssessment;
+  reasoning: CapabilityAssessment;
+  structuredOutput: CapabilityAssessment;
+}
+
+/**
+ * E2A transport/media encoding authority for a protocol (+ provider endpoint
+ * behavior). Separate from model capability: adapters decide HOW media is
+ * encoded, models decide WHETHER media can be understood.
+ */
+export interface TransportMediaCapabilityAssessment {
+  protocol: ProtocolId;
+  inlineBase64: CapabilityAssessment;
+  remoteImageUrl: CapabilityAssessment;
+  multipleImages: CapabilityAssessment;
+}
+
+/**
+ * Runtime-only, non-secret projection of the active connection for a solve
+ * operation. Never contains encrypted or plaintext credential material —
+ * secret resolution is a separate boundary step taken only when a real
+ * provider request is about to execute.
+ */
+export interface AIConnectionRuntimeConfig {
+  connectionId: string;
+  connectionRevision: number;
+  presetId: ProviderPresetId;
+  protocol: ProtocolId;
+  endpoint: string;
+  authScheme: AuthScheme;
+  /** False only for `authScheme.kind === "none"` connections. */
+  requiresCredential: boolean;
+  credentialRef?: string;
+  credentialRevision?: number;
+  selectedModelId: string;
+  modelCapabilityAssessment: ModelCapabilityAssessment;
+  transportCapabilities: TransportMediaCapabilityAssessment;
+}
+
+/**
  * Non-secret projection of a connection for metadata readers. Guaranteed to
  * contain no credential material — only presence and revision of the
  * referenced credential.
