@@ -1,3 +1,4 @@
+import { handleAppSettingsCommand, getOrCreateAppSettingsDeviceId } from "./appSettingsAuthority";
 import { handleAIConnectionCommand } from "./aiConnectionAuthority";
 /**
  * Background Service Worker
@@ -13,13 +14,11 @@ import { handleAIConnectionCommand } from "./aiConnectionAuthority";
 import type { ExtMessage } from "@/shared/types";
 import { logEvent } from "@/shared/utils/analytics";
 import { injectContentScriptIntoTab, isInjectablePageUrl, shouldBootstrapContentScript } from "@/shared/utils/messaging";
-import { getOrCreateDeviceId } from "@/shared/utils/storage";
 
 chrome.runtime.onInstalled.addListener((details) => {
-  void getOrCreateDeviceId();
-  if (details.reason === "install") {
-    logEvent("extension_installed", { reason: details.reason });
-  }
+  void getOrCreateAppSettingsDeviceId().then(() => {
+    if (details.reason === "install") logEvent("extension_installed", { reason: details.reason });
+  }).catch(() => { console.warn("APP_SETTINGS_INITIALIZATION_FAILED"); });
 });
 
 chrome.runtime.onMessage.addListener((
@@ -28,6 +27,11 @@ chrome.runtime.onMessage.addListener((
   sendResponse: (r?: unknown) => void
 ) => {
   switch (message?.type) {
+    case "APP_SETTINGS_UPDATE":
+    case "APP_SETTINGS_ENSURE_NORMALIZED":
+    case "APP_SETTINGS_GET_OR_CREATE_DEVICE_ID":
+      void handleAppSettingsCommand(message, sender).then(sendResponse);
+      return true;
     case "AI_CONNECTION_ENSURE_INITIALIZED":
     case "AI_CONNECTION_GET_ACTIVE_METADATA":
     case "AI_CONNECTION_APPLY_LEGACY_SETTINGS":

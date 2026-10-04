@@ -1,3 +1,4 @@
+import { installSettingsMessaging } from "../../test/settingsMessaging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS } from "../types";
 import { __resetStorageCacheForTests, loadSettings, saveSettings, CURRENT_ANALYTICS_CONSENT_VERSION } from "./storage";
@@ -43,6 +44,7 @@ describe("optional analytics privacy boundary", () => {
     __resetAnalyticsForTests();
     stored = {};
     installStorage();
+    installSettingsMessaging();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
   });
 
