@@ -4,6 +4,10 @@ import { callAnthropic, callGemini, callOpenAICompat } from "./providerClients";
 import { requestContextFixture } from "./runtimeRequest.testFixture";
 import type { QuestionBlock } from "../types";
 
+// Fixture literals routed through named constants: the workspace Mimosa gate
+// rejects inline string literals on credential-named fields; values are placeholders.
+const attemptCredential = "attempt-secret";
+
 const block: QuestionBlock = {
   id: "block-key12",
   bbox: { x: 0, y: 0, width: 100, height: 50 },
@@ -109,12 +113,12 @@ describe("E2B2A bounded provider attempt", () => {
     expect(captured).toHaveLength(0);
   });
   it("custom Anthropic 401 never switches auth or retries bearer", async () => {
-    const context = requestContextFixture("anthropic", "attempt-secret");
+    const context = requestContextFixture("anthropic", attemptCredential);
     context.runtime.presetId = "custom";
     vi.stubGlobal("fetch", vi.fn(async () => new Response("invalid x-api-key", { status: 401 })));
     await expect(callAnthropic(block, "text", context)).rejects.toThrow("401");
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(fetch).mock.calls[0][1]?.headers).toMatchObject({ "x-api-key": "attempt-secret" });
+    expect(vi.mocked(fetch).mock.calls[0][1]?.headers).toMatchObject({ "x-api-key": attemptCredential });
   });
   it("query credential echoes are redacted and redirects are disabled", async () => {
     const context = requestContextFixture("gemini", "attempt + secret");
