@@ -1,6 +1,7 @@
+import type { AIConnectionScenarioFixture } from "@/test/aiConnectionFixture";
 import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, type AppSettings, type HistoryEntry, type ParseResult, type QuestionBlock } from "@/shared/types";
+import { DEFAULT_SETTINGS, type HistoryEntry, type ParseResult, type QuestionBlock } from "@/shared/types";
 import {
   parseBlockForAutoSolve,
   parseBlockForAutoSolveQuickReview,
@@ -41,7 +42,7 @@ function makeResult(overrides: Partial<ParseResult> = {}): ParseResult {
   };
 }
 
-function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
+function makeSettings(overrides: Partial<AIConnectionScenarioFixture> = {}): AIConnectionScenarioFixture {
   return {
     ...DEFAULT_SETTINGS,
     providerId: "anthropic",
@@ -83,7 +84,7 @@ describe("autoSolveParsing", () => {
 
     expect(result.answer).toBe("A");
     expect(deps.tryCaptureBlockImageForAutoSolve).not.toHaveBeenCalled();
-    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AppSettings];
+    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AIConnectionScenarioFixture];
     expect(usedBlock).not.toHaveProperty("imageDataUrl");
     expect(usedSettings).toMatchObject({ preferredRoute: "auto" });
   });
@@ -98,7 +99,7 @@ describe("autoSolveParsing", () => {
     await parseBlockForAutoSolve(block, defaultTimeouts, deps);
 
     expect(deps.tryCaptureBlockImageForAutoSolve).toHaveBeenCalledTimes(1);
-    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AppSettings];
+    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AIConnectionScenarioFixture];
     expect(usedBlock).toMatchObject({ imageDataUrl: "data:image/png;base64,abc", hasImage: true });
     expect(usedSettings).toMatchObject({ preferredRoute: "vision" });
   });
@@ -109,7 +110,7 @@ describe("autoSolveParsing", () => {
     await parseBlockForAutoSolveQuickReview(makeBlock(), defaultTimeouts, deps);
 
     expect(deps.tryCaptureBlockImageForAutoSolve).not.toHaveBeenCalled();
-    const [usedBlock, usedSettings] = ((deps.parseQuestion.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AppSettings];
+    const [usedBlock, usedSettings] = ((deps.parseQuestion.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AIConnectionScenarioFixture];
     expect(usedBlock).not.toHaveProperty("imageDataUrl");
     expect(usedSettings).toMatchObject({ preferredRoute: "auto" });
   });
@@ -120,7 +121,7 @@ describe("autoSolveParsing", () => {
     await parseBlockForAutoSolveReview(makeBlock(), null, defaultTimeouts, deps);
 
     expect(deps.tryCaptureBlockImageForAutoSolve).not.toHaveBeenCalled();
-    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AppSettings];
+    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AIConnectionScenarioFixture];
     expect(usedBlock).not.toHaveProperty("imageDataUrl");
     expect(usedSettings).toMatchObject({ preferredRoute: "auto" });
   });

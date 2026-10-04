@@ -1,3 +1,5 @@
+import { getAIConnectionEditorView, updateActiveAIConnection } from "./aiConnectionClient";
+const sender = () => ({ id: chrome.runtime.id, url: chrome.runtime.getURL("sidepanel/sidepanel.html") });
 import { installSettingsMessaging } from "../../test/settingsMessaging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { installMemoryStorage } from "../../test/memoryStorage";
@@ -23,7 +25,7 @@ const keyA = "test-authoritative-key-a";
 const keyB = "test-authoritative-key-b";
 const ensure = () => handle({ type: "AI_CONNECTION_ENSURE_INITIALIZED" });
 const apply = (settings: unknown) =>
-  handle({ type: "AI_CONNECTION_APPLY_LEGACY_SETTINGS", settings });
+  handle({ type: "AI_CONNECTION_UPDATE_ACTIVE", patch: settings });
 async function state() {
   return (await loadAIConnectionState())!;
 }
@@ -42,13 +44,13 @@ beforeEach(async () => {
   memory = installMemoryStorage();
   memory.store.set("appSettings", {
     ...DEFAULT_SETTINGS,
-    apiKey: keyA,
+    providerId: "anthropic", apiKey: keyA,
     deviceId: "device",
     analyticsConsentVersion: 1,
   });
   vi.resetModules();
-  handle = (await import("../../background/aiConnectionAuthority"))
-    .handleAIConnectionCommand;
+  const handler = (await import("../../background/aiConnectionAuthority")).handleAIConnectionCommand;
+  handle = message => handler(message, sender());
   installSettingsMessaging();
 });
 
@@ -69,7 +71,7 @@ describe("background initialization", () => {
     const restarted = (await import("../../background/aiConnectionAuthority"))
       .handleAIConnectionCommand;
     expect(
-      await restarted({ type: "AI_CONNECTION_ENSURE_INITIALIZED" }),
+      await restarted({ type: "AI_CONNECTION_ENSURE_INITIALIZED" }, sender()),
     ).toMatchObject({ ok: true, migrated: false });
     expect(JSON.stringify(await state())).toBe(snapshot);
   });
@@ -83,7 +85,7 @@ describe("background initialization", () => {
     const restarted = (await import("../../background/aiConnectionAuthority"))
       .handleAIConnectionCommand;
     expect(
-      (await restarted({ type: "AI_CONNECTION_ENSURE_INITIALIZED" })).ok,
+      (await restarted({ type: "AI_CONNECTION_ENSURE_INITIALIZED" }, sender())).ok,
     ).toBe(true);
     expect(await testCredential()).toBe(keyA);
   });
@@ -116,7 +118,7 @@ describe("background initialization", () => {
     const results = await Promise.all([
       ensure(),
       ensure(),
-      apply({ apiModel: "claude-sonnet-4.6", credential: { action: "KEEP" } }),
+      apply({ selectedModelId: "claude-sonnet-4.6", credential: { action: "KEEP" } }),
       ensure(),
     ]);
     expect(results.every((response) => response.ok)).toBe(true);
@@ -127,17 +129,13 @@ describe("background initialization", () => {
   });
   it("E2B1-INIT-07 worker restart after migration ignores legacy even without cleanup", async () => {
     await configured();
-    await saveSettings({
-      providerId: "openai",
-      apiKey: keyB,
-      apiModel: "gpt-5.5",
-    });
+    await updateActiveAIConnection({ presetId: "openai", credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" }, selectedModelId: "gpt-5.5" });
     memory.store.set("appSettings", { ...DEFAULT_SETTINGS, apiKey: keyA });
     vi.resetModules();
     const restarted = (await import("../../background/aiConnectionAuthority"))
       .handleAIConnectionCommand;
     expect(
-      (await restarted({ type: "AI_CONNECTION_ENSURE_INITIALIZED" })).ok,
+      (await restarted({ type: "AI_CONNECTION_ENSURE_INITIALIZED" }, sender())).ok,
     ).toBe(true);
     expect((await main()).presetId).toBe("openai");
     expect(
@@ -152,7 +150,8 @@ describe("writer and credential intent", () => {
   it("E2B1-WRITE-01 same provider empty visible key means KEEP", async () => {
     await configured();
     const settings = await loadSettings();
-    expect(settings.apiKey).toBe("");
+    expect("apiKey" in settings).toBe(false);
+    await updateActiveAIConnection({ credential: { action: "KEEP" } });
     await saveSettings(settings);
     expect(
       await credentials.resolveCredentialForRuntime(
@@ -164,18 +163,13 @@ describe("writer and credential intent", () => {
     await configured();
     const ref = (await main()).credentialRef!;
     const revision = (await state()).credentials[ref].revision;
-    await saveSettings({ apiKey: keyB });
+    await updateActiveAIConnection({ credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } });
     expect((await state()).credentials[ref].revision).toBe(revision + 1);
     expect(await credentials.resolveCredentialForRuntime(ref)).toBe(keyB);
   });
   it("E2B1-WRITE-03 provider switch empty key cannot reuse old credential", async () => {
     await configured();
-    await saveSettings({
-      ...(await loadSettings()),
-      providerId: "openai",
-      apiKey: "",
-      apiModel: "gpt-5.5",
-    });
+    await updateActiveAIConnection({ presetId: "openai", credential: { action: "KEEP" }, selectedModelId: "gpt-5.5" });
     expect((await main()).credentialRef).toBeUndefined();
     expect(await getAIConnectionReadiness()).toEqual({
       ready: false,
@@ -184,11 +178,7 @@ describe("writer and credential intent", () => {
   });
   it("E2B1-WRITE-04 provider switch new key uses only new material", async () => {
     await configured();
-    await saveSettings({
-      providerId: "openai",
-      apiKey: keyB,
-      apiModel: "gpt-5.5",
-    });
+    await updateActiveAIConnection({ presetId: "openai", credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" }, selectedModelId: "gpt-5.5" });
     expect((await main()).presetId).toBe("openai");
     expect(await testCredential()).toBe(keyB);
     expect(JSON.stringify(memory.store.get("aiConnectionState"))).not.toContain(
@@ -199,17 +189,13 @@ describe("writer and credential intent", () => {
     );
   });
   it.each([
-    ["E2B1-WRITE-05", { apiModel: "claude-sonnet-4.6" }],
-    ["E2B1-WRITE-06", { customBaseUrl: "https://proxy.example" }],
-    ["E2B1-WRITE-07", { customProviderProtocol: "anthropic" as const }],
+    ["E2B1-WRITE-05", { selectedModelId: "claude-sonnet-4.6" }],
+    ["E2B1-WRITE-06", { endpointOverride: "https://proxy.example" }],
+    ["E2B1-WRITE-07", { protocolOverride: "anthropic_messages" as const }],
   ])("%s configuration mutation invalidates once", async (id, patch) => {
     await configured();
     if (id === "E2B1-WRITE-07")
-      await saveSettings({
-        providerId: "custom",
-        customProviderProtocol: "openai",
-        apiKey: keyB,
-      });
+      await updateActiveAIConnection({ presetId: "custom", protocolOverride: "openai_chat_completions", credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } });
     await updateAIConnectionState((value) => {
       const connection = value.connections[value.activeConnectionId!];
       connection.validation = {
@@ -223,15 +209,15 @@ describe("writer and credential intent", () => {
       return value;
     });
     const before = await main();
-    await saveSettings(patch);
+    await updateActiveAIConnection({ ...patch, credential: { action: "KEEP" } });
     const after = await main();
     expect(after.connectionRevision).toBe(before.connectionRevision + 1);
     expect(after.updatedAt).toBeGreaterThan(before.updatedAt);
     expect(after.validation).toEqual({ status: "stale", generation: 6 });
   });
   it.each([
-    ["E2B1-WRITE-08", { providerId: "bogus" }],
-    ["E2B1-WRITE-09", { customProviderProtocol: "bogus" }],
+    ["E2B1-WRITE-08", { presetId: "bogus" }],
+    ["E2B1-WRITE-09", { protocolOverride: "bogus" }],
     ["E2B1-WRITE-10", { authScheme: { kind: "none" } }],
   ])("%s rejects untrusted payload", async (_id, patch) => {
     expect(await apply({ ...patch, credential: { action: "KEEP" } })).toEqual({
@@ -242,12 +228,8 @@ describe("writer and credential intent", () => {
   });
   it("E2B1-WRITE-11 switching official providers resets the old endpoint and auth", async () => {
     await configured();
-    await saveSettings({ customBaseUrl: "https://old-proxy.example" });
-    await saveSettings({
-      providerId: "openai",
-      customBaseUrl: "https://old-proxy.example",
-      apiKey: keyB,
-    });
+    await updateActiveAIConnection({ endpointOverride: "https://old-proxy.example", credential: { action: "KEEP" } });
+    await updateActiveAIConnection({ presetId: "openai", endpointOverride: "https://old-proxy.example", credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } });
     expect((await main()).endpointOverride).toBeUndefined();
     expect((await main()).protocolOverride).toBeUndefined();
     expect((await main()).authScheme).toEqual({ kind: "bearer" });
@@ -257,7 +239,7 @@ describe("writer and credential intent", () => {
     const before = await main();
     memory.set.mockClear();
     await apply({
-      apiModel: "claude-sonnet-4.6",
+      selectedModelId: "claude-sonnet-4.6",
       credential: { action: "REPLACE", value: keyB },
     });
     expect(
@@ -276,12 +258,7 @@ describe("writer and credential intent", () => {
 
 describe("UI projection and bounded runtime authority", () => {
   it("authoritative request remains operational with authoritative model, endpoint and key", async () => {
-    await saveSettings({
-      providerId: "custom",
-      apiModel: "fixture-model",
-      customBaseUrl: "https://fixture.example",
-      apiKey: keyB,
-    });
+    await updateActiveAIConnection({ presetId: "custom", selectedModelId: "fixture-model", endpointOverride: "https://fixture.example", credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } });
     const fetch = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
@@ -319,10 +296,10 @@ describe("UI projection and bounded runtime authority", () => {
       `Bearer ${keyB}`,
     );
     expect(JSON.parse(init!.body as string).model).toBe("fixture-model");
-    expect((await loadSettings()).apiKey).toBe("");
+    expect(("apiKey" in await loadSettings())).toBe(false);
   });
   it.each(["protocol", "auth"])("custom %s readiness supports the new authoritative adapters", async kind => {
-    await saveSettings({ providerId: "custom", apiKey: keyB });
+    await updateActiveAIConnection({ presetId: "custom", credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } });
     await updateAIConnectionState(value => {
       const connection = value.connections[value.activeConnectionId!];
       if (kind === "protocol") connection.protocolOverride = "gemini_generate_content";
@@ -334,7 +311,7 @@ describe("UI projection and bounded runtime authority", () => {
     const runtime = await resolveActiveAIConnectionRuntimeMetadata();
     expect(kind === "protocol" ? runtime.protocol : runtime.authScheme.kind).toBe(kind === "protocol" ? "gemini_generate_content" : "none");
   });
-  it("AI mutation during a non-AI save cannot republish the old projection cache", async () => {
+  it("AI mutation during an ordinary save leaves editor view current", async () => {
     await configured();
     await loadSettings();
     const originalSet = memory.set.getMockImplementation() as (items: Record<string, unknown>) => Promise<void>;
@@ -351,34 +328,29 @@ describe("UI projection and bounded runtime authority", () => {
       await originalSet(items);
     });
     await saveSettings({ language: "en" });
-    expect((await loadSettings()).apiModel).toBe("concurrent-model");
+    expect((await getAIConnectionEditorView()).selectedModelId).toBe("concurrent-model");
   });
   it("E2B1-COMPAT-RUN-01 bounded runtime resolver decrypts only authoritative key", async () => {
     expect(await testCredential()).toBe(keyA);
   });
   it("E2B1-COMPAT-RUN-02 ordinary Settings never receives authoritative plaintext", async () => {
     await configured();
-    expect((await loadSettings()).apiKey).toBe("");
+    expect(("apiKey" in await loadSettings())).toBe(false);
   });
   it("E2B1-COMPAT-RUN-03 transient key is never persisted or globally cached", async () => {
     await configured();
     memory.set.mockClear();
     const credential = await testCredential();
     expect(credential).toBe(keyA);
-    expect((await loadSettings()).apiKey).toBe("");
+    expect(("apiKey" in await loadSettings())).toBe(false);
     expect(JSON.stringify(memory.set.mock.calls)).not.toContain(keyA);
   });
   it("E2B1-COMPAT-RUN-04 Ollama runtime resolves no key", async () => {
-    await saveSettings({ providerId: "ollama", apiKey: "" });
+    await updateActiveAIConnection({ presetId: "ollama", credential: { action: "KEEP" } });
     expect(await testCredential()).toBeNull();
   });
   it("E2B1-COMPAT-RUN-05 custom protocol metadata retains committed authority", async () => {
-    await saveSettings({
-      providerId: "custom",
-      customProviderProtocol: "anthropic",
-      customBaseUrl: "https://custom.example",
-      apiKey: keyB,
-    });
+    await updateActiveAIConnection({ presetId: "custom", protocolOverride: "anthropic_messages", endpointOverride: "https://custom.example", credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } });
     expect(await resolveActiveAIConnectionRuntimeMetadata()).toMatchObject({
       protocol: "anthropic_messages", endpoint: "https://custom.example",
     });
@@ -403,14 +375,14 @@ describe("UI projection and bounded runtime authority", () => {
     expect(secret).not.toHaveBeenCalled();
   });
   it("E2B1-READY-02 missing credential gives stable not-ready result", async () => {
-    await saveSettings({ providerId: "openai", apiKey: "" });
+    await updateActiveAIConnection({ presetId: "openai", credential: { action: "KEEP" } });
     expect(await getAIConnectionReadiness()).toEqual({
       ready: false,
       code: "AI_CREDENTIAL_REQUIRED",
     });
   });
   it("E2B1-READY-03 Ollama readiness needs no credential", async () => {
-    await saveSettings({ providerId: "ollama", apiKey: "" });
+    await updateActiveAIConnection({ presetId: "ollama", credential: { action: "KEEP" } });
     expect(await getAIConnectionReadiness()).toEqual({ ready: true });
   });
   it("E2B1-READY-04 malformed state fails closed", async () => {
@@ -418,29 +390,23 @@ describe("UI projection and bounded runtime authority", () => {
     expect((await getAIConnectionReadiness()).ready).toBe(false);
   });
   it("E2B1-APP-01 UI metadata is projected from active connection", async () => {
-    await saveSettings({
-      providerId: "custom",
-      apiModel: "model-example",
-      customProviderProtocol: "anthropic",
-      customBaseUrl: "https://custom.example",
-      apiKey: keyB,
-    });
-    expect(await loadSettings()).toMatchObject({
-      providerId: "custom",
-      apiModel: "model-example",
-      customProviderProtocol: "anthropic",
-      customBaseUrl: "https://custom.example",
+    await updateActiveAIConnection({ presetId: "custom", selectedModelId: "model-example", protocolOverride: "anthropic_messages", endpointOverride: "https://custom.example", credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } });
+    expect(await getAIConnectionEditorView()).toMatchObject({
+      presetId: "custom",
+      selectedModelId: "model-example",
+      protocol: "anthropic_messages",
+      endpointOverride: "https://custom.example",
     });
   });
   it("E2B1-APP-02 UI key remains empty", async () => {
     await configured();
-    expect((await loadSettings()).apiKey).toBe("");
+    expect(("apiKey" in await loadSettings())).toBe(false);
   });
   it("E2B1-APP-03 AI save never writes new legacy key", async () => {
-    await saveSettings({ apiKey: keyB });
+    await updateActiveAIConnection({ credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } });
     expect(
       (memory.store.get("appSettings") as Record<string, unknown>).apiKey,
-    ).toBe(keyA);
+    ).toBeUndefined();
     expect(JSON.stringify(memory.store.get("aiConnectionState"))).not.toContain(
       keyB,
     );
@@ -452,7 +418,7 @@ describe("UI projection and bounded runtime authority", () => {
       code: "TEST_FAILURE",
     } as never);
     await expect(
-      saveSettings({ apiKey: keyB, language: "en" }),
+      (updateActiveAIConnection({ credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } }).then(() => saveSettings({ language: "en" }))),
     ).rejects.toThrow("TEST_FAILURE");
     expect(JSON.stringify(memory.store.get("appSettings"))).toBe(before);
   });
@@ -467,13 +433,12 @@ describe("UI projection and bounded runtime authority", () => {
       language: "en",
       preferredRoute: "text",
       authToken: "test-session-token",
-      apiKey: "",
     });
     expect(
       (memory.store.get("appSettings") as Record<string, unknown>).authToken,
     ).toMatch(/^qse:v1:/);
   });
-  it("E2B1-APP-06 AI storage events invalidate projected cache", async () => {
+  it("E2B1-APP-06 AI storage events leave ordinary cache independent and editor view current", async () => {
     await configured();
     await loadSettings();
     await updateAIConnectionState((value) => {
@@ -492,9 +457,9 @@ describe("UI projection and bounded runtime authority", () => {
         },
         "local",
       );
-    expect((await loadSettings()).apiModel).toBe("new-model");
+    expect((await getAIConnectionEditorView()).selectedModelId).toBe("new-model");
   });
-  it("E2B1-APP-07 non-AI save preserves historical AI fields without re-persisting projected metadata", async () => {
+  it("E2B1-APP-07 non-AI save preserves closure without re-persisting AI metadata", async () => {
     await configured();
     const before = { ...(memory.store.get("appSettings") as Record<string, unknown>) };
     await loadSettings();
@@ -508,7 +473,7 @@ describe("UI projection and bounded runtime authority", () => {
 
 describe("Gemini endpoint authority after runtime cutover", () => {
   async function existingGeminiOverride() {
-    await saveSettings({ providerId: "gemini", apiKey: keyB });
+    await updateActiveAIConnection({ presetId: "gemini", credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } });
     await updateAIConnectionState((value) => {
       const connection = value.connections[value.activeConnectionId!];
       connection.endpointOverride = "https://gemini-proxy.example";
@@ -517,16 +482,11 @@ describe("Gemini endpoint authority after runtime cutover", () => {
     });
   }
   it("E2B1-RF01-GEMINI-01 same-provider override is rejected atomically with a machine-readable code", async () => {
-    await saveSettings({ providerId: "gemini", apiKey: keyA });
+    await updateActiveAIConnection({ presetId: "gemini", credential: keyA ? { action: "REPLACE", value: keyA } : { action: "KEEP" } });
     const before = JSON.stringify(await state());
     const nonAI = JSON.stringify(memory.store.get("appSettings"));
     await expect(
-      saveSettings({
-        providerId: "gemini",
-        customBaseUrl: "https://gemini-proxy.example",
-        apiKey: keyB,
-        language: "en",
-      }),
+      (updateActiveAIConnection({ presetId: "gemini", endpointOverride: "https://gemini-proxy.example", credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } }).then(() => saveSettings({ language: "en" }))),
     ).rejects.toMatchObject({
       code: "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
       message: "AI_RUNTIME_COMPATIBILITY_UNSUPPORTED",
@@ -566,16 +526,8 @@ describe("Gemini endpoint authority after runtime cutover", () => {
     expect(String(fetch.mock.calls[0][0])).toContain("https://gemini-proxy.example/v1beta/models/");
   });
   it("switching to Gemini clears prior endpoints even when the old form resubmits one", async () => {
-    await saveSettings({
-      providerId: "custom",
-      customBaseUrl: "https://old-custom.example",
-      apiKey: keyA,
-    });
-    await saveSettings({
-      providerId: "gemini",
-      customBaseUrl: "https://old-custom.example",
-      apiKey: keyB,
-    });
+    await updateActiveAIConnection({ presetId: "custom", endpointOverride: "https://old-custom.example", credential: keyA ? { action: "REPLACE", value: keyA } : { action: "KEEP" } });
+    await updateActiveAIConnection({ presetId: "gemini", endpointOverride: "https://old-custom.example", credential: keyB ? { action: "REPLACE", value: keyB } : { action: "KEEP" } });
     expect((await main()).endpointOverride).toBeUndefined();
     expect(await getAIConnectionReadiness()).toEqual({ ready: true });
     expect(await resolveActiveAIConnectionRuntimeMetadata()).toMatchObject({ presetId: "gemini", endpointProvenance: "canonical_builtin_endpoint" });
@@ -604,8 +556,8 @@ describe("message trust and response boundary", () => {
     {},
     { credential: { action: "REPLACE", value: "" } },
     { credential: { action: "REPLACE", value: "x".repeat(16385) } },
-    { customBaseUrl: "not-a-url", credential: { action: "KEEP" } },
-    { apiModel: 4, credential: { action: "KEEP" } },
+    { endpointOverride: "not-a-url", credential: { action: "KEEP" } },
+    { selectedModelId: 4, credential: { action: "KEEP" } },
   ])("malformed input is rejected without writes", async (settings) => {
     expect((await apply(settings)).ok).toBe(false);
     expect(memory.store.has("aiConnectionState")).toBe(false);

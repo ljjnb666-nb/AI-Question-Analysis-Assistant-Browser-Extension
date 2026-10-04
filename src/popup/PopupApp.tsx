@@ -5,6 +5,7 @@ import {
   sendToTabWithBootstrap,
 } from "@/shared/utils/messaging";
 import type { ExtMessage } from "@/shared/types";
+import { sendAIConnectionCommand } from "@/shared/utils/aiConnectionClient";
 import { getProviderShortName } from "@/shared/ai/providers";
 import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
 import { logEvent } from "@/shared/utils/analytics";
@@ -127,12 +128,14 @@ export const PopupApp: React.FC = () => {
   useEffect(() => {
     let disposed = false;
     void getAIConnectionReadiness().then(async (readiness) => {
-      const settings = await loadSettings();
+      const [settings, response] = await Promise.all([
+        loadSettings(), sendAIConnectionCommand({ type: "AI_CONNECTION_GET_ACTIVE_METADATA" }),
+      ]);
       if (disposed) return;
       setAIReady(readiness.ready);
-      const nextProviderId = settings.providerId ?? "anthropic";
+      const nextProviderId = response.metadata?.presetId;
       const nextLang = settings.language ?? "zh";
-      setProviderName(getProviderShortName(nextProviderId));
+      setProviderName(nextProviderId ? getProviderShortName(nextProviderId) : "");
       setLang(nextLang);
       if (typeof document !== "undefined") {
         document.documentElement.lang = nextLang === "zh" ? "zh-CN" : "en";

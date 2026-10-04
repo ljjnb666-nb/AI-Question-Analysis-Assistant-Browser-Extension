@@ -52,7 +52,7 @@ async function switchToCustom() {
   await waitFor(() =>
     expect(screen.getByDisplayValue(oldEndpoint)).toBeInTheDocument(),
   );
-  expect((await loadSettings()).apiKey).toBe("");
+  expect("apiKey" in await loadSettings()).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: /Custom/ }));
   const endpoint = screen.getByPlaceholderText(getProvider("custom").baseUrl);
   expect(endpoint).toHaveValue("");
@@ -87,7 +87,7 @@ describe("RF01 provider endpoint ownership through real Settings save", () => {
     expect(JSON.stringify(memory.store.get("aiConnectionState"))).not.toContain(
       newKey,
     );
-    expect(memory.store.get("appSettings")).toHaveProperty("apiKey", "rf01-old-fixture-key");
+    expect(memory.store.get("appSettings")).not.toHaveProperty("apiKey");
   });
   it("E2B1-RF01-ENDPOINT-03 explicitly entered new Custom endpoint and key remain operational", async () => {
     const endpoint = await switchToCustom();
@@ -115,7 +115,7 @@ describe("E2B2A committed Save-and-Test", () => {
     expect(screen.getByPlaceholderText(getProvider("anthropic").keyPlaceholder)).toHaveValue("");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
       expect(JSON.stringify(document.body.innerHTML)).not.toContain("rf01-old-fixture-key");
-      expect((await loadSettings()).apiKey).toBe("");
+      expect("apiKey" in await loadSettings()).toBe(false);
       expect((init?.headers as Record<string, string>)["x-api-key"]).toBe("rf01-old-fixture-key");
       expect(JSON.parse(String(init?.body)).messages[0].content.every((part: { type: string }) => part.type === "text")).toBe(true);
       return providerReply("anthropic");

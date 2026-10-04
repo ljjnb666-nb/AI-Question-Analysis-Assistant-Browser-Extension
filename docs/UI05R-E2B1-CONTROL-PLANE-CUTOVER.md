@@ -1,5 +1,7 @@
 # UI05R-E2B1 control-plane cutover — SPEC REVISION 01
 
+> Historical phase report. Current settings domain and legacy cleanup contract: [E2B2B authority closure](UI05R-E2B2B-AUTHORITY-CLOSURE.md). AppSettings is now non-AI; historical compatibility statements below describe that phase only.
+
 AIConnectionState V1 is the only writable AI authority. Provider, model,
 endpoint, protocol, auth, credential and active-connection identity live in the
 single `aiConnectionState` storage key. No schema bump or second credential

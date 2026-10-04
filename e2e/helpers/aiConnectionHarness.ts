@@ -1,13 +1,17 @@
 import type { BrowserContext, Page, Route } from "@playwright/test";
-import type { LegacyAISettingsPatch, AIConnectionResponse } from "../../src/shared/types/aiConnectionMessages";
+import type { AIConnectionUpdatePatch, AIConnectionResponse } from "../../src/shared/types/aiConnectionMessages";
 declare const chrome: { runtime: { sendMessage: (message: unknown) => Promise<AIConnectionResponse> } };
 
-/** Configure AI through the real background writer, after Popup initialization. */
-export async function seedAIConnection(page: Page, settings: LegacyAISettingsPatch): Promise<void> {
-  const response = await page.evaluate(async (patch) => {
-    return await chrome.runtime.sendMessage({ type: "AI_CONNECTION_APPLY_LEGACY_SETTINGS", settings: patch }) as AIConnectionResponse;
-  }, settings);
-  if (!response?.ok) throw new Error(`AI fixture configuration failed: ${response?.code ?? "NO_RESPONSE"}`);
+/** Configure via the real sidepanel sender, without granting popup mutation authority. */
+export async function seedAIConnection(page: Page, patch: AIConnectionUpdatePatch): Promise<void> {
+  const editorUrl = new URL(page.url());
+  editorUrl.pathname = "/sidepanel/sidepanel.html"; editorUrl.search = ""; editorUrl.hash = "";
+  const editor = await page.context().newPage();
+  try {
+    await editor.goto(editorUrl.toString());
+    const response = await editor.evaluate(async patch => chrome.runtime.sendMessage({ type: "AI_CONNECTION_UPDATE_ACTIVE", patch }), patch);
+    if (!response?.ok) throw new Error(`AI fixture configuration failed: ${response?.code ?? "NO_RESPONSE"}`);
+  } finally { await editor.close(); }
 }
 
 /** Preserve canonical model/transport authority while serving fixture responses locally. */

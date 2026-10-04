@@ -44,7 +44,6 @@ describe("analyticsBackend", () => {
         enableAnalytics: true,
         deviceId: "dev-1",
         analyticsConsentVersion: 1,
-        apiKey: fakeApiKey,
         authToken: fakeAuthToken,
       },
       "api_key_set",

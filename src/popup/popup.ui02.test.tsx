@@ -129,7 +129,8 @@ const createFetchMock = () =>
 
 vi.stubGlobal("fetch", createFetchMock());
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.resetModules();
   installSettingsMessaging();
   sentRuntimeMessages.length = 0;
   sentTabTargets.length = 0;
@@ -244,8 +245,7 @@ describe("UI-02 Popup Commercial View Integration", () => {
       fireEvent.click(switchToLoginBtn);
     });
 
-    const loginTabBtn = await screen.findByRole("button", { name: /^登录$|^Sign In$/ });
-    expect(loginTabBtn).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: /^登录$|^Sign In$/ })).toBeInTheDocument());
     expect(await screen.findByRole("button", { name: /^登录账号$|^Sign In to Account$/ })).toBeInTheDocument();
     expect(screen.getByLabelText(/邮箱|Email/)).toBeInTheDocument();
     expect(screen.getByLabelText(/密码|Password/)).toBeInTheDocument();
@@ -1101,17 +1101,4 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
     expect(POPUP_COPY.zh.connected("Claude")).toBe("Claude");
     expect(POPUP_COPY.en.connected("Claude")).toBe("Claude");
   });
-});
-
-vi.mock("@/shared/utils/aiSolvePreferences", async () => {
-  const storage = await import("@/shared/utils/storage");
-  const { getProvider } = await import("@/shared/ai/providers");
-  return {
-    loadParsePreferences: async () => { const { preferredRoute, language } = await storage.loadSettings(); return { preferredRoute, language }; },
-    getRuntimeCaptureInfo: async () => { const fixture = await storage.loadSettings(); return getProvider(fixture.providerId); },
-    getAIConnectionReadiness: async () => {
-      const fixture = await storage.loadSettings();
-      return { ready: getProvider(fixture.providerId).keyOptional === true || Boolean(fixture.apiKey?.trim()) };
-    },
-  };
 });

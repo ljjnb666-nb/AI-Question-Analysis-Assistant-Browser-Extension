@@ -6,7 +6,6 @@ import {
   langSafe,
   looksLikePlaceholderResolvedAnswer,
   looksMathHeavy,
-  pickBatchReviewModel,
   preferBatchRetryResult,
   preferVisionResult,
   shouldRetryBatchParseAfterError,
@@ -116,7 +115,7 @@ describe("batchParseHeuristics", () => {
     ).toBe(false);
   });
 
-  it("handles placeholders, math-heavy text, provider review model, and language fallback", () => {
+  it("handles placeholders, math-heavy text, and language fallback", () => {
     expect(looksLikePlaceholderResolvedAnswer("需人工确认")).toBe(true);
     expect(looksLikePlaceholderResolvedAnswer("")).toBe(true);
     expect(looksLikePlaceholderResolvedAnswer("A")).toBe(false);
@@ -124,7 +123,6 @@ describe("batchParseHeuristics", () => {
     expect(looksMathHeavy("传递函数 G(s)=1/s")).toBe(true);
     expect(looksMathHeavy("plain language only")).toBe(false);
 
-    expect(pickBatchReviewModel("openai", "gpt-4o-mini")).toBe("gpt-5.5");
     expect(langSafe("en", "中文", "English")).toBe("English");
     expect(langSafe("zh", "中文", "English")).toBe("中文");
   });

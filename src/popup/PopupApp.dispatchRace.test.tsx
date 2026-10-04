@@ -120,7 +120,8 @@ import { PopupApp } from "./PopupApp";
 import { __resetStorageCacheForTests } from "@/shared/utils/storage";
 import { readProtectedWorkOwners } from "@/shared/auth/protectedWorkOwner";
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.resetModules();
   installSettingsMessaging();
   sentRuntimeMessages.length = 0;
   sentTabTargets.length = 0;
@@ -236,17 +237,4 @@ describe("PopupApp protected work ownership", () => {
     const owners = await readProtectedWorkOwners();
     expect(owners.fullPage).toEqual([{ tabId: 5 }]);
   });
-});
-
-vi.mock("@/shared/utils/aiSolvePreferences", async () => {
-  const storage = await import("@/shared/utils/storage");
-  const { getProvider } = await import("@/shared/ai/providers");
-  return {
-    loadParsePreferences: async () => { const { preferredRoute, language } = await storage.loadSettings(); return { preferredRoute, language }; },
-    getRuntimeCaptureInfo: async () => { const fixture = await storage.loadSettings(); return getProvider(fixture.providerId); },
-    getAIConnectionReadiness: async () => {
-      const fixture = await storage.loadSettings();
-      return { ready: getProvider(fixture.providerId).keyOptional === true || Boolean(fixture.apiKey?.trim()) };
-    },
-  };
 });

@@ -1,9 +1,10 @@
+import type { AIConnectionScenarioFixture } from "@/test/aiConnectionFixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppSettings, QuestionBlock } from "@/shared/types";
+import type { QuestionBlock } from "@/shared/types";
 import { DEFAULT_SETTINGS } from "@/shared/types";
 import type { ScanScrollRoot } from "./detector/fullPageDetector";
 
-let mockSettings: AppSettings = { ...DEFAULT_SETTINGS };
+let mockSettings: AIConnectionScenarioFixture = { ...DEFAULT_SETTINGS };
 
 vi.mock("@/shared/utils/storage", () => ({
   addHistoryEntry: vi.fn(async () => undefined),
@@ -168,10 +169,10 @@ vi.mock("@/shared/utils/aiSolvePreferences", async () => {
   const { getProvider } = await import("@/shared/ai/providers");
   return {
     loadParsePreferences: async () => { const { preferredRoute, language } = await storage.loadSettings(); return { preferredRoute, language }; },
-    getRuntimeCaptureInfo: async () => { const fixture = await storage.loadSettings(); return getProvider(fixture.providerId); },
+    getRuntimeCaptureInfo: async () => { const fixture = await storage.loadSettings() as AIConnectionScenarioFixture; return getProvider(fixture.providerId ?? "anthropic"); },
     getAIConnectionReadiness: async () => {
-      const fixture = await storage.loadSettings();
-      return { ready: getProvider(fixture.providerId).keyOptional === true || Boolean(fixture.apiKey?.trim()) };
+      const fixture = await storage.loadSettings() as AIConnectionScenarioFixture;
+      return { ready: getProvider(fixture.providerId ?? "anthropic").keyOptional === true || Boolean(fixture.apiKey?.trim()) };
     },
   };
 });

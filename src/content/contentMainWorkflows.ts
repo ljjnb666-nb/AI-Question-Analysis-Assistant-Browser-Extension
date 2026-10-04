@@ -4,7 +4,7 @@ import type { BoundingBox, HistoryEntry, ParseResult, QuestionBlock } from "@/sh
 import { cropScreenshot } from "@/shared/utils/cropImage";
 import {
   getProviderNotConfiguredMessage,
-} from "@/shared/utils/parseRouter";
+} from "@/shared/ai/parseResultAuthority";
 import { addHistoryEntry, loadHistory, loadSettings } from "@/shared/utils/storage";
 import { logEvent } from "@/shared/utils/analytics";
 import type { ActiveDetectMode } from "./contentRuntimeState";

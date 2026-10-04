@@ -43,7 +43,7 @@ async function writeAppSettingsUnderLock(command: AppSettingsCommand): Promise<E
   const result = await chrome.storage.local.get("appSettings");
   const raw = result.appSettings ?? {};
   if (!plainObject(raw)) throw new Error("APP_SETTINGS_WRITE_FAILED");
-  // Preserve legacy fields byte-for-byte. Physical cleanup is a separate phase.
+  // Ordinary mutations preserve migration input until authority cleanup.
   const next = { ...raw };
   if (raw.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION) next.enableAnalytics = false;
   next.analyticsConsentVersion = CURRENT_ANALYTICS_CONSENT_VERSION;
@@ -66,8 +66,7 @@ async function writeAppSettingsUnderLock(command: AppSettingsCommand): Promise<E
       next.authToken = decoded.plaintext ? await encryptValue(decoded.plaintext) : "";
     }
   }
-  // This is the sole production appSettings persistence site and the commit point.
-  if (JSON.stringify(next) !== JSON.stringify(raw)) await chrome.storage.local.set({ appSettings: next });
+  await persistAppSettings(raw, next);
   const analyticsDisabled = next.enableAnalytics !== true;
   if (analyticsDisabled) await chrome.storage.local.remove("analyticsLog");
   return { ok: true, deviceId: next.deviceId as string, analyticsDisabled };
@@ -87,4 +86,20 @@ export async function handleAppSettingsCommand(message: unknown, sender: chrome.
     // Never attach command, storage snapshot, token or underlying exception.
     return { ok: false, code: "APP_SETTINGS_WRITE_FAILED" };
   }
+}
+
+/** Sole raw commit site, called only while holding settingsWriteTail. */
+async function persistAppSettings(raw: Record<string, unknown>, next: Record<string, unknown>): Promise<void> {
+  if (JSON.stringify(next) !== JSON.stringify(raw)) await chrome.storage.local.set({ appSettings: next });
+}
+
+/** Internal only: authority must be valid before calling this operation. */
+export function cleanupLegacyAISettingsAfterAuthority(): Promise<void> {
+  return withAppSettingsWriteLock(async () => {
+    const { appSettings: raw = {} } = await chrome.storage.local.get("appSettings");
+    if (!plainObject(raw)) throw new Error("AI_LEGACY_SETTINGS_CLEANUP_FAILED");
+    const next = { ...raw };
+    for (const key of ["providerId", "apiKey", "apiModel", "customBaseUrl", "customProviderProtocol"]) delete next[key];
+    await persistAppSettings(raw, next);
+  });
 }

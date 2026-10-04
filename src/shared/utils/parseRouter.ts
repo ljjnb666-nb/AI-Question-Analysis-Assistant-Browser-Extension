@@ -3,8 +3,6 @@
  */
 
 import type { ParseResult, QuestionBlock } from "../types";
-import { PROVIDERS, getProvider } from "../ai/providers";
-import type { ProviderConfig, ProviderId } from "../ai/providers";
 import { buildResult } from "../ai/parseResult";
 import { callAnthropic, callGemini, callOpenAICompat } from "../ai/providerClients";
 import { decideRoute, hasSufficientPreviewText } from "../ai/routeDecision";
@@ -12,7 +10,6 @@ import { mockParse } from "../ai/mockParse";
 import {
   getProviderNotConfiguredMessage,
   isParseResultFillAuthoritative,
-  isProviderRuntimeConfigured,
 } from "../ai/parseResultAuthority";
 import { classifyAnalyticsFailure, logEvent } from "./analytics";
 import { ensureAIConnectionAuthorityReady } from "./aiConnectionClient";
@@ -29,17 +26,12 @@ import { prepareQuestionPackageForProvider } from "../ai/providerMediaPreparatio
 import { ProviderNotConfiguredError, StaleQuestionRevisionError } from "./parseAttemptErrors";
 
 export {
-  PROVIDERS,
-  getProvider,
   decideRoute,
   hasSufficientPreviewText,
   buildResult,
   mockParse,
-  isProviderRuntimeConfigured,
   isParseResultFillAuthoritative,
-  getProviderNotConfiguredMessage,
 };
-export type { ProviderConfig, ProviderId };
 export { getParseResultAuthority, getUnfillableResultCode } from "../ai/parseResultAuthority";
 export { PROVIDER_NOT_CONFIGURED, ProviderNotConfiguredError, isProviderNotConfiguredError } from "./parseAttemptErrors";
 
@@ -225,13 +217,16 @@ async function resolveSolveRuntime(settings: ParsePreferences, context?: ParseQu
   try {
     await ensureAIConnectionAuthorityReady();
     const expected = context?.authorityLease && solveRuntimes.get(context.authorityLease);
-    if (expected) await assertRuntimeConfigCurrent(expected);
-    const current = await resolveActiveAIConnectionRuntimeMetadata();
-    if (expected) await assertRuntimeConfigCurrent(expected);
-    const runtime = expected ?? current;
+    if (expected) {
+      await assertRuntimeConfigCurrent(expected);
+      validateRuntimeEndpoint(expected.endpoint);
+      validateRuntimeAuth(expected);
+      return expected;
+    }
+    const runtime = await resolveActiveAIConnectionRuntimeMetadata();
     validateRuntimeEndpoint(runtime.endpoint);
     validateRuntimeAuth(runtime);
-    if (context?.authorityLease && !expected) solveRuntimes.set(context.authorityLease, runtime);
+    if (context?.authorityLease) solveRuntimes.set(context.authorityLease, runtime);
     return runtime;
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
@@ -304,46 +299,6 @@ export function normalizeNetworkError(
   );
 }
 
-export function isLikelyTextOnlyModel(name: string): boolean {
-  const normalizedName = String(name || "").trim().toLowerCase();
-  if (!normalizedName) return false;
-
-  const visionHints = [
-    "gpt-5",
-    "gpt-4.1",
-    "vision",
-    "vl",
-    "gemini",
-    "llava",
-    "glm-5v",
-    "glm-4v",
-    "qwen3-vl",
-    "qwen2.5-vl",
-    "claude-fable-5",
-    "claude-opus-4",
-    "claude-sonnet-4",
-    "claude-haiku-4",
-    "kimi-k2",
-    "minimax-m3",
-    "llama3.2-vision",
-    "gemma4",
-  ];
-  if (visionHints.some((hint) => normalizedName.includes(hint))) {
-    return false;
-  }
-
-  const textOnlyHints = [
-    "deepseek-v4",
-    "gpt-3.5",
-    "qwen-plus",
-    "qwen-flash",
-    "qwen-max",
-    "glm-5.2",
-    "glm-5.1",
-    "glm-5-turbo",
-  ];
-  return textOnlyHints.some((hint) => normalizedName.includes(hint));
-}
 
 function getEndpointHostLabel(baseUrl: string): string {
   try {

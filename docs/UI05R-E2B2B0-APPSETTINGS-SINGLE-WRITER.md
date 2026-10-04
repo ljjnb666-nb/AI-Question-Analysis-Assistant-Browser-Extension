@@ -1,5 +1,7 @@
 # UI05R-E2B2B0: AppSettings single-writer ownership
 
+> Historical phase report. Current settings domain and legacy cleanup contract: [E2B2B authority closure](UI05R-E2B2B-AUTHORITY-CLOSURE.md). AppSettings is now non-AI; historical compatibility statements below describe that phase only.
+
 Base: `7e3e10ff758131099ec15bc3f5691b8159f17556`.
 
 ## Why this prerequisite exists

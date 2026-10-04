@@ -1,5 +1,5 @@
 import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
-import { ensureAIConnectionAuthorityReady } from "@/shared/utils/aiConnectionClient";
+import { getAIConnectionEditorView, updateActiveAIConnection } from "@/shared/utils/aiConnectionClient";
 import React, { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
@@ -8,11 +8,12 @@ import { DEFAULT_ANALYTICS_BASE_URL } from "@/shared/constants/analytics";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { getConnectionTestNotConfiguredMessage } from "@/shared/ai/parseResultAuthority";
 import { mapUserFacingError, userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
-import { getProvider, parseQuestion } from "@/shared/utils/parseRouter";
+import { parseQuestion } from "@/shared/utils/parseRouter";
+import { getProvider } from "@/shared/ai/providers";
 import { logEvent } from "@/shared/utils/analytics";
 import { getAuthText } from "@/shared/auth/authText";
 import { useAuthController } from "@/shared/auth/useAuthController";
-import type { ProviderId } from "@/shared/utils/parseRouter";
+import type { ProviderId } from "@/shared/ai/providers";
 import type { UILang } from "./displayUtils";
 import { SettingsAccountSection, SettingsActionsSection, SettingsConfigSections } from "./settingsSections";
 
@@ -29,6 +30,7 @@ export const SettingsTab: React.FC<{
 }> = ({ lang: initialLang, onLanguageChange, authOnly = false, sessionRejectedHint = false }) => {
   const scopeRef = useRef<HTMLDivElement | null>(null);
   const [providerId, setProviderId] = useState<ProviderId>("anthropic");
+  const [hasCredential, setHasCredential] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
   const [route, setRoute] = useState<"auto" | "text" | "vision">("auto");
@@ -59,16 +61,17 @@ export const SettingsTab: React.FC<{
 
   useEffect(() => {
     let disposed = false;
-    void ensureAIConnectionAuthorityReady().then(() => loadSettings()).then((settings) => {
+    void Promise.all([loadSettings(), getAIConnectionEditorView()]).then(([settings, editor]) => {
       if (disposed) return;
-      setProviderId((settings.providerId as ProviderId) ?? "anthropic");
-      setApiKey(settings.apiKey ?? "");
-      setModel(settings.apiModel ?? "");
+      setProviderId(editor.presetId);
+      setApiKey("");
+      setHasCredential(editor.hasCredential);
+      setModel(editor.selectedModelId);
       setRoute(settings.preferredRoute ?? "auto");
-      setCustomUrl(settings.customBaseUrl ?? "");
+      setCustomUrl(editor.endpointOverride ?? "");
       setAnalyticsBaseUrl(settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL);
       setEnableAnalytics(settings.enableAnalytics ?? false);
-      setCustomProtocol(settings.customProviderProtocol ?? "openai");
+      setCustomProtocol(editor.protocol === "anthropic_messages" ? "anthropic" : "openai");
       setLang(settings.language ?? "zh");
       setDeviceId(settings.deviceId ?? "");
       // Auth identity is owned by the shared session coordinator inside
@@ -142,20 +145,24 @@ export const SettingsTab: React.FC<{
     setProviderId(id);
     setModel(getProvider(id).defaultModel);
     setApiKey("");
+    setHasCredential(false);
     setTestResult(null);
   };
 
-  const saveCurrentDraft = () => saveSettings({
-        providerId,
-        apiKey: apiKey.trim(),
-        apiModel: model || provider.defaultModel,
-        preferredRoute: route,
-        customBaseUrl: customUrl || undefined,
-        analyticsBaseUrl: analyticsBaseUrl.trim() || DEFAULT_ANALYTICS_BASE_URL,
-        enableAnalytics,
-        customProviderProtocol: customProtocol,
-        language: lang,
-  });
+  const saveCurrentDraft = async () => {
+    const committed = await updateActiveAIConnection({
+      presetId: providerId, selectedModelId: model || provider.defaultModel,
+      endpointOverride: customUrl || null,
+      protocolOverride: customProtocol === "anthropic" ? "anthropic_messages" : "openai_chat_completions",
+      credential: apiKey.trim() ? { action: "REPLACE", value: apiKey.trim() } : { action: "KEEP" },
+    });
+    setHasCredential(committed.metadata?.hasCredential ?? false);
+    setApiKey("");
+    await saveSettings({ preferredRoute: route,
+      analyticsBaseUrl: analyticsBaseUrl.trim() || DEFAULT_ANALYTICS_BASE_URL,
+      enableAnalytics, language: lang,
+    });
+  };
 
   const handleSave = async () => {
     try {
@@ -230,6 +237,7 @@ export const SettingsTab: React.FC<{
       <SettingsConfigSections
         analyticsBaseUrl={analyticsBaseUrl}
         apiKey={apiKey}
+        hasCredential={hasCredential}
         customProtocol={customProtocol}
         customUrl={customUrl}
         deviceId={deviceId}
