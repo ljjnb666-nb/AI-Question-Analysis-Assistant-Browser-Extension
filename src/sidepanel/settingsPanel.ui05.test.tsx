@@ -66,6 +66,7 @@ vi.mock("@/shared/utils/parseRouter", async (importOriginal) => ({
 vi.mock("@/shared/utils/aiConnectionClient", () => ({
   getAIConnectionEditorView: vi.fn(),
   updateActiveAIConnection: vi.fn(),
+  getAIConnectionActiveMetadata: vi.fn(),
   ensureAIConnectionAuthorityReady: vi.fn().mockResolvedValue({ ok: true }),
 }));
 
@@ -74,10 +75,10 @@ vi.mock("@/shared/utils/aiSolvePreferences", () => ({
 }));
 
 import { parseQuestion } from "@/shared/utils/parseRouter";
-import { getAIConnectionEditorView, updateActiveAIConnection } from "@/shared/utils/aiConnectionClient";
+import { getAIConnectionActiveMetadata, getAIConnectionEditorView, updateActiveAIConnection } from "@/shared/utils/aiConnectionClient";
 import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
 import { SettingsTab } from "./settingsPanel";
-import { computeValidationFingerprint, deriveSetupStatus } from "./settingsTypes";
+import { computeAuthorityValidationFingerprint, type AuthorityValidationReceipt, deriveSetupStatus } from "./settingsTypes";
 import * as storage from "@/shared/utils/storage";
 
 const SYNTHETIC_TEST_KEY = "sk-test-ui05-example";
@@ -111,6 +112,17 @@ function setupConnectionMock(
     ...defaultEditorView,
     ...editorOverrides,
   });
+  vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+    id: "conn-ui05-test",
+    providerId: (editorOverrides.presetId ?? defaultEditorView.presetId) as any,
+    endpointOverride: editorOverrides.endpointOverride ?? null,
+    protocol: (editorOverrides.protocol ?? defaultEditorView.protocol) as any,
+    selectedModelId: editorOverrides.selectedModelId ?? defaultEditorView.selectedModelId,
+    connectionRevision: 1,
+    credentialRevision: editorOverrides.hasCredential ? 1 : 0,
+    hasCredential: Boolean(editorOverrides.hasCredential),
+    validation: { status: "untested" },
+  } as any);
   vi.spyOn(storage, "loadSettings").mockResolvedValue({
     ...DEFAULT_SETTINGS,
     preferredRoute: "auto",
@@ -127,14 +139,21 @@ function setupConnectionMock(
     const isReplace = patch?.credential?.action === "REPLACE";
     const isClear = patch?.credential?.action === "CLEAR";
     const hasCred = isReplace ? true : isClear ? false : Boolean(editorOverrides.hasCredential);
+    const updatedMeta = {
+      id: "conn-ui05-test",
+      presetId: patch?.presetId ?? editorOverrides.presetId ?? defaultEditorView.presetId,
+      providerId: patch?.presetId ?? editorOverrides.presetId ?? defaultEditorView.presetId,
+      hasCredential: hasCred,
+      protocol: patch?.protocolOverride ?? editorOverrides.protocol ?? defaultEditorView.protocol,
+      selectedModelId: patch?.selectedModelId ?? editorOverrides.selectedModelId ?? defaultEditorView.selectedModelId,
+      connectionRevision: 2,
+      credentialRevision: hasCred ? 2 : 0,
+      validation: { status: "untested" },
+    };
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue(updatedMeta as any);
     return {
       ok: true,
-      metadata: {
-        presetId: patch?.presetId ?? editorOverrides.presetId ?? defaultEditorView.presetId,
-        hasCredential: hasCred,
-        protocol: patch?.protocolOverride ?? editorOverrides.protocol ?? defaultEditorView.protocol,
-        selectedModelId: patch?.selectedModelId ?? editorOverrides.selectedModelId ?? defaultEditorView.selectedModelId,
-      },
+      metadata: updatedMeta,
     } as any;
   });
   vi.mocked(getAIConnectionReadiness).mockResolvedValue({ ready: true });
@@ -155,11 +174,11 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
       expect(screen.getByText("未配置 AI 服务")).toBeInTheDocument();
     });
     expect(screen.getByText("快速配置引导")).toBeInTheDocument();
-    expect(screen.getByText(/尚未填写 API Key。配置后才能进行 AI 解析和连接测试。/)).toBeInTheDocument();
+    expect(screen.getAllByText(/尚未填写 API Key。配置后才能进行 AI 解析和连接测试。/).length).toBeGreaterThan(0);
   });
 
-  // UI05-02: provider picker renders authority-backed providers
-  it("UI05-02: provider picker renders authority-backed providers with capability tags", async () => {
+  // UI05-02: provider picker renders authority-backed providers without provider-level capability claims
+  it("UI05-02: provider picker renders authority-backed providers with key tags and no provider-level capability claims", async () => {
     render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
 
     await waitFor(() => {
@@ -169,8 +188,9 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
     for (const p of PROVIDERS) {
       expect(screen.getAllByText(p.name).length).toBeGreaterThan(0);
     }
-    expect(screen.getAllByText("支持图像").length).toBeGreaterThan(0);
-    expect(screen.getByText("仅文本")).toBeInTheDocument();
+    // Per Item 4: provider-level supports images / text only claims deleted; unknown capability fails closed
+    expect(screen.queryByText("支持图像")).toBeNull();
+    expect(screen.queryByText("仅文本")).toBeNull();
     expect(screen.getByText("无需 Key")).toBeInTheDocument();
   });
 
@@ -962,31 +982,30 @@ describe("UI-05 Review Fix 01: Validation Authority & Freshness Tests (RF01-VAL0
     });
   });
 
-  // RF01-VAL07: validated fingerprint equals committed runtime fingerprint before Ready
-  it("RF01-VAL07: validated fingerprint equals committed runtime fingerprint before Ready", () => {
-    const base = {
-      providerId: "anthropic" as const,
-      apiKey: "sk-test",
-      apiModel: "claude-3-opus",
-      customBaseUrl: "",
-      customProviderProtocol: "openai" as const,
+  // RF01-VAL07: validated authority receipt binds strictly to non-secret revisions before Ready
+  it("RF01-VAL07: validated authority receipt binds strictly to non-secret revisions before Ready", () => {
+    const base: AuthorityValidationReceipt = {
+      connectionId: "conn-gemini-1",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      validationGeneration: 1,
     };
 
-    const fp1 = computeValidationFingerprint(base);
-    const fp2 = computeValidationFingerprint({ ...base });
+    const fp1 = computeAuthorityValidationFingerprint(base);
+    const fp2 = computeAuthorityValidationFingerprint({ ...base });
     expect(fp1).toBe(fp2);
 
-    const fpChangedKey = computeValidationFingerprint({ ...base, apiKey: "sk-test-different" });
-    expect(fpChangedKey).not.toBe(fp1);
+    const fpChangedConn = computeAuthorityValidationFingerprint({ ...base, connectionId: "conn-gemini-2" });
+    expect(fpChangedConn).not.toBe(fp1);
 
-    const fpChangedModel = computeValidationFingerprint({ ...base, apiModel: "claude-3.5-sonnet" });
-    expect(fpChangedModel).not.toBe(fp1);
+    const fpChangedRev = computeAuthorityValidationFingerprint({ ...base, connectionRevision: 2 });
+    expect(fpChangedRev).not.toBe(fp1);
 
-    const fpChangedUrl = computeValidationFingerprint({ ...base, customBaseUrl: "https://example.com" });
-    expect(fpChangedUrl).not.toBe(fp1);
+    const fpChangedCredRev = computeAuthorityValidationFingerprint({ ...base, credentialRevision: 2 });
+    expect(fpChangedCredRev).not.toBe(fp1);
 
-    const fpChangedProto = computeValidationFingerprint({ ...base, customProviderProtocol: "anthropic" });
-    expect(fpChangedProto).not.toBe(fp1);
+    const fpChangedGen = computeAuthorityValidationFingerprint({ ...base, validationGeneration: 2 });
+    expect(fpChangedGen).not.toBe(fp1);
 
     expect(
       deriveSetupStatus({

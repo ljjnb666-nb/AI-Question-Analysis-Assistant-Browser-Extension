@@ -22,30 +22,34 @@ export interface SettingsFormValues {
   language: "zh" | "en";
 }
 
-export interface ValidationFingerprintInput {
-  providerId: ProviderId;
-  apiKey: string;
-  apiModel: string;
-  customBaseUrl?: string;
-  customProviderProtocol?: "openai" | "anthropic";
+/**
+ * Non-secret authority validation receipt.
+ * Binds strictly to backend single-writer authority revisions, never secret material.
+ */
+export interface AuthorityValidationReceipt {
+  connectionId: string;
+  connectionRevision: number;
+  credentialRevision?: number;
+  validationGeneration?: number;
 }
 
 /**
- * Deterministically computes the validation fingerprint covering all provider-runtime-relevant
- * authority configuration fields: providerId, apiKey, apiModel, customBaseUrl, and customProviderProtocol.
+ * Deterministically computes the authority validation fingerprint covering ONLY
+ * non-secret authority revisions: connectionId, connectionRevision, credentialRevision,
+ * and optional validation generation. Plaintext secrets are strictly excluded.
  */
-export function computeValidationFingerprint(
-  input: ValidationFingerprintInput | null | undefined,
+export function computeAuthorityValidationFingerprint(
+  receipt: AuthorityValidationReceipt | null | undefined,
 ): string {
-  if (!input) return "";
-  return JSON.stringify({
-    providerId: input.providerId ?? "",
-    apiKey: (input.apiKey ?? "").trim(),
-    apiModel: (input.apiModel ?? "").trim(),
-    customBaseUrl: (input.customBaseUrl ?? "").trim(),
-    customProviderProtocol: input.customProviderProtocol ?? "openai",
-  });
+  if (!receipt) return "";
+  return [
+    receipt.connectionId,
+    receipt.connectionRevision,
+    receipt.credentialRevision ?? 0,
+    receipt.validationGeneration ?? 0,
+  ].join(":");
 }
+
 
 /**
  * Derives current setup status based on runtime provider configuration,
@@ -77,6 +81,10 @@ export function deriveSetupStatus(params: {
 
   if (isDirty) {
     return "incomplete";
+  }
+
+  if (isValidated) {
+    return "validated";
   }
 
   if (savedOnce) {

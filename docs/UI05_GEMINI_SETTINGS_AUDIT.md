@@ -1,5 +1,7 @@
 # UI05_GEMINI_SETTINGS_AUDIT
 
+> **Historical Notice**: This document records the pre-redesign baseline of the settings panel prior to UI-05 and E2B-2B authority closure. Active architecture is governed by `docs/UI05R_PROVIDER_CONNECTION_ARCHITECTURE.md` and background single-writer authorities.
+
 ## 1. CURRENT_SETTINGS_STRUCTURE
 The current Settings page (`src/sidepanel/settingsPanel.tsx` and `src/sidepanel/settingsSections.tsx`) is structured as a vertical stack of `SectionCard` containers:
 - **Auth Gate (`authOnly` mode)**: If the user is unauthenticated, `SettingsTab` renders only `SettingsAccountSection` (registration and login views).

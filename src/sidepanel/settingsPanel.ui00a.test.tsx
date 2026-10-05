@@ -153,5 +153,5 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
   });
 });
 
-vi.mock("@/shared/utils/aiConnectionClient", () => ({ getAIConnectionEditorView: vi.fn(async () => ({ ...connectionFixture, selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages" })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/shared/utils/aiConnectionClient", () => ({ getAIConnectionActiveMetadata: vi.fn(async () => null), getAIConnectionEditorView: vi.fn(async () => ({ ...connectionFixture, selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages" })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));
 vi.mock("@/shared/utils/aiSolvePreferences", () => ({ getAIConnectionReadiness: async () => connectionFixture.presetId === "ollama" || connectionFixture.hasCredential ? { ready: true } : { ready: false, code: "AI_CREDENTIAL_REQUIRED" } }));

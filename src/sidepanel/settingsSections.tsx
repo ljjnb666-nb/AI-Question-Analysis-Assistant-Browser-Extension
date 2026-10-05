@@ -587,7 +587,8 @@ export const SettingsProviderPicker: React.FC<{
   };
 
   return (
-    <SectionCard title={copy.provider.title} description={copy.provider.description}>
+    <div data-testid="settings-provider-picker">
+      <SectionCard title={copy.provider.title} description={copy.provider.description}>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <input
           id="provider-search-input"
@@ -671,17 +672,6 @@ export const SettingsProviderPicker: React.FC<{
                 ) : null}
 
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2 }}>
-                  <span
-                    style={{
-                      fontSize: 10,
-                      padding: "1px 4px",
-                      borderRadius: orbitRadius.sm,
-                      background: item.supportsVision ? "rgba(16, 185, 129, 0.1)" : "rgba(255, 255, 255, 0.04)",
-                      color: item.supportsVision ? orbitColors.semantic.success : orbitColors.text.muted,
-                    }}
-                  >
-                    {item.supportsVision ? copy.provider.supportsVision : copy.provider.textOnly}
-                  </span>
                   {item.keyOptional ? (
                     <span
                       style={{
@@ -715,6 +705,7 @@ export const SettingsProviderPicker: React.FC<{
         </div>
       </div>
     </SectionCard>
+  </div>
   );
 };
 

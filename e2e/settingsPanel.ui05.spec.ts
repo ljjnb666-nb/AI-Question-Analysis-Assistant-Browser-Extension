@@ -30,9 +30,25 @@ async function open(page: Page, state = "first-run", lang = "zh", width = 360) {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(`${origin}e2e/fixtures/ui05.html?state=${state}&lang=${lang}`);
   await page.waitForLoadState("domcontentloaded");
-  await page.waitForSelector("#sidepanel-tabpanel-settings");
-  // Give GSAP transitions and state actions time to settle
-  await page.waitForTimeout(300);
+  await expect(page.locator("#sidepanel-tabpanel-settings")).toBeVisible();
+
+  // Semantic settlement wait strictly replacing arbitrary setTimeout(300)
+  if (state === "provider-picker") {
+    await expect(page.locator('[data-testid="settings-catalog-view"]')).toBeVisible();
+  } else if (
+    state === "api-key-hidden" ||
+    state === "api-key-visible-synthetic" ||
+    state === "config-saved-not-tested" ||
+    state === "validation-testing" ||
+    state === "validation-error" ||
+    state === "validation-success" ||
+    state === "ollama" ||
+    state === "custom"
+  ) {
+    await expect(page.locator('[data-testid="settings-editor-view"]')).toBeVisible();
+  } else {
+    await expect(page.locator('[data-testid="settings-home-view"]')).toBeVisible();
+  }
 }
 
 async function noOverflow(page: Page) {
@@ -65,32 +81,39 @@ async function capture(page: Page, name: string) {
 test.describe("UI-05: Visual Evidence & First-Run Redesign Screenshots", () => {
   test("ui05-zh-first-run.png", async ({ page }) => {
     await open(page, "first-run", "zh", 360);
+    await expect(page.getByText("未配置 AI 服务")).toBeVisible();
+    await expect(page.locator('[data-testid="first-run-signin-section"]')).toBeVisible();
     await capture(page, "ui05-zh-first-run.png");
   });
 
   test("ui05-en-first-run.png", async ({ page }) => {
     await open(page, "first-run", "en", 360);
+    await expect(page.getByText("AI Provider Not Configured")).toBeVisible();
+    await expect(page.locator('[data-testid="first-run-signin-section"]')).toBeVisible();
     await capture(page, "ui05-en-first-run.png");
   });
 
   test("ui05-zh-provider-picker.png", async ({ page }) => {
     await open(page, "provider-picker", "zh", 360);
+    await expect(page.locator('[data-testid="settings-provider-picker"]')).toBeVisible();
     await capture(page, "ui05-zh-provider-picker.png");
   });
 
   test("ui05-en-provider-picker.png", async ({ page }) => {
     await open(page, "provider-picker", "en", 360);
+    await expect(page.locator('[data-testid="settings-provider-picker"]')).toBeVisible();
     await capture(page, "ui05-en-provider-picker.png");
   });
 
   test("ui05-api-key-hidden.png", async ({ page }) => {
     await open(page, "api-key-hidden", "zh", 360);
+    await expect(page.locator('input[type="password"][data-testid="settings-api-key-input"]')).toBeVisible();
     await capture(page, "ui05-api-key-hidden.png");
   });
 
   test("ui05-api-key-visible-synthetic.png", async ({ page }) => {
     await open(page, "api-key-visible-synthetic", "zh", 360);
-    await page.waitForTimeout(150);
+    await expect(page.locator('input[type="text"][data-testid="settings-api-key-input"]')).toBeVisible();
     await capture(page, "ui05-api-key-visible-synthetic.png");
   });
 
@@ -102,28 +125,27 @@ test.describe("UI-05: Visual Evidence & First-Run Redesign Screenshots", () => {
 
   test("ui05-validation-testing.png", async ({ page }) => {
     await open(page, "validation-testing", "zh", 360);
-    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
+    const testBtn = page.locator('[data-testid="settings-editor-view"]').getByRole("button", { name: /连接测试|测试配置/ });
     await expect(testBtn).toBeVisible();
     await testBtn.click();
     await expect(page.getByText("正在测试配置...")).toBeVisible();
-    const loadingBtn = page.getByRole("button", { name: /测试中\.\.\.|Testing\.\.\./ });
+    const loadingBtn = page.locator('[data-testid="settings-editor-view"]').getByRole("button", { name: /测试中\.\.\.|Testing\.\.\./ });
     await expect(loadingBtn).toBeDisabled();
     await capture(page, "ui05-validation-testing.png");
   });
 
   test("ui05-validation-success.png", async ({ page }) => {
     await open(page, "validation-success", "zh", 360);
-    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
+    const testBtn = page.locator('[data-testid="settings-editor-view"]').getByRole("button", { name: /连接测试|测试配置/ });
     await expect(testBtn).toBeVisible();
     await testBtn.click();
-    await expect(page.getByText("AI 配置已就绪")).toBeVisible();
     await expect(page.locator('[data-test-tone="success"]')).toBeVisible();
     await capture(page, "ui05-validation-success.png");
   });
 
   test("ui05-validation-error.png", async ({ page }) => {
     await open(page, "validation-error", "zh", 360);
-    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
+    const testBtn = page.locator('[data-testid="settings-editor-view"]').getByRole("button", { name: /连接测试|测试配置/ });
     await expect(testBtn).toBeVisible();
     await testBtn.click();
     await expect(page.getByText("连接测试失败")).toBeVisible();
@@ -133,19 +155,18 @@ test.describe("UI-05: Visual Evidence & First-Run Redesign Screenshots", () => {
 
   test("ui05-ollama.png", async ({ page }) => {
     await open(page, "ollama", "zh", 360);
+    await expect(page.locator('[data-testid="settings-editor-view"]')).toBeVisible();
     await capture(page, "ui05-ollama.png");
   });
 
   test("ui05-custom-provider.png", async ({ page }) => {
     await open(page, "custom", "zh", 360);
+    await expect(page.locator('[data-testid="settings-editor-view"]')).toBeVisible();
     await capture(page, "ui05-custom-provider.png");
   });
 
   test("ui05-ready.png", async ({ page }) => {
     await open(page, "ready", "zh", 360);
-    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
-    await expect(testBtn).toBeVisible();
-    await testBtn.click();
     await expect(page.locator('[data-testid="settings-ready-banner"]')).toBeVisible();
     await expect(page.getByText("已保存（待测试）")).toHaveCount(0);
     await capture(page, "ui05-ready.png");
@@ -153,37 +174,26 @@ test.describe("UI-05: Visual Evidence & First-Run Redesign Screenshots", () => {
 
   test("ui05-320.png", async ({ page }) => {
     await open(page, "ready", "zh", 320);
-    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
-    await expect(testBtn).toBeVisible();
-    await testBtn.click();
     await expect(page.locator('[data-testid="settings-ready-banner"]')).toBeVisible();
     await capture(page, "ui05-320.png");
   });
 
   test("ui05-360.png", async ({ page }) => {
     await open(page, "ready", "zh", 360);
-    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
-    await expect(testBtn).toBeVisible();
-    await testBtn.click();
     await expect(page.locator('[data-testid="settings-ready-banner"]')).toBeVisible();
     await capture(page, "ui05-360.png");
   });
 
   test("ui05-400.png", async ({ page }) => {
     await open(page, "ready", "zh", 400);
-    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
-    await expect(testBtn).toBeVisible();
-    await testBtn.click();
     await expect(page.locator('[data-testid="settings-ready-banner"]')).toBeVisible();
     await capture(page, "ui05-400.png");
   });
 
   test("ui05-480.png", async ({ page }) => {
     await open(page, "ready", "zh", 480);
-    const testBtn = page.getByRole("button", { name: /测试配置|Save & Test|保存并测试/ });
-    await expect(testBtn).toBeVisible();
-    await testBtn.click();
     await expect(page.locator('[data-testid="settings-ready-banner"]')).toBeVisible();
     await capture(page, "ui05-480.png");
   });
 });
+

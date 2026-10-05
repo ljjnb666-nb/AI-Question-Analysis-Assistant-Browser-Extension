@@ -1,12 +1,20 @@
 # UI-05R — Provider & Connection Architecture Specification V1
 
-> **Document Status**: DRAFT ARCHITECTURE SPECIFICATION  
+> **Document Status**: SUPERSEDED WITH E2B-2B AUTHORITY CLOSURE  
 > **Repository**: `ljjnb666-nb/AI-Question-Analysis-Assistant-Browser-Extension`  
 > **Associated PR**: #36 (`feat/ui-05-gemini-settings-first-run`)  
 > **Base HEAD**: `1739db2c80842ac589537b35df3bde46324aa175`  
 > **Frontend Owner**: Gemini Antigravity  
 > **Gatekeeper**: ChatGPT  
-> **Current Gate Status**: `UI_05_REVIEW_FIX_01 = CLOSED`, `UI05R_PROVIDER_CONNECTION_ARCHITECTURE_REQUIRED`
+> **Current Gate Status**: `UI_05_REVIEW_FIX_01 = CLOSED`, `E2B-2B AUTHORITY CLOSURE APPLIED`
+
+> [!IMPORTANT]
+> ### E2B-2B Authority Closure & Review Fix 01 Notice
+> 1. **Single-Writer Authority**: The background control plane (`AIConnectionAuthority`, `AppSettingsAuthority`, `credentialStore`) is the sole authoritative writer of connection and credential state. Frontend settings UI surfaces are read-and-dispatch only.
+> 2. **Zero Plaintext Key Fingerprints**: Any earlier mentions in this document or legacy code of computing fingerprints from raw or decrypted API keys are **DEPRECATED and SUPERSEDED**. Plaintext API keys must NEVER be hashed, fingerprinted, logged, or included in client receipts.
+> 3. **Non-Secret Authority Revision Binding**: UI Ready status binds strictly to non-secret authority metadata: `connectionId`, `connectionRevision`, `credentialRevision`, and optional `validationGeneration`.
+> 4. **Authoritative Invalidation**: Any authoritative change to `aiConnectionState` in storage immediately invalidates UI Ready.
+> 5. **Fail-Closed Capability**: Provider catalog no longer declares static provider-level "Supports images / Text only" authority claims; unknown capabilities fail closed.
 
 ---
 
@@ -461,18 +469,19 @@ export interface CredentialEntity {
 ---
 
 ## 12. Validation
+ 
+> **DEPRECATION NOTICE (Review Fix 01 / E2B-2B)**:  
+> Plaintext API-key fingerprinting (`Hash of endpoint + credential + model + protocol`) is **REMOVED and SUPERSEDED**.  
+> In accordance with zero-leakage security boundaries, validation receipts bind exclusively to non-secret authority metadata (`connectionId`, `connectionRevision`, `credentialRevision`, and optional `validationGeneration`). The UI never extracts, hashes, or compares plaintext secrets.
 
 Validation proves reachability and capability without corrupting runtime authority:
 
 ```typescript
-export interface ValidationRecord {
+export interface AuthorityValidationReceipt {
   connectionId: string;
-  fingerprint: string; // Hash of endpoint + credential + model + protocol
-  generation: number;  // Monotonically increasing counter
-  status: "never_tested" | "testing" | "validated" | "failed" | "stale";
-  validatedAt: number | null;
-  errorCode?: string;
-  scope: "reachability" | "model_callable" | "vision_verified";
+  connectionRevision: number;
+  credentialRevision?: number;
+  validationGeneration?: number;
 }
 ```
 
