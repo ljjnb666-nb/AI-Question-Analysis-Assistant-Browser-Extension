@@ -135,6 +135,9 @@ export const PopupApp: React.FC = () => {
     let disposed = false;
     const generationAtStart = languageGenerationRef.current;
     void getAIConnectionReadiness().then(async (readiness) => {
+      // An unmounted popup must not start the second-stage settings/metadata
+      // messages at all, not merely discard their result.
+      if (disposed) return;
       const [settings, response] = await Promise.all([
         loadSettings(), sendAIConnectionCommand({ type: "AI_CONNECTION_GET_ACTIVE_METADATA" }),
       ]);

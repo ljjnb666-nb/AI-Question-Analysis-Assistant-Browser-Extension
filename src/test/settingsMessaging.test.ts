@@ -142,4 +142,79 @@ describe("settings messaging transport isolation", () => {
     expect(generationB.store.size).toBe(0);
     expect(generationB.store.get("appSettings")).toBeUndefined();
   });
+
+  it("idle stays pending across a caller continuation that enqueues message B after message A settles", async () => {
+    const generationA: MemoryFacade = { store: new Map() };
+    installFakeStorage(generationA);
+    installSettingsMessaging();
+
+    // Gate the storage reads so each message's handler parks mid-flight:
+    // first read belongs to message A's handler, second to message B's.
+    let releaseA!: (value: Record<string, unknown>) => void;
+    let releaseB!: (value: Record<string, unknown>) => void;
+    const gateA = new Promise<Record<string, unknown>>((resolve) => { releaseA = resolve; });
+    const gateB = new Promise<Record<string, unknown>>((resolve) => { releaseB = resolve; });
+    const storageLocal = chromeGlobal().chrome.storage.local;
+    const realGet = storageLocal.get as unknown as GetFn;
+    let getCalls = 0;
+    storageLocal.get = (keys: unknown) => {
+      getCalls += 1;
+      if (getCalls === 1) return gateA;
+      if (getCalls === 2) return gateB;
+      return realGet(keys);
+    };
+
+    // Caller chain mirroring the real popup shape: await message A, then let
+    // A's continuation enqueue message B.
+    let callerDone = false;
+    const caller = async () => {
+      await chrome.runtime.sendMessage({ type: "APP_SETTINGS_GET_OR_CREATE_DEVICE_ID" });
+      await chrome.runtime.sendMessage({ type: "APP_SETTINGS_UPDATE", patch: { language: "en" } });
+    };
+    void caller().then(
+      () => { callerDone = true; },
+      () => { callerDone = true; },
+    );
+
+    // Teardown begins while message A is still in flight.
+    const idle = awaitSettingsMessagingIdle();
+    let idleSettled = false;
+    void idle.then(
+      () => { idleSettled = true; },
+      () => { idleSettled = true; },
+    );
+
+    // A few microtask hops cannot finish A: idle must be waiting on it.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(idleSettled).toBe(false);
+
+    // Release A. The caller continuation must then enqueue B (its handler
+    // starts and parks on the second gate), and idle must NOT resolve while
+    // B is pending — including after full task turns that give a shallow
+    // idle every opportunity to observe an empty in-flight set.
+    releaseA({});
+    while (getCalls < 2) await Promise.resolve();
+    const taskTurn = () => new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    await taskTurn();
+    await taskTurn();
+    expect(getCalls).toBe(2);
+    expect(idleSettled).toBe(false);
+
+    // Only after B settles may idle resolve.
+    releaseB({});
+    await idle;
+    expect(idleSettled).toBe(true);
+    expect(callerDone).toBe(true);
+    expect((generationA.store.get("appSettings") as Record<string, unknown>)?.language).toBe("en");
+
+    // Generation B: fresh store — neither A nor B can mutate it.
+    const generationB: MemoryFacade = { store: new Map() };
+    installFakeStorage(generationB);
+    installSettingsMessaging();
+    await awaitSettingsMessagingIdle();
+    expect(generationB.store.size).toBe(0);
+    expect(generationB.store.get("appSettings")).toBeUndefined();
+  });
 });
