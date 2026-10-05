@@ -1121,8 +1121,8 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
     expect(source).not.toContain("fixture-conn");
     expect(source).not.toMatch(/validation:\s*\{\s*status:\s*["']validated["']/);
     expect(source).not.toMatch(/generation:\s*\(.*generation.*\)\s*\+\s*1/);
-    expect(source).not.toContain("validatedConnectionRevision");
-    expect(source).not.toContain("validatedCredentialRevision");
+    expect(source).not.toMatch(/validatedConnectionRevision:\s*(?:connectionRevision|\d+)/);
+    expect(source).not.toMatch(/validatedCredentialRevision:\s*(?:credentialRevision|\d+)/);
   });
 
   // 4. COMMITTED_HOME_IGNORES_UNSAVED_DRAFT
@@ -1273,6 +1273,191 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
       expect(screen.getByTestId("settings-editor-view")).not.toHaveAttribute("hidden");
       expect(screen.getByTestId("settings-catalog-view")).toHaveAttribute("hidden");
       expect(screen.getByDisplayValue("gpt-5.5")).toBeInTheDocument();
+    });
+  });
+
+  // UI-05 Review Fix 03: Regressions
+  it("STALE_VALIDATED_CONNECTION_REVISION_NOT_READY: stale validatedConnectionRevision leaves connection unready", async () => {
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      connectionRevision: 2,
+      credentialRevision: 1,
+      hasCredential: true,
+      validation: {
+        status: "validated",
+        generation: 1,
+        validatedConnectionRevision: 1, // Stale: 1 !== 2
+        validatedCredentialRevision: 1,
+      },
+    } as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true");
+    });
+
+    expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+    const summaryCard = screen.getByTestId("settings-home-summary-card");
+    expect(within(summaryCard).getByText("需要重新测试")).toBeInTheDocument();
+    expect(screen.getByText("已保存（待测试）")).toBeInTheDocument();
+  });
+
+  it("STALE_VALIDATED_CREDENTIAL_REVISION_NOT_READY: stale validatedCredentialRevision leaves connection unready", async () => {
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      connectionRevision: 2,
+      credentialRevision: 2,
+      hasCredential: true,
+      validation: {
+        status: "validated",
+        generation: 1,
+        validatedConnectionRevision: 2,
+        validatedCredentialRevision: 1, // Stale: 1 !== 2
+      },
+    } as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true");
+    });
+
+    expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+    const summaryCard = screen.getByTestId("settings-home-summary-card");
+    expect(within(summaryCard).getByText("需要重新测试")).toBeInTheDocument();
+    expect(screen.getByText("已保存（待测试）")).toBeInTheDocument();
+  });
+
+  it("PERSISTED_VALIDATION_REVISION_BOUND: matching persisted validation revisions reloads Ready", async () => {
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      connectionRevision: 2,
+      credentialRevision: 1,
+      hasCredential: true,
+      validation: {
+        status: "validated",
+        generation: 1,
+        validatedConnectionRevision: 2, // Matches
+        validatedCredentialRevision: 1, // Matches
+      },
+    } as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+      expect(screen.getByText("AI 配置已就绪")).toBeInTheDocument();
+    });
+  });
+
+  it("DRAFT_ISOLATION_AND_HOME_RETEST: unsaved custom draft does not downgrade Home Ready and Home retest does not commit draft", async () => {
+    setupConnectionMock({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", hasCredential: true });
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      hasCredential: true,
+      validation: {
+        status: "validated",
+        generation: 1,
+        validatedConnectionRevision: 1,
+        validatedCredentialRevision: 1,
+      },
+    } as any);
+    vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+      const summaryCard = screen.getByTestId("settings-home-summary-card");
+      expect(within(summaryCard).getByText("Anthropic (Claude)")).toBeInTheDocument();
+    });
+
+    // User navigates: Home -> Catalog -> Custom
+    fireEvent.click(screen.getByTestId("home-change-service-btn"));
+    const customCard = await screen.findByTestId("provider-card-custom");
+    fireEvent.click(customCard);
+
+    // In Editor: Custom draft is uncommitted
+    expect(screen.getByTestId("settings-editor-view")).not.toHaveAttribute("hidden");
+
+    // Return to Home without saving
+    fireEvent.click(screen.getByTestId("nav-editor-done-to-home"));
+
+    // Expected: Home still says Anthropic, and Ready REMAINS READY!
+    expect(screen.getByTestId("settings-home-view")).not.toHaveAttribute("hidden");
+    const summaryCardAfterReturn = screen.getByTestId("settings-home-summary-card");
+    expect(within(summaryCardAfterReturn).getByText("Anthropic (Claude)")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+
+    // Clear calls on updateActiveAIConnection
+    vi.mocked(updateActiveAIConnection).mockClear();
+
+    // Click Home Retest / 验证连接
+    fireEvent.click(screen.getByTestId("home-test-connection-btn"));
+
+    await waitFor(() => {
+      expect(parseQuestion).toHaveBeenCalled();
+    });
+
+    // MUST NOT call updateActiveAIConnection({ presetId: "custom" })
+    expect(updateActiveAIConnection).not.toHaveBeenCalledWith(expect.objectContaining({ presetId: "custom" }));
+    expect(updateActiveAIConnection).not.toHaveBeenCalled();
+  });
+
+  it("LANGUAGE_HOME_PERSISTS_WITHOUT_EDITOR: changing language on Home persists immediately without Editor", async () => {
+    const onLanguageChange = vi.fn();
+    render(<SettingsTab lang="zh" onLanguageChange={onLanguageChange} initialView="home" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true");
+    });
+
+    const enBtn = screen.getByRole("button", { name: "English" });
+    fireEvent.click(enBtn);
+
+    await waitFor(() => {
+      expect(storage.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ language: "en" }));
+      expect(onLanguageChange).toHaveBeenCalledWith("en");
+    });
+
+    expect(screen.getByTestId("settings-home-view")).not.toHaveAttribute("hidden");
+    expect(screen.getByTestId("settings-editor-view")).toHaveAttribute("hidden");
+  });
+
+  it("LANGUAGE_CHANGE_DOES_NOT_INVALIDATE_AI_READY: changing language does not invalidate AI Ready status", async () => {
+    setupConnectionMock({ hasCredential: true });
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      hasCredential: true,
+      validation: {
+        status: "validated",
+        generation: 1,
+        validatedConnectionRevision: 1,
+        validatedCredentialRevision: 1,
+      },
+    } as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="home" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+    });
+
+    const enBtn = screen.getByRole("button", { name: "English" });
+    fireEvent.click(enBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
     });
   });
 });

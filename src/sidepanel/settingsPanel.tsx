@@ -89,8 +89,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   const [lang, setLang] = useState<"zh" | "en">(initialLang);
   const [saved, setSaved] = useState(false);
   const [savedOnce, setSavedOnce] = useState(false);
-  const [testing, setTesting] = useState(false);
+  const [testingTarget, setTestingTarget] = useState<"none" | "committed" | "editor">("none");
   const [testResult, setTestResult] = useState<UserFeedback | null>(null);
+  const [committedTestResult, setCommittedTestResult] = useState<UserFeedback | null>(null);
   const [validatedReceipt, setValidatedReceipt] = useState<AuthorityValidationReceipt | null>(null);
   const [activeMetadata, setActiveMetadata] = useState<ConnectionMetadata | null>(null);
   const [deviceId, setDeviceId] = useState("");
@@ -163,14 +164,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     void getAIConnectionActiveMetadata().then((meta) => {
       if (!disposed && meta) {
         setActiveMetadata(meta);
-        if (meta.validation?.status === "validated") {
-          setValidatedReceipt({
-            connectionId: meta.id,
-            connectionRevision: meta.connectionRevision,
-            credentialRevision: meta.credentialRevision,
-            validationGeneration: meta.validation.generation,
-          });
-        }
       }
     }).catch(() => {});
     return () => {
@@ -183,6 +176,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
       if (area === "local" && changes.aiConnectionState) {
         setValidatedReceipt(null);
+        setCommittedTestResult(null);
         void Promise.all([loadSettings(), getAIConnectionEditorView(), getAIConnectionActiveMetadata()]).then(([settings, editor, freshMeta]) => {
           if (freshMeta) {
             setActiveMetadata(freshMeta);
@@ -215,7 +209,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setLang(initialLang);
   }, [initialLang]);
 
-  const isDirty = useMemo(() => {
+  const connectionDraftDirty = useMemo(() => {
     if (!storedSnapshot) return false;
     if (providerId !== storedSnapshot.presetId) return true;
     if (apiKey.trim().length > 0) return true;
@@ -223,12 +217,19 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     if ((model || provider.defaultModel) !== (storedSnapshot.selectedModelId || provider.defaultModel)) return true;
     if (customUrl !== (storedSnapshot.endpointOverride ?? "")) return true;
     if (providerId === "custom" && customProtocol !== storedSnapshot.protocol) return true;
+    return false;
+  }, [storedSnapshot, providerId, apiKey, isCredentialCleared, model, provider.defaultModel, customUrl, customProtocol]);
+
+  const generalSettingsDirty = useMemo(() => {
+    if (!storedSnapshot) return false;
     if (route !== storedSnapshot.preferredRoute) return true;
     if (analyticsBaseUrl !== storedSnapshot.analyticsBaseUrl) return true;
     if (enableAnalytics !== storedSnapshot.enableAnalytics) return true;
     if (lang !== storedSnapshot.language) return true;
     return false;
-  }, [storedSnapshot, providerId, apiKey, isCredentialCleared, model, provider.defaultModel, customUrl, customProtocol, route, analyticsBaseUrl, enableAnalytics, lang]);
+  }, [storedSnapshot, route, analyticsBaseUrl, enableAnalytics, lang]);
+
+  const isDirty = connectionDraftDirty || generalSettingsDirty;
 
   const isConfigured = useMemo(
     () => Boolean(provider.keyOptional || hasCredential || apiKey.trim().length > 0),
@@ -236,70 +237,97 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   );
 
   // Committed active connection strictly represents stored / authoritative backend state, ignoring unsaved editor drafts
-  const committedPresetId = (storedSnapshot?.presetId ?? activeMetadata?.presetId ?? "anthropic") as ProviderId;
+  // Committed active connection strictly represents stored / authoritative backend state, ignoring unsaved editor drafts
+  const committedPresetId = (activeMetadata?.presetId ?? storedSnapshot?.presetId ?? "anthropic") as ProviderId;
   const committedProvider = getProvider(committedPresetId);
-  const committedModel = storedSnapshot?.selectedModelId || committedProvider.defaultModel;
-  const committedHasCredential = storedSnapshot?.hasCredential ?? activeMetadata?.hasCredential ?? false;
+  const committedModel = activeMetadata?.selectedModelId || storedSnapshot?.selectedModelId || committedProvider.defaultModel;
+  const committedHasCredential = activeMetadata ? activeMetadata.hasCredential : Boolean(storedSnapshot?.hasCredential);
   const committedKeyOptional = committedProvider.keyOptional;
   const isCommittedConfigured = Boolean(committedKeyOptional || committedHasCredential);
 
-  // Ready binds strictly to: real test succeeded + receipt matches current actual metadata revisions + draft clean + no subsequent authority change
+  // Validation status for committed active connection:
+  // Reload Ready only if persisted validation status is "validated" and matches connectionRevision + credentialRevision
+  const isPersistedValidationMatch = Boolean(
+    activeMetadata &&
+    activeMetadata.validation?.status === "validated" &&
+    activeMetadata.validation.validatedConnectionRevision === activeMetadata.connectionRevision &&
+    (activeMetadata.validation.validatedCredentialRevision ?? 0) === (activeMetadata.credentialRevision ?? 0)
+  );
+
+  // In-session test receipt matches active metadata revisions
+  const isReceiptMatch = Boolean(
+    validatedReceipt &&
+    activeMetadata &&
+    (committedTestResult?.tone === "success" || testResult?.tone === "success") &&
+    validatedReceipt.connectionId === activeMetadata.id &&
+    validatedReceipt.connectionRevision === activeMetadata.connectionRevision &&
+    (validatedReceipt.credentialRevision ?? 0) === (activeMetadata.credentialRevision ?? 0) &&
+    (validatedReceipt.validationGeneration === undefined ||
+      activeMetadata.validation?.generation === undefined ||
+      validatedReceipt.validationGeneration === activeMetadata.validation.generation)
+  );
+
+  const isCommittedValidated = Boolean(activeMetadata && (isReceiptMatch || isPersistedValidationMatch));
+
+  // In editor, validation is invalidated if connection draft is dirty (provider/model/key/url/protocol changed)
   const isValidated = useMemo(() => {
-    if (!validatedReceipt) return false;
-    if (isDirty) return false;
-    if (!activeMetadata) return false;
-
-    const isTestSuccess = testResult?.tone === "success";
-    const isPersistedValidated = activeMetadata.validation?.status === "validated";
-
-    if (!isTestSuccess && !isPersistedValidated) return false;
-
-    if (validatedReceipt.connectionId !== activeMetadata.id) return false;
-    if (validatedReceipt.connectionRevision !== activeMetadata.connectionRevision) return false;
-    if ((validatedReceipt.credentialRevision ?? 0) !== (activeMetadata.credentialRevision ?? 0)) return false;
-    if (
-      validatedReceipt.validationGeneration !== undefined &&
-      activeMetadata.validation?.generation !== undefined &&
-      validatedReceipt.validationGeneration !== activeMetadata.validation.generation
-    ) {
-      return false;
-    }
-    return true;
-  }, [testResult, validatedReceipt, activeMetadata, isDirty]);
+    if (connectionDraftDirty) return false;
+    return isCommittedValidated;
+  }, [connectionDraftDirty, isCommittedValidated]);
 
   const setupStatus: SetupStatus = useMemo(
     () =>
       deriveSetupStatus({
         isConfigured,
-        isDirty,
-        testing,
+        isDirty: connectionDraftDirty,
+        testing: testingTarget === "editor",
         testResult,
         savedOnce,
         isValidated,
       }),
-    [isConfigured, isDirty, testing, testResult, savedOnce, isValidated],
+    [isConfigured, connectionDraftDirty, testingTarget, testResult, savedOnce, isValidated],
   );
 
   const homeSetupStatus: SetupStatus = useMemo(
     () =>
       deriveSetupStatus({
         isConfigured: isCommittedConfigured,
-        isDirty,
-        testing,
-        testResult,
-        savedOnce,
-        isValidated,
+        isDirty: false, // Committed connection is never dirty from unsaved editor drafts
+        testing: testingTarget === "committed",
+        testResult: committedTestResult,
+        savedOnce: savedOnce || isCommittedConfigured,
+        isValidated: isCommittedValidated,
       }),
-    [isCommittedConfigured, isDirty, testing, testResult, savedOnce, isValidated],
+    [isCommittedConfigured, testingTarget, committedTestResult, savedOnce, isCommittedValidated],
   );
+
+  const currentSetupStatus = view === "home" ? homeSetupStatus : setupStatus;
 
   const activeStep = useMemo(() => {
     if (!auth.isAuthenticated) return 1;
+    if (view === "home") {
+      if (isCommittedValidated) return 4;
+      if (testingTarget === "committed") return 3;
+      if (!isCommittedConfigured) return 2;
+      return 3;
+    }
     if (isValidated) return 4;
-    if (testing) return 3;
+    if (testingTarget === "editor") return 3;
     if (!isConfigured) return 2;
     return 3;
-  }, [auth.isAuthenticated, isValidated, testing, isConfigured]);
+  }, [auth.isAuthenticated, view, isCommittedValidated, testingTarget, isCommittedConfigured, isValidated, isConfigured]);
+
+  const discardDraft = () => {
+    if (!storedSnapshot) return;
+    setProviderId(storedSnapshot.presetId);
+    setModel(storedSnapshot.selectedModelId);
+    setCustomUrl(storedSnapshot.endpointOverride ?? "");
+    setCustomProtocol(storedSnapshot.protocol);
+    setApiKey("");
+    setHasCredential(storedSnapshot.hasCredential);
+    setIsCredentialCleared(false);
+    setTestResult(null);
+  };
 
   // Respect prefers-reduced-motion to avoid unwanted transitions
   useGSAP(
@@ -326,7 +354,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         delay: 0.06,
       });
     },
-    { scope: scopeRef, dependencies: [providerId, lang, testResult, view], revertOnUpdate: true },
+    { scope: scopeRef, dependencies: [providerId, lang, committedTestResult, testResult, view], revertOnUpdate: true },
   );
 
   const handleProviderChange = (id: ProviderId) => {
@@ -377,6 +405,17 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setValidatedReceipt(null);
   };
 
+  const handleHomeLanguageChange = async (nextLang: UILang) => {
+    setLang(nextLang);
+    onLanguageChange(nextLang);
+    try {
+      await saveSettings({ language: nextLang });
+      setStoredSnapshot((prev) => (prev ? { ...prev, language: nextLang } : prev));
+    } catch {
+      // Failed persistence leaves in-memory state
+    }
+  };
+
   const saveCurrentDraft = async () => {
     const credentialAction = apiKey.trim()
       ? ({ action: "REPLACE" as const, value: apiKey.trim() })
@@ -391,6 +430,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       protocolOverride: customProtocol === "anthropic" ? "anthropic_messages" : "openai_chat_completions",
       credential: credentialAction,
     });
+    if (committed.metadata) {
+      setActiveMetadata(committed.metadata);
+    }
     setHasCredential(committed.metadata?.hasCredential ?? false);
     setIsCredentialCleared(false);
     setApiKey("");
@@ -429,14 +471,16 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     }
   };
 
-  const handleTest = async () => {
-    setTesting(true);
-    setTestResult(null);
+  // Retest committed active connection directly from Home without committing any uncommitted editor drafts
+  const handleTestCommitted = async () => {
+    setTestingTarget("committed");
+    setCommittedTestResult(null);
     try {
-      await saveCurrentDraft();
+      // INVARIANT: DO NOT call saveCurrentDraft! Unsaved editor drafts are never committed by Home retest.
       const readiness = await getAIConnectionReadiness();
       if (!readiness.ready) {
-        setTestResult(userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), { code: readiness.code }));
+        const warningFeedback = userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), { code: readiness.code });
+        setCommittedTestResult(warningFeedback);
         return;
       }
       const testBlock: QuestionBlock = {
@@ -449,14 +493,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         source: "manual_capture",
       };
       const result = await parseQuestion(testBlock, { preferredRoute: "text", language: lang });
-      // Refresh authoritative metadata from single-writer backend
       const freshMeta = await getAIConnectionActiveMetadata().catch(() => null);
       if (!freshMeta) {
-        // If freshMeta is null / unavailable: fail closed. DO NOT mark Ready.
         setValidatedReceipt(null);
         setActiveMetadata(null);
       } else {
-        // Create only an ephemeral frontend receipt from ACTUAL metadata. Do not mutate freshMeta.
         setActiveMetadata(freshMeta);
         setValidatedReceipt({
           connectionId: freshMeta.id,
@@ -478,19 +519,85 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             : isEn
               ? "hybrid"
               : "混合";
-      setTestResult(
-        userFeedback(
-          "success",
-          isEn
-            ? `Connection success | route: ${routeLabel} | answer: ${result.answer} | confidence ${Math.round(result.confidence * 100)}%`
-            : `连接成功 | 路由：${routeLabel} | 答案：${result.answer} | 置信度 ${Math.round(result.confidence * 100)}%`,
-          { code: "CONNECTION_TEST_OK" },
-        ),
+      const feedback = userFeedback(
+        "success",
+        isEn
+          ? `Connection success | route: ${routeLabel} | answer: ${result.answer} | confidence ${Math.round(result.confidence * 100)}%`
+          : `连接成功 | 路由：${routeLabel} | 答案：${result.answer} | 置信度 ${Math.round(result.confidence * 100)}%`,
+        { code: "CONNECTION_TEST_OK" },
       );
+      setCommittedTestResult(feedback);
+      setTestResult(feedback);
     } catch (error) {
-      setTestResult(mapUserFacingError(error, isEn ? "en" : "zh", { context: "connection-test" }));
+      const feedback = mapUserFacingError(error, isEn ? "en" : "zh", { context: "connection-test" });
+      setCommittedTestResult(feedback);
+      setTestResult(feedback);
     } finally {
-      setTesting(false);
+      setTestingTarget("none");
+    }
+  };
+
+  // Test editor draft by saving it to committed state first, then verifying the new connection
+  const handleTestEditor = async () => {
+    setTestingTarget("editor");
+    setTestResult(null);
+    try {
+      await saveCurrentDraft();
+      const readiness = await getAIConnectionReadiness();
+      if (!readiness.ready) {
+        setTestResult(userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), { code: readiness.code }));
+        return;
+      }
+      const testBlock: QuestionBlock = {
+        id: "test",
+        bbox: { x: 0, y: 0, width: 100, height: 50 },
+        previewText: "1+1=? A.1 B.2 C.3 D.4",
+        hasImage: false,
+        questionTypeGuess: "single_choice",
+        confidence: 1,
+        source: "manual_capture",
+      };
+      const result = await parseQuestion(testBlock, { preferredRoute: "text", language: lang });
+      const freshMeta = await getAIConnectionActiveMetadata().catch(() => null);
+      if (!freshMeta) {
+        setValidatedReceipt(null);
+        setActiveMetadata(null);
+      } else {
+        setActiveMetadata(freshMeta);
+        setValidatedReceipt({
+          connectionId: freshMeta.id,
+          connectionRevision: freshMeta.connectionRevision,
+          credentialRevision: freshMeta.credentialRevision,
+          validationGeneration: freshMeta.validation?.generation,
+        });
+      }
+
+      const routeLabel =
+        result.routeUsed === "vision"
+          ? isEn
+            ? "vision"
+            : "视觉"
+          : result.routeUsed === "text"
+            ? isEn
+              ? "text"
+              : "文本"
+            : isEn
+              ? "hybrid"
+              : "混合";
+      const feedback = userFeedback(
+        "success",
+        isEn
+          ? `Connection success | route: ${routeLabel} | answer: ${result.answer} | confidence ${Math.round(result.confidence * 100)}%`
+          : `连接成功 | 路由：${routeLabel} | 答案：${result.answer} | 置信度 ${Math.round(result.confidence * 100)}%`,
+        { code: "CONNECTION_TEST_OK" },
+      );
+      setTestResult(feedback);
+      setCommittedTestResult(feedback);
+    } catch (error) {
+      const feedback = mapUserFacingError(error, isEn ? "en" : "zh", { context: "connection-test" });
+      setTestResult(feedback);
+    } finally {
+      setTestingTarget("none");
     }
   };
 
@@ -566,10 +673,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       >
         {/* 1. Setup Status & 4-Step Onboarding Stepper Header */}
         <SettingsSetupStatusCard
-          status={homeSetupStatus}
+          status={currentSetupStatus}
           isEn={isEn}
           activeStep={activeStep}
-          onRetest={() => void handleTest()}
+          onRetest={() => void (view === "home" ? handleTestCommitted() : handleTestEditor())}
         />
 
         {/* First-Run Sign-in Guidance / Resume Stepper Callout */}
@@ -645,18 +752,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           isEn={isEn}
           onChangeService={() => setView("catalog")}
           onEditConnection={() => setView("editor")}
-          onTestConnection={() => void handleTest()}
-          testing={testing}
+          onTestConnection={() => void handleTestCommitted()}
+          testing={testingTarget === "committed"}
         />
 
         {/* 3. Global Preferences: Language & Usage Analytics */}
         <SettingsGeneralSection
           isEn={isEn}
           lang={lang}
-          onLanguageChange={(nextLang) => {
-            setLang(nextLang);
-            onLanguageChange(nextLang);
-          }}
+          onLanguageChange={handleHomeLanguageChange}
         />
 
         {/* 4. Account / Session Section */}
@@ -679,7 +783,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           <button
             type="button"
             data-testid="nav-catalog-back-to-home"
-            onClick={() => setView("home")}
+            onClick={() => {
+              discardDraft();
+              setView("home");
+            }}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -721,7 +828,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           <button
             type="button"
             data-testid="nav-editor-back-to-catalog"
-            onClick={() => setView("catalog")}
+            onClick={() => {
+              discardDraft();
+              setView("catalog");
+            }}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -740,7 +850,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           <button
             type="button"
             data-testid="nav-editor-done-to-home"
-            onClick={() => setView("home")}
+            onClick={() => {
+              discardDraft();
+              setView("home");
+            }}
             style={{
               background: "transparent",
               border: "none",
@@ -804,10 +917,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           isDirty={isDirty}
           isEn={isEn}
           onSave={() => void handleSave()}
-          onTest={() => void handleTest()}
+          onTest={() => void handleTestEditor()}
           saved={saved}
           testResult={testResult}
-          testing={testing}
+          testing={testingTarget === "editor"}
         />
       </div>
     </div>
