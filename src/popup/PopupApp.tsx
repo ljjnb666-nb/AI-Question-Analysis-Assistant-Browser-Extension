@@ -98,6 +98,12 @@ export const PopupApp: React.FC = () => {
   const authority = createPopupAuthority(auth.session);
   const isAuthenticatedNow = authority.isAuthenticatedNow;
 
+  // A user language action taken while the initial settings/metadata load is
+  // still in flight MUST win over that older load's result. Each toggle bumps
+  // this generation; the mount continuation only applies its stale snapshot
+  // when no toggle happened since the load started (P1-01 language race).
+  const languageGenerationRef = useRef(0);
+
   // AUTH-UI-INV-11 + INV-15 (popup side): when this surface observes the
   // session leave `authenticated`, any long-running protected work recorded
   // in the cross-surface owner store — Popup- or Side-Panel-started — is
@@ -127,7 +133,11 @@ export const PopupApp: React.FC = () => {
 
   useEffect(() => {
     let disposed = false;
+    const generationAtStart = languageGenerationRef.current;
     void getAIConnectionReadiness().then(async (readiness) => {
+      // An unmounted popup must not start the second-stage settings/metadata
+      // messages at all, not merely discard their result.
+      if (disposed) return;
       const [settings, response] = await Promise.all([
         loadSettings(), sendAIConnectionCommand({ type: "AI_CONNECTION_GET_ACTIVE_METADATA" }),
       ]);
@@ -136,9 +146,11 @@ export const PopupApp: React.FC = () => {
       const nextProviderId = response.metadata?.presetId;
       const nextLang = settings.language ?? "zh";
       setProviderName(nextProviderId ? getProviderShortName(nextProviderId) : "");
-      setLang(nextLang);
-      if (typeof document !== "undefined") {
-        document.documentElement.lang = nextLang === "zh" ? "zh-CN" : "en";
+      if (generationAtStart === languageGenerationRef.current) {
+        setLang(nextLang);
+        if (typeof document !== "undefined") {
+          document.documentElement.lang = nextLang === "zh" ? "zh-CN" : "en";
+        }
       }
       setLoaded(true);
     }).catch(() => { if (!disposed) { setAIReady(false); setLoaded(true); } });
@@ -387,6 +399,9 @@ export const PopupApp: React.FC = () => {
   };
 
   const toggleLang = () => {
+    // Invalidate any in-flight initial load's language snapshot: this user
+    // action is newer and must win over it (P1-01 language race).
+    languageGenerationRef.current += 1;
     const nextLang: PopupLang = lang === "zh" ? "en" : "zh";
     setLang(nextLang);
     if (typeof document !== "undefined") {

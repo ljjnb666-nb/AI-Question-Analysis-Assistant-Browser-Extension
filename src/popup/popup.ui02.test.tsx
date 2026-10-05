@@ -14,6 +14,7 @@ import { setKeyboardModalityForTesting } from "@/shared/ui/orbitFocus";
 import { orbitColors } from "@/shared/ui/orbitTokens";
 import { userFeedback } from "@/shared/ui/userFeedback";
 import { loadSettings, __resetStorageCacheForTests } from "@/shared/utils/storage";
+import { awaitSettingsMessagingIdle } from "@/test/settingsMessaging";
 
 // Test fixtures routed through named constants: the workspace Mimosa gate
 // rejects inline string literals on credential-named fields, and these values
@@ -152,11 +153,14 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // Drain in-flight background messages FIRST so handlers started by this
+  // test finish against this test's store and can never execute against the
+  // next test's generation. Settlement-driven; no sleeps.
+  await awaitSettingsMessagingIdle();
   storageListeners.length = 0;
   __resetStorageCacheForTests();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  await new Promise((resolve) => setTimeout(resolve, 10));
 });
 
 describe("UI-02 Presentation State & Readiness Models", () => {
@@ -237,18 +241,31 @@ describe("UI-02 Popup Commercial View Integration", () => {
     await loadSettings();
     render(<PopupApp />);
 
-    // Wait for the asynchronous background normalization/session load before interacting.
-    await waitFor(() => expect(screen.queryAllByText(/正在检查|Checking/)).toHaveLength(0));
-    // In register view by default, switch to login view
-    const switchToLoginBtn = await screen.findByText(/已有账号？去登录|Sign in/);
-    await act(async () => {
-      fireEvent.click(switchToLoginBtn);
+    // Settled signed-out state: the session gate is gone AND the login view tab
+    // is rendered but not selected. A late storage-driven re-validation (which
+    // swaps in the validating gate) keeps this condition false, so interaction
+    // starts only on a stable form.
+    await waitFor(() => {
+      expect(screen.queryAllByText(/正在检查|Checking/)).toHaveLength(0);
+      expect(screen.getByRole("button", { name: /^登录$|^Sign In$/ })).toHaveAttribute("aria-pressed", "false");
     });
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /^登录$|^Sign In$/ })).toBeInTheDocument());
-    expect(await screen.findByRole("button", { name: /^登录账号$|^Sign In to Account$/ })).toBeInTheDocument();
-    expect(screen.getByLabelText(/邮箱|Email/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/密码|Password/)).toBeInTheDocument();
+    // Drive the register→login transition through the view tab itself. The tab
+    // exists in both views, so only its aria-pressed flip is authoritative
+    // transition evidence — its mere presence proves nothing.
+    fireEvent.click(screen.getByRole("button", { name: /^登录$|^Sign In$/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^登录$|^Sign In$/ })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    // Query and assertion run synchronously inside each waitFor poll, so a
+    // transient gate re-render can never strand a detached element reference
+    // between find and assert.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^登录账号$|^Sign In to Account$/ })).toBeInTheDocument();
+      expect(screen.getByLabelText(/邮箱|Email/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/密码|Password/)).toBeInTheDocument();
+    });
 
     // Protected actions not visible
     expect(screen.queryByText(/解析并填答/)).toBeNull();
@@ -581,6 +598,12 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
   it("RF02-12: language switch persists -> reopen reads selected language", async () => {
     render(<PopupApp />);
+    // Let the mount-time background normalization write land BEFORE toggling
+    // so the toggle's save is the last writer to appSettings; a late
+    // normalizer read-modify-write would otherwise clobber language back.
+    await waitFor(() => {
+      expect((store.get("appSettings") as Record<string, unknown>)?.analyticsConsentVersion).toBe(1);
+    });
     const menuBtn = await screen.findByRole("button", { name: "产品菜单" });
     await act(async () => {
       fireEvent.click(menuBtn);
@@ -598,6 +621,10 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
   it("RF02-13: html lang follows selected language", async () => {
     render(<PopupApp />);
+    // Let the popup's async settings load settle its document.lang side effect
+    // (zh -> zh-CN) BEFORE toggling, so the toggle is the last writer and a
+    // late load cannot clobber the asserted state (CI run 37218167859).
+    await waitFor(() => expect(document.documentElement.lang).toBe("zh-CN"));
     const menuBtn = await screen.findByRole("button", { name: "产品菜单" });
     await act(async () => {
       fireEvent.click(menuBtn);
@@ -608,6 +635,58 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
     });
 
     expect(document.documentElement.lang).toBe("en");
+  });
+
+  it("UI02-LR1: user language toggle wins over stale initial settings load", async () => {
+    sessionResponse = { ok: false };
+    store.set("appSettings", { userId: undefined, authToken: undefined, language: "zh" });
+    await loadSettings();
+
+    // Park the popup's initial AI metadata command so the mount continuation
+    // stays pending while the user interacts with the language menu.
+    let releaseMetadata!: (value: unknown) => void;
+    const metadataGate = new Promise<unknown>((resolve) => {
+      releaseMetadata = resolve;
+    });
+    const baselineSend = vi.mocked(chrome.runtime.sendMessage).getMockImplementation() as unknown as (message: unknown) => Promise<unknown>;
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(async (message: unknown) => {
+      if ((message as { type?: string } | null)?.type === "AI_CONNECTION_GET_ACTIVE_METADATA") {
+        return metadataGate;
+      }
+      return baselineSend(message);
+    });
+
+    try {
+      render(<PopupApp />);
+      // Menu is interactive before the initial async load resolves.
+      const menuBtn = await screen.findByRole("button", { name: "产品菜单" });
+      await act(async () => {
+        fireEvent.click(menuBtn);
+      });
+      const langBtn = await screen.findByRole("button", { name: "Switch to English" });
+      await act(async () => {
+        fireEvent.click(langBtn);
+      });
+      expect(document.documentElement.lang).toBe("en");
+      expect(screen.getByText("Quiz Solver")).toBeInTheDocument();
+
+      // The OLD initial load now resolves with a well-formed zh snapshot.
+      // A user language action that happened after initialization started
+      // MUST win: the stale continuation must not touch visible language.
+      await act(async () => {
+        releaseMetadata({ ok: true, initialized: true, migrated: false, revision: 1, metadata: null });
+        await metadataGate;
+      });
+      await awaitSettingsMessagingIdle();
+
+      expect(document.documentElement.lang).toBe("en");
+      expect(screen.getByText("Quiz Solver")).toBeInTheDocument();
+      await waitFor(() => {
+        expect((store.get("appSettings") as Record<string, unknown>)?.language).toBe("en");
+      });
+    } finally {
+      vi.mocked(chrome.runtime.sendMessage).mockImplementation(baselineSend);
+    }
   });
 
   it("RF02-14: UI-00A provenance regression PASS", async () => {

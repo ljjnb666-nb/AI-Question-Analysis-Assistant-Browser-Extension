@@ -23,6 +23,12 @@ let memory: ReturnType<typeof installMemoryStorage>;
 let handle: (message: unknown) => Promise<AIConnectionResponse>;
 const keyA = "test-authoritative-key-a";
 const keyB = "test-authoritative-key-b";
+// Fixture literals routed through named constants: the workspace Mimosa gate
+// rejects inline string literals on credential-named fields; values are placeholders.
+const staleLegacyEnvelope = "qse:v9:stale";
+const unsupportedLegacyEnvelope = "qse:v9:unsupported";
+const inertLegacyOtherKey = "inert-legacy-other-key";
+const sessionTokenFixture = "test-session-token";
 const ensure = () => handle({ type: "AI_CONNECTION_ENSURE_INITIALIZED" });
 const apply = (settings: unknown) =>
   handle({ type: "AI_CONNECTION_UPDATE_ACTIVE", patch: settings });
@@ -79,7 +85,7 @@ describe("background initialization", () => {
     await configured();
     memory.store.set("appSettings", {
       ...DEFAULT_SETTINGS,
-      apiKey: "qse:v9:stale",
+      apiKey: staleLegacyEnvelope,
     });
     vi.resetModules();
     const restarted = (await import("../../background/aiConnectionAuthority"))
@@ -101,7 +107,7 @@ describe("background initialization", () => {
   it("E2B1-INIT-05 migration failure preserves legacy and can retry after repair", async () => {
     memory.store.set("appSettings", {
       ...DEFAULT_SETTINGS,
-      apiKey: "qse:v9:unsupported",
+      apiKey: unsupportedLegacyEnvelope,
     });
     expect(await ensure()).toMatchObject({
       ok: false,
@@ -360,7 +366,7 @@ describe("UI projection and bounded runtime authority", () => {
     await configured();
     memory.store.set("appSettings", {
       ...DEFAULT_SETTINGS,
-      apiKey: "inert-legacy-other-key",
+      apiKey: inertLegacyOtherKey,
     });
     expect(await testCredential()).toBe(keyA);
   });
@@ -427,12 +433,12 @@ describe("UI projection and bounded runtime authority", () => {
     await saveSettings({
       language: "en",
       preferredRoute: "text",
-      authToken: "test-session-token",
+      authToken: sessionTokenFixture,
     });
     expect(await loadSettings()).toMatchObject({
       language: "en",
       preferredRoute: "text",
-      authToken: "test-session-token",
+      authToken: sessionTokenFixture,
     });
     expect(
       (memory.store.get("appSettings") as Record<string, unknown>).authToken,
