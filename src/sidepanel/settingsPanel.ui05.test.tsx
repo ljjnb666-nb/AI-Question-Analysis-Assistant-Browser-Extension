@@ -211,13 +211,19 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
 
   // UI05-04: provider selection keyboard accessible
   it("UI05-04: provider selection responds to arrow key navigation", async () => {
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="catalog" />);
 
     const firstCard = await screen.findByRole("button", { name: /Anthropic \(Claude\)/i });
     firstCard.focus();
 
     fireEvent.keyDown(firstCard, { key: "ArrowRight" });
 
+    // ArrowRight moves focus without calling onProviderChange (stays in Catalog, does not open Editor)
+    expect(screen.getByTestId("settings-catalog-view")).not.toHaveAttribute("hidden");
+    expect(screen.getByTestId("settings-editor-view")).toHaveAttribute("hidden");
+
+    // Enter selects provider and opens Editor
+    fireEvent.keyDown(screen.getByTestId("provider-card-openai"), { key: "Enter" });
     await waitFor(() => {
       expect(screen.getByDisplayValue("gpt-5.5")).toBeInTheDocument();
     });
@@ -225,7 +231,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
 
   // UI05-05: API key masked
   it("UI05-05: API key is masked by default with password input type", async () => {
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const input = await screen.findByTestId("settings-api-key-input");
     expect(input).toHaveAttribute("type", "password");
@@ -233,7 +239,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
 
   // UI05-06: Show API key
   it("UI05-06: Show API key unmasks credentials to type text", async () => {
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const toggle = await screen.findByRole("button", { name: "显示 API Key" });
     fireEvent.click(toggle);
@@ -245,7 +251,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
 
   // UI05-07: Hide API key
   it("UI05-07: Hide API key returns input back to password type", async () => {
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const showToggle = await screen.findByRole("button", { name: "显示 API Key" });
     fireEvent.click(showToggle);
@@ -264,7 +270,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
 
   // UI05-09: saved != validated
   it("UI05-09: saving settings establishes saved state but not validated status", async () => {
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const input = await screen.findByTestId("settings-api-key-input");
     fireEvent.change(input, { target: { value: SYNTHETIC_TEST_KEY } });
@@ -289,7 +295,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
     });
     vi.mocked(parseQuestion).mockReturnValue(pendingPromise as any);
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const input = await screen.findByTestId("settings-api-key-input");
     fireEvent.change(input, { target: { value: SYNTHETIC_TEST_KEY } });
@@ -311,7 +317,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
   it("UI05-11: successful validation transitions to validated state and renders ready banner", async () => {
     vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const input = await screen.findByTestId("settings-api-key-input");
     fireEvent.change(input, { target: { value: SYNTHETIC_TEST_KEY } });
@@ -330,7 +336,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
   it("UI05-12: validation failure displays safe classified feedback and error status", async () => {
     vi.mocked(parseQuestion).mockRejectedValue(new Error("401 Unauthorized invalid_api_key"));
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const input = await screen.findByTestId("settings-api-key-input");
     fireEvent.change(input, { target: { value: SYNTHETIC_TEST_KEY } });
@@ -350,7 +356,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
       new Error("SecretDumpException: Bearer sk-ant-secret-12345 at InternalRuntime.eval (/var/stack.js:99)"),
     );
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const input = await screen.findByTestId("settings-api-key-input");
     fireEvent.change(input, { target: { value: SYNTHETIC_TEST_KEY } });
@@ -368,7 +374,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
   // UI05-14: model picker
   it("UI05-14: model picker displays known selectable models for provider", async () => {
     setupConnectionMock({ presetId: "gemini", selectedModelId: "gemini-2.5-flash" });
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     await waitFor(() => {
       expect(screen.getByRole("option", { name: "gemini-2.5-flash" })).toBeInTheDocument();
@@ -378,7 +384,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
 
   // UI05-15: custom model when supported
   it("UI05-15: custom model toggle allows typing custom model override", async () => {
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const toggleBtn = await screen.findByRole("button", { name: /手动输入|自定义/ });
     fireEvent.click(toggleBtn);
@@ -392,7 +398,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
   // UI05-16: Base URL hidden when irrelevant
   it("UI05-16: Base URL is not in common path for standard cloud providers like gemini", async () => {
     setupConnectionMock({ presetId: "gemini", selectedModelId: "gemini-2.5-flash" });
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     await waitFor(() => {
       expect(screen.getByText("Google Gemini")).toBeInTheDocument();
@@ -403,13 +409,9 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
   // UI05-17: Base URL shown when relevant
   it("UI05-17: Base URL is shown directly for custom and ollama providers", async () => {
     setupConnectionMock({ presetId: "ollama", selectedModelId: "llama3.2" });
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Ollama/i })).toHaveAttribute("aria-pressed", "true");
-    });
-
-    const baseUrlInput = screen.getByTestId("settings-base-url-input");
+    const baseUrlInput = await screen.findByTestId("settings-base-url-input");
     expect(baseUrlInput).toBeInTheDocument();
     expect(baseUrlInput).toHaveAttribute("placeholder", "http://localhost:11434");
   });
@@ -417,13 +419,9 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
   // UI05-18: invalid Base URL frontend handling
   it("UI05-18: invalid Base URL shows clear validation warning", async () => {
     setupConnectionMock({ presetId: "ollama", selectedModelId: "llama3.2" });
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Ollama/i })).toHaveAttribute("aria-pressed", "true");
-    });
-
-    const baseUrlInput = screen.getByTestId("settings-base-url-input");
+    const baseUrlInput = await screen.findByTestId("settings-base-url-input");
     fireEvent.change(baseUrlInput, { target: { value: "not-a-valid-protocol" } });
 
     await waitFor(() => {
@@ -434,7 +432,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
   // UI05-19: Ollama experience
   it("UI05-19: Ollama experience clarifies local provider with optional API key", async () => {
     setupConnectionMock({ presetId: "ollama", selectedModelId: "llama3.2" });
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     await waitFor(() => {
       expect(screen.getByText("此服务商可以不填写 API Key。")).toBeInTheDocument();
@@ -446,7 +444,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
   // UI05-20: Custom OpenAI-compatible experience
   it("UI05-20: Custom OpenAI-compatible provider exposes wire protocol and custom inputs", async () => {
     setupConnectionMock({ presetId: "custom", selectedModelId: "custom-model" });
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     await waitFor(() => {
       expect(screen.getByText("自定义协议")).toBeInTheDocument();
@@ -457,7 +455,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
 
   // UI05-21: Chinese UI
   it("UI05-21: Chinese UI renders natural Chinese copy across all sections", async () => {
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     await waitFor(() => {
       expect(screen.getByText("快速配置引导")).toBeInTheDocument();
@@ -470,7 +468,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
   // UI05-22: English UI
   it("UI05-22: English UI renders natural English copy across all sections", async () => {
     setupConnectionMock({}, { language: "en" });
-    render(<SettingsTab lang="en" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="en" onLanguageChange={vi.fn()} initialView="editor" />);
 
     await waitFor(() => {
       expect(screen.getByText("Setup Guide")).toBeInTheDocument();
@@ -486,19 +484,15 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
     const onLangChange = vi.fn();
     const { rerender } = render(<SettingsTab lang="zh" onLanguageChange={onLangChange} />);
 
-    await waitFor(() => {
-      expect(screen.getByText("保存设置")).toBeInTheDocument();
-    });
-
-    const enBtn = screen.getByRole("button", { name: "English" });
+    const enBtn = await screen.findByRole("button", { name: "English" });
     fireEvent.click(enBtn);
     expect(onLangChange).toHaveBeenCalledWith("en");
 
     rerender(<SettingsTab lang="en" onLanguageChange={onLangChange} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Save Settings" })).toBeInTheDocument();
-      expect(screen.getByText(/Credential stored/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Edit Connection" })).toBeInTheDocument();
+      expect(screen.getByText(/Credential saved/)).toBeInTheDocument();
     });
   });
 
@@ -533,7 +527,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
     setupConnectionMock({ hasCredential: true });
     vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult({ confidence: 1 }));
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const testBtn = await screen.findByRole("button", { name: /连接测试/ });
     fireEvent.click(testBtn);
@@ -546,7 +540,7 @@ describe("UI-05: Settings & First-Run Integration Tests", () => {
 
   // UI05-30: no automatic submission is introduced by settings configuration
   it("UI05-30: no automatic submission is introduced by settings configuration", async () => {
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const input = await screen.findByTestId("settings-api-key-input");
     fireEvent.change(input, { target: { value: SYNTHETIC_TEST_KEY } });
@@ -580,7 +574,7 @@ describe("UI-05 Section 22: Settings Home, Catalog & Credential Authority Integr
     expect(within(summaryCard).getByText("当前 AI 服务")).toBeInTheDocument();
     expect(within(summaryCard).getByText("Anthropic (Claude)")).toBeInTheDocument();
     expect(within(summaryCard).getByText("claude-opus-4.8")).toBeInTheDocument();
-    expect(within(summaryCard).getByText("已保存密钥")).toBeInTheDocument();
+    await waitFor(() => { expect(within(summaryCard).getByText("已保存密钥")).toBeInTheDocument(); });
 
     const changeBtn = screen.getByRole("button", { name: "更改 AI 服务" });
     const editBtn = screen.getByRole("button", { name: "编辑连接" });
@@ -623,7 +617,7 @@ describe("UI-05 Section 22: Settings Home, Catalog & Credential Authority Integr
   it("S22-03: loading from AIConnectionEditorView renders blank input and stored credential badge", async () => {
     setupConnectionMock({ hasCredential: true });
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const input = await screen.findByTestId("settings-api-key-input");
     expect(input).toHaveValue("");
@@ -635,7 +629,7 @@ describe("UI-05 Section 22: Settings Home, Catalog & Credential Authority Integr
   it("S22-04: saving with existing credential and blank input dispatches KEEP credential action", async () => {
     setupConnectionMock({ hasCredential: true });
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const modelSelect = await screen.findByTestId("settings-model-select");
     fireEvent.change(modelSelect, { target: { value: "claude-sonnet-4.6" } });
@@ -658,7 +652,7 @@ describe("UI-05 Section 22: Settings Home, Catalog & Credential Authority Integr
   it("S22-05: saving with newly typed key dispatches REPLACE credential action", async () => {
     setupConnectionMock({ hasCredential: true });
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const input = await screen.findByTestId("settings-api-key-input");
     fireEvent.change(input, { target: { value: "sk-brand-new-key" } });
@@ -680,7 +674,7 @@ describe("UI-05 Section 22: Settings Home, Catalog & Credential Authority Integr
   it("S22-06: clicking clear credential dispatches CLEAR credential action on save", async () => {
     setupConnectionMock({ hasCredential: true });
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const clearBtn = await screen.findByRole("button", { name: "清除密钥" });
     fireEvent.click(clearBtn);
@@ -706,7 +700,7 @@ describe("UI-05 Section 22: Settings Home, Catalog & Credential Authority Integr
   it("S22-07: switching provider without entering key sends no credential carry", async () => {
     setupConnectionMock({ presetId: "anthropic", hasCredential: true });
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="catalog" />);
 
     await waitFor(() => {
       expect(screen.getByText("OpenAI (GPT)")).toBeInTheDocument();
@@ -731,7 +725,7 @@ describe("UI-05 Section 22: Settings Home, Catalog & Credential Authority Integr
   it("S22-08: switching from official Anthropic to Custom defaults to OpenAI wire protocol", async () => {
     setupConnectionMock({ presetId: "anthropic", selectedModelId: "claude-opus-4.8" });
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="catalog" />);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Custom/ })).toBeInTheDocument();
@@ -766,7 +760,7 @@ describe("UI-05 Section 22: Settings Home, Catalog & Credential Authority Integr
       hasCredential: true,
     });
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     await waitFor(() => {
       expect(screen.getByRole("radio", { name: "Claude 兼容" })).toBeChecked();
@@ -797,6 +791,7 @@ describe("UI-05 Section 22: Settings Home, Catalog & Credential Authority Integr
     });
 
     // Step 2 & 3: Save untested
+    fireEvent.click(screen.getByTestId("home-edit-connection-btn"));
     const input = await screen.findByTestId("settings-api-key-input");
     fireEvent.change(input, { target: { value: SYNTHETIC_TEST_KEY } });
 
@@ -830,7 +825,7 @@ describe("UI-05 Review Fix 01: Validation Authority & Freshness Tests (RF01-VAL0
     setupConnectionMock({ hasCredential: true });
     vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const testBtn = await screen.findByRole("button", { name: /连接测试/ });
     fireEvent.click(testBtn);
@@ -846,7 +841,7 @@ describe("UI-05 Review Fix 01: Validation Authority & Freshness Tests (RF01-VAL0
     setupConnectionMock({ hasCredential: false });
     vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     await waitFor(() => {
       expect(screen.getByText("未配置 AI 服务")).toBeInTheDocument();
@@ -870,7 +865,7 @@ describe("UI-05 Review Fix 01: Validation Authority & Freshness Tests (RF01-VAL0
     setupConnectionMock({ hasCredential: true });
     vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const testBtn = await screen.findByRole("button", { name: /连接测试/ });
     fireEvent.click(testBtn);
@@ -894,7 +889,7 @@ describe("UI-05 Review Fix 01: Validation Authority & Freshness Tests (RF01-VAL0
     setupConnectionMock({ hasCredential: true, selectedModelId: "claude-opus-4.8" });
     vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     await waitFor(() => {
       expect(screen.getByTestId("settings-model-select")).toBeInTheDocument();
@@ -927,7 +922,7 @@ describe("UI-05 Review Fix 01: Validation Authority & Freshness Tests (RF01-VAL0
     });
     vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("custom-model")).toBeInTheDocument();
@@ -960,7 +955,7 @@ describe("UI-05 Review Fix 01: Validation Authority & Freshness Tests (RF01-VAL0
     });
     vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("custom-model")).toBeInTheDocument();
@@ -1035,7 +1030,7 @@ describe("UI-05 Review Fix 01: Validation Authority & Freshness Tests (RF01-VAL0
     setupConnectionMock({ hasCredential: false });
     vi.mocked(parseQuestion).mockRejectedValue(new Error("401 Unauthorized"));
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
     const input = await screen.findByTestId("settings-api-key-input");
     fireEvent.change(input, { target: { value: SYNTHETIC_TEST_KEY } });
@@ -1052,6 +1047,232 @@ describe("UI-05 Review Fix 01: Validation Authority & Freshness Tests (RF01-VAL0
 
     await waitFor(() => {
       expect(screen.queryByText("连接测试失败")).toBeNull();
+    });
+  });
+});
+
+describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupConnectionMock();
+  });
+
+  // 1. REAL_METADATA_ONLY_READY
+  it("REAL_METADATA_ONLY_READY: real test succeeds and genuine metadata revisions yield Ready", async () => {
+    setupConnectionMock({ hasCredential: true });
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-prod-real-888",
+      connectionRevision: 5,
+      credentialRevision: 3,
+      validation: { status: "never_tested", generation: 0 },
+      presetId: "anthropic",
+      providerId: "anthropic",
+      selectedModelId: "claude-opus-4.8",
+      endpointOverride: null,
+      protocol: "anthropic_messages",
+      hasCredential: true,
+      authScheme: "api_key",
+      createdAt: 1,
+      updatedAt: 1,
+    } as any);
+    vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
+
+    const testBtn = await screen.findByRole("button", { name: /连接测试/ });
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+      expect(screen.getByText("AI 配置已就绪")).toBeInTheDocument();
+    });
+  });
+
+  // 2. METADATA_FAILURE_NEVER_READY
+  it("METADATA_FAILURE_NEVER_READY: null or failed active metadata fails closed and never marks Ready", async () => {
+    setupConnectionMock({ hasCredential: true });
+    vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
+    // Metadata query fails / returns null even after save
+    vi.mocked(updateActiveAIConnection).mockResolvedValue({
+      ok: true,
+      metadata: { id: "conn-ui05-test", hasCredential: true } as any,
+    } as any);
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue(null as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
+
+    const testBtn = await screen.findByRole("button", { name: /连接测试/ });
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(parseQuestion).toHaveBeenCalledTimes(1);
+    });
+
+    // Even though parseQuestion succeeded, metadata was unavailable: fail closed
+    expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+  });
+
+  // 3. NO_FIXTURE_METADATA_IN_PRODUCTION
+  it("NO_FIXTURE_METADATA_IN_PRODUCTION: production settingsPanel does not contain fixture-conn or fake authority fabrication", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const source = fs.readFileSync(path.resolve("src/sidepanel/settingsPanel.tsx"), "utf8");
+
+    expect(source).not.toContain("fixture-conn");
+    expect(source).not.toMatch(/validation:\s*\{\s*status:\s*["']validated["']/);
+    expect(source).not.toMatch(/generation:\s*\(.*generation.*\)\s*\+\s*1/);
+    expect(source).not.toContain("validatedConnectionRevision");
+    expect(source).not.toContain("validatedCredentialRevision");
+  });
+
+  // 4. COMMITTED_HOME_IGNORES_UNSAVED_DRAFT
+  it("COMMITTED_HOME_IGNORES_UNSAVED_DRAFT: Home Current AI Service ignores unsaved draft changes", async () => {
+    setupConnectionMock({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", hasCredential: true });
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    const summaryCard = await screen.findByTestId("settings-home-summary-card");
+    await waitFor(() => {
+      expect(within(summaryCard).getByText("Anthropic (Claude)")).toBeInTheDocument();
+      expect(within(summaryCard).getByText("已保存密钥")).toBeInTheDocument();
+    });
+
+    // User navigates: Home -> Catalog -> Custom
+    fireEvent.click(screen.getByTestId("home-change-service-btn"));
+    const customCard = await screen.findByTestId("provider-card-custom");
+    fireEvent.click(customCard);
+
+    // In Editor, Custom is in draft. User does NOT save, navigates back to Home
+    expect(screen.getByTestId("settings-editor-view")).not.toHaveAttribute("hidden");
+    fireEvent.click(screen.getByTestId("nav-editor-done-to-home"));
+
+    // Expected: Home still says Anthropic, still says credential stored, runtime remains Anthropic
+    expect(screen.getByTestId("settings-home-view")).not.toHaveAttribute("hidden");
+    const homeSummary = screen.getByTestId("settings-home-summary-card");
+    expect(within(homeSummary).getByText("Anthropic (Claude)")).toBeInTheDocument();
+    expect(within(homeSummary).getByText("已保存密钥")).toBeInTheDocument();
+    expect(within(homeSummary).queryByText(/Custom/)).toBeNull();
+  });
+
+  // 5. HOME_UPDATES_AFTER_SUCCESSFUL_SAVE
+  it("HOME_UPDATES_AFTER_SUCCESSFUL_SAVE: Home switches to newly committed provider only after successful save", async () => {
+    setupConnectionMock({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", hasCredential: true });
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    // Navigate to catalog -> custom
+    fireEvent.click(screen.getByTestId("home-change-service-btn"));
+    fireEvent.click(await screen.findByTestId("provider-card-custom"));
+
+    // Enter api key and save
+    const input = await screen.findByTestId("settings-api-key-input");
+    fireEvent.change(input, { target: { value: SYNTHETIC_TEST_KEY } });
+
+    const saveBtn = await screen.findByRole("button", { name: "保存设置" });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateActiveAIConnection).toHaveBeenCalledTimes(1);
+    });
+
+    // Return to Home
+    fireEvent.click(screen.getByTestId("nav-editor-done-to-home"));
+
+    // Home now displays Custom as committed connection
+    const homeSummary = screen.getByTestId("settings-home-summary-card");
+    expect(within(homeSummary).getByText(/Custom/)).toBeInTheDocument();
+  });
+
+  // 6. REAL_AUTHONLY_FIRST_RUN
+  it("REAL_AUTHONLY_FIRST_RUN: unauthenticated Settings renders Step 1 guide and auth form with provider config absent", async () => {
+    mockAuth.isAuthenticated = false;
+    mockAuth.status = "unauthenticated";
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} authOnly={true} />);
+
+    expect(screen.getByTestId("first-run-signin-section")).toBeInTheDocument();
+    expect(screen.getByText("第一步：登录账号")).toBeInTheDocument();
+    expect(screen.getByText("插件访问账号")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-account-section")).toBeInTheDocument();
+    mockAuth.isAuthenticated = true;
+    mockAuth.status = "authenticated";
+  });
+
+  // 7. FIRST_RUN_PROVIDER_CONFIG_LOCKED
+  it("FIRST_RUN_PROVIDER_CONFIG_LOCKED: authOnly strictly excludes provider picker, credentials, and model config", async () => {
+    mockAuth.isAuthenticated = false;
+    mockAuth.status = "unauthenticated";
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} authOnly={true} />);
+
+    expect(screen.queryByTestId("settings-provider-picker")).toBeNull();
+    expect(screen.queryByTestId("settings-api-key-input")).toBeNull();
+    expect(screen.queryByTestId("settings-model-select")).toBeNull();
+    expect(screen.queryByTestId("settings-catalog-view")).toBeNull();
+    expect(screen.queryByTestId("settings-editor-view")).toBeNull();
+    expect(screen.queryByTestId("settings-home-summary-card")).toBeNull();
+
+    mockAuth.isAuthenticated = true;
+    mockAuth.status = "authenticated";
+  });
+
+  // 8. INACTIVE_VIEW_NOT_TABBABLE
+  it("INACTIVE_VIEW_NOT_TABBABLE: inactive views are inert and hidden with display none", async () => {
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="home" />);
+
+    const homeView = screen.getByTestId("settings-home-view");
+    const catalogView = screen.getByTestId("settings-catalog-view");
+    const editorView = screen.getByTestId("settings-editor-view");
+
+    // Home view active
+    expect(homeView).not.toHaveAttribute("hidden");
+    expect(homeView).not.toHaveAttribute("inert");
+    expect(catalogView).toHaveAttribute("hidden");
+    expect(catalogView).toHaveAttribute("inert");
+    expect(catalogView).toHaveStyle({ display: "none" });
+    expect(editorView).toHaveAttribute("hidden");
+    expect(editorView).toHaveAttribute("inert");
+    expect(editorView).toHaveStyle({ display: "none" });
+
+    // Switch to Catalog view
+    fireEvent.click(screen.getByTestId("home-change-service-btn"));
+    expect(catalogView).not.toHaveAttribute("hidden");
+    expect(catalogView).not.toHaveAttribute("inert");
+    expect(homeView).toHaveAttribute("hidden");
+    expect(homeView).toHaveAttribute("inert");
+    expect(homeView).toHaveStyle({ display: "none" });
+    expect(editorView).toHaveAttribute("hidden");
+    expect(editorView).toHaveAttribute("inert");
+  });
+
+  // 9. CATALOG_ARROW_STAYS_IN_CATALOG
+  it("CATALOG_ARROW_STAYS_IN_CATALOG: ArrowRight moves focus between providers and stays in Catalog view", async () => {
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="catalog" />);
+
+    const anthropicCard = await screen.findByTestId("provider-card-anthropic");
+    anthropicCard.focus();
+
+    fireEvent.keyDown(anthropicCard, { key: "ArrowRight" });
+
+    // Stays in Catalog, does not switch to editor
+    expect(screen.getByTestId("settings-catalog-view")).not.toHaveAttribute("hidden");
+    expect(screen.getByTestId("settings-editor-view")).toHaveAttribute("hidden");
+    expect(screen.queryByTestId("settings-api-key-input")).not.toBeVisible();
+  });
+
+  // 10. CATALOG_ENTER_OPENS_EDITOR
+  it("CATALOG_ENTER_OPENS_EDITOR: pressing Enter on focused provider card selects provider and opens Editor", async () => {
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="catalog" />);
+
+    const openaiCard = await screen.findByTestId("provider-card-openai");
+    openaiCard.focus();
+
+    fireEvent.keyDown(openaiCard, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-editor-view")).not.toHaveAttribute("hidden");
+      expect(screen.getByTestId("settings-catalog-view")).toHaveAttribute("hidden");
+      expect(screen.getByDisplayValue("gpt-5.5")).toBeInTheDocument();
     });
   });
 });

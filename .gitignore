@@ -13,3 +13,4 @@ tmp_resp.json
 output/
 test-results/
 .env.analytics.local
+.mimosa/

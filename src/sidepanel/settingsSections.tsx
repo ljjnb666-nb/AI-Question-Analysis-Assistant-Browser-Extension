@@ -135,13 +135,13 @@ export const PROVIDER_CATALOG_META: Record<ProviderId, ProviderCatalogMeta> = {
     shortDesc: { zh: "高智力、长文本上下文推理", en: "High-intelligence reasoning & long context" },
     modelFamily: { zh: "Claude 系列模型", en: "Claude model series" },
     connectionType: { zh: "Cloud API", en: "Cloud API" },
-    badge: { zh: "官方推荐", en: "Recommended" },
+    badge: { zh: "推荐", en: "Recommended" },
   },
   openai: {
     shortDesc: { zh: "通用智能与多模态标杆", en: "General AI & multimodal benchmark" },
     modelFamily: { zh: "GPT 系列模型", en: "GPT model series" },
     connectionType: { zh: "Cloud API", en: "Cloud API" },
-    badge: { zh: "官方推荐", en: "Recommended" },
+    badge: { zh: "推荐", en: "Recommended" },
   },
   gemini: {
     shortDesc: { zh: "Google 原生多模态理解", en: "Google native multimodal understanding" },
@@ -286,6 +286,7 @@ export const SettingsHomeSummaryCard: React.FC<{
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingTop: 4, borderTop: `1px solid ${orbitColors.border.subtle}` }}>
         <button
           type="button"
+          data-testid="home-change-service-btn"
           onClick={onChangeService}
           style={{
             ...providerButtonStyle,
@@ -306,6 +307,7 @@ export const SettingsHomeSummaryCard: React.FC<{
 
         <button
           type="button"
+          data-testid="home-edit-connection-btn"
           onClick={onEditConnection}
           style={{
             ...providerButtonStyle,
@@ -326,6 +328,7 @@ export const SettingsHomeSummaryCard: React.FC<{
 
         <button
           type="button"
+          data-testid="home-test-connection-btn"
           onClick={onTestConnection}
           disabled={testing}
           style={{
@@ -580,7 +583,6 @@ export const SettingsProviderPicker: React.FC<{
     }
     if (nextIndex >= 0) {
       e.preventDefault();
-      onProviderChange(filteredProviders[nextIndex].id as ProviderId);
       const targetBtn = document.getElementById(`provider-card-${filteredProviders[nextIndex].id}`);
       targetBtn?.focus();
     }
@@ -1233,7 +1235,8 @@ export const SettingsAccountSection: React.FC<{
   isEn: boolean;
   rejectedSessionHint?: boolean;
 }> = ({ auth, authText, isEn, rejectedSessionHint = false }) => (
-  <SectionCard
+  <div data-testid="settings-account-section">
+    <SectionCard
     title={isEn ? "Plugin Access Account" : "插件访问账号"}
     description={
       isEn
@@ -1379,6 +1382,7 @@ export const SettingsAccountSection: React.FC<{
       </div>
     )}
   </SectionCard>
+  </div>
 );
 
 /**

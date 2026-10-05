@@ -53,13 +53,15 @@ beforeEach(async () => {
 });
 
 async function switchToCustom() {
-  render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+  render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="catalog" />);
   await waitFor(() =>
-    expect(screen.getByDisplayValue(oldEndpoint)).toBeInTheDocument(),
+    expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true"),
   );
+  await screen.findByRole("button", { name: /Anthropic/ });
   expect("apiKey" in await loadSettings()).toBe(false);
-  fireEvent.click(screen.getByRole("button", { name: /Custom/ }));
-  const endpoint = screen.getByPlaceholderText(getProvider("custom").baseUrl);
+  fireEvent.click(await screen.findByRole("button", { name: /Custom/ }));
+  await screen.findByPlaceholderText(getProvider("custom").keyPlaceholder);
+  const endpoint = await screen.findByPlaceholderText(getProvider("custom").baseUrl);
   expect(endpoint).toHaveValue("");
   return endpoint;
 }
@@ -115,8 +117,8 @@ describe("E2B2A committed Save-and-Test", () => {
     : { choices: [{ message: { content: '{"questionType":"single_choice","answer":"B","confidence":1}' } }] }), { status: 200 });
 
   it("TEST-01/02 blank visible key keeps stored credential and runs a text request without React plaintext", async () => {
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
-    await waitFor(() => expect(screen.getByDisplayValue(oldEndpoint)).toBeInTheDocument());
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
+    await waitFor(() => expect(screen.getByPlaceholderText(getProvider("anthropic").keyPlaceholder)).toBeInTheDocument());
     expect(screen.getByPlaceholderText(getProvider("anthropic").keyPlaceholder)).toHaveValue("");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
       expect(JSON.stringify(document.body.innerHTML)).not.toContain("rf01-old-fixture-key");
@@ -131,10 +133,9 @@ describe("E2B2A committed Save-and-Test", () => {
     expect(memory.store.has("history")).toBe(false);
   });
   it("TEST-03 changing provider commits B before B's request", async () => {
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
-    await waitFor(() => expect(screen.getByDisplayValue(oldEndpoint)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: /^OpenAI/ }));
-    fireEvent.change(screen.getByPlaceholderText(getProvider("openai").keyPlaceholder), { target: { value: newKey } });
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="catalog" />);
+    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI/ }));
+    fireEvent.change(await screen.findByPlaceholderText(getProvider("openai").keyPlaceholder), { target: { value: newKey } });
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const state = (await loadAIConnectionState())!;
       expect(state.connections[state.activeConnectionId!].presetId).toBe("openai");
@@ -197,7 +198,7 @@ describe("E2B2B RF01 Custom protocol draft semantics", () => {
   it("existing Custom Anthropic reloads its radio and retains protocol on unchanged save", async () => {
     await ensureAIConnectionAuthorityReady();
     await updateActiveAIConnection({ presetId: "custom", protocolOverride: "anthropic_messages", endpointOverride: oldEndpoint, credential: { action: "REPLACE", value: newKey } });
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
     await waitFor(() => expect(screen.getByRole("radio", { name: "Claude 兼容" })).toBeChecked());
     expect(await save()).toMatchObject({ presetId: "custom", protocolOverride: "anthropic_messages" });
     const runtime = await resolveActiveAIConnectionRuntimeMetadata();

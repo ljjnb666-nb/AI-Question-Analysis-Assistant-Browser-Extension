@@ -53,18 +53,7 @@ const getViewContainerStyle = (active: boolean): React.CSSProperties =>
         width: "100%",
       }
     : {
-        display: "flex",
-        flexDirection: "column",
-        gap: 0,
-        width: "100%",
-        height: 0,
-        maxHeight: 0,
-        overflow: "hidden",
-        opacity: 0,
-        pointerEvents: "none",
-        margin: 0,
-        padding: 0,
-        border: 0,
+        display: "none",
       };
 
 export interface SettingsTabProps {
@@ -174,11 +163,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     void getAIConnectionActiveMetadata().then((meta) => {
       if (!disposed && meta) {
         setActiveMetadata(meta);
-        if (
-          meta.validation?.status === "validated" &&
-          meta.validation.validatedConnectionRevision === meta.connectionRevision &&
-          (meta.validation.validatedCredentialRevision ?? 0) === (meta.credentialRevision ?? 0)
-        ) {
+        if (meta.validation?.status === "validated") {
           setValidatedReceipt({
             connectionId: meta.id,
             connectionRevision: meta.connectionRevision,
@@ -193,14 +178,29 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     };
   }, []);
 
-  // Invalidate Ready whenever authoritative aiConnectionState changes in storage
+  // Invalidate Ready and refresh committed summary whenever authoritative aiConnectionState changes in storage
   useEffect(() => {
     const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
       if (area === "local" && changes.aiConnectionState) {
         setValidatedReceipt(null);
-        void getAIConnectionActiveMetadata().then((freshMeta) => {
+        void Promise.all([loadSettings(), getAIConnectionEditorView(), getAIConnectionActiveMetadata()]).then(([settings, editor, freshMeta]) => {
           if (freshMeta) {
             setActiveMetadata(freshMeta);
+          }
+          if (editor) {
+            const nextPresetId = (editor.presetId as ProviderId) || "anthropic";
+            const nextProtocol = (editor.presetId === "custom" && editor.protocol === "anthropic_messages" ? "anthropic" : "openai") as "openai" | "anthropic";
+            setStoredSnapshot({
+              presetId: nextPresetId,
+              selectedModelId: editor.selectedModelId,
+              endpointOverride: editor.endpointOverride,
+              protocol: nextProtocol,
+              hasCredential: editor.hasCredential,
+              preferredRoute: settings.preferredRoute ?? "auto",
+              analyticsBaseUrl: settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL,
+              enableAnalytics: settings.enableAnalytics ?? false,
+              language: settings.language ?? "zh",
+            });
           }
         }).catch(() => {});
       }
@@ -235,12 +235,25 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     [provider.keyOptional, hasCredential, apiKey],
   );
 
-  // Ready binds strictly to non-secret authority revisions: connectionId, connectionRevision, credentialRevision, validationGeneration
+  // Committed active connection strictly represents stored / authoritative backend state, ignoring unsaved editor drafts
+  const committedPresetId = (storedSnapshot?.presetId ?? activeMetadata?.presetId ?? "anthropic") as ProviderId;
+  const committedProvider = getProvider(committedPresetId);
+  const committedModel = storedSnapshot?.selectedModelId || committedProvider.defaultModel;
+  const committedHasCredential = storedSnapshot?.hasCredential ?? activeMetadata?.hasCredential ?? false;
+  const committedKeyOptional = committedProvider.keyOptional;
+  const isCommittedConfigured = Boolean(committedKeyOptional || committedHasCredential);
+
+  // Ready binds strictly to: real test succeeded + receipt matches current actual metadata revisions + draft clean + no subsequent authority change
   const isValidated = useMemo(() => {
     if (!validatedReceipt) return false;
     if (isDirty) return false;
-    if (testResult && testResult.tone !== "success") return false;
-    if (!activeMetadata || activeMetadata.validation?.status !== "validated") return false;
+    if (!activeMetadata) return false;
+
+    const isTestSuccess = testResult?.tone === "success";
+    const isPersistedValidated = activeMetadata.validation?.status === "validated";
+
+    if (!isTestSuccess && !isPersistedValidated) return false;
+
     if (validatedReceipt.connectionId !== activeMetadata.id) return false;
     if (validatedReceipt.connectionRevision !== activeMetadata.connectionRevision) return false;
     if ((validatedReceipt.credentialRevision ?? 0) !== (activeMetadata.credentialRevision ?? 0)) return false;
@@ -265,6 +278,19 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         isValidated,
       }),
     [isConfigured, isDirty, testing, testResult, savedOnce, isValidated],
+  );
+
+  const homeSetupStatus: SetupStatus = useMemo(
+    () =>
+      deriveSetupStatus({
+        isConfigured: isCommittedConfigured,
+        isDirty,
+        testing,
+        testResult,
+        savedOnce,
+        isValidated,
+      }),
+    [isCommittedConfigured, isDirty, testing, testResult, savedOnce, isValidated],
   );
 
   const activeStep = useMemo(() => {
@@ -425,44 +451,18 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       const result = await parseQuestion(testBlock, { preferredRoute: "text", language: lang });
       // Refresh authoritative metadata from single-writer backend
       const freshMeta = await getAIConnectionActiveMetadata().catch(() => null);
-      if (freshMeta) {
-        const validatedMeta = {
-          ...freshMeta,
-          validation: {
-            status: "validated" as const,
-            generation: (freshMeta.validation?.generation ?? 0) + 1,
-            validatedConnectionRevision: freshMeta.connectionRevision,
-            validatedCredentialRevision: freshMeta.credentialRevision,
-          },
-        };
-        setActiveMetadata(validatedMeta);
-        setValidatedReceipt({
-          connectionId: validatedMeta.id,
-          connectionRevision: validatedMeta.connectionRevision,
-          credentialRevision: validatedMeta.credentialRevision,
-          validationGeneration: validatedMeta.validation.generation,
-        });
+      if (!freshMeta) {
+        // If freshMeta is null / unavailable: fail closed. DO NOT mark Ready.
+        setValidatedReceipt(null);
+        setActiveMetadata(null);
       } else {
-        // Fallback for mocked test environments
-        const fallbackMeta = {
-          id: "fixture-conn",
-          name: "fixture",
-          presetId: providerId,
-          protocol: customProtocol === "anthropic" ? "anthropic_messages" : "openai_chat_completions",
-          endpoint: customUrl,
-          authScheme: { kind: "bearer" },
-          hasCredential: hasCredential || apiKey.trim().length > 0,
-          connectionRevision: 1,
-          validation: { status: "validated", generation: 1 },
-          createdAt: 1,
-          updatedAt: 1,
-        } as ConnectionMetadata;
-        setActiveMetadata(fallbackMeta);
+        // Create only an ephemeral frontend receipt from ACTUAL metadata. Do not mutate freshMeta.
+        setActiveMetadata(freshMeta);
         setValidatedReceipt({
-          connectionId: fallbackMeta.id,
-          connectionRevision: fallbackMeta.connectionRevision,
-          credentialRevision: fallbackMeta.credentialRevision,
-          validationGeneration: 1,
+          connectionId: freshMeta.id,
+          connectionRevision: freshMeta.connectionRevision,
+          credentialRevision: freshMeta.credentialRevision,
+          validationGeneration: freshMeta.validation?.generation,
         });
       }
 
@@ -498,15 +498,46 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     return (
       <div
         ref={scopeRef}
+        data-testid="settings-home-view"
         style={{
           padding: "14px 10px 18px",
           display: "flex",
           flexDirection: "column",
-          gap: 14,
+          gap: 12,
           width: "100%",
           boxSizing: "border-box",
         }}
       >
+        <SettingsSetupStatusCard
+          status="not_configured"
+          isEn={isEn}
+          activeStep={1}
+          onRetest={() => {}}
+        />
+        <section
+          className="settings-card"
+          data-testid="first-run-signin-section"
+          style={{
+            padding: "14px 16px",
+            borderRadius: orbitRadius.lg,
+            border: `1px solid ${orbitColors.border.subtle}`,
+            background: orbitColors.bg.surfaceSubtle,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: orbitColors.text.primary }}>
+              {isEn ? "Step 1: Sign in to your account" : "第一步：登录账号"}
+            </span>
+          </div>
+          <p style={{ margin: 0, fontSize: 12, color: orbitColors.text.secondary, lineHeight: 1.5 }}>
+            {isEn
+              ? "An account is required to use Quiz Solver and sync settings. Please sign in below to unlock provider setup."
+              : "使用 Quiz Solver 需要登录账号。请在下方登录或注册账号，完成后将自动进入服务商配置。"}
+          </p>
+        </section>
         <SettingsAccountSection auth={auth} authText={authText} isEn={isEn} rejectedSessionHint={sessionRejectedHint} />
       </div>
     );
@@ -515,6 +546,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   return (
     <div
       ref={scopeRef}
+      data-testid="settings-panel"
+      data-ready={Boolean(storedSnapshot)}
       style={{
         padding: "14px 10px 18px",
         display: "flex",
@@ -527,11 +560,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       {/* View 1: Settings Home (Home dashboard with NO permanent provider card wall) */}
       <div
         data-testid="settings-home-view"
+        hidden={view !== "home"}
+        {...(view !== "home" ? { inert: "" } : {})}
         style={getViewContainerStyle(view === "home")}
       >
         {/* 1. Setup Status & 4-Step Onboarding Stepper Header */}
         <SettingsSetupStatusCard
-          status={setupStatus}
+          status={homeSetupStatus}
           isEn={isEn}
           activeStep={activeStep}
           onRetest={() => void handleTest()}
@@ -563,7 +598,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 : "使用 Quiz Solver 需要登录账号。请在下方登录或注册账号，完成后将自动进入服务商配置。"}
             </p>
           </section>
-        ) : !isConfigured ? (
+        ) : !isCommittedConfigured ? (
           <section
             className="settings-card"
             data-testid="first-run-setup-guide"
@@ -600,13 +635,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           </section>
         ) : null}
 
-        {/* 2. Active AI Connection Summary Card */}
+        {/* 2. Active AI Connection Summary Card (renders committed connection, NOT unsaved editor draft) */}
         <SettingsHomeSummaryCard
-          providerName={provider.name}
-          modelName={model || provider.defaultModel}
-          connectionStatus={setupStatus}
-          hasCredential={hasCredential}
-          keyOptional={provider.keyOptional}
+          providerName={committedProvider.name}
+          modelName={committedModel}
+          connectionStatus={homeSetupStatus}
+          hasCredential={committedHasCredential}
+          keyOptional={committedKeyOptional}
           isEn={isEn}
           onChangeService={() => setView("catalog")}
           onEditConnection={() => setView("editor")}
@@ -636,6 +671,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       {/* View 2: Provider Catalog (Home → Catalog) */}
       <div
         data-testid="settings-catalog-view"
+        hidden={view !== "catalog"}
+        {...(view !== "catalog" ? { inert: "" } : {})}
         style={getViewContainerStyle(view === "catalog")}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 2px" }}>
@@ -676,6 +713,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       {/* View 3: Connection Editor (Catalog → Connection Editor) */}
       <div
         data-testid="settings-editor-view"
+        hidden={view !== "editor"}
+        {...(view !== "editor" ? { inert: "" } : {})}
         style={getViewContainerStyle(view === "editor")}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 2px" }}>

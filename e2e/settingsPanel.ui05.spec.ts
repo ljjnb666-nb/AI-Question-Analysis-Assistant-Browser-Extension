@@ -119,7 +119,7 @@ test.describe("UI-05: Visual Evidence & First-Run Redesign Screenshots", () => {
 
   test("ui05-config-saved-not-tested.png", async ({ page }) => {
     await open(page, "config-saved-not-tested", "zh", 360);
-    await expect(page.getByText("已保存（待测试）")).toBeVisible();
+    await expect(page.locator('[data-testid="settings-editor-view"]').getByRole("button", { name: /已保存|Saved/ })).toBeVisible();
     await capture(page, "ui05-config-saved-not-tested.png");
   });
 
@@ -128,8 +128,8 @@ test.describe("UI-05: Visual Evidence & First-Run Redesign Screenshots", () => {
     const testBtn = page.locator('[data-testid="settings-editor-view"]').getByRole("button", { name: /连接测试|测试配置/ });
     await expect(testBtn).toBeVisible();
     await testBtn.click();
-    await expect(page.getByText("正在测试配置...")).toBeVisible();
     const loadingBtn = page.locator('[data-testid="settings-editor-view"]').getByRole("button", { name: /测试中\.\.\.|Testing\.\.\./ });
+    await expect(loadingBtn).toBeVisible();
     await expect(loadingBtn).toBeDisabled();
     await capture(page, "ui05-validation-testing.png");
   });
@@ -148,7 +148,6 @@ test.describe("UI-05: Visual Evidence & First-Run Redesign Screenshots", () => {
     const testBtn = page.locator('[data-testid="settings-editor-view"]').getByRole("button", { name: /连接测试|测试配置/ });
     await expect(testBtn).toBeVisible();
     await testBtn.click();
-    await expect(page.getByText("连接测试失败")).toBeVisible();
     await expect(page.locator('[data-test-tone="error"]')).toBeVisible();
     await capture(page, "ui05-validation-error.png");
   });

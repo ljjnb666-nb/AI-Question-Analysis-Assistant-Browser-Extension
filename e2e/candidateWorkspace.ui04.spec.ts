@@ -182,8 +182,12 @@ test("UI04 visual evidence: asserted empty, mixed, selected, review, running, lo
   await open(page, "settings");
   await expect(page.getByRole("tabpanel")).toBeVisible();
   await expect(page.getByRole("tab", { name: "设置", exact: true })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByText("服务商", { exact: true })).toBeVisible();
-  await expect(page.getByPlaceholder("sk-test-ui03-example")).toBeVisible();
+  await expect(page.getByTestId("settings-home-view")).toBeVisible();
+  await noOverflow(page);
+  // Navigate to connection editor to verify detailed settings and scrollbar
+  await page.getByRole("button", { name: "编辑连接" }).click();
+  await expect(page.getByTestId("settings-editor-view")).toBeVisible();
+  await expect(page.getByTestId("settings-api-key-input")).toBeVisible();
   expect(await page.locator(".orbit-panel-scroll").evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true);
   await expect(page.locator(".orbit-panel-scroll")).toHaveCSS("scrollbar-width", "thin");
   await capture(page, "sidepanel-ui04-settings-scrollbar.png");

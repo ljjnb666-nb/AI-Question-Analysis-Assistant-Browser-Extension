@@ -273,7 +273,7 @@ function Fixture() {
       />
       <div className="orbit-panel-scroll" style={PANEL_BODY_STYLE}>
         <WorkspaceTabPanel id="sidepanel-tabpanel-settings" tabId="settings">
-          <SettingsTab lang={uiLang} onLanguageChange={setUiLang} initialView={initialView} />
+          <SettingsTab lang={uiLang} onLanguageChange={setUiLang} initialView={initialView} authOnly={!isAuth} />
         </WorkspaceTabPanel>
       </div>
     </div>

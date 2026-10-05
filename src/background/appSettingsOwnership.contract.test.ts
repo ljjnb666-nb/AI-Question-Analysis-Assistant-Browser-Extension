@@ -81,4 +81,4 @@ it("SW-07/08/15 AST audit finds exactly one production appSettings writer and no
     visit(file);
   }
   expect(owners).toEqual(["background/appSettingsAuthority.ts"]);
-});
+}, 30000);

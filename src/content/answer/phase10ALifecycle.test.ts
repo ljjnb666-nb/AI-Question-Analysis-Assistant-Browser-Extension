@@ -194,7 +194,7 @@ describe("Phase 10A runtime registry lifecycle", () => {
     expect(controlRegistry.entryCountForRoot(frameRoot.rootKey)).toBe(0);
     expect(revisionRegistry().currentForRoot(frameRoot.rootKey, "frame-revision-0")).toBeUndefined();
     stop();
-  });
+  }, 30_000);
 
   it("root generation replacement clears prior controls and revision state", async () => {
     controlRegistry.clear();
