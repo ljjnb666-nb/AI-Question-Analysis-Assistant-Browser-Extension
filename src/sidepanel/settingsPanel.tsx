@@ -1,28 +1,31 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import type { AppSettings, QuestionBlock } from "@/shared/types";
+import type { QuestionBlock } from "@/shared/types";
 import { DEFAULT_ANALYTICS_BASE_URL } from "@/shared/constants/analytics";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
-import { getConnectionTestNotConfiguredMessage, isProviderRuntimeConfigured } from "@/shared/ai/parseResultAuthority";
+import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
+import { getAIConnectionEditorView, updateActiveAIConnection } from "@/shared/utils/aiConnectionClient";
+import { getConnectionTestNotConfiguredMessage } from "@/shared/ai/parseResultAuthority";
 import { mapUserFacingError, userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
-import { getProvider, parseQuestion } from "@/shared/utils/parseRouter";
+import { parseQuestion } from "@/shared/utils/parseRouter";
+import { getProvider } from "@/shared/ai/providers";
 import { logEvent } from "@/shared/utils/analytics";
 import { getAuthText } from "@/shared/auth/authText";
 import { useAuthController } from "@/shared/auth/useAuthController";
-import type { ProviderId } from "@/shared/utils/parseRouter";
+import type { ProviderId } from "@/shared/ai/providers";
 import type { UILang } from "./displayUtils";
 import {
   SettingsAccountSection,
   SettingsActionsSection,
   SettingsConfigSections,
+  SettingsHomeSummaryCard,
   SettingsSetupStatusCard,
 } from "./settingsSections";
 import {
   computeValidationFingerprint,
   deriveSetupStatus,
-  isSettingsDirty,
-  type SettingsFormValues,
+  type SetupStatus,
 } from "./settingsTypes";
 
 gsap.registerPlugin(useGSAP);
@@ -38,6 +41,8 @@ export const SettingsTab: React.FC<{
 }> = ({ lang: initialLang, onLanguageChange, authOnly = false, sessionRejectedHint = false }) => {
   const scopeRef = useRef<HTMLDivElement | null>(null);
   const [providerId, setProviderId] = useState<ProviderId>("anthropic");
+  const [hasCredential, setHasCredential] = useState(false);
+  const [isCredentialCleared, setIsCredentialCleared] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
   const [route, setRoute] = useState<"auto" | "text" | "vision">("auto");
@@ -52,7 +57,18 @@ export const SettingsTab: React.FC<{
   const [testResult, setTestResult] = useState<UserFeedback | null>(null);
   const [validatedFingerprint, setValidatedFingerprint] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState("");
-  const [storedSnapshot, setStoredSnapshot] = useState<Partial<AppSettings> | null>(null);
+
+  const [storedSnapshot, setStoredSnapshot] = useState<{
+    presetId: ProviderId;
+    selectedModelId: string;
+    endpointOverride: string | null;
+    protocol: "openai" | "anthropic";
+    hasCredential: boolean;
+    preferredRoute: "auto" | "text" | "vision";
+    analyticsBaseUrl: string;
+    enableAnalytics: boolean;
+    language: "zh" | "en";
+  } | null>(null);
 
   const auth = useAuthController({
     lang,
@@ -75,23 +91,37 @@ export const SettingsTab: React.FC<{
 
   useEffect(() => {
     let disposed = false;
-    void loadSettings().then((settings) => {
+    void Promise.all([loadSettings(), getAIConnectionEditorView()]).then(([settings, editor]) => {
       if (disposed) return;
-      setStoredSnapshot(settings);
-      setProviderId((settings.providerId as ProviderId) ?? "anthropic");
-      setApiKey(settings.apiKey ?? "");
-      setModel(settings.apiModel ?? "");
+      const initialPresetId = (editor.presetId as ProviderId) || "anthropic";
+      const initialProtocol = (editor.presetId === "custom" && editor.protocol === "anthropic_messages" ? "anthropic" : "openai") as "openai" | "anthropic";
+      setProviderId(initialPresetId);
+      setApiKey("");
+      setHasCredential(editor.hasCredential);
+      setModel(editor.selectedModelId);
       setRoute(settings.preferredRoute ?? "auto");
-      setCustomUrl(settings.customBaseUrl ?? "");
+      setCustomUrl(editor.endpointOverride ?? "");
       setAnalyticsBaseUrl(settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL);
       setEnableAnalytics(settings.enableAnalytics ?? false);
-      setCustomProtocol(settings.customProviderProtocol ?? "openai");
-      setLang(initialLangRef.current || settings.language || "zh");
+      setCustomProtocol(initialProtocol);
+      setLang(settings.language ?? initialLangRef.current ?? "zh");
       setDeviceId(settings.deviceId ?? "");
-      if (settings.apiKey || settings.providerId === "ollama") {
+      if (editor.hasCredential || editor.presetId === "ollama") {
         setSavedOnce(true);
       }
-    });
+
+      setStoredSnapshot({
+        presetId: initialPresetId,
+        selectedModelId: editor.selectedModelId,
+        endpointOverride: editor.endpointOverride,
+        protocol: initialProtocol,
+        hasCredential: editor.hasCredential,
+        preferredRoute: settings.preferredRoute ?? "auto",
+        analyticsBaseUrl: settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL,
+        enableAnalytics: settings.enableAnalytics ?? false,
+        language: settings.language ?? "zh",
+      });
+    }).catch(() => { /* Failed initialization leaves the form unconfigured; no legacy fallback. */ });
     return () => {
       disposed = true;
     };
@@ -101,29 +131,24 @@ export const SettingsTab: React.FC<{
     setLang(initialLang);
   }, [initialLang]);
 
-  const currentValues: SettingsFormValues = useMemo(
-    () => ({
-      providerId,
-      apiKey,
-      apiModel: model,
-      preferredRoute: route,
-      customBaseUrl: customUrl,
-      analyticsBaseUrl,
-      enableAnalytics,
-      customProviderProtocol: customProtocol,
-      language: lang,
-    }),
-    [providerId, apiKey, model, route, customUrl, analyticsBaseUrl, enableAnalytics, customProtocol, lang],
-  );
-
-  const isDirty = useMemo(
-    () => isSettingsDirty(currentValues, storedSnapshot),
-    [currentValues, storedSnapshot],
-  );
+  const isDirty = useMemo(() => {
+    if (!storedSnapshot) return false;
+    if (providerId !== storedSnapshot.presetId) return true;
+    if (apiKey.trim().length > 0) return true;
+    if (isCredentialCleared && storedSnapshot.hasCredential) return true;
+    if ((model || provider.defaultModel) !== (storedSnapshot.selectedModelId || provider.defaultModel)) return true;
+    if (customUrl !== (storedSnapshot.endpointOverride ?? "")) return true;
+    if (providerId === "custom" && customProtocol !== storedSnapshot.protocol) return true;
+    if (route !== storedSnapshot.preferredRoute) return true;
+    if (analyticsBaseUrl !== storedSnapshot.analyticsBaseUrl) return true;
+    if (enableAnalytics !== storedSnapshot.enableAnalytics) return true;
+    if (lang !== storedSnapshot.language) return true;
+    return false;
+  }, [storedSnapshot, providerId, apiKey, isCredentialCleared, model, provider.defaultModel, customUrl, customProtocol, route, analyticsBaseUrl, enableAnalytics, lang]);
 
   const isConfigured = useMemo(
-    () => isProviderRuntimeConfigured(provider, { apiKey: apiKey.trim() }),
-    [provider, apiKey],
+    () => Boolean(provider.keyOptional || hasCredential || apiKey.trim().length > 0),
+    [provider.keyOptional, hasCredential, apiKey],
   );
 
   const currentFingerprint = useMemo(
@@ -138,29 +163,12 @@ export const SettingsTab: React.FC<{
     [providerId, apiKey, model, provider.defaultModel, customUrl, customProtocol],
   );
 
-  const committedFingerprint = useMemo(
-    () =>
-      computeValidationFingerprint({
-        providerId: (storedSnapshot?.providerId as ProviderId) ?? "anthropic",
-        apiKey: storedSnapshot?.apiKey ?? "",
-        apiModel:
-          storedSnapshot?.apiModel ??
-          getProvider((storedSnapshot?.providerId as ProviderId) ?? "anthropic").defaultModel,
-        customBaseUrl: storedSnapshot?.customBaseUrl ?? "",
-        customProviderProtocol: storedSnapshot?.customProviderProtocol ?? "openai",
-      }),
-    [storedSnapshot],
-  );
+  const isValidated = useMemo(() => {
+    if (!validatedFingerprint) return false;
+    return Boolean(testResult?.tone === "success" && validatedFingerprint === currentFingerprint && !isDirty);
+  }, [testResult, validatedFingerprint, currentFingerprint, isDirty]);
 
-  const isValidated = Boolean(
-    testResult?.tone === "success" &&
-      validatedFingerprint &&
-      validatedFingerprint === committedFingerprint &&
-      currentFingerprint === committedFingerprint &&
-      !isDirty,
-  );
-
-  const setupStatus = useMemo(
+  const setupStatus: SetupStatus = useMemo(
     () =>
       deriveSetupStatus({
         isConfigured,
@@ -174,11 +182,12 @@ export const SettingsTab: React.FC<{
   );
 
   const activeStep = useMemo(() => {
+    if (!auth.isAuthenticated) return 1;
     if (isValidated) return 4;
     if (testing) return 3;
-    if (isConfigured) return 3;
-    return 2;
-  }, [isValidated, testing, isConfigured]);
+    if (!isConfigured) return 2;
+    return 3;
+  }, [auth.isAuthenticated, isValidated, testing, isConfigured]);
 
   useGSAP(
     () => {
@@ -202,136 +211,134 @@ export const SettingsTab: React.FC<{
     { scope: scopeRef, dependencies: [providerId, lang, testResult], revertOnUpdate: true },
   );
 
-  const invalidateValidationAuthority = () => {
+  const handleProviderChange = (id: ProviderId) => {
+    if (id !== providerId) {
+      setCustomUrl("");
+      if (id === "custom") {
+        setCustomProtocol("openai");
+      }
+    }
+    setProviderId(id);
+    setModel(getProvider(id).defaultModel);
+    setApiKey("");
+    setHasCredential(false);
+    setIsCredentialCleared(false);
     setTestResult(null);
     setValidatedFingerprint(null);
   };
 
-  const handleProviderChange = (id: ProviderId) => {
-    setProviderId(id);
-    setModel(getProvider(id).defaultModel);
-    setApiKey("");
-    invalidateValidationAuthority();
-  };
-
   const handleApiKeyChange = (val: string) => {
     setApiKey(val);
-    invalidateValidationAuthority();
+    setTestResult(null);
+    setValidatedFingerprint(null);
+  };
+
+  const handleClearCredential = () => {
+    setApiKey("");
+    setHasCredential(false);
+    setIsCredentialCleared(true);
+    setTestResult(null);
+    setValidatedFingerprint(null);
   };
 
   const handleModelChange = (val: string) => {
     setModel(val);
-    invalidateValidationAuthority();
+    setTestResult(null);
+    setValidatedFingerprint(null);
   };
 
   const handleCustomUrlChange = (val: string) => {
     setCustomUrl(val);
-    invalidateValidationAuthority();
+    setTestResult(null);
+    setValidatedFingerprint(null);
   };
 
   const handleCustomProtocolChange = (val: "openai" | "anthropic") => {
     setCustomProtocol(val);
-    invalidateValidationAuthority();
+    setTestResult(null);
+    setValidatedFingerprint(null);
+  };
+
+  const saveCurrentDraft = async () => {
+    const credentialAction = apiKey.trim()
+      ? ({ action: "REPLACE" as const, value: apiKey.trim() })
+      : isCredentialCleared
+        ? ({ action: "CLEAR" as const })
+        : ({ action: "KEEP" as const });
+
+    const committed = await updateActiveAIConnection({
+      presetId: providerId,
+      selectedModelId: model || provider.defaultModel,
+      endpointOverride: customUrl || null,
+      protocolOverride: customProtocol === "anthropic" ? "anthropic_messages" : "openai_chat_completions",
+      credential: credentialAction,
+    });
+    setHasCredential(committed.metadata?.hasCredential ?? false);
+    setIsCredentialCleared(false);
+    setApiKey("");
+    await saveSettings({
+      preferredRoute: route,
+      analyticsBaseUrl: analyticsBaseUrl.trim() || DEFAULT_ANALYTICS_BASE_URL,
+      enableAnalytics,
+      language: lang,
+    });
+
+    setStoredSnapshot({
+      presetId: providerId,
+      selectedModelId: model || provider.defaultModel,
+      endpointOverride: customUrl || null,
+      protocol: customProtocol,
+      hasCredential: committed.metadata?.hasCredential ?? false,
+      preferredRoute: route,
+      analyticsBaseUrl: analyticsBaseUrl.trim() || DEFAULT_ANALYTICS_BASE_URL,
+      enableAnalytics,
+      language: lang,
+    });
   };
 
   const handleSave = async () => {
-    const nextSettings: Partial<AppSettings> = {
-      providerId,
-      apiKey: apiKey.trim(),
-      apiModel: model || provider.defaultModel,
-      preferredRoute: route,
-      customBaseUrl: customUrl || undefined,
-      analyticsBaseUrl: analyticsBaseUrl.trim() || DEFAULT_ANALYTICS_BASE_URL,
-      enableAnalytics,
-      customProviderProtocol: customProtocol,
-      language: lang,
-    };
-    await saveSettings(nextSettings);
-    setStoredSnapshot((prev) => ({ ...prev, ...nextSettings }));
-    logEvent("settings_saved", { providerId, route });
-    if (apiKey.trim()) logEvent("api_key_set", { providerId });
-    onLanguageChange(lang);
-    setSaved(true);
-    setSavedOnce(true);
-    setTimeout(() => setSaved(false), 2000);
+    try {
+      await saveCurrentDraft();
+      logEvent("settings_saved", { providerId, route });
+      if (apiKey.trim()) logEvent("api_key_set", { providerId });
+      onLanguageChange(lang);
+      setSaved(true);
+      setSavedOnce(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (error) {
+      setSaved(false);
+      setTestResult(mapUserFacingError(error, isEn ? "en" : "zh", { context: "general" }));
+    }
   };
 
   const handleTest = async () => {
     setTesting(true);
     setTestResult(null);
     try {
-      const currentProvider = getProvider(providerId);
-      // Pre-flight check: required-key provider without a key fails closed safely.
-      if (!isProviderRuntimeConfigured(currentProvider, { apiKey: apiKey.trim() })) {
-        setTestResult(
-          userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), {
-            code: "PROVIDER_NOT_CONFIGURED",
-          }),
-        );
-        setTesting(false);
+      await saveCurrentDraft();
+      const readiness = await getAIConnectionReadiness();
+      if (!readiness.ready) {
+        setTestResult(userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), { code: readiness.code }));
         return;
       }
-
-      // If configuration is dirty, commit exact configuration first (Save & Test contract)
-      let activeSettings: AppSettings;
-      if (isDirty) {
-        const nextSettings: Partial<AppSettings> = {
-          providerId,
-          apiKey: apiKey.trim(),
-          apiModel: model || currentProvider.defaultModel,
-          preferredRoute: route,
-          customBaseUrl: customUrl || undefined,
-          analyticsBaseUrl: analyticsBaseUrl.trim() || DEFAULT_ANALYTICS_BASE_URL,
-          enableAnalytics,
-          customProviderProtocol: customProtocol,
-          language: lang,
-        };
-        await saveSettings(nextSettings);
-        setStoredSnapshot((prev) => ({ ...prev, ...nextSettings }));
-        logEvent("settings_saved", { providerId, route });
-        if (apiKey.trim()) logEvent("api_key_set", { providerId });
-        onLanguageChange(lang);
-        setSaved(true);
-        setSavedOnce(true);
-        setTimeout(() => setSaved(false), 2000);
-        activeSettings = { ...(await loadSettings()), ...nextSettings } as AppSettings;
-      } else {
-        activeSettings = (await loadSettings()) as AppSettings;
-      }
-
       const testBlock: QuestionBlock = {
         id: "test",
         bbox: { x: 0, y: 0, width: 100, height: 50 },
         previewText: "1+1=? A.1 B.2 C.3 D.4",
-        hasImage: !!currentProvider.supportsVision,
-        imageDataUrl: currentProvider.supportsVision
-          ? "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-          : undefined,
+        hasImage: false,
         questionTypeGuess: "single_choice",
         confidence: 1,
         source: "manual_capture",
       };
-
-      const result = await parseQuestion(testBlock, {
-        ...activeSettings,
+      const result = await parseQuestion(testBlock, { preferredRoute: "text", language: lang });
+      const committedFingerprint = computeValidationFingerprint({
         providerId,
-        apiKey: apiKey.trim(),
-        apiModel: model || currentProvider.defaultModel,
-        preferredRoute: currentProvider.supportsVision ? "vision" : "text",
-        customBaseUrl: customUrl || undefined,
-        customProviderProtocol: customProtocol,
-      });
-
-      const testedFingerprint = computeValidationFingerprint({
-        providerId,
-        apiKey,
-        apiModel: model || currentProvider.defaultModel,
+        apiKey: "",
+        apiModel: model || provider.defaultModel,
         customBaseUrl: customUrl,
         customProviderProtocol: customProtocol,
       });
-
-      setValidatedFingerprint(testedFingerprint);
-
+      setValidatedFingerprint(committedFingerprint);
       const routeLabel =
         result.routeUsed === "vision"
           ? isEn
@@ -355,8 +362,9 @@ export const SettingsTab: React.FC<{
       );
     } catch (error) {
       setTestResult(mapUserFacingError(error, isEn ? "en" : "zh", { context: "connection-test" }));
+    } finally {
+      setTesting(false);
     }
-    setTesting(false);
   };
 
   if (authOnly) {
@@ -389,7 +397,7 @@ export const SettingsTab: React.FC<{
         boxSizing: "border-box",
       }}
     >
-      {/* 1. Setup Status & 4-Step Onboarding Stepper */}
+      {/* 1. Setup Status & 4-Step Onboarding Stepper Header */}
       <SettingsSetupStatusCard
         status={setupStatus}
         isEn={isEn}
@@ -397,10 +405,34 @@ export const SettingsTab: React.FC<{
         onRetest={() => void handleTest()}
       />
 
-      {/* 2. Provider, Credentials, Model, Base URL, Advanced, Language */}
+      {/* 2. Active AI Connection Summary Card */}
+      <SettingsHomeSummaryCard
+        providerName={provider.name}
+        modelName={model || provider.defaultModel}
+        connectionStatus={setupStatus}
+        hasCredential={hasCredential}
+        keyOptional={provider.keyOptional}
+        isEn={isEn}
+        onChangeService={() => {
+          const el = document.getElementById(`provider-card-${providerId}`) || document.getElementById("provider-search-input");
+          el?.focus();
+          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }}
+        onEditConnection={() => {
+          const el = document.getElementById("settings-api-key-input") || document.getElementById("settings-model-select");
+          el?.focus();
+          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }}
+        onTestConnection={() => void handleTest()}
+        testing={testing}
+      />
+
+      {/* 3. Provider Catalog, Credentials, Model, Base URL, Advanced, Language */}
       <SettingsConfigSections
         analyticsBaseUrl={analyticsBaseUrl}
         apiKey={apiKey}
+        hasCredential={hasCredential}
+        onClearCredential={handleClearCredential}
         customProtocol={customProtocol}
         customUrl={customUrl}
         deviceId={deviceId}
@@ -425,7 +457,7 @@ export const SettingsTab: React.FC<{
         setRoute={setRoute}
       />
 
-      {/* 3. Actions: Save Settings & Test Configuration */}
+      {/* 4. Actions: Save Settings & Test Configuration */}
       <SettingsActionsSection
         isDirty={isDirty}
         isEn={isEn}
@@ -436,7 +468,7 @@ export const SettingsTab: React.FC<{
         testing={testing}
       />
 
-      {/* 4. Account / Session Section */}
+      {/* 5. Account / Session Section */}
       <SettingsAccountSection auth={auth} authText={authText} isEn={isEn} rejectedSessionHint={sessionRejectedHint} />
     </div>
   );

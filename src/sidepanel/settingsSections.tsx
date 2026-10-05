@@ -12,8 +12,8 @@ import {
   orbitTypography,
 } from "@/shared/ui/orbitTokens";
 import type { UserFeedback } from "@/shared/ui/userFeedback";
-import { PROVIDERS } from "@/shared/utils/parseRouter";
-import type { ProviderConfig, ProviderId } from "@/shared/utils/parseRouter";
+import { PROVIDERS } from "@/shared/ai/providers";
+import type { ProviderConfig, ProviderId } from "@/shared/ai/providers";
 import type { UILang } from "./displayUtils";
 import { getSettingsCopy, type SetupStatusType } from "./settingsCopy";
 
@@ -121,6 +121,233 @@ export const KEY_LINKS: Partial<Record<ProviderId, [string, string]>> = {
   zhipu: ["https://open.bigmodel.cn", "Zhipu Platform"],
   minimax: ["https://platform.minimaxi.com", "MiniMax Platform"],
   custom: ["https://platform.openai.com/docs/api-reference/chat", "OpenAI Compatible API Docs"],
+};
+
+export interface ProviderCatalogMeta {
+  shortDesc: { zh: string; en: string };
+  modelFamily: { zh: string; en: string };
+  connectionType: { zh: string; en: string };
+  badge?: { zh: string; en: string };
+}
+
+export const PROVIDER_CATALOG_META: Record<ProviderId, ProviderCatalogMeta> = {
+  anthropic: {
+    shortDesc: { zh: "高智力、长文本上下文推理", en: "High-intelligence reasoning & long context" },
+    modelFamily: { zh: "Claude 系列模型", en: "Claude model series" },
+    connectionType: { zh: "Cloud API", en: "Cloud API" },
+    badge: { zh: "官方推荐", en: "Recommended" },
+  },
+  openai: {
+    shortDesc: { zh: "通用智能与多模态标杆", en: "General AI & multimodal benchmark" },
+    modelFamily: { zh: "GPT 系列模型", en: "GPT model series" },
+    connectionType: { zh: "Cloud API", en: "Cloud API" },
+    badge: { zh: "官方推荐", en: "Recommended" },
+  },
+  gemini: {
+    shortDesc: { zh: "Google 原生多模态理解", en: "Google native multimodal understanding" },
+    modelFamily: { zh: "Gemini 系列模型", en: "Gemini model series" },
+    connectionType: { zh: "Cloud API", en: "Cloud API" },
+  },
+  deepseek: {
+    shortDesc: { zh: "高性价比长链推理", en: "Cost-effective deep reasoning" },
+    modelFamily: { zh: "DeepSeek 系列模型", en: "DeepSeek model series" },
+    connectionType: { zh: "Cloud API", en: "Cloud API" },
+  },
+  qwen: {
+    shortDesc: { zh: "阿里云百炼官方兼容服务", en: "Alibaba Cloud DashScope service" },
+    modelFamily: { zh: "通义千问 Qwen 系列", en: "Qwen model series" },
+    connectionType: { zh: "Cloud API", en: "Cloud API" },
+  },
+  moonshot: {
+    shortDesc: { zh: "超长文本长链分析", en: "Ultra-long context comprehension" },
+    modelFamily: { zh: "Kimi 系列模型", en: "Kimi model series" },
+    connectionType: { zh: "Cloud API", en: "Cloud API" },
+  },
+  zhipu: {
+    shortDesc: { zh: "国产大模型多模态能力", en: "Domestic GLM multimodal capability" },
+    modelFamily: { zh: "GLM 系列模型", en: "GLM model series" },
+    connectionType: { zh: "Cloud API", en: "Cloud API" },
+  },
+  minimax: {
+    shortDesc: { zh: "快速多语言综合分析", en: "Fast multilingual synthesis" },
+    modelFamily: { zh: "MiniMax 系列模型", en: "MiniMax model series" },
+    connectionType: { zh: "Cloud API", en: "Cloud API" },
+  },
+  ollama: {
+    shortDesc: { zh: "本地运行开源大模型", en: "Local runtime for open-weights models" },
+    modelFamily: { zh: "本地运行时 (Local)", en: "Local Runtime" },
+    connectionType: { zh: "Local Runtime", en: "Local Runtime" },
+    badge: { zh: "本地私有", en: "Local" },
+  },
+  custom: {
+    shortDesc: { zh: "自建网关或第三方中转代理", en: "Self-hosted gateway or third-party proxy" },
+    modelFamily: { zh: "OpenAI / Claude 兼容协议", en: "OpenAI / Claude wire protocols" },
+    connectionType: { zh: "Custom Gateway", en: "Custom Gateway" },
+    badge: { zh: "自建网关", en: "Gateway" },
+  },
+};
+
+/**
+ * 0. Settings Home — Active Connection Summary Card
+ */
+export const SettingsHomeSummaryCard: React.FC<{
+  providerName: string;
+  modelName: string;
+  connectionStatus: SetupStatusType;
+  hasCredential: boolean;
+  keyOptional?: boolean;
+  isEn: boolean;
+  onChangeService: () => void;
+  onEditConnection: () => void;
+  onTestConnection: () => void;
+  testing?: boolean;
+}> = ({
+  providerName,
+  modelName,
+  connectionStatus,
+  hasCredential,
+  keyOptional,
+  isEn,
+  onChangeService,
+  onEditConnection,
+  onTestConnection,
+  testing,
+}) => {
+  const copy = getSettingsCopy(isEn ? "en" : "zh");
+
+  const statusToneMap: Record<SetupStatusType, "success" | "warning" | "error" | "ai" | "info"> = {
+    validated: "success",
+    not_configured: "warning",
+    incomplete: "warning",
+    testing: "ai",
+    saved_untested: "info",
+    error: "error",
+  };
+
+  const statusLabel =
+    connectionStatus === "validated"
+      ? copy.summaryCard.connected
+      : connectionStatus === "not_configured"
+        ? copy.summaryCard.unconfigured
+        : connectionStatus === "testing"
+          ? copy.summaryCard.testing
+          : connectionStatus === "error"
+            ? copy.summaryCard.failed
+            : copy.summaryCard.retest;
+
+  const credentialLabel = hasCredential
+    ? copy.summaryCard.credentialSaved
+    : keyOptional
+      ? copy.summaryCard.keyOptional
+      : copy.summaryCard.credentialMissing;
+
+  return (
+    <section
+      className="settings-card"
+      data-testid="settings-home-summary-card"
+      style={{
+        ...sectionSurfaceStyle,
+        padding: "14px 16px",
+        borderRadius: orbitRadius.lg,
+        border: `1px solid ${connectionStatus === "validated" ? orbitColors.semantic.successBorder : orbitColors.border.subtle}`,
+        background: connectionStatus === "validated"
+          ? `linear-gradient(180deg, rgba(16, 185, 129, 0.08), rgba(20, 24, 31, 0.95))`
+          : `linear-gradient(180deg, rgba(37, 99, 235, 0.06), rgba(20, 24, 31, 0.95))`,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        boxSizing: "border-box",
+        width: "100%",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 11, color: orbitColors.text.muted, fontWeight: 500, letterSpacing: 0.5, textTransform: "uppercase" }}>
+            {copy.summaryCard.title}
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: orbitColors.text.primary, marginTop: 2, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span>{providerName}</span>
+            <span style={{ fontSize: 12, fontWeight: 500, color: orbitColors.brand.border, background: "rgba(59, 130, 246, 0.1)", padding: "2px 8px", borderRadius: orbitRadius.pill }}>
+              {modelName}
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <OrbitBadge variant={statusToneMap[connectionStatus]} dot>
+            {statusLabel}
+          </OrbitBadge>
+          <OrbitBadge variant={hasCredential || keyOptional ? "neutral" : "warning"}>
+            {credentialLabel}
+          </OrbitBadge>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingTop: 4, borderTop: `1px solid ${orbitColors.border.subtle}` }}>
+        <button
+          type="button"
+          onClick={onChangeService}
+          style={{
+            ...providerButtonStyle,
+            width: "auto",
+            padding: "6px 12px",
+            background: orbitColors.brand.primary,
+            borderColor: orbitColors.brand.border,
+            color: orbitColors.control.onAccent,
+            fontWeight: 600,
+            fontSize: 12,
+            cursor: "pointer",
+            flexDirection: "row",
+            alignItems: "center",
+          }}
+        >
+          {copy.summaryCard.changeService}
+        </button>
+
+        <button
+          type="button"
+          onClick={onEditConnection}
+          style={{
+            ...providerButtonStyle,
+            width: "auto",
+            padding: "6px 12px",
+            background: orbitColors.bg.surfaceRaised,
+            borderColor: orbitColors.border.subtle,
+            color: orbitColors.text.secondary,
+            fontWeight: 500,
+            fontSize: 12,
+            cursor: "pointer",
+            flexDirection: "row",
+            alignItems: "center",
+          }}
+        >
+          {copy.summaryCard.editConnection}
+        </button>
+
+        <button
+          type="button"
+          onClick={onTestConnection}
+          disabled={testing}
+          style={{
+            ...providerButtonStyle,
+            width: "auto",
+            padding: "6px 12px",
+            background: "transparent",
+            borderColor: orbitColors.border.subtle,
+            color: testing ? orbitColors.text.muted : orbitColors.brand.border,
+            fontWeight: 500,
+            fontSize: 12,
+            cursor: testing ? "not-allowed" : "pointer",
+            flexDirection: "row",
+            alignItems: "center",
+            marginLeft: "auto",
+          }}
+        >
+          {testing ? (isEn ? "Verifying..." : "正在验证...") : copy.summaryCard.testConnection}
+        </button>
+      </div>
+    </section>
+  );
 };
 
 /**
@@ -319,115 +546,173 @@ export const SettingsProviderPicker: React.FC<{
   onProviderChange: (id: ProviderId) => void;
   isEn: boolean;
 }> = ({ providerId, onProviderChange, isEn }) => {
+  const [searchQuery, setSearchQuery] = useState("");
   const copy = getSettingsCopy(isEn ? "en" : "zh");
+
+  const query = searchQuery.trim().toLowerCase();
+  const filteredProviders = PROVIDERS.filter((item) => {
+    if (!query) return true;
+    const meta = PROVIDER_CATALOG_META[item.id as ProviderId];
+    return (
+      item.name.toLowerCase().includes(query) ||
+      item.id.toLowerCase().includes(query) ||
+      item.defaultModel.toLowerCase().includes(query) ||
+      item.models.some((m) => m.toLowerCase().includes(query)) ||
+      (meta && (
+        meta.modelFamily.zh.toLowerCase().includes(query) ||
+        meta.modelFamily.en.toLowerCase().includes(query) ||
+        meta.shortDesc.zh.toLowerCase().includes(query) ||
+        meta.shortDesc.en.toLowerCase().includes(query)
+      ))
+    );
+  });
 
   const handleKeyDown = (e: React.KeyboardEvent, index: number) => {
     let nextIndex = -1;
     if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-      nextIndex = (index + 1) % PROVIDERS.length;
+      nextIndex = (index + 1) % filteredProviders.length;
     } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-      nextIndex = (index - 1 + PROVIDERS.length) % PROVIDERS.length;
+      nextIndex = (index - 1 + filteredProviders.length) % filteredProviders.length;
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      onProviderChange(PROVIDERS[index].id as ProviderId);
+      onProviderChange(filteredProviders[index].id as ProviderId);
       return;
     }
     if (nextIndex >= 0) {
       e.preventDefault();
-      onProviderChange(PROVIDERS[nextIndex].id as ProviderId);
-      const targetBtn = document.getElementById(`provider-card-${PROVIDERS[nextIndex].id}`);
+      onProviderChange(filteredProviders[nextIndex].id as ProviderId);
+      const targetBtn = document.getElementById(`provider-card-${filteredProviders[nextIndex].id}`);
       targetBtn?.focus();
     }
   };
 
   return (
     <SectionCard title={copy.provider.title} description={copy.provider.description}>
-      <div
-        role="radiogroup"
-        aria-label={copy.provider.title}
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-          gap: 8,
-        }}
-      >
-        {PROVIDERS.map((item, idx) => {
-          const isSelected = providerId === item.id;
-          return (
-            <button
-              key={item.id}
-              id={`provider-card-${item.id}`}
-              type="button"
-              aria-pressed={isSelected}
-              tabIndex={0}
-              onClick={() => onProviderChange(item.id as ProviderId)}
-              onKeyDown={(e) => handleKeyDown(e, idx)}
-              style={{
-                ...providerButtonStyle,
-                borderColor: isSelected ? orbitColors.brand.primary : orbitColors.border.subtle,
-                background: isSelected
-                  ? `linear-gradient(180deg, rgba(37, 99, 235, 0.16), rgba(30, 41, 59, 0.45))`
-                  : orbitColors.bg.surfaceSubtle,
-                boxShadow: isSelected ? `0 0 0 1px ${orbitColors.brand.primary}` : "none",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: isSelected ? 650 : 500,
-                    color: isSelected ? orbitColors.text.primary : orbitColors.text.secondary,
-                    letterSpacing: -0.1,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {item.name}
-                </span>
-                {isSelected ? (
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: orbitRadius.pill,
-                      backgroundColor: orbitColors.brand.primary,
-                      flexShrink: 0,
-                    }}
-                  />
-                ) : null}
-              </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <input
+          id="provider-search-input"
+          data-testid="provider-search-input"
+          type="text"
+          placeholder={copy.summaryCard.searchPlaceholder}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          aria-label={isEn ? "Search providers" : "搜索服务商"}
+          style={{
+            ...uiInputStyle,
+            padding: "8px 12px",
+            fontSize: 12,
+            background: orbitColors.bg.surfaceSubtle,
+          }}
+        />
 
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2 }}>
-                <span
-                  style={{
-                    fontSize: 10,
-                    padding: "1px 4px",
-                    borderRadius: orbitRadius.sm,
-                    background: item.supportsVision ? "rgba(16, 185, 129, 0.1)" : "rgba(255, 255, 255, 0.04)",
-                    color: item.supportsVision ? orbitColors.semantic.success : orbitColors.text.muted,
-                  }}
-                >
-                  {item.supportsVision ? copy.provider.supportsVision : copy.provider.textOnly}
-                </span>
-                {item.keyOptional ? (
+        <div
+          role="radiogroup"
+          aria-label={copy.provider.title}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: 8,
+          }}
+        >
+          {filteredProviders.map((item, idx) => {
+            const isSelected = providerId === item.id;
+            const meta = PROVIDER_CATALOG_META[item.id as ProviderId];
+            return (
+              <button
+                key={item.id}
+                id={`provider-card-${item.id}`}
+                data-testid={`provider-card-${item.id}`}
+                type="button"
+                aria-pressed={isSelected}
+                tabIndex={0}
+                onClick={() => onProviderChange(item.id as ProviderId)}
+                onKeyDown={(e) => handleKeyDown(e, idx)}
+                style={{
+                  ...providerButtonStyle,
+                  borderColor: isSelected ? orbitColors.brand.primary : orbitColors.border.subtle,
+                  background: isSelected
+                    ? `linear-gradient(180deg, rgba(37, 99, 235, 0.16), rgba(30, 41, 59, 0.45))`
+                    : orbitColors.bg.surfaceSubtle,
+                  boxShadow: isSelected ? `0 0 0 1px ${orbitColors.brand.primary}` : "none",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: isSelected ? 650 : 500,
+                      color: isSelected ? orbitColors.text.primary : orbitColors.text.secondary,
+                      letterSpacing: -0.1,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {item.name}
+                  </span>
+                  {isSelected ? (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: orbitRadius.pill,
+                        backgroundColor: orbitColors.brand.primary,
+                        flexShrink: 0,
+                      }}
+                    />
+                  ) : null}
+                </div>
+
+                {meta ? (
+                  <div style={{ fontSize: 10, color: orbitColors.brand.border, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {meta.modelFamily[isEn ? "en" : "zh"]}
+                  </div>
+                ) : null}
+
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2 }}>
                   <span
                     style={{
                       fontSize: 10,
                       padding: "1px 4px",
                       borderRadius: orbitRadius.sm,
-                      background: "rgba(59, 130, 246, 0.1)",
-                      color: orbitColors.semantic.info,
+                      background: item.supportsVision ? "rgba(16, 185, 129, 0.1)" : "rgba(255, 255, 255, 0.04)",
+                      color: item.supportsVision ? orbitColors.semantic.success : orbitColors.text.muted,
                     }}
                   >
-                    {copy.provider.keyOptional}
+                    {item.supportsVision ? copy.provider.supportsVision : copy.provider.textOnly}
                   </span>
-                ) : null}
-              </div>
-            </button>
-          );
-        })}
+                  {item.keyOptional ? (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: "1px 4px",
+                        borderRadius: orbitRadius.sm,
+                        background: "rgba(59, 130, 246, 0.1)",
+                        color: orbitColors.semantic.info,
+                      }}
+                    >
+                      {copy.provider.keyOptional}
+                    </span>
+                  ) : null}
+                  {meta?.badge ? (
+                    <span
+                      style={{
+                        fontSize: 9,
+                        padding: "1px 4px",
+                        borderRadius: orbitRadius.sm,
+                        background: "rgba(255, 255, 255, 0.06)",
+                        color: orbitColors.text.secondary,
+                      }}
+                    >
+                      {meta.badge[isEn ? "en" : "zh"]}
+                    </span>
+                  ) : null}
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </SectionCard>
   );
@@ -438,11 +723,13 @@ export const SettingsProviderPicker: React.FC<{
  */
 export const SettingsCredentialsSection: React.FC<{
   apiKey: string;
+  hasCredential?: boolean;
   onApiKeyChange: (value: string) => void;
+  onClearCredential?: () => void;
   provider: ProviderConfig;
   providerId: ProviderId;
   isEn: boolean;
-}> = ({ apiKey, onApiKeyChange, provider, providerId, isEn }) => {
+}> = ({ apiKey, hasCredential = false, onApiKeyChange, onClearCredential, provider, providerId, isEn }) => {
   const [showKey, setShowKey] = useState(false);
   const copy = getSettingsCopy(isEn ? "en" : "zh");
 
@@ -466,6 +753,43 @@ export const SettingsCredentialsSection: React.FC<{
             }}
           >
             {copy.credentials.localHint}
+          </div>
+        ) : null}
+
+        {hasCredential && !apiKey ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "7px 10px",
+              borderRadius: orbitRadius.sm,
+              background: "rgba(16, 185, 129, 0.08)",
+              border: `1px solid ${orbitColors.semantic.successBorder}`,
+              fontSize: 12,
+            }}
+          >
+            <span style={{ color: orbitColors.semantic.success, display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: orbitColors.semantic.success }} />
+              {isEn ? "Credential stored (secret hidden)" : "已保存密钥（已加密隐藏）"}
+            </span>
+            {onClearCredential ? (
+              <button
+                type="button"
+                onClick={onClearCredential}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: orbitColors.semantic.error,
+                  fontSize: 11,
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                  padding: 0,
+                }}
+              >
+                {copy.summaryCard.clearKey}
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -504,7 +828,7 @@ export const SettingsCredentialsSection: React.FC<{
           </button>
         </div>
 
-        {!provider.keyOptional && !apiKey ? (
+        {!provider.keyOptional && !apiKey && !hasCredential ? (
           <div style={{ ...hintStyle, color: orbitColors.semantic.warning }}>
             {copy.credentials.emptyHint}
           </div>
@@ -549,6 +873,7 @@ export const SettingsModelSection: React.FC<{
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <input
               id="settings-model-input"
+              data-testid="settings-model-input"
               type="text"
               value={model}
               onChange={(e) => onModelChange(e.target.value)}
@@ -581,6 +906,7 @@ export const SettingsModelSection: React.FC<{
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <select
               id="settings-model-select"
+              data-testid="settings-model-select"
               value={effectiveValue}
               onChange={(e) => onModelChange(e.target.value)}
               aria-label={copy.model.title}
@@ -1119,30 +1445,23 @@ export const SettingsActionsSection: React.FC<{
         }}
       >
         <UiButton primary={isDirty || !saved} onClick={onSave}>
-          {saved ? copy.actions.saved : copy.actions.save}
+          {saved ? (isEn ? "Saved" : "已保存") : isEn ? "Save Settings" : "保存设置"}
         </UiButton>
 
-        {/* Backward-compatible and UI-05-compliant Test Configuration button */}
         <UiButton
           onClick={onTest}
           disabled={testing}
           aria-label={
             testing
-              ? copy.actions.testing
-              : isDirty
-                ? copy.actions.saveAndTest
-                : isEn
-                  ? copy.actions.test
-                  : `${copy.actions.test} (${copy.actions.testAlias})`
+              ? isEn
+                ? "Testing..."
+                : "测试中..."
+              : isEn
+                ? "Connection Test / Test configuration"
+                : "测试配置（连接测试）"
           }
         >
-          {testing
-            ? copy.actions.testing
-            : isDirty
-              ? copy.actions.saveAndTest
-              : isEn
-                ? copy.actions.test
-                : `${copy.actions.test} (${copy.actions.testAlias})`}
+          {testing ? (isEn ? "Testing..." : "测试中...") : isEn ? "Connection Test" : "连接测试"}
         </UiButton>
 
         {isDirty ? (
@@ -1182,6 +1501,8 @@ export const SettingsActionsSection: React.FC<{
 export const SettingsConfigSections: React.FC<{
   analyticsBaseUrl: string;
   apiKey: string;
+  hasCredential?: boolean;
+  onClearCredential?: () => void;
   customProtocol: "openai" | "anthropic";
   customUrl: string;
   deviceId: string;
@@ -1204,6 +1525,8 @@ export const SettingsConfigSections: React.FC<{
 }> = ({
   analyticsBaseUrl,
   apiKey,
+  hasCredential = false,
+  onClearCredential,
   customProtocol,
   customUrl,
   deviceId,
@@ -1236,10 +1559,12 @@ export const SettingsConfigSections: React.FC<{
 
       <SettingsCredentialsSection
         apiKey={apiKey}
-        isEn={isEn}
+        hasCredential={hasCredential}
         onApiKeyChange={setApiKey}
+        onClearCredential={onClearCredential}
         provider={provider}
         providerId={providerId}
+        isEn={isEn}
       />
 
       <SettingsModelSection

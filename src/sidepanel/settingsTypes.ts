@@ -86,12 +86,22 @@ export function deriveSetupStatus(params: {
   return "saved_untested";
 }
 
+export type StoredSettingsLike = Partial<
+  AppSettings & {
+    providerId?: ProviderId;
+    apiKey?: string;
+    apiModel?: string;
+    customBaseUrl?: string;
+    customProviderProtocol?: "openai" | "anthropic";
+  }
+>;
+
 /**
  * Checks whether form inputs differ from storage values.
  */
 export function isSettingsDirty(
   current: SettingsFormValues,
-  stored: Partial<AppSettings> | null,
+  stored: StoredSettingsLike | null,
 ): boolean {
   if (!stored) return false;
   if (current.providerId !== (stored.providerId ?? "anthropic")) return true;

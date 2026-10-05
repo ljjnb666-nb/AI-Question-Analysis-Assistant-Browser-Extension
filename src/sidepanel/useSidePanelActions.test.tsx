@@ -413,3 +413,9 @@ describe("useSidePanelActions authority gate", () => {
     expect(sentMessages.filter((m) => m.type === "FILL_PARSED_ANSWER")).toEqual([]);
   });
 });
+
+// This suite isolates auth/owner choreography with a configured AI readiness fixture.
+vi.mock("@/shared/utils/aiSolvePreferences", async () => {
+  const storage = await import("@/shared/utils/storage");
+  return { loadParsePreferences: async () => { const { preferredRoute, language } = await storage.loadSettings(); return { preferredRoute, language }; }, getAIConnectionReadiness: async () => ({ ready: true }), getRuntimeCaptureInfo: async () => ({ name: "anthropic", baseUrl: "https://api.anthropic.com", supportsVision: true }) };
+});

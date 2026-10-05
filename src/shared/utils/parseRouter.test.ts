@@ -1,18 +1,20 @@
-﻿import { describe, it, expect, vi, afterEach } from "vitest";
+import { getProvider, PROVIDERS } from "../ai/providers";
+import type { AIConnectionScenarioFixture } from "@/test/aiConnectionFixture";
+import { parseConfiguredQuestion as parseQuestion } from "../../test/aiConnectionFixture";
+import { beforeEach } from "vitest";
+import { installMemoryStorage } from "../../test/memoryStorage";
+beforeEach(() => { installMemoryStorage(); });
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
-  getProvider,
   buildResult,
   decideRoute,
-  parseQuestion,
-  PROVIDERS,
-  isLikelyTextOnlyModel,
   normalizeNetworkError,
 } from "./parseRouter";
 
 // Assembled at runtime so security scanners do not mistake this synthetic
 // test fixture for a committed credential.
 const TEST_API_KEY = ["test", "key"].join("-");
-import { DEFAULT_SETTINGS, type QuestionBlock, type AppSettings } from "../types";
+import { DEFAULT_SETTINGS, type QuestionBlock } from "../types";
 import * as analytics from "./analytics";
 import { StaleQuestionRevisionError } from "./parseAttemptErrors";
 
@@ -669,7 +671,7 @@ describe("parseRouter", () => {
       source: "manual_capture",
     };
 
-    const mockSettings: AppSettings = {
+    const mockSettings: AIConnectionScenarioFixture = {
       ...DEFAULT_SETTINGS,
       providerId: "anthropic",
       apiKey: TEST_API_KEY,
@@ -685,8 +687,9 @@ describe("parseRouter", () => {
       expect(route).toBe("vision");
     });
 
-    it("returns text for non-vision providers", async () => {
-      const route = await decideRoute(mockBlock, { ...mockSettings, providerId: "deepseek" });
+    it("plans sufficient text without legacy provider authority", async () => {
+      const forgedSettings = { ...mockSettings, providerId: "deepseek" };
+      const route = await decideRoute(mockBlock, forgedSettings);
       expect(route).toBe("text");
     });
 
@@ -765,16 +768,15 @@ describe("parseRouter", () => {
         source: "manual_capture",
       };
 
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
-        providerId: "custom",
+        providerId: "openai",
         apiKey: TEST_API_KEY,
-        apiModel: "claude-haiku-4.5",
+        apiModel: "gpt-5.5",
         preferredRoute: "vision",
         language: "zh",
         enableAnalytics: true,
         analyticsConsentVersion: 1,
-        customBaseUrl: "http://127.0.0.1:3000",
         customProviderProtocol: "openai",
       };
 
@@ -829,7 +831,7 @@ describe("parseRouter", () => {
         source: "manual_capture",
       };
 
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
         providerId: "minimax",
         apiKey: TEST_API_KEY,
@@ -886,7 +888,7 @@ describe("parseRouter", () => {
         ],
       };
 
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
         providerId: "minimax",
         apiKey: TEST_API_KEY,
@@ -933,7 +935,7 @@ describe("parseRouter", () => {
         source: "manual_capture",
       };
 
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
         providerId: "minimax",
         apiKey: TEST_API_KEY,
@@ -1002,7 +1004,7 @@ describe("parseRouter", () => {
       const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { release = resolve; }));
       vi.stubGlobal("fetch", fetchMock);
       const logEvent = vi.spyOn(analytics, "logEvent");
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
         providerId: "custom",
         apiKey: TEST_API_KEY,
@@ -1047,7 +1049,7 @@ describe("parseRouter", () => {
         }) } }],
       }), { status: 200, headers: { "Content-Type": "application/json" } })));
       const logEvent = vi.spyOn(analytics, "logEvent");
-      const settings: AppSettings = {
+      const settings: AIConnectionScenarioFixture = {
         ...DEFAULT_SETTINGS,
         providerId: "custom",
         apiKey: TEST_API_KEY,
@@ -1070,11 +1072,10 @@ describe("parseRouter", () => {
     it("normalizes localhost failed-fetch errors in Chinese", () => {
       const error = normalizeNetworkError(
         new Error("Failed to fetch"),
-        getProvider("ollama"),
+        { presetId: "ollama", endpoint: "http://127.0.0.1:11434" },
         {
           ...DEFAULT_SETTINGS,
           language: "zh",
-          customBaseUrl: "http://127.0.0.1:11434",
         },
       );
 
@@ -1085,11 +1086,10 @@ describe("parseRouter", () => {
     it("normalizes insecure http failed-fetch errors in English", () => {
       const error = normalizeNetworkError(
         new Error("Failed to fetch"),
-        getProvider("custom"),
+        { presetId: "custom", endpoint: "http://example.com/v1" },
         {
           ...DEFAULT_SETTINGS,
           language: "en",
-          customBaseUrl: "http://example.com/v1",
         },
       );
 
@@ -1099,15 +1099,9 @@ describe("parseRouter", () => {
 
     it("keeps non-network errors unchanged", () => {
       const original = new Error("401 Unauthorized");
-      const error = normalizeNetworkError(original, getProvider("openai"), DEFAULT_SETTINGS);
+      const error = normalizeNetworkError(original, { presetId: "openai", endpoint: "https://api.openai.com" }, DEFAULT_SETTINGS);
       expect(error).toBe(original);
     });
 
-    it("identifies likely text-only models without flagging multimodal models", () => {
-      expect(isLikelyTextOnlyModel("qwen-plus")).toBe(true);
-      expect(isLikelyTextOnlyModel("glm-5.2")).toBe(true);
-      expect(isLikelyTextOnlyModel("qwen3-vl-plus")).toBe(false);
-      expect(isLikelyTextOnlyModel("llama3.2-vision")).toBe(false);
-    });
   });
 });

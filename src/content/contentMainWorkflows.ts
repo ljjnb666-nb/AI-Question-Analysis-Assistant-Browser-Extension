@@ -1,10 +1,10 @@
+import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
+import { loadParsePreferences, getAIConnectionReadiness, getRuntimeCaptureInfo } from "@/shared/utils/aiSolvePreferences";
 import type { BoundingBox, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import { cropScreenshot } from "@/shared/utils/cropImage";
 import {
-  getProvider,
   getProviderNotConfiguredMessage,
-  isProviderRuntimeConfigured,
-} from "@/shared/utils/parseRouter";
+} from "@/shared/ai/parseResultAuthority";
 import { addHistoryEntry, loadHistory, loadSettings } from "@/shared/utils/storage";
 import { logEvent } from "@/shared/utils/analytics";
 import type { ActiveDetectMode } from "./contentRuntimeState";
@@ -58,9 +58,10 @@ type CreateContentMainWorkflowsOptions = {
   manualParsePipelineTimeoutMs: number;
   parseWithTieredRetries: (
     block: QuestionBlock,
-    settings: Awaited<ReturnType<typeof loadSettings>>,
+    settings: Awaited<ReturnType<typeof loadParsePreferences>>,
     providerSupportsVision: boolean,
     onStream: (partial: string) => void,
+    runtimeContext?: ParseQuestionRuntimeContext,
   ) => Promise<ParseResult>;
   screenshotWithRetry: () => Promise<string | null>;
   clickNextQuestionButton: () => boolean;
@@ -251,8 +252,8 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         extractQuestionImageUrlFromBBox: options.extractQuestionImageUrlFromBBox,
         screenshotWithRetry: options.screenshotWithRetry,
         cropScreenshot,
-        loadSettings,
-        getProvider,
+        loadSettings: loadParsePreferences,
+        getRuntimeCaptureInfo,
         parseWithTieredRetries: options.parseWithTieredRetries,
         withTimeout: options.withTimeout,
         addHistoryEntry,
@@ -281,7 +282,7 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
     // provenance gate keeps real-page mutation at zero.
     const autoSolveSettings = await loadSettings();
     if (!isRunCurrent()) return;
-    if (!isProviderRuntimeConfigured(getProvider(autoSolveSettings.providerId ?? "anthropic"), autoSolveSettings)) {
+    if (!(await getAIConnectionReadiness()).ready) {
       options.sendAutoSolveDone({
         ok: false,
         solved: 0,

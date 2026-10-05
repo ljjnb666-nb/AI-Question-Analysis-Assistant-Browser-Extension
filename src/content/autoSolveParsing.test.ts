@@ -1,5 +1,7 @@
+import type { AIConnectionScenarioFixture } from "@/test/aiConnectionFixture";
+import type { ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, type AppSettings, type HistoryEntry, type ParseResult, type QuestionBlock } from "@/shared/types";
+import { DEFAULT_SETTINGS, type HistoryEntry, type ParseResult, type QuestionBlock } from "@/shared/types";
 import {
   parseBlockForAutoSolve,
   parseBlockForAutoSolveQuickReview,
@@ -40,7 +42,7 @@ function makeResult(overrides: Partial<ParseResult> = {}): ParseResult {
   };
 }
 
-function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
+function makeSettings(overrides: Partial<AIConnectionScenarioFixture> = {}): AIConnectionScenarioFixture {
   return {
     ...DEFAULT_SETTINGS,
     providerId: "anthropic",
@@ -58,7 +60,7 @@ function createDeps() {
   const withTimeout = <T>(promise: Promise<T>) => promise;
   return {
     loadSettings: vi.fn(async () => makeSettings()),
-    getProvider: vi.fn(() => ({ supportsVision: true })),
+    getRuntimeCaptureInfo: vi.fn(async () => ({ supportsVision: true })),
     tryCaptureBlockImageForAutoSolve: vi.fn(async () => "data:image/png;base64,abc"),
     parseWithTieredRetries: vi.fn(async () => makeResult()),
     withTimeout,
@@ -82,7 +84,7 @@ describe("autoSolveParsing", () => {
 
     expect(result.answer).toBe("A");
     expect(deps.tryCaptureBlockImageForAutoSolve).not.toHaveBeenCalled();
-    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AppSettings];
+    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AIConnectionScenarioFixture];
     expect(usedBlock).not.toHaveProperty("imageDataUrl");
     expect(usedSettings).toMatchObject({ preferredRoute: "auto" });
   });
@@ -97,7 +99,7 @@ describe("autoSolveParsing", () => {
     await parseBlockForAutoSolve(block, defaultTimeouts, deps);
 
     expect(deps.tryCaptureBlockImageForAutoSolve).toHaveBeenCalledTimes(1);
-    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AppSettings];
+    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AIConnectionScenarioFixture];
     expect(usedBlock).toMatchObject({ imageDataUrl: "data:image/png;base64,abc", hasImage: true });
     expect(usedSettings).toMatchObject({ preferredRoute: "vision" });
   });
@@ -108,7 +110,7 @@ describe("autoSolveParsing", () => {
     await parseBlockForAutoSolveQuickReview(makeBlock(), defaultTimeouts, deps);
 
     expect(deps.tryCaptureBlockImageForAutoSolve).not.toHaveBeenCalled();
-    const [usedBlock, usedSettings] = ((deps.parseQuestion.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AppSettings];
+    const [usedBlock, usedSettings] = ((deps.parseQuestion.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AIConnectionScenarioFixture];
     expect(usedBlock).not.toHaveProperty("imageDataUrl");
     expect(usedSettings).toMatchObject({ preferredRoute: "auto" });
   });
@@ -119,7 +121,7 @@ describe("autoSolveParsing", () => {
     await parseBlockForAutoSolveReview(makeBlock(), null, defaultTimeouts, deps);
 
     expect(deps.tryCaptureBlockImageForAutoSolve).not.toHaveBeenCalled();
-    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AppSettings];
+    const [usedBlock, usedSettings] = ((deps.parseWithTieredRetries.mock.calls[0] ?? []) as unknown) as [QuestionBlock, AIConnectionScenarioFixture];
     expect(usedBlock).not.toHaveProperty("imageDataUrl");
     expect(usedSettings).toMatchObject({ preferredRoute: "auto" });
   });
@@ -156,4 +158,29 @@ describe("autoSolveParsing", () => {
     }), expect.any(Function));
     owner.remove();
   });
+});
+
+
+it("RF01 Auto Solve outer timeout revokes its nested parse context", async () => {
+  const deps = createDeps();
+  let nested!: ParseQuestionRuntimeContext;
+  deps.parseWithTieredRetries.mockImplementation((...args: unknown[]) => {
+    nested = args[4] as ParseQuestionRuntimeContext;
+    return new Promise<ParseResult>(() => {});
+  });
+  const timedDeps = { ...deps, withTimeout: <T>(_promise: Promise<T>) => Promise.reject<T>(new Error("auto_solve_parse_timeout")) };
+  await expect(parseBlockForAutoSolve(makeBlock(), defaultTimeouts, timedDeps)).rejects.toThrow("auto_solve_parse_timeout");
+  expect(nested.signal?.aborted).toBe(true);
+  expect(deps.parseWithTieredRetries).toHaveBeenCalledTimes(1);
+});
+
+it("RF01 Auto Solve automatic vision retry shares a lease; separate review binds a new one", async () => {
+  const deps = createDeps();
+  deps.parseWithTieredRetries.mockResolvedValueOnce(makeResult({ confidence: 0.1, recognizedText: "" }));
+  await parseBlockForAutoSolve(makeBlock({ hasImage: true }), defaultTimeouts, deps);
+  expect(deps.parseWithTieredRetries).toHaveBeenCalledTimes(2);
+  const contexts = deps.parseWithTieredRetries.mock.calls as unknown as Array<[unknown, unknown, unknown, unknown, ParseQuestionRuntimeContext]>;
+  expect(contexts[0][4].authorityLease).toBe(contexts[1][4].authorityLease);
+  await parseBlockForAutoSolveReview(makeBlock(), null, defaultTimeouts, deps);
+  expect(contexts[2][4].authorityLease).not.toBe(contexts[0][4].authorityLease);
 });

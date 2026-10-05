@@ -259,3 +259,29 @@ describe("authSessionCoordinator", () => {
     expect(computeSessionCandidateFingerprint({ userId: "u", authToken: "" })).toBe("");
   });
 });
+
+describe("E2B2B ordinary-read timing and rejected-session hint", () => {
+  it("retains the server rejection hint when its credential-clear event arrives first", async () => {
+    const h = createHarness({ userId: "usr-1", authToken: "forged" });
+    h.coordinator.start(); await settle();
+    h.saveSettings({ userId: undefined, authToken: undefined }); await settle();
+    expect(h.coordinator.getState().status).toBe("unauthenticated");
+    h.validationCalls[0].resolve({ status: "unauthenticated" }); await settle();
+    expect(h.coordinator.getState()).toMatchObject({ status: "unauthenticated", sessionRejected: true, userId: "" });
+    h.coordinator.dispose();
+  });
+  it.each(["logout", "login", "dispose"])("an old rejection cannot overwrite a newer %s action", async action => {
+    const h = createHarness({ userId: "old", authToken: "old-token" });
+    h.coordinator.start(); await settle();
+    h.saveSettings({ userId: undefined, authToken: undefined }); await settle();
+    if (action === "login") {
+      h.setSettings({ userId: "new", authToken: "new-token" });
+      await h.coordinator.applyAuthenticatedSession("new", "new@example.test");
+    } else if (action === "logout") h.coordinator.applyLoggedOut();
+    else h.coordinator.dispose();
+    h.validationCalls[0].resolve({ status: "unauthenticated" }); await settle();
+    expect(h.coordinator.getState().sessionRejected).toBe(false);
+    expect(h.coordinator.getState().status).toBe(action === "login" ? "authenticated" : "unauthenticated");
+    h.coordinator.dispose();
+  });
+});

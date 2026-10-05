@@ -1,3 +1,4 @@
+import { installSettingsMessaging } from "../../test/settingsMessaging";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logoutAccount } from "./auth";
 import { loadSettings, saveSettings, __resetStorageCacheForTests } from "./storage";
@@ -42,12 +43,13 @@ function installStatefulChromeStorage() {
     QUOTA_BYTES: 5242880,
   };
   (global as unknown as { chrome: unknown }).chrome = {
-    runtime: { id: "test-extension-id-12345" },
+    runtime: { id: "test-extension-id-12345", sendMessage: vi.fn(), getURL: (path: string) => `chrome-extension://test-extension-id-12345/${path.replace(/^\//, "")}` },
     storage: {
       local: storageApi,
       onChanged: { addListener: (fn: (changes: unknown, area: string) => void) => onChangedListeners.push(fn) },
     },
   };
+  installSettingsMessaging();
   return { storageApi, store };
 }
 

@@ -1,3 +1,4 @@
+import { installSettingsMessaging } from "../test/settingsMessaging";
 import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -70,7 +71,7 @@ const sessionApi = {
 };
 
 (globalThis as unknown as { chrome: unknown }).chrome = {
-  runtime: { id: "test-extension-id" },
+  runtime: { id: "test-extension-id", sendMessage: vi.fn(), getURL: (path: string) => `chrome-extension://test-extension-id/${path.replace(/^\//, "")}` },
   storage: {
     local: storageApi,
     session: sessionApi,
@@ -119,7 +120,9 @@ import { PopupApp } from "./PopupApp";
 import { __resetStorageCacheForTests } from "@/shared/utils/storage";
 import { readProtectedWorkOwners } from "@/shared/auth/protectedWorkOwner";
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.resetModules();
+  installSettingsMessaging();
   sentRuntimeMessages.length = 0;
   sentTabTargets.length = 0;
   store.clear();
@@ -203,6 +206,7 @@ describe("PopupApp protected work ownership", () => {
     render(<PopupApp />);
     // 定位真正的动作按钮：支持旧称"自动答题"以及UI-02标准名称"解析并填答/Solve & Fill"。
     await screen.findByRole("button", { name: /自动答题|Auto Solve|解析并填答|Solve & Fill/ }, { timeout: 10_000 });
+    await waitFor(() => expect(screen.getByRole("button", { name: /自动答题|Auto Solve|解析并填答|Solve & Fill/ })).toBeEnabled());
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /自动答题|Auto Solve|解析并填答|Solve & Fill/ }));

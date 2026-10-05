@@ -5,8 +5,9 @@ import {
   sendToTabWithBootstrap,
 } from "@/shared/utils/messaging";
 import type { ExtMessage } from "@/shared/types";
-import { getProvider, getProviderShortName } from "@/shared/ai/providers";
-import { isProviderRuntimeConfigured } from "@/shared/ai/parseResultAuthority";
+import { sendAIConnectionCommand } from "@/shared/utils/aiConnectionClient";
+import { getProviderShortName } from "@/shared/ai/providers";
+import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
 import { logEvent } from "@/shared/utils/analytics";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { useAuthController } from "@/shared/auth/useAuthController";
@@ -80,8 +81,7 @@ const shellStyle: React.CSSProperties = {
 
 export const PopupApp: React.FC = () => {
   const [feedback, setFeedback] = useState<UserFeedback | null>(null);
-  const [apiKey, setApiKey] = useState("");
-  const [providerId, setProviderId] = useState("anthropic");
+  const [aiReady, setAIReady] = useState(false);
   const [providerName, setProviderName] = useState("Claude");
   const [lang, setLang] = useState<PopupLang>("zh");
   const [_loaded, setLoaded] = useState(false);
@@ -97,6 +97,12 @@ export const PopupApp: React.FC = () => {
   // not an effect-lagged ref or a render snapshot (AUTH-UI-INV-09).
   const authority = createPopupAuthority(auth.session);
   const isAuthenticatedNow = authority.isAuthenticatedNow;
+
+  // A user language action taken while the initial settings/metadata load is
+  // still in flight MUST win over that older load's result. Each toggle bumps
+  // this generation; the mount continuation only applies its stale snapshot
+  // when no toggle happened since the load started (P1-01 language race).
+  const languageGenerationRef = useRef(0);
 
   // AUTH-UI-INV-11 + INV-15 (popup side): when this surface observes the
   // session leave `authenticated`, any long-running protected work recorded
@@ -127,20 +133,27 @@ export const PopupApp: React.FC = () => {
 
   useEffect(() => {
     let disposed = false;
-    void loadSettings().then((settings) => {
+    const generationAtStart = languageGenerationRef.current;
+    void getAIConnectionReadiness().then(async (readiness) => {
+      // An unmounted popup must not start the second-stage settings/metadata
+      // messages at all, not merely discard their result.
       if (disposed) return;
-      const key = settings.apiKey ?? "";
-      const nextProviderId = settings.providerId ?? "anthropic";
+      const [settings, response] = await Promise.all([
+        loadSettings(), sendAIConnectionCommand({ type: "AI_CONNECTION_GET_ACTIVE_METADATA" }),
+      ]);
+      if (disposed) return;
+      setAIReady(readiness.ready);
+      const nextProviderId = response.metadata?.presetId;
       const nextLang = settings.language ?? "zh";
-      setApiKey(key);
-      setProviderId(nextProviderId);
-      setProviderName(getProviderShortName(nextProviderId));
-      setLang(nextLang);
-      if (typeof document !== "undefined") {
-        document.documentElement.lang = nextLang === "zh" ? "zh-CN" : "en";
+      setProviderName(nextProviderId ? getProviderShortName(nextProviderId) : "");
+      if (generationAtStart === languageGenerationRef.current) {
+        setLang(nextLang);
+        if (typeof document !== "undefined") {
+          document.documentElement.lang = nextLang === "zh" ? "zh-CN" : "en";
+        }
       }
       setLoaded(true);
-    });
+    }).catch(() => { if (!disposed) { setAIReady(false); setLoaded(true); } });
     return () => {
       disposed = true;
     };
@@ -170,7 +183,7 @@ export const PopupApp: React.FC = () => {
   }, []);
 
   // UI-00A: shared provider-contract check
-  const hasApiKey = isProviderRuntimeConfigured(getProvider(providerId), { apiKey });
+  const hasApiKey = aiReady;
 
   const viewState = derivePopupViewState({
     authStatus: auth.status,
@@ -386,6 +399,9 @@ export const PopupApp: React.FC = () => {
   };
 
   const toggleLang = () => {
+    // Invalidate any in-flight initial load's language snapshot: this user
+    // action is newer and must win over it (P1-01 language race).
+    languageGenerationRef.current += 1;
     const nextLang: PopupLang = lang === "zh" ? "en" : "zh";
     setLang(nextLang);
     if (typeof document !== "undefined") {

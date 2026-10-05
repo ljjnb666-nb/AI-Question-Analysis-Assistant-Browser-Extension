@@ -1,5 +1,4 @@
 import type { AppSettings, ParseResult } from "../types";
-import type { ProviderConfig } from "./providers";
 
 /**
  * UI-00A result provenance authority.
@@ -35,19 +34,6 @@ export function getUnfillableResultCode(result: Pick<ParseResult, "resultSource"
   return getParseResultAuthority(result) === "mock" ? DEMO_RESULT_NOT_FILLABLE : UNVERIFIED_RESULT_SOURCE;
 }
 
-/**
- * Shared provider runtime-configuration check (UI-00A). Provider contract owns
- * the semantics: a key-optional provider (e.g. Ollama) is always configured;
- * every other provider needs a non-empty key. Popup, Side Panel, and the parse
- * router must all ask this one question instead of copying `Boolean(apiKey)`.
- */
-export function isProviderRuntimeConfigured(
-  provider: Pick<ProviderConfig, "keyOptional">,
-  settings: Pick<AppSettings, "apiKey">,
-): boolean {
-  if (provider.keyOptional === true) return true;
-  return String(settings.apiKey ?? "").trim().length > 0;
-}
 
 /** Natural-language hint for an unconfigured provider, keyed by UI language. */
 export function getProviderNotConfiguredMessage(language: AppSettings["language"]): string {

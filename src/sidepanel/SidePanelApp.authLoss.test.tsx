@@ -1,3 +1,4 @@
+import type { AIConnectionScenarioFixture } from "@/test/aiConnectionFixture";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -422,3 +423,18 @@ describe("SidePanelApp auth-loss watchdog", () => {
     await waitFor(() => expect(document.documentElement.lang).toBe("zh-CN"), { timeout: UI_TIMEOUT });
   });
 });
+
+vi.mock("@/shared/utils/aiSolvePreferences", async () => {
+  const storage = await import("@/shared/utils/storage");
+  const { getProvider } = await import("@/shared/ai/providers");
+  return {
+    loadParsePreferences: async () => { const { preferredRoute, language } = await storage.loadSettings(); return { preferredRoute, language }; },
+    getRuntimeCaptureInfo: async () => { const fixture = await storage.loadSettings() as AIConnectionScenarioFixture; return getProvider(fixture.providerId ?? "anthropic"); },
+    getAIConnectionReadiness: async () => {
+      const fixture = await storage.loadSettings() as AIConnectionScenarioFixture;
+      return { ready: getProvider(fixture.providerId ?? "anthropic").keyOptional === true || Boolean(fixture.apiKey?.trim()) };
+    },
+  };
+});
+
+vi.mock("@/shared/utils/aiConnectionClient", () => ({ ensureAIConnectionAuthorityReady: vi.fn(async () => ({ ok: true })), sendAIConnectionCommand: vi.fn(async () => ({ ok: true, metadata: { presetId: "anthropic" } })), getAIConnectionEditorView: vi.fn(async () => ({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages", hasCredential: true })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));

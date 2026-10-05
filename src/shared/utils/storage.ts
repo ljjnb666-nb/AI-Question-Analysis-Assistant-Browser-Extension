@@ -1,9 +1,12 @@
+import { APP_SETTINGS_FIELDS, projectAppSettings } from "./appSettingsPolicy";
+import { sendAppSettingsCommand } from "./appSettingsClient";
+import type { AppSettingsUpdatePatch } from "../types/appSettingsMessages";
+import { CURRENT_ANALYTICS_CONSENT_VERSION, normalizeAnalyticsBaseUrl as normalizeBaseUrl } from "./appSettingsPolicy";
+export { CURRENT_ANALYTICS_CONSENT_VERSION } from "./appSettingsPolicy";
 import type { FloatingWindowState, AppSettings, HistoryEntry, ParseResult, QuestionBlock } from "../types";
-import { DEFAULT_SETTINGS } from "../types";
 import { logError } from "./errorLogger";
 import {
   decryptValue,
-  encryptValue,
   isCredentialEnvelope,
   isEncrypted,
   tryDecryptLegacyValue,
@@ -12,7 +15,6 @@ import {
 import { sanitizeQuestionBlockForSerialization } from "./mediaSerialization";
 import { flushAnalyticsWork, invalidateAnalyticsConsent } from "./analyticsState";
 
-export const CURRENT_ANALYTICS_CONSENT_VERSION = 1;
 
 const KEYS = {
   floatingState: "floatingWindowState",
@@ -20,7 +22,7 @@ const KEYS = {
   history: "parseHistory",
   analytics: "analyticsLog",
 } as const;
-const SENSITIVE_SETTINGS_KEYS = ["apiKey", "authToken"] as const;
+const SENSITIVE_SETTINGS_KEYS = ["authToken"] as const;
 
 const MAX_HISTORY = 50;
 const MAX_PREVIEW_TEXT_CHARS = 800;
@@ -33,32 +35,14 @@ const HISTORY_RETRY_LIMIT_BYTES = 450_000;
 const HISTORY_PRUNE_LIMIT_BYTES = 300_000;
 const HISTORY_PRUNE_MAX_ENTRIES = 25;
 const ANALYTICS_PRUNE_RETAIN_COUNT = 120;
+let settingsCacheGeneration = 0;
 let cachedSettings: AppSettings | null = null;
 let settingsLoadPromise: Promise<AppSettings> | null = null;
 let settingsListenerRegistered = false;
 
-function createDeviceIdValue(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `dev-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function normalizeBaseUrl(value: string | undefined): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return DEFAULT_SETTINGS.analyticsBaseUrl;
-  return raw.replace(/\/+$/, "");
-}
-
 function isExtensionContextInvalidatedError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err || "");
   return /Extension context invalidated/i.test(message);
-}
-
-function createErrorWithCause(message: string, cause: unknown): Error {
-  const error = new Error(message) as Error & { cause?: unknown };
-  error.cause = cause;
-  return error;
 }
 
 function cloneSettings(settings: AppSettings): AppSettings {
@@ -71,6 +55,7 @@ function setCachedSettings(settings: AppSettings): AppSettings {
 }
 
 function invalidateSettingsCache(): void {
+  settingsCacheGeneration += 1;
   cachedSettings = null;
   settingsLoadPromise = null;
 }
@@ -95,39 +80,24 @@ function ensureSettingsCacheListener(): void {
 }
 
 async function readSettingsFromStorage(): Promise<AppSettings> {
-  const result = await chrome.storage.local.get(KEYS.settings);
-  const rawStored = (result[KEYS.settings] as Partial<AppSettings> ?? {});
-  const stored = { ...DEFAULT_SETTINGS, ...rawStored };
-
-  const requiresConsentMigration = rawStored.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION;
-  if (requiresConsentMigration) {
-    stored.enableAnalytics = false;
-    stored.analyticsConsentVersion = CURRENT_ANALYTICS_CONSENT_VERSION;
+  const generation = settingsCacheGeneration;
+  let result = await chrome.storage.local.get(KEYS.settings);
+  let rawStored = (result[KEYS.settings] as Partial<AppSettings> ?? {});
+  if (rawStored.analyticsConsentVersion !== CURRENT_ANALYTICS_CONSENT_VERSION || !rawStored.deviceId || !rawStored.analyticsBaseUrl) {
+    const ack = await sendAppSettingsCommand({ type: "APP_SETTINGS_ENSURE_NORMALIZED" });
+    if (ack.analyticsDisabled) invalidateAnalyticsConsent();
+    result = await chrome.storage.local.get(KEYS.settings);
+    rawStored = (result[KEYS.settings] as Partial<AppSettings> ?? {});
   }
-  if (!stored.deviceId) stored.deviceId = createDeviceIdValue();
-
+  const stored = projectAppSettings(rawStored);
   stored.analyticsBaseUrl = normalizeBaseUrl(stored.analyticsBaseUrl);
 
-  if (requiresConsentMigration || !rawStored.deviceId || !rawStored.analyticsBaseUrl) {
-    await chrome.storage.local.set({
-      [KEYS.settings]: {
-        ...rawStored,
-        ...(requiresConsentMigration ? { enableAnalytics: false, analyticsConsentVersion: CURRENT_ANALYTICS_CONSENT_VERSION } : {}),
-        deviceId: stored.deviceId,
-        analyticsBaseUrl: stored.analyticsBaseUrl,
-      },
-    });
-    if (requiresConsentMigration) {
-      invalidateAnalyticsConsent();
-      await chrome.storage.local.remove(KEYS.analytics);
-    }
-  }
 
   // Credential read path. `qse:v1:` envelopes decrypt and fail closed on
   // tampering; unknown `qse:*` versions fail closed as well; legacy strings
-  // (no marker) are decoded leniently and never cleared. Loading never
-  // writes credentials back to storage: migration to the current envelope
-  // happens on the next saveSettings call.
+  // (no marker) are decoded leniently and never cleared. Credential persistence is background-owned; a normalization command may
+  // secure an old authToken, but this reader never performs a raw write. AI migration is background-owned;
+  // only account/session credentials remain on the ordinary settings path.
   for (const key of SENSITIVE_SETTINGS_KEYS) {
     const value = stored[key];
     if (!value) continue;
@@ -152,7 +122,7 @@ async function readSettingsFromStorage(): Promise<AppSettings> {
     }
   }
 
-  return setCachedSettings(stored);
+  return generation === settingsCacheGeneration ? setCachedSettings(stored) : cloneSettings(stored);
 }
 
 export async function saveFloatingState(state: Partial<FloatingWindowState>): Promise<void> {
@@ -174,40 +144,17 @@ function hasOwnSetting<K extends keyof AppSettings>(
 
 export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
   ensureSettingsCacheListener();
-  const existing = await loadSettings();
-  const merged = { ...existing, ...settings };
-  merged.analyticsConsentVersion = CURRENT_ANALYTICS_CONSENT_VERSION;
-  merged.deviceId = merged.deviceId || existing.deviceId || createDeviceIdValue();
-  merged.analyticsBaseUrl = normalizeBaseUrl(merged.analyticsBaseUrl);
-
-  // saveSettings receives plaintext domain values: loadSettings returns
-  // plaintext, chrome.storage.local stores the envelope. Every non-empty
-  // sensitive value is (re-)encrypted here, which also makes the next save
-  // the canonical migration point for legacy plaintext and legacy
-  // unversioned ciphertext. undefined/null/"" keep the explicit-clear
-  // contract and are never encrypted.
-  for (const key of SENSITIVE_SETTINGS_KEYS) {
-    const value = merged[key];
-    if (!value) continue;
-    try {
-      merged[key] = await encryptValue(value);
-    } catch (err) {
-      logError(`Failed to encrypt ${key}`, err, "saveSettings");
-      throw createErrorWithCause(`Failed to save ${key} securely`, err);
-    }
+  const patch: AppSettingsUpdatePatch = {};
+  for (const key of APP_SETTINGS_FIELDS) {
+    if (hasOwnSetting(settings, key)) Object.assign(patch, { [key]: settings[key] });
   }
-
-  await chrome.storage.local.set({ [KEYS.settings]: merged });
-  // The in-memory cache must distinguish "property absent" (keep the previous
-  // credential) from "property present with undefined" (explicit clear).
-  // Falling back with ?? would resurrect a stale token after a logout that
-  // only mutated chrome.storage.
-  setCachedSettings({
-    ...merged,
-    apiKey: hasOwnSetting(settings, "apiKey") ? settings.apiKey : existing.apiKey,
-    authToken: hasOwnSetting(settings, "authToken") ? settings.authToken : existing.authToken,
-  });
-  if (existing.enableAnalytics && !merged.enableAnalytics) {
+  // Undefined account fields are omitted by Chrome JSON messaging; send explicit clears.
+  for (const key of ["authToken", "userId", "userEmail"] as const) {
+    if (hasOwnSetting(settings, key) && settings[key] === undefined) patch[key] = null;
+  }
+  const ack = await sendAppSettingsCommand({ type: "APP_SETTINGS_UPDATE", patch });
+  invalidateSettingsCache();
+  if (ack.analyticsDisabled) {
     invalidateAnalyticsConsent();
     await flushAnalyticsWork();
     await chrome.storage.local.remove(KEYS.analytics);
@@ -303,38 +250,18 @@ export async function loadSettings(): Promise<AppSettings> {
     return cloneSettings(cachedSettings);
   }
   if (!settingsLoadPromise) {
-    settingsLoadPromise = readSettingsFromStorage().finally(() => {
-      settingsLoadPromise = null;
+    const pending = readSettingsFromStorage().finally(() => {
+      if (settingsLoadPromise === pending) settingsLoadPromise = null;
     });
+    settingsLoadPromise = pending;
   }
   return cloneSettings(await settingsLoadPromise);
 }
 
 export async function getOrCreateDeviceId(): Promise<string> {
   ensureSettingsCacheListener();
-  if (cachedSettings?.deviceId) return cachedSettings.deviceId;
-  const result = await chrome.storage.local.get(KEYS.settings);
-  const rawStored = (result[KEYS.settings] as Partial<AppSettings> ?? {});
-  const existingDeviceId = String(rawStored.deviceId || "").trim();
-  if (existingDeviceId) return existingDeviceId;
-
-  const deviceId = createDeviceIdValue();
-  await chrome.storage.local.set({
-    [KEYS.settings]: {
-      ...DEFAULT_SETTINGS,
-      ...rawStored,
-      deviceId,
-      analyticsBaseUrl: normalizeBaseUrl(rawStored.analyticsBaseUrl),
-    },
-  });
-  if (cachedSettings) {
-    setCachedSettings({
-      ...cachedSettings,
-      deviceId,
-      analyticsBaseUrl: normalizeBaseUrl(rawStored.analyticsBaseUrl || cachedSettings.analyticsBaseUrl),
-    });
-  }
-  return deviceId;
+  const ack = await sendAppSettingsCommand({ type: "APP_SETTINGS_GET_OR_CREATE_DEVICE_ID" });
+  return ack.deviceId;
 }
 
 export async function addHistoryEntry(entry: HistoryEntry): Promise<void> {

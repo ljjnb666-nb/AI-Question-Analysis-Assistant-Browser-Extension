@@ -1,4 +1,6 @@
-import type { AppSettings, CandidateOrigin, DetectedCandidate, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
+import { withSolveAuthorityLease, type ParseQuestionRuntimeContext } from "@/shared/utils/parseRouter";
+import type { ParsePreferences } from "@/shared/ai/runtimeRequest";
+import type { CandidateOrigin, DetectedCandidate, HistoryEntry, ParseResult, QuestionBlock } from "@/shared/types";
 import { getUnfillableResultCode, isParseResultFillAuthoritative } from "@/shared/ai/parseResultAuthority";
 import type { FillAnswerCode } from "@/content/answerTypes";
 import type { CandidateAttemptLease, CandidateAttemptRegistry } from "./candidateAuthority";
@@ -19,11 +21,10 @@ type AttemptDeps = {
 };
 
 type ParseDeps = AttemptDeps & {
-  loadSettings: () => Promise<AppSettings>;
-  getProvider: (providerId: string) => { supportsVision: boolean };
-  parseQuestion: (block: QuestionBlock, settings: AppSettings) => Promise<ParseResult>;
+  loadSettings: () => Promise<ParsePreferences>;
+  getRuntimeCaptureInfo: () => Promise<{ supportsVision: boolean }>;
+  parseQuestion: (block: QuestionBlock, settings: ParsePreferences, context?: ParseQuestionRuntimeContext) => Promise<ParseResult>;
   requestBlockImage: (tabId: number, bbox: QuestionBlock["bbox"]) => Promise<string | null>;
-  pickBatchReviewModel: (providerId: string, currentModel: string) => string;
   shouldRetryBatchParseAfterError: (err: unknown) => boolean;
   shouldRetryWithVision: (result: ParseResult) => boolean;
   preferVisionResult: (textResult: ParseResult, visionResult: ParseResult) => boolean;
@@ -34,12 +35,11 @@ type ParseDeps = AttemptDeps & {
 };
 
 type VisionRetryDeps = AttemptDeps & {
-  loadSettings: () => Promise<AppSettings>;
-  getProvider: (providerId: string) => { supportsVision: boolean };
+  loadSettings: () => Promise<ParsePreferences>;
+  getRuntimeCaptureInfo: () => Promise<{ supportsVision: boolean }>;
   requestBlockImage: (tabId: number, bbox: QuestionBlock["bbox"]) => Promise<string | null>;
-  parseQuestion: (block: QuestionBlock, settings: AppSettings) => Promise<ParseResult>;
+  parseQuestion: (block: QuestionBlock, settings: ParsePreferences, context?: ParseQuestionRuntimeContext) => Promise<ParseResult>;
   langSafe: (lang: "zh" | "en" | undefined, zh: string, en: string) => string;
-  pickBatchReviewModel: (providerId: string, currentModel: string) => string;
   shouldRetryBatchParseForIncompleteResult: (result: ParseResult, block: QuestionBlock) => boolean;
   preferBatchRetryResult: (firstResult: ParseResult, retryResult: ParseResult, block: QuestionBlock) => boolean;
 };
@@ -75,6 +75,7 @@ export async function runBatchParse(candidates: DetectedCandidate[], deps: Parse
 
   const settings = await deps.loadSettings();
   for (const candidate of selected) {
+    const runtimeContext = withSolveAuthorityLease();
     const lease = deps.attempts.begin(candidate);
     if (!lease) {
       clearStaleCandidate(candidate, deps, null);
@@ -87,7 +88,7 @@ export async function runBatchParse(candidates: DetectedCandidate[], deps: Parse
       }
       setCandidateLoading(candidate, lease, deps);
 
-      const provider = deps.getProvider(settings.providerId ?? "anthropic");
+      const provider = await deps.getRuntimeCaptureInfo();
       let firstPassBlock: QuestionBlock = candidate.block;
       let imageAttached = false;
       const originTabId = candidate.origin?.tabId;
@@ -108,21 +109,20 @@ export async function runBatchParse(candidates: DetectedCandidate[], deps: Parse
       const firstPassSettings = { ...settings, preferredRoute: firstPassRoute };
       const retrySettings = {
         ...settings,
-        apiModel: deps.pickBatchReviewModel(settings.providerId ?? "anthropic", settings.apiModel),
         preferredRoute: firstPassRoute,
       };
 
       let historyBlock = firstPassBlock;
       let result: ParseResult;
       try {
-        result = await deps.parseQuestion(firstPassBlock, firstPassSettings);
+        result = await deps.parseQuestion(firstPassBlock, firstPassSettings, runtimeContext);
       } catch (firstError) {
         if (!await isAuthorized(candidate, lease, deps)) {
           clearStaleCandidate(candidate, deps, lease);
           continue;
         }
         if (!deps.shouldRetryBatchParseAfterError(firstError)) throw firstError;
-        result = await deps.parseQuestion(firstPassBlock, retrySettings);
+        result = await deps.parseQuestion(firstPassBlock, retrySettings, runtimeContext);
       }
       if (!await isAuthorized(candidate, lease, deps)) {
         discardStaleProviderResult(candidate, lease, result, deps);
@@ -141,7 +141,7 @@ export async function runBatchParse(candidates: DetectedCandidate[], deps: Parse
         }
         if (imageDataUrl) {
           const visionBlock: QuestionBlock = { ...candidate.block, hasImage: true, imageDataUrl };
-          const visionResult = await deps.parseQuestion(visionBlock, { ...settings, preferredRoute: "vision" as const });
+          const visionResult = await deps.parseQuestion(visionBlock, { ...settings, preferredRoute: "vision" as const }, runtimeContext);
           if (!await isAuthorized(candidate, lease, deps)) {
             discardStaleProviderResult(candidate, lease, visionResult, deps);
             continue;
@@ -161,7 +161,7 @@ export async function runBatchParse(candidates: DetectedCandidate[], deps: Parse
           clearStaleCandidate(candidate, deps, lease);
           continue;
         }
-        const reviewedResult = await deps.parseQuestion(historyBlock, retrySettings);
+        const reviewedResult = await deps.parseQuestion(historyBlock, retrySettings, runtimeContext);
         if (!await isAuthorized(candidate, lease, deps)) {
           discardStaleProviderResult(candidate, lease, reviewedResult, deps);
           continue;
@@ -194,6 +194,7 @@ export async function runRetryRisky(
 }
 
 async function runVisionRetryForCandidate(candidate: DetectedCandidate, deps: VisionRetryDeps): Promise<void> {
+  const runtimeContext = withSolveAuthorityLease();
   const lease = deps.attempts.begin(candidate);
   if (!lease) {
     clearStaleCandidate(candidate, deps, null);
@@ -206,7 +207,7 @@ async function runVisionRetryForCandidate(candidate: DetectedCandidate, deps: Vi
     }
     setCandidateLoading(candidate, lease, deps);
     const settings = await deps.loadSettings();
-    const provider = deps.getProvider(settings.providerId ?? "anthropic");
+    const provider = await deps.getRuntimeCaptureInfo();
     const originTabId = candidate.origin?.tabId;
     if (!provider.supportsVision || !originTabId) {
       clearStaleCandidate(candidate, deps, lease);
@@ -223,16 +224,15 @@ async function runVisionRetryForCandidate(candidate: DetectedCandidate, deps: Vi
     const visionSettings = { ...settings, preferredRoute: "vision" as const };
     const reviewSettings = {
       ...visionSettings,
-      apiModel: deps.pickBatchReviewModel(settings.providerId ?? "anthropic", settings.apiModel),
     };
 
-    let finalResult = await deps.parseQuestion(visionBlock, visionSettings);
+    let finalResult = await deps.parseQuestion(visionBlock, visionSettings, runtimeContext);
     if (!await isAuthorized(candidate, lease, deps)) {
       discardStaleProviderResult(candidate, lease, finalResult, deps);
       return;
     }
     if (deps.shouldRetryBatchParseForIncompleteResult(finalResult, candidate.block)) {
-      const reviewedResult = await deps.parseQuestion(visionBlock, reviewSettings);
+      const reviewedResult = await deps.parseQuestion(visionBlock, reviewSettings, runtimeContext);
       if (!await isAuthorized(candidate, lease, deps)) {
         discardStaleProviderResult(candidate, lease, reviewedResult, deps);
         return;

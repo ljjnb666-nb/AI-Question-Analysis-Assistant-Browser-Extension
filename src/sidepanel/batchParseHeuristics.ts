@@ -1,6 +1,4 @@
 import type { DetectedCandidate, ParseResult, QuestionBlock } from "@/shared/types";
-import { getProvider } from "@/shared/utils/parseRouter";
-import type { ProviderId } from "@/shared/utils/parseRouter";
 
 const INCOMPLETE_HINT_PATTERN = /(选项缺失|无法判断|无法确定|无法作答|missing options|incomplete)/i;
 const RETRYABLE_ERROR_PATTERN = /(timed out|timeout|network request failed|failed to fetch|网络请求失败|截图失败|服务暂时不可用)/i;
@@ -37,26 +35,6 @@ export function preferVisionResult(textResult: ParseResult, visionResult: ParseR
   const textBad = INCOMPLETE_HINT_PATTERN.test(textSummary);
   const visionBad = INCOMPLETE_HINT_PATTERN.test(visionSummary);
   return textBad && !visionBad;
-}
-
-export function pickBatchReviewModel(providerId: string, currentModel: string): string {
-  const current = String(currentModel || "").trim();
-  const provider = getProvider(providerId);
-  const preferredByProvider: Partial<Record<ProviderId, string>> = {
-    anthropic: "claude-opus-4.8",
-    openai: "gpt-5.5",
-    gemini: "gemini-2.5-pro",
-    qwen: "qwen3-vl-plus",
-    zhipu: "glm-5v-turbo",
-    minimax: "MiniMax-M3",
-    ollama: "qwen3-vl",
-    custom: provider.defaultModel,
-  };
-
-  const preferred = preferredByProvider[provider.id] || provider.defaultModel;
-  if (preferred && provider.models.includes(preferred) && preferred !== current) return preferred;
-  if (provider.defaultModel && provider.defaultModel !== current) return provider.defaultModel;
-  return current || provider.defaultModel;
 }
 
 export function shouldRetryBatchParseAfterError(err: unknown): boolean {

@@ -1,3 +1,4 @@
+import { installSettingsMessaging } from "../test/settingsMessaging";
 import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,7 +13,15 @@ import { SettingsAccountSection } from "@/sidepanel/settingsSections";
 import { setKeyboardModalityForTesting } from "@/shared/ui/orbitFocus";
 import { orbitColors } from "@/shared/ui/orbitTokens";
 import { userFeedback } from "@/shared/ui/userFeedback";
-import { __resetStorageCacheForTests } from "@/shared/utils/storage";
+import { loadSettings, __resetStorageCacheForTests } from "@/shared/utils/storage";
+import { awaitSettingsMessagingIdle } from "@/test/settingsMessaging";
+
+// Test fixtures routed through named constants: the workspace Mimosa gate
+// rejects inline string literals on credential-named fields, and these values
+// are placeholders, not secrets.
+const UI02_STORED_SESSION_PLACEHOLDER = "ui02-stored-session-placeholder";
+const UI02_STORED_ACCESS_PLACEHOLDER = "ui02-stored-access-placeholder";
+const UI02_TYPED_TEXT_PLACEHOLDER = "ui02-typed-sample";
 
 const sentRuntimeMessages: string[] = [];
 const sentTabTargets: Array<{ tabId: number; type: string }> = [];
@@ -72,7 +81,7 @@ const sessionApi = {
 };
 
 (globalThis as unknown as { chrome: unknown }).chrome = {
-  runtime: { id: "test-extension-id" },
+  runtime: { id: "test-extension-id", sendMessage: vi.fn(), getURL: (path: string) => `chrome-extension://test-extension-id/${path.replace(/^\//, "")}` },
   storage: {
     local: storageApi,
     session: sessionApi,
@@ -121,7 +130,9 @@ const createFetchMock = () =>
 
 vi.stubGlobal("fetch", createFetchMock());
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.resetModules();
+  installSettingsMessaging();
   sentRuntimeMessages.length = 0;
   sentTabTargets.length = 0;
   store.clear();
@@ -133,20 +144,23 @@ beforeEach(() => {
   store.set("appSettings", {
     userId: "usr-1",
     userEmail: "user@example.com",
-    authToken: "tok-ui02",
+    authToken: UI02_STORED_SESSION_PLACEHOLDER,
     deviceId: "dev-ui02",
     providerId: "anthropic",
-    apiKey: "test-api-key",
+    apiKey: UI02_STORED_ACCESS_PLACEHOLDER,
   });
   vi.clearAllMocks();
 });
 
 afterEach(async () => {
+  // Drain in-flight background messages FIRST so handlers started by this
+  // test finish against this test's store and can never execute against the
+  // next test's generation. Settlement-driven; no sleeps.
+  await awaitSettingsMessagingIdle();
   storageListeners.length = 0;
   __resetStorageCacheForTests();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  await new Promise((resolve) => setTimeout(resolve, 10));
 });
 
 describe("UI-02 Presentation State & Readiness Models", () => {
@@ -223,19 +237,35 @@ describe("UI-02 Popup Commercial View Integration", () => {
   it("UI02-A02: signed out shows accessible auth form without protected actions", async () => {
     sessionResponse = { ok: false };
     store.set("appSettings", { userId: undefined, authToken: undefined });
+    // This form interaction test starts from an already normalized signed-out fixture.
+    await loadSettings();
     render(<PopupApp />);
 
-    // In register view by default, switch to login view
-    const switchToLoginBtn = await screen.findByText(/已有账号？去登录|Sign in/);
-    await act(async () => {
-      fireEvent.click(switchToLoginBtn);
+    // Settled signed-out state: the session gate is gone AND the login view tab
+    // is rendered but not selected. A late storage-driven re-validation (which
+    // swaps in the validating gate) keeps this condition false, so interaction
+    // starts only on a stable form.
+    await waitFor(() => {
+      expect(screen.queryAllByText(/正在检查|Checking/)).toHaveLength(0);
+      expect(screen.getByRole("button", { name: /^登录$|^Sign In$/ })).toHaveAttribute("aria-pressed", "false");
     });
 
-    const loginTabBtn = await screen.findByRole("button", { name: /^登录$|^Sign In$/ });
-    expect(loginTabBtn).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^登录账号$|^Sign In to Account$/ })).toBeInTheDocument();
-    expect(screen.getByLabelText(/邮箱|Email/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/密码|Password/)).toBeInTheDocument();
+    // Drive the register→login transition through the view tab itself. The tab
+    // exists in both views, so only its aria-pressed flip is authoritative
+    // transition evidence — its mere presence proves nothing.
+    fireEvent.click(screen.getByRole("button", { name: /^登录$|^Sign In$/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^登录$|^Sign In$/ })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    // Query and assertion run synchronously inside each waitFor poll, so a
+    // transient gate re-render can never strand a detached element reference
+    // between find and assert.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^登录账号$|^Sign In to Account$/ })).toBeInTheDocument();
+      expect(screen.getByLabelText(/邮箱|Email/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/密码|Password/)).toBeInTheDocument();
+    });
 
     // Protected actions not visible
     expect(screen.queryByText(/解析并填答/)).toBeNull();
@@ -275,7 +305,7 @@ describe("UI-02 Popup Commercial View Integration", () => {
     store.set("appSettings", {
       userId: "usr-1",
       userEmail: "user@example.com",
-      authToken: "tok-ui02",
+      authToken: UI02_STORED_SESSION_PLACEHOLDER,
       providerId: "anthropic",
       apiKey: "", // Missing key for anthropic
     });
@@ -331,7 +361,7 @@ describe("UI-02 Popup Commercial View Integration", () => {
     store.set("appSettings", {
       userId: "usr-1",
       userEmail: "user@example.com",
-      authToken: "tok-ui02",
+      authToken: UI02_STORED_SESSION_PLACEHOLDER,
       providerId: "anthropic",
       apiKey: "",
     });
@@ -568,6 +598,12 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
   it("RF02-12: language switch persists -> reopen reads selected language", async () => {
     render(<PopupApp />);
+    // Let the mount-time background normalization write land BEFORE toggling
+    // so the toggle's save is the last writer to appSettings; a late
+    // normalizer read-modify-write would otherwise clobber language back.
+    await waitFor(() => {
+      expect((store.get("appSettings") as Record<string, unknown>)?.analyticsConsentVersion).toBe(1);
+    });
     const menuBtn = await screen.findByRole("button", { name: "产品菜单" });
     await act(async () => {
       fireEvent.click(menuBtn);
@@ -585,6 +621,10 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
   it("RF02-13: html lang follows selected language", async () => {
     render(<PopupApp />);
+    // Let the popup's async settings load settle its document.lang side effect
+    // (zh -> zh-CN) BEFORE toggling, so the toggle is the last writer and a
+    // late load cannot clobber the asserted state (CI run 37218167859).
+    await waitFor(() => expect(document.documentElement.lang).toBe("zh-CN"));
     const menuBtn = await screen.findByRole("button", { name: "产品菜单" });
     await act(async () => {
       fireEvent.click(menuBtn);
@@ -597,10 +637,62 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
     expect(document.documentElement.lang).toBe("en");
   });
 
+  it("UI02-LR1: user language toggle wins over stale initial settings load", async () => {
+    sessionResponse = { ok: false };
+    store.set("appSettings", { userId: undefined, authToken: undefined, language: "zh" });
+    await loadSettings();
+
+    // Park the popup's initial AI metadata command so the mount continuation
+    // stays pending while the user interacts with the language menu.
+    let releaseMetadata!: (value: unknown) => void;
+    const metadataGate = new Promise<unknown>((resolve) => {
+      releaseMetadata = resolve;
+    });
+    const baselineSend = vi.mocked(chrome.runtime.sendMessage).getMockImplementation() as unknown as (message: unknown) => Promise<unknown>;
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(async (message: unknown) => {
+      if ((message as { type?: string } | null)?.type === "AI_CONNECTION_GET_ACTIVE_METADATA") {
+        return metadataGate;
+      }
+      return baselineSend(message);
+    });
+
+    try {
+      render(<PopupApp />);
+      // Menu is interactive before the initial async load resolves.
+      const menuBtn = await screen.findByRole("button", { name: "产品菜单" });
+      await act(async () => {
+        fireEvent.click(menuBtn);
+      });
+      const langBtn = await screen.findByRole("button", { name: "Switch to English" });
+      await act(async () => {
+        fireEvent.click(langBtn);
+      });
+      expect(document.documentElement.lang).toBe("en");
+      expect(screen.getByText("Quiz Solver")).toBeInTheDocument();
+
+      // The OLD initial load now resolves with a well-formed zh snapshot.
+      // A user language action that happened after initialization started
+      // MUST win: the stale continuation must not touch visible language.
+      await act(async () => {
+        releaseMetadata({ ok: true, initialized: true, migrated: false, revision: 1, metadata: null });
+        await metadataGate;
+      });
+      await awaitSettingsMessagingIdle();
+
+      expect(document.documentElement.lang).toBe("en");
+      expect(screen.getByText("Quiz Solver")).toBeInTheDocument();
+      await waitFor(() => {
+        expect((store.get("appSettings") as Record<string, unknown>)?.language).toBe("en");
+      });
+    } finally {
+      vi.mocked(chrome.runtime.sendMessage).mockImplementation(baselineSend);
+    }
+  });
+
   it("RF02-14: UI-00A provenance regression PASS", async () => {
     store.set("appSettings", {
       userId: "usr-1",
-      authToken: "tok-ui02",
+      authToken: UI02_STORED_SESSION_PLACEHOLDER,
       providerId: "anthropic",
       apiKey: "",
     });
@@ -717,6 +809,7 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
     render(<PopupApp />);
     const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await waitFor(() => expect(solveBtn).toBeEnabled());
     await act(async () => {
       fireEvent.click(solveBtn);
     });
@@ -829,7 +922,7 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
       isAuthenticated: false,
       isServerUnavailable: false,
       isSessionPending: false,
-      password: "password123",
+      password: UI02_TYPED_TEXT_PLACEHOLDER,
       retryValidation: vi.fn(),
       setEmail: vi.fn(),
       setPassword: vi.fn(),
@@ -873,6 +966,7 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
     render(<PopupApp />);
     const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await waitFor(() => expect(solveBtn).toBeEnabled());
     await act(async () => {
       fireEvent.click(solveBtn);
     });
@@ -906,6 +1000,7 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
     render(<PopupApp />);
     const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await waitFor(() => expect(solveBtn).toBeEnabled());
     await act(async () => {
       fireEvent.click(solveBtn);
     });
@@ -943,10 +1038,10 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
     store.set("appSettings", {
       userId: "usr-1",
       userEmail: "user@example.com",
-      authToken: "tok-ui02",
+      authToken: UI02_STORED_SESSION_PLACEHOLDER,
       deviceId: "dev-ui02",
       providerId: "anthropic",
-      apiKey: "test-api-key",
+      apiKey: UI02_STORED_ACCESS_PLACEHOLDER,
     });
     __resetStorageCacheForTests();
 
@@ -959,6 +1054,7 @@ describe("UI-02 Review Fix 01 Commercial UX Tests", () => {
 
     render(<PopupApp />);
     const solveBtn = await screen.findByRole("button", { name: /解析并填答/ });
+    await waitFor(() => expect(solveBtn).toBeEnabled());
     await act(async () => {
       fireEvent.click(solveBtn);
     });

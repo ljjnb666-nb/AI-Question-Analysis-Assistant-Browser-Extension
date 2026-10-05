@@ -1,7 +1,6 @@
 import type { HistoryEntry, ParseResult, QuestionBlock, QuestionType } from "@/shared/types";
 import { hasHighCoveragePreviewText, inferVisualNeed, looksFormulaOrDiagramHeavy } from "@/shared/ai/routeDecision";
 import { isParseResultFillAuthoritative } from "@/shared/ai/parseResultAuthority";
-import { getProvider } from "@/shared/utils/parseRouter";
 import type { parseQuestion } from "@/shared/utils/parseRouter";
 import { splitAnswerParts } from "./answerText";
 
@@ -153,35 +152,6 @@ export function looksNonChoiceStem(text: string): boolean {
 export function hasStructuredPoints(text: string): boolean {
   const normalized = String(text || "");
   return /(\(\s*\d+\s*\)|（\s*\d+\s*）|[①②③④⑤⑥])/u.test(normalized);
-}
-
-export function buildAutoSolveReviewSettings<T extends { providerId: string; apiModel: string }>(
-  settings: T,
-): T & { apiModel: string; preferredRoute: "auto" } {
-  const reviewModel = pickAutoSolveReviewModel(settings.providerId, settings.apiModel);
-  return {
-    ...settings,
-    apiModel: reviewModel,
-    preferredRoute: "auto" as const,
-  };
-}
-
-export function pickAutoSolveReviewModel(providerId: string, currentModel: string): string {
-  const current = String(currentModel || "").trim();
-  const provider = getProvider(providerId);
-  const preferredByProvider: Partial<Record<string, string>> = {
-    anthropic: "claude-opus-4.8",
-    openai: "gpt-5.5",
-    gemini: "gemini-2.5-pro",
-    qwen: "qwen3-vl-plus",
-    zhipu: "glm-5v-turbo",
-    minimax: "MiniMax-M3",
-    ollama: "qwen3-vl",
-  };
-  const preferred = preferredByProvider[provider.id] || provider.defaultModel;
-  if (provider.models.includes(preferred) && preferred !== current) return preferred;
-  if (provider.defaultModel && provider.defaultModel !== current) return provider.defaultModel;
-  return current || provider.defaultModel;
 }
 
 export function getAutoSolveFingerprint(block: QuestionBlock): string {

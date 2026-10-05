@@ -1,9 +1,10 @@
+import { installSettingsMessaging } from "../../test/settingsMessaging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS } from "../types";
 import { __resetStorageCacheForTests, loadSettings, saveSettings, CURRENT_ANALYTICS_CONSENT_VERSION } from "./storage";
 import { __resetAnalyticsForTests, flushAnalytics, getSessionLog, getStoredLog, logEvent } from "./analytics";
 import { loginWithEmail } from "./auth";
-import { parseQuestion } from "./parseRouter";
+import { parseConfiguredQuestion as parseQuestion } from "../../test/aiConnectionFixture";
 import type { QuestionBlock } from "../types";
 
 // Mock values are assembled at runtime so security scanners do not mistake
@@ -43,6 +44,7 @@ describe("optional analytics privacy boundary", () => {
     __resetAnalyticsForTests();
     stored = {};
     installStorage();
+    installSettingsMessaging();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
   });
 
@@ -194,7 +196,7 @@ describe("optional analytics privacy boundary", () => {
       questionType: "single_choice", answer: "B", confidence: 0.9, briefExplanation: "Two", detailedExplanation: "1+1=2",
     }) } }] }), { status: 200, headers: { "Content-Type": "application/json" } }));
 
-    const result = await parseQuestion(block, { ...DEFAULT_SETTINGS, providerId: "openai", apiKey: "provider-key" });
+    const result = await parseQuestion(block, { ...DEFAULT_SETTINGS, ...{ providerId: "openai" as const, apiKey: "provider-key" } });
     await flushAnalytics();
 
     expect(result.answer).toBe("B");

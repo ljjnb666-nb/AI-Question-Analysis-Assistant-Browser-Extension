@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { logoutAccount } from "@/shared/utils/auth";
-import { getProvider, getProviderShortName } from "@/shared/ai/providers";
+import { sendAIConnectionCommand } from "@/shared/utils/aiConnectionClient";
+import { getProviderShortName } from "@/shared/ai/providers";
 import { useAuthSession } from "@/shared/auth/useAuthSession";
 import {
   clearProtectedWorkOwner,
@@ -256,30 +257,23 @@ export const SidePanelApp: React.FC = () => {
   }, [session, setAuthStatus, setAutoSolveProgress, setIsAuthenticated, setIsAutoSolving, setIsBatchFilling, setIsBatchParsing, setIsDetecting, setIsFullPageScan, setIsRetryingRisky, setScanProgress, setSessionRejected, setTab, setUserEmail]);
 
   useEffect(() => {
-    loadSettings().then((settings) => {
-      setUiLang((settings.language ?? "zh") as UILang);
-      if (settings.providerId) {
-        const configuredProvider = getProvider(settings.providerId);
-        setProviderName(getProviderShortName(settings.providerId) || configuredProvider.name);
-      } else {
-        setProviderName(undefined);
-      }
-    });
+    const refreshProvider = () => void sendAIConnectionCommand({ type: "AI_CONNECTION_GET_ACTIVE_METADATA" }).then(response => {
+      setProviderName(response.metadata ? getProviderShortName(response.metadata.presetId) : undefined);
+    }).catch(() => setProviderName(undefined));
+    loadSettings().then(settings => setUiLang(settings.language));
+    refreshProvider();
 
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
-      if (areaName !== "local" || !changes.appSettings?.newValue) return;
+      if (areaName !== "local") return;
+      if (changes.aiConnectionState) refreshProvider();
+      if (!changes.appSettings?.newValue) return;
 
       const nextSettings = changes.appSettings.newValue as {
         language?: UILang;
-        providerId?: string;
       };
 
       if (nextSettings.language === "zh" || nextSettings.language === "en") {
         setUiLang(nextSettings.language);
-      }
-      if (nextSettings.providerId) {
-        const configuredProvider = getProvider(nextSettings.providerId);
-        setProviderName(getProviderShortName(nextSettings.providerId) || configuredProvider.name);
       }
       // Auth-related storage changes are intentionally NOT converted into an
       // authenticated state here: the session coordinator owns that authority.

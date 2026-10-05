@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext, resolveExtensionId } from "./helpers/extensionHarness";
+import { seedAIConnection, routeCanonicalOpenAIToFixture } from "./helpers/aiConnectionHarness";
 
 type DriverWindow = Window & typeof globalThis & { __events: string[]; __candidateBlocks: unknown[] };
 
@@ -506,17 +507,16 @@ async function startProductionAutoSolve(context: BrowserContext, extensionId: st
     });
   });
 
-  await driver.evaluate((baseOrigin: string) => chrome.storage.local.set({
+  await driver.evaluate(() => chrome.storage.local.set({
     appSettings: {
-      providerId: "custom",
-      apiKey: "e2e-key",
-      apiModel: "qwen3-vl",
       preferredRoute: "text",
       language: "en",
       enableAnalytics: false,
-      customBaseUrl: `${baseOrigin}/api`,
     },
-  }), origin);
+  }));
+
+  await routeCanonicalOpenAIToFixture(context, origin);
+  await seedAIConnection(driver, { presetId: "openai", selectedModelId: "gpt-5.5", credential: { action: "REPLACE", value: "e2e-key" } });
 
   const tabId = await driver.evaluate(async (baseOrigin: string) => {
     const [tab] = await chrome.tabs.query({ url: `${baseOrigin}/*` });

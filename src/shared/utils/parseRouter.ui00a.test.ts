@@ -1,7 +1,12 @@
+import type { AIConnectionScenarioFixture } from "@/test/aiConnectionFixture";
+import { parseConfiguredQuestion as parseQuestion } from "../../test/aiConnectionFixture";
+import { beforeEach } from "vitest";
+import { installMemoryStorage } from "../../test/memoryStorage";
+beforeEach(() => { installMemoryStorage(); });
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, type AppSettings, type QuestionBlock } from "../types";
+import { DEFAULT_SETTINGS, type QuestionBlock } from "../types";
 import { isProviderNotConfiguredError, ProviderNotConfiguredError } from "./parseAttemptErrors";
-import { mockParse, parseQuestion } from "./parseRouter";
+import { mockParse } from "./parseRouter";
 
 // Assembled at runtime so security scanners do not mistake this synthetic
 // test fixture for a committed credential.
@@ -17,12 +22,12 @@ const block: QuestionBlock = {
   source: "manual_capture",
 };
 
-function providerSettings(overrides: Partial<AppSettings> = {}): AppSettings {
+function providerSettings(overrides: Partial<AIConnectionScenarioFixture> = {}): AIConnectionScenarioFixture {
   return { ...DEFAULT_SETTINGS, providerId: "anthropic", apiKey: TEST_API_KEY, apiModel: "claude-opus-4.8", ...overrides };
 }
 
 /** OpenAI-compatible custom endpoint so the stubbed response shape matches. */
-function customProviderSettings(overrides: Partial<AppSettings> = {}): AppSettings {
+function customProviderSettings(overrides: Partial<AIConnectionScenarioFixture> = {}): AIConnectionScenarioFixture {
   return {
     ...providerSettings(overrides),
     providerId: "custom",

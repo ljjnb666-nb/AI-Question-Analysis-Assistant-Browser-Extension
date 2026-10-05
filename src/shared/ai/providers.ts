@@ -1,3 +1,4 @@
+/** Display/UI catalog only. Runtime uses AIConnectionState and connection-domain presets. */
 export type ProviderId =
   | "anthropic"
   | "openai"
@@ -17,7 +18,7 @@ export interface ProviderConfig {
   defaultModel: string;
   models: string[];
   supportsVision: boolean;
-  /** Media capabilities are consumed by the solver package adapters. */
+  /** Catalog display metadata; runtime transport assessment is independently authoritative. */
   supportsRemoteImageUrl: boolean;
   supportsInlineBase64: boolean;
   supportsMultipleImages: boolean;
@@ -186,16 +187,6 @@ export const PROVIDER_SHORT_NAMES: Record<ProviderId, string> = {
 
 export function getProvider(id: string): ProviderConfig {
   return PROVIDERS.find((provider) => provider.id === id) ?? PROVIDERS[0];
-}
-
-/** The custom endpoint's wire protocol, not its editable default, owns media semantics. */
-export function resolveEffectiveProviderMediaCapabilities(
-  provider: ProviderConfig,
-  customProviderProtocol?: "openai" | "anthropic",
-): ProviderConfig {
-  if (provider.id !== "custom" || customProviderProtocol !== "anthropic") return provider;
-  const anthropic = getProvider("anthropic");
-  return { ...provider, supportsRemoteImageUrl: anthropic.supportsRemoteImageUrl, supportsInlineBase64: anthropic.supportsInlineBase64, supportsMultipleImages: anthropic.supportsMultipleImages };
 }
 
 export function getProviderShortName(id: string): string {

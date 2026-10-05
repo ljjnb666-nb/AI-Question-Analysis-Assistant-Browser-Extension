@@ -113,7 +113,7 @@ export const SectionCard: React.FC<{
   </section>
 );
 
-export interface UiButtonProps {
+export interface UiButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children: React.ReactNode;
   onClick: (e?: React.MouseEvent<HTMLButtonElement>) => void;
   primary?: boolean;
@@ -131,6 +131,7 @@ export const UiButton: React.FC<UiButtonProps> = ({
   disabled,
   style,
   className,
+  ...rest
 }) => {
   const variant: OrbitButtonVariant = danger
     ? "danger"
@@ -145,6 +146,7 @@ export const UiButton: React.FC<UiButtonProps> = ({
       onClick={onClick}
       style={style}
       className={className}
+      {...rest}
     >
       {children}
     </OrbitButton>

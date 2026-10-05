@@ -267,3 +267,9 @@ describe("UI04A bound workspace dispatch", () => {
     vi.unstubAllGlobals();
   });
 });
+
+// This suite isolates auth/owner choreography with a configured AI readiness fixture.
+vi.mock("@/shared/utils/aiSolvePreferences", async () => {
+  const storage = await import("@/shared/utils/storage");
+  return { loadParsePreferences: async () => { const { preferredRoute, language } = await storage.loadSettings(); return { preferredRoute, language }; }, getAIConnectionReadiness: async () => ({ ready: true }), getRuntimeCaptureInfo: async () => ({ name: "anthropic", baseUrl: "https://api.anthropic.com", supportsVision: true }) };
+});

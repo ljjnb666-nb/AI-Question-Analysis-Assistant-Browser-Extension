@@ -1,5 +1,5 @@
-import type { AppSettings, QuestionBlock, RouteUsed } from "../types";
-import { getProvider } from "./providers";
+import type { QuestionBlock, RouteUsed } from "../types";
+import type { ParsePreferences } from "./runtimeRequest";
 import { analyzeImageContent, detectVisualKeywords } from "../utils/ocr";
 import { buildPreferredQuestionText } from "./questionPromptText";
 
@@ -50,16 +50,13 @@ const MULTI_PART_PATTERNS = /(\(\s*\d+\s*\)|（\s*\d+\s*）)/;
 const OPTION_PATTERNS = /(?:^|\s)([A-F])[\.\):：、]/g;
 const FORMULA_PATTERNS = /(g\(s\)|h\(s\)|g\(j|h\(j|f\(x\)|jw|σ|theta|λ|μ|∑|∫|∞|\/|=\s*0|s\^|nyquist|bode|根轨迹|奈奎斯特|伯德图)/i;
 
-export async function decideRoute(block: QuestionBlock, settings: AppSettings): Promise<RouteUsed> {
-  const provider = getProvider(settings.providerId ?? "anthropic");
+export async function decideRoute(block: QuestionBlock, settings: ParsePreferences): Promise<RouteUsed> {
   const canonicalMedia = Boolean(block.mediaAssets?.some((asset) => (asset.ownership.role === "stem" || asset.ownership.role === "option") && !asset.ownership.reasons.includes("CROSS_QUESTION_OWNER")));
   const questionText = buildPreferredQuestionText(block);
   if (settings.preferredRoute !== "auto") {
-    if (!provider.supportsVision) return "text";
     return settings.preferredRoute;
   }
 
-  if (!provider.supportsVision) return "text";
   // Correctness first: canonical option/stem evidence must never be silently
   // discarded merely because OCR text happens to be long.
   if (canonicalMedia) return "vision";

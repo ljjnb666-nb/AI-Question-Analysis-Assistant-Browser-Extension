@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, type ParseResult, type QuestionBlock } from "@/shared/types";
-import { parseWithTieredRetries } from "./parseRetryPipeline";
+import { parseWithStreamingFallback, parseWithTieredRetries } from "./parseRetryPipeline";
 
 const block: QuestionBlock = { id: "q", bbox: { x: 0, y: 0, width: 1, height: 1 }, previewText: "q", hasImage: false, questionTypeGuess: "single_choice", confidence: 1, source: "auto_dom" };
 const result: ParseResult = { blockId: "q", questionType: "single_choice", answer: "A", confidence: 1, briefExplanation: "", detailedExplanation: "", recognizedText: "q", routeUsed: "hybrid" };
@@ -26,4 +26,23 @@ describe("parseWithTieredRetries", () => {
     expect(retryDeps.logEvent).toHaveBeenCalledWith("manual_parse_attempt_started", expect.any(Object));
     expect(retryDeps.logEvent).not.toHaveBeenCalledWith("manual_parse_attempt_succeeded", expect.any(Object));
   });
+});
+
+
+it("RF01 old timed-out callback and late result cannot update current streaming UI", async () => {
+  let oldStream!: (partial: string) => void;
+  let resolveOld!: (value: ParseResult) => void;
+  const onStream = vi.fn();
+  let calls = 0;
+  const parseQuestion = vi.fn((_block, _settings, callback) => {
+    if (++calls === 1) { oldStream = callback; return new Promise<ParseResult>(resolve => { resolveOld = resolve; }); }
+    oldStream("late old stream"); resolveOld(result);
+    return Promise.resolve({ ...result, answer: "B" });
+  });
+  let timers = 0;
+  const final = await parseWithStreamingFallback(block, DEFAULT_SETTINGS, onStream, 100, {
+    parseQuestion, logEvent: vi.fn(), setStreamingText: vi.fn(),
+    withTimeout: promise => ++timers === 1 ? Promise.reject(new Error("stream_timeout")) : promise,
+  });
+  expect(onStream).not.toHaveBeenCalled(); expect(final.answer).toBe("B");
 });

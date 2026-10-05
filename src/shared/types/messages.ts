@@ -1,3 +1,5 @@
+import type { AppSettingsCommand } from "./appSettingsMessages";
+import type { AIConnectionCommand } from "./aiConnectionMessages";
 import type { BoundingBox } from "./capture";
 import type { ParseResult } from "./parse";
 import type { QuestionBlock } from "./question";
@@ -6,6 +8,8 @@ import type { CandidateSnapshot, FloatingWindowState } from "./ui";
 import type { CandidateWorkspaceSnapshot } from "./workspace";
 
 export type MessageType =
+  | AppSettingsCommand["type"]
+  | AIConnectionCommand["type"]
   | "GET_CANDIDATE_WORKSPACE_SNAPSHOT"
   | "CANDIDATE_WORKSPACE_UPDATED"
   | "START_MANUAL_CAPTURE"
@@ -240,6 +244,8 @@ export interface AutoSolveDoneMsg extends BaseMessage {
 }
 
 export type ExtMessage =
+  | AppSettingsCommand
+  | AIConnectionCommand
   | { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT"; expectedUrl: string }
   | { type: "CANDIDATE_WORKSPACE_UPDATED"; snapshot: CandidateWorkspaceSnapshot }
   | StartManualCaptureMsg

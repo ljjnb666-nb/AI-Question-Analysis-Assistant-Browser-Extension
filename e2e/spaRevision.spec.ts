@@ -5,6 +5,7 @@ import type { BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext, resolveExtensionId } from "./helpers/extensionHarness";
 import { startTestAnalyticsBackend, type TestAnalyticsBackend } from "./helpers/authUiHarness";
+import { seedAIConnection, routeCanonicalOpenAIToFixture, fulfillOpenAIJSON } from "./helpers/aiConnectionHarness";
 
 // Mock values are assembled at runtime so security scanners do not mistake
 // synthetic test fixtures for committed credentials.
@@ -156,17 +157,15 @@ async function startProductionAutoSolve(context: BrowserContext, extensionId: st
     parseHistory: [],
     analyticsLog: [],
     appSettings: {
-      providerId: "custom",
-      apiKey: "e2e-key",
-      apiModel: "qwen3-vl",
       preferredRoute: "text",
       language: "en",
       enableAnalytics: analyticsOptIn,
       analyticsConsentVersion: 1,
       analyticsBaseUrl: baseOrigin,
-      customBaseUrl: `${baseOrigin}/api`,
     },
   }), { baseOrigin: origin, analyticsOptIn });
+  await routeCanonicalOpenAIToFixture(context, origin);
+  await seedAIConnection(driver, { presetId: "openai", selectedModelId: "gpt-5.5", credential: { action: "REPLACE", value: "e2e-key" } });
 
   const tabId = await driver.evaluate(async (baseOrigin: string) => {
     const [tab] = await chrome.tabs.query({ url: `${baseOrigin}/*` });
@@ -212,11 +211,7 @@ async function installControlledProvider(context: BrowserContext) {
       optionSelections: { B: true },
       warning: null,
     });
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ choices: [{ message: { content: modelJson } }] }),
-    });
+    await fulfillOpenAIJSON(route, { choices: [{ message: { content: modelJson } }] });
   });
 
   return {
@@ -249,23 +244,21 @@ async function seedAuthenticatedSidePanel(driver: Page, backend: TestAnalyticsBa
   // Server-authoritative UI sessions require REAL credentials: the sidepanel
   // validates the seeded session against the real analytics backend before
   // unlocking the workspace, so a synthetic token can never unlock it.
-  await driver.evaluate(async ({ analyticsBaseUrl, userId, userEmail, authToken, key }) => chrome.storage.local.set({
+  await driver.evaluate(async ({ analyticsBaseUrl, userId, userEmail, authToken }) => chrome.storage.local.set({
     parseHistory: [],
     analyticsLog: [],
     appSettings: {
       userId,
       userEmail,
       authToken,
-      providerId: "deepseek",
-      apiKey: key,
-      apiModel: "deepseek-v4-flash",
       preferredRoute: "text",
       language: "en",
       enableAnalytics: true,
       analyticsConsentVersion: 1,
       analyticsBaseUrl,
     },
-  }), { analyticsBaseUrl: backend.baseUrl, userId: account.userId, userEmail: account.email, authToken: account.authToken, key: PHASE8A_E2E_KEY });
+  }), { analyticsBaseUrl: backend.baseUrl, userId: account.userId, userEmail: account.email, authToken: account.authToken });
+  await seedAIConnection(driver, { presetId: "deepseek", selectedModelId: "deepseek-v4-flash", credential: { action: "REPLACE", value: PHASE8A_E2E_KEY } });
 }
 
 async function sendDetectToTab(driver: Page, tabId: number) {

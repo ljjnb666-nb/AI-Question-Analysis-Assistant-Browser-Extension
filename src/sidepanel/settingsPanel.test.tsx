@@ -59,16 +59,12 @@ describe("SettingsTab", () => {
 
   it("keeps the newly selected provider instead of resetting from storage", async () => {
     vi.spyOn(storage, "loadSettings").mockResolvedValue({
-      providerId: "anthropic",
-      apiKey: "",
-      apiModel: "claude-opus-4.8",
       preferredRoute: "auto",
       language: "zh",
       enableAnalytics: true,
       analyticsConsentVersion: 1,
       deviceId: "dev-1",
       analyticsBaseUrl: DEFAULT_ANALYTICS_BASE_URL,
-      customProviderProtocol: "openai",
     });
 
     render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
@@ -86,8 +82,7 @@ describe("SettingsTab", () => {
 
   it("shows a saved bilingual analytics consent control", async () => {
     vi.spyOn(storage, "loadSettings").mockResolvedValue({
-      providerId: "anthropic", apiKey: "", apiModel: "claude-opus-4.8", preferredRoute: "auto", language: "zh",
-      enableAnalytics: false, analyticsConsentVersion: 1, deviceId: "dev-1", analyticsBaseUrl: DEFAULT_ANALYTICS_BASE_URL,
+      preferredRoute: "auto", language: "zh", enableAnalytics: false, analyticsConsentVersion: 1, deviceId: "dev-1", analyticsBaseUrl: DEFAULT_ANALYTICS_BASE_URL,
     });
     const save = vi.spyOn(storage, "saveSettings").mockResolvedValue(undefined);
     const view = render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
@@ -103,3 +98,5 @@ describe("SettingsTab", () => {
     expect(screen.getByText(/Turning analytics off does not affect account sign-in or AI parsing/)).toBeInTheDocument();
   });
 });
+
+vi.mock("@/shared/utils/aiConnectionClient", () => ({ getAIConnectionEditorView: vi.fn(async () => ({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages", hasCredential: false })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));
