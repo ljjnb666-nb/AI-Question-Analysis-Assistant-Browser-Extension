@@ -529,13 +529,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: orbitColors.text.primary }}>
-              {isEn ? "Step 1: Sign in to your account" : "第一步：登录账号"}
+              {isEn ? "Step 1: Sign in to your account" : "第一步：账号登录"}
             </span>
           </div>
           <p style={{ margin: 0, fontSize: 12, color: orbitColors.text.secondary, lineHeight: 1.5 }}>
             {isEn
               ? "An account is required to use Quiz Solver and sync settings. Please sign in below to unlock provider setup."
-              : "使用 Quiz Solver 需要登录账号。请在下方登录或注册账号，完成后将自动进入服务商配置。"}
+              : "使用 Quiz Solver 需要验证身份。请在下方登录或注册，完成后将自动进入服务商配置。"}
           </p>
         </section>
         <SettingsAccountSection auth={auth} authText={authText} isEn={isEn} rejectedSessionHint={sessionRejectedHint} />
@@ -589,13 +589,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: orbitColors.text.primary }}>
-                {isEn ? "Step 1: Sign in to your account" : "第一步：登录账号"}
+                {isEn ? "Step 1: Sign in to your account" : "第一步：账号登录"}
               </span>
             </div>
             <p style={{ margin: 0, fontSize: 12, color: orbitColors.text.secondary, lineHeight: 1.5 }}>
               {isEn
                 ? "An account is required to use Quiz Solver and sync settings. Please sign in below to unlock provider setup."
-                : "使用 Quiz Solver 需要登录账号。请在下方登录或注册账号，完成后将自动进入服务商配置。"}
+                : "使用 Quiz Solver 需要验证身份。请在下方登录或注册，完成后将自动进入服务商配置。"}
             </p>
           </section>
         ) : !isCommittedConfigured ? (

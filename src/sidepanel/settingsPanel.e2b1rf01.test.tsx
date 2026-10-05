@@ -134,6 +134,9 @@ describe("E2B2A committed Save-and-Test", () => {
   });
   it("TEST-03 changing provider commits B before B's request", async () => {
     render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="catalog" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true"),
+    );
     fireEvent.click(await screen.findByRole("button", { name: /^OpenAI/ }));
     fireEvent.change(await screen.findByPlaceholderText(getProvider("openai").keyPlaceholder), { target: { value: newKey } });
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {

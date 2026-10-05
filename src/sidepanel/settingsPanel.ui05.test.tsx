@@ -1191,7 +1191,7 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
     render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} authOnly={true} />);
 
     expect(screen.getByTestId("first-run-signin-section")).toBeInTheDocument();
-    expect(screen.getByText("第一步：登录账号")).toBeInTheDocument();
+    expect(screen.getByText("第一步：账号登录")).toBeInTheDocument();
     expect(screen.getByText("插件访问账号")).toBeInTheDocument();
     expect(screen.getByTestId("settings-account-section")).toBeInTheDocument();
     mockAuth.isAuthenticated = true;
