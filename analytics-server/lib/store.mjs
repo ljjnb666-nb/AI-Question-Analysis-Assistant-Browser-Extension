@@ -136,6 +136,10 @@ function getDatabase() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS idx_analytics_events_ts ON analytics_events(ts);
+    CREATE INDEX IF NOT EXISTS idx_analytics_events_event_ts ON analytics_events(event, ts);
+    CREATE INDEX IF NOT EXISTS idx_analytics_events_device_ts ON analytics_events(deviceId, ts);
+    CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(createdAt);
   `);
 
   // Schema migration must complete before anything that reads or writes
@@ -343,6 +347,16 @@ export function loadDb() {
 export function resetDbConnectionForTests() {
   dbInstance?.close?.();
   dbInstance = null;
+}
+
+export function runAdminReadStorage({ sqlite, json }) {
+  if (typeof sqlite !== "function" || typeof json !== "function") {
+    throw new TypeError("sqlite and json admin read handlers are required");
+  }
+  if (SQLITE_SUPPORTED) {
+    return sqlite(getDatabase());
+  }
+  return json(loadDbFromJsonFile());
 }
 
 export function saveDb(db) {

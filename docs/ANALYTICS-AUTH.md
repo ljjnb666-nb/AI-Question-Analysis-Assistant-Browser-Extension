@@ -40,10 +40,18 @@ set PUBLIC_BASE_URL=https://analytics.082515.online
 - `GET /admin/login`: native, POST-only admin login document
 - `POST /admin/login`: exchanges a form-encoded admin token for a short-lived browser session
 - `GET /admin/api/session`: cookie-only browser Admin session authority; the long-lived admin bearer is not accepted here
+- `GET /admin/api/overview?days=14`: cookie-only aggregate overview. Telemetry activity is explicitly labeled `opt_in_only`; registered-account counts are labeled separately as `all_registered_accounts`
+- `GET /admin/api/analytics/timeseries?days=14`: dense daily opt-in activity / observed install / parse outcome series plus separately scoped account registrations
+- `GET /admin/api/analytics/providers?days=14`: observed parse outcomes grouped by provider; this is not a current-user provider configuration distribution
+- `GET /admin/api/analytics/errors?days=14`: observed terminal parse errors grouped by allowlisted error category
+- `GET /admin/api/analytics/versions?days=14`: latest observed extension version per opt-in device inside the requested window, not raw event frequency
+- `GET /admin/api/analytics/latency?days=14`: observed parse-outcome duration samples and daily averages
 - `GET /admin`, `/admin/analytics`, `/admin/users`, `/admin/system`, `/admin/audit`: independent Admin Console application routes
 - `POST /admin/logout`: invalidates the current browser admin session
 
 The dashboard submits the admin token in the login request body. Admin tokens in query parameters are never accepted. Browser sessions expire after 8 hours, are limited to 64 active sessions, and use an `HttpOnly`, `SameSite=Strict` cookie scoped to `/admin` (`Secure` in production). Admin login allows 10 attempts per IP in a 15-minute window. If `ANALYTICS_ADMIN_TOKEN` is blank or missing, protected routes fail closed with `503 ADMIN_AUTH_NOT_CONFIGURED` and do not load analytics data.
+
+The Admin analytics read APIs accept only integer `days` values from 1 through 90 (default 14), matching the analytics retention window. They are session-cookie only, use a separate bounded read-rate namespace, return aggregate allowlisted DTOs, and do not serialize raw database rows. Missing denominators are represented as `null` ratios rather than fabricated zero-percent results.
 
 ## Storage
 

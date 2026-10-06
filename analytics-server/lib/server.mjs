@@ -22,6 +22,7 @@ import {
   hasAdminAuthority,
   requireConfiguredAdminToken,
 } from "./admin-console.mjs";
+import { createAdminAnalyticsReadModels } from "./admin-read-model.mjs";
 
 const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
 const EXTENSION_ORIGIN_PREFIX = "chrome-extension://";
@@ -134,6 +135,7 @@ export function createAnalyticsHandler(options = {}) {
     adminSessionTtlMs = ADMIN_SESSION_TTL_MS,
     adminSessionMaxCount = ADMIN_SESSION_MAX_COUNT,
     createAdminSessionToken,
+    adminReadModelsImpl,
     recordAnalyticsEventImpl = recordAnalyticsEventInStorage,
     registerUserImpl = registerUserWithVerificationCodeInStorage,
     revokeUserSessionImpl = revokeUserSessionInStorage,
@@ -164,6 +166,7 @@ export function createAnalyticsHandler(options = {}) {
     createFixedWindowRateLimiter({ now: nowImpl, maxBuckets: rateLimitMaxBuckets });
   const rateLimiters = {
     adminLogin: createNamespaceLimiter(),
+    adminRead: createNamespaceLimiter(),
     sendCodeIp: createNamespaceLimiter(),
     sendCodeEmail: createNamespaceLimiter(),
     registerIp: createNamespaceLimiter(),
@@ -175,11 +178,14 @@ export function createAnalyticsHandler(options = {}) {
     timeseriesIp: createNamespaceLimiter(),
   };
 
+  const adminReadModels = adminReadModelsImpl || createAdminAnalyticsReadModels({ now: nowImpl });
   const adminPortal = createAdminPortal({
     adminToken,
     adminSessions,
     adminSessionTtlMs,
     adminLoginRateLimiter: rateLimiters.adminLogin,
+    adminReadRateLimiter: rateLimiters.adminRead,
+    adminReadModels,
     nowImpl,
     publicBaseUrl,
   });
