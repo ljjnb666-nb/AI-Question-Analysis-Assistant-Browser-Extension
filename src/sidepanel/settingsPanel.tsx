@@ -28,6 +28,7 @@ import {
 } from "./settingsSections";
 import {
   deriveSetupStatus,
+  sameAuthoritySnapshot,
   type AuthorityValidationReceipt,
   type SetupStatus,
 } from "./settingsTypes";
@@ -94,8 +95,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   const [committedTestResult, setCommittedTestResult] = useState<UserFeedback | null>(null);
   const [validatedReceipt, setValidatedReceipt] = useState<AuthorityValidationReceipt | null>(null);
   const [activeMetadata, setActiveMetadata] = useState<ConnectionMetadata | null>(null);
-  const [isConnectionAuthorityAvailable, setIsConnectionAuthorityAvailable] = useState(true);
-  const [isEditorAvailable, setIsEditorAvailable] = useState(true);
+  const [isConnectionAuthorityAvailable, setIsConnectionAuthorityAvailable] = useState(false);
+  const [isEditorAvailable, setIsEditorAvailable] = useState(false);
   const [deviceId, setDeviceId] = useState("");
   const authorityRefreshGenerationRef = useRef(0);
 
@@ -134,30 +135,41 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     let disposed = false;
     const generation = ++authorityRefreshGenerationRef.current;
 
-    void Promise.all([
-      loadSettings().catch(() => null),
-      getAIConnectionEditorView().catch(() => null),
-      getAIConnectionActiveMetadata().catch(() => null),
-    ]).then(([settings, editor, meta]) => {
+    // Coherent authority loading: settings run in parallel with the coherent
+    // authority read window (metaBefore → editor → metaAfter).
+    const settingsP = loadSettings().catch(() => null);
+
+    const coherentLoad = async () => {
+      // Phase 1: metaBefore
+      const metaBefore = await getAIConnectionActiveMetadata().catch(() => null);
       if (disposed || generation !== authorityRefreshGenerationRef.current) return;
 
-      if (settings) {
-        setRoute(settings.preferredRoute ?? "auto");
-        setAnalyticsBaseUrl(settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL);
-        setEnableAnalytics(settings.enableAnalytics ?? false);
-        setLang(settings.language ?? initialLangRef.current ?? "zh");
-        setDeviceId(settings.deviceId ?? "");
-      }
-
-      if (meta) {
-        setActiveMetadata(meta);
-        setIsConnectionAuthorityAvailable(true);
-      } else {
+      if (!metaBefore) {
+        // No authority at all
         setActiveMetadata(null);
         setIsConnectionAuthorityAvailable(false);
+        setIsEditorAvailable(false);
+        setStoredSnapshot(null);
+        return;
       }
 
-      if (editor) {
+      // Phase 2: editor (may fail independently)
+      const editor = await getAIConnectionEditorView().catch(() => null);
+      if (disposed || generation !== authorityRefreshGenerationRef.current) return;
+
+      // Phase 3: metaAfter (coherence witness)
+      const metaAfter = await getAIConnectionActiveMetadata().catch(() => null);
+      if (disposed || generation !== authorityRefreshGenerationRef.current) return;
+
+      // Apply metadata: use metaAfter if available, else metaBefore
+      const effectiveMeta = metaAfter ?? metaBefore;
+      setActiveMetadata(effectiveMeta);
+      setIsConnectionAuthorityAvailable(true);
+
+      // Coherence gate: only accept editor when authority didn't change mid-read
+      const isCoherent = sameAuthoritySnapshot(metaBefore, metaAfter);
+
+      if (editor && isCoherent) {
         setIsEditorAvailable(true);
         const initialPresetId = (editor.presetId as ProviderId) || "anthropic";
         const initialProtocol = (editor.presetId === "custom" && editor.protocol === "anthropic_messages" ? "anthropic" : "openai") as "openai" | "anthropic";
@@ -171,6 +183,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           setSavedOnce(true);
         }
 
+        const settings = await settingsP;
+        if (disposed || generation !== authorityRefreshGenerationRef.current) return;
         setStoredSnapshot({
           presetId: initialPresetId,
           selectedModelId: editor.selectedModelId,
@@ -182,20 +196,34 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           enableAnalytics: settings?.enableAnalytics ?? false,
           language: settings?.language ?? "zh",
         });
-      } else if (meta) {
+      } else {
+        // Editor failed or authority changed mid-read: Home gets metadata, editor stays unavailable
         setIsEditorAvailable(false);
-        const initialPresetId = (meta.presetId as ProviderId) || "anthropic";
-        setProviderId(initialPresetId);
-        setModel(meta.selectedModelId);
-        setHasCredential(meta.hasCredential);
+        const metaPresetId = (effectiveMeta.presetId as ProviderId) || "anthropic";
+        setProviderId(metaPresetId);
+        setModel(effectiveMeta.selectedModelId);
+        setHasCredential(effectiveMeta.hasCredential);
         setCustomUrl("");
         setApiKey("");
         setStoredSnapshot(null);
-      } else {
-        setIsEditorAvailable(false);
-        setStoredSnapshot(null);
       }
-    }).catch(() => {
+    };
+
+    void (async () => {
+      try {
+        const settings = await settingsP;
+        if (disposed || generation !== authorityRefreshGenerationRef.current) return;
+        if (settings) {
+          setRoute(settings.preferredRoute ?? "auto");
+          setAnalyticsBaseUrl(settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL);
+          setEnableAnalytics(settings.enableAnalytics ?? false);
+          setLang(settings.language ?? initialLangRef.current ?? "zh");
+          setDeviceId(settings.deviceId ?? "");
+        }
+      } catch { /* settings load failure is non-fatal */ }
+    })();
+
+    void coherentLoad().catch(() => {
       if (disposed || generation !== authorityRefreshGenerationRef.current) return;
       setActiveMetadata(null);
       setIsConnectionAuthorityAvailable(false);
@@ -219,74 +247,101 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         setIsConnectionAuthorityAvailable(false);
         setIsEditorAvailable(false);
 
-        void Promise.all([
-          loadSettings().catch(() => null),
-          getAIConnectionEditorView().catch(() => null),
-          getAIConnectionActiveMetadata().catch(() => null),
-        ]).then(([settings, editor, freshMeta]) => {
-          if (generation !== authorityRefreshGenerationRef.current) return;
+        // Coherent authority refresh: sequential metaBefore → editor → metaAfter
+        const settingsP = loadSettings().catch(() => null);
 
-          if (freshMeta) {
-            setActiveMetadata(freshMeta);
+        void (async () => {
+          try {
+            const settings = await settingsP;
+            if (generation !== authorityRefreshGenerationRef.current) return;
+            if (settings) {
+              setRoute(settings.preferredRoute ?? "auto");
+              setAnalyticsBaseUrl(settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL);
+              setEnableAnalytics(settings.enableAnalytics ?? false);
+            }
+          } catch { /* settings load failure is non-fatal */ }
+        })();
+
+        void (async () => {
+          try {
+            // Phase 1: metaBefore
+            const metaBefore = await getAIConnectionActiveMetadata().catch(() => null);
+            if (generation !== authorityRefreshGenerationRef.current) return;
+
+            if (!metaBefore) {
+              // Total refresh failure
+              setIsEditorAvailable(false);
+              setIsConnectionAuthorityAvailable(false);
+              setActiveMetadata(null);
+              setStoredSnapshot(null);
+              setApiKey("");
+              setIsCredentialCleared(false);
+              setTestResult(null);
+              return;
+            }
+
+            // Phase 2: editor
+            const editor = await getAIConnectionEditorView().catch(() => null);
+            if (generation !== authorityRefreshGenerationRef.current) return;
+
+            // Phase 3: metaAfter (coherence witness)
+            const metaAfter = await getAIConnectionActiveMetadata().catch(() => null);
+            if (generation !== authorityRefreshGenerationRef.current) return;
+
+            const effectiveMeta = metaAfter ?? metaBefore;
+            setActiveMetadata(effectiveMeta);
             setIsConnectionAuthorityAvailable(true);
-          } else {
+
+            // Coherence gate: only accept editor when authority didn't change mid-read
+            const isCoherent = sameAuthoritySnapshot(metaBefore, metaAfter);
+
+            if (editor && isCoherent) {
+              setIsEditorAvailable(true);
+              const nextPresetId = (editor.presetId as ProviderId) || "anthropic";
+              const nextProtocol = (editor.presetId === "custom" && editor.protocol === "anthropic_messages" ? "anthropic" : "openai") as "openai" | "anthropic";
+              setProviderId(nextPresetId);
+              setModel(editor.selectedModelId);
+              setHasCredential(editor.hasCredential);
+              setCustomUrl(editor.endpointOverride ?? "");
+              setCustomProtocol(nextProtocol);
+              setApiKey("");
+              setIsCredentialCleared(false);
+              setTestResult(null);
+
+              const settings = await settingsP;
+              if (generation !== authorityRefreshGenerationRef.current) return;
+              setStoredSnapshot({
+                presetId: nextPresetId,
+                selectedModelId: editor.selectedModelId,
+                endpointOverride: editor.endpointOverride,
+                protocol: nextProtocol,
+                hasCredential: editor.hasCredential,
+                preferredRoute: settings?.preferredRoute ?? "auto",
+                analyticsBaseUrl: settings?.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL,
+                enableAnalytics: settings?.enableAnalytics ?? false,
+                language: settings?.language ?? "zh",
+              });
+            } else {
+              // Editor failed or authority changed mid-read
+              setIsEditorAvailable(false);
+              const nextPresetId = (effectiveMeta.presetId as ProviderId) || "anthropic";
+              setProviderId(nextPresetId);
+              setModel(effectiveMeta.selectedModelId);
+              setHasCredential(effectiveMeta.hasCredential);
+              setCustomUrl("");
+              setApiKey("");
+              setIsCredentialCleared(false);
+              setTestResult(null);
+              setStoredSnapshot(null);
+            }
+          } catch {
+            if (generation !== authorityRefreshGenerationRef.current) return;
             setActiveMetadata(null);
             setIsConnectionAuthorityAvailable(false);
-          }
-
-          if (editor) {
-            setIsEditorAvailable(true);
-            const nextPresetId = (editor.presetId as ProviderId) || "anthropic";
-            const nextProtocol = (editor.presetId === "custom" && editor.protocol === "anthropic_messages" ? "anthropic" : "openai") as "openai" | "anthropic";
-            setProviderId(nextPresetId);
-            setModel(editor.selectedModelId);
-            setHasCredential(editor.hasCredential);
-            setCustomUrl(editor.endpointOverride ?? "");
-            setCustomProtocol(nextProtocol);
-            setApiKey("");
-            setIsCredentialCleared(false);
-            setTestResult(null);
-
-            setStoredSnapshot({
-              presetId: nextPresetId,
-              selectedModelId: editor.selectedModelId,
-              endpointOverride: editor.endpointOverride,
-              protocol: nextProtocol,
-              hasCredential: editor.hasCredential,
-              preferredRoute: settings?.preferredRoute ?? "auto",
-              analyticsBaseUrl: settings?.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL,
-              enableAnalytics: settings?.enableAnalytics ?? false,
-              language: settings?.language ?? "zh",
-            });
-          } else if (freshMeta) {
-            // Metadata succeeded but editor view failed
             setIsEditorAvailable(false);
-            const nextPresetId = (freshMeta.presetId as ProviderId) || "anthropic";
-            setProviderId(nextPresetId);
-            setModel(freshMeta.selectedModelId);
-            setHasCredential(freshMeta.hasCredential);
-            setCustomUrl("");
-            setApiKey("");
-            setIsCredentialCleared(false);
-            setTestResult(null);
             setStoredSnapshot(null);
-          } else {
-            // Total refresh failure
-            setIsEditorAvailable(false);
-            setIsConnectionAuthorityAvailable(false);
-            setActiveMetadata(null);
-            setStoredSnapshot(null);
-            setApiKey("");
-            setIsCredentialCleared(false);
-            setTestResult(null);
           }
-        }).catch(() => {
-          if (generation !== authorityRefreshGenerationRef.current) return;
-          setActiveMetadata(null);
-          setIsConnectionAuthorityAvailable(false);
-          setIsEditorAvailable(false);
-          setStoredSnapshot(null);
-        });
+        })();
       }
     };
     if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {

@@ -50,6 +50,31 @@ export function computeAuthorityValidationFingerprint(
   ].join(":");
 }
 
+/**
+ * Frontend-only coherence check: returns true only when two metadata snapshots
+ * represent the exact same backend authority revision (id, connectionRevision,
+ * credentialRevision, and optional validation.generation).
+ *
+ * Used inside the coherent-read window (metaBefore → editor → metaAfter) to
+ * detect mid-refresh authority changes that the generation fence alone cannot
+ * catch.
+ */
+export function sameAuthoritySnapshot(
+  a: { id: string; connectionRevision: number; credentialRevision?: number; validation?: { generation?: number } } | null | undefined,
+  b: { id: string; connectionRevision: number; credentialRevision?: number; validation?: { generation?: number } } | null | undefined,
+): boolean {
+  if (!a || !b) return false;
+  if (a.id !== b.id) return false;
+  if (a.connectionRevision !== b.connectionRevision) return false;
+  if ((a.credentialRevision ?? 0) !== (b.credentialRevision ?? 0)) return false;
+  // If both expose validation.generation, require equality
+  if (
+    a.validation?.generation !== undefined &&
+    b.validation?.generation !== undefined &&
+    a.validation.generation !== b.validation.generation
+  ) return false;
+  return true;
+}
 
 /**
  * Derives current setup status based on runtime provider configuration,

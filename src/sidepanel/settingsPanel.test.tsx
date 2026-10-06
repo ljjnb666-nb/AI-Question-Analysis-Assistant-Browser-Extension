@@ -83,6 +83,8 @@ describe("SettingsTab", () => {
     const save = vi.spyOn(storage, "saveSettings").mockResolvedValue(undefined);
     const view = render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
+    // RF07: bootstrap is fail-closed; the editor enables only after the coherent authority read resolves
+    await waitFor(() => expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true"));
     const toggle = await screen.findByRole("checkbox", { name: "开启可选使用情况统计" });
     expect(screen.getByText(/关闭统计不会影响账号登录或 AI 解析功能/)).toBeInTheDocument();
     fireEvent.click(toggle);
@@ -95,4 +97,17 @@ describe("SettingsTab", () => {
   });
 });
 
-vi.mock("@/shared/utils/aiConnectionClient", () => ({ getAIConnectionActiveMetadata: vi.fn(async () => null), getAIConnectionEditorView: vi.fn(async () => ({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages", hasCredential: false })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));
+// RF07: active metadata resolves coherently so the fail-closed bootstrap enables the editor
+vi.mock("@/shared/utils/aiConnectionClient", () => ({
+  getAIConnectionActiveMetadata: vi.fn(async () => ({
+    id: "conn-anthropic",
+    presetId: "anthropic",
+    selectedModelId: "claude-opus-4.8",
+    connectionRevision: 1,
+    credentialRevision: 0,
+    hasCredential: false,
+    validation: { status: "untested" },
+  })),
+  getAIConnectionEditorView: vi.fn(async () => ({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages", hasCredential: false })),
+  updateActiveAIConnection: vi.fn(async () => ({ ok: true })),
+}));

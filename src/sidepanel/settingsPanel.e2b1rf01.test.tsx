@@ -118,6 +118,8 @@ describe("E2B2A committed Save-and-Test", () => {
 
   it("TEST-01/02 blank visible key keeps stored credential and runs a text request without React plaintext", async () => {
     render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
+    // RF07: bootstrap is fail-closed; wait until the coherent authority read completed before testing
+    await waitFor(() => expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true"));
     await waitFor(() => expect(screen.getByPlaceholderText(getProvider("anthropic").keyPlaceholder)).toBeInTheDocument());
     expect(screen.getByPlaceholderText(getProvider("anthropic").keyPlaceholder)).toHaveValue("");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {

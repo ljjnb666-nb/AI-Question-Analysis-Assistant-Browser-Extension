@@ -246,6 +246,13 @@ function Fixture() {
         const toggle = document.querySelector('button[aria-label*="API Key"]') as HTMLButtonElement;
         if (toggle) toggle.click();
       } else if (state === "config-saved-not-tested") {
+        // RF07: editor is fail-closed until the coherent authority bootstrap
+        // resolves; wait for the panel readiness signal before saving.
+        const panel = document.querySelector('[data-testid="settings-panel"]');
+        for (let i = 0; i < 200; i++) {
+          if (panel?.getAttribute("data-ready") === "true") break;
+          await new Promise((r) => requestAnimationFrame(r));
+        }
         const saveBtn = Array.from(document.querySelectorAll("button")).find(
           (b) => b.textContent?.includes("保存设置") || b.textContent?.includes("Save Settings"),
         );
