@@ -163,7 +163,7 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     expect(res.statusCode).toBe(503);
     expect(parsePayload(res)).toEqual({
       ok: false,
-      error: { code: "ADMIN_AUTH_NOT_CONFIGURED" },
+      error: "ADMIN_AUTH_NOT_CONFIGURED",
     });
   });
 
@@ -207,7 +207,7 @@ describe("Phase 11B1-R1 admin portal authority", () => {
       origin: "https://evil.example",
     });
     expect(rejected.res.statusCode).toBe(403);
-    expect(parsePayload(rejected.res).error.code).toBe("ADMIN_ORIGIN_REJECTED");
+    expect(parsePayload(rejected.res).error).toBe("ADMIN_ORIGIN_REJECTED");
     expect(rejected.res.headers["Set-Cookie"]).toBeUndefined();
 
     const accepted = await login(portal, "real-admin-secret", {
@@ -309,7 +309,7 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     const { res } = await login(portal);
     expect(res.statusCode).toBe(429);
     expect(res.headers["Retry-After"]).toBe("5");
-    expect(parsePayload(res).error.code).toBe("ADMIN_RATE_LIMITED");
+    expect(parsePayload(res).error).toBe("ADMIN_RATE_LIMITED");
     expect(res.headers["Set-Cookie"]).toBeUndefined();
   });
 });
