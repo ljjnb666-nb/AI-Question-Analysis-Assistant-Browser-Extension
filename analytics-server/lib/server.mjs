@@ -204,7 +204,10 @@ export function createAnalyticsHandler(options = {}) {
         return;
       }
 
-      if (await adminPortal.handle(req, res, url, ip)) {
+      if (
+        (url.pathname === "/" || url.pathname.startsWith("/admin")) &&
+        (await adminPortal.handle(req, res, url, ip))
+      ) {
         return;
       }
 
@@ -378,7 +381,13 @@ export function createAnalyticsHandler(options = {}) {
 
       sendJson(req, res, 404, { ok: false, error: "not found" });
     } catch (err) {
-      const statusCode = err instanceof HttpError ? err.statusCode : 400;
+      const externalStatusCode = Number(err?.statusCode);
+      const statusCode =
+        err instanceof HttpError
+          ? err.statusCode
+          : Number.isInteger(externalStatusCode) && externalStatusCode >= 400 && externalStatusCode <= 599
+            ? externalStatusCode
+            : 400;
       sendJson(req, res, statusCode, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   };
