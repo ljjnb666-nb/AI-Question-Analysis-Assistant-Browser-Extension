@@ -443,7 +443,7 @@ describe("analytics handler", () => {
     const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
     const signedIn = await login(handler);
     const { res } = await invoke(handler, {
-      url: "/admin/assets/%2e%2e/%2e%2e/analytics-server/lib/server.mjs",
+      url: "/admin/assets/..%2F..%2Fanalytics-server%2Flib%2Fserver.mjs",
       headers: { cookie: sessionCookie(signedIn.res) },
     });
     expect(res.statusCode).toBe(404);
