@@ -117,9 +117,13 @@ function compareAscending(left, right) {
 }
 
 function observedDuration(event) {
-  const direct = Number(event?.duration);
-  if (Number.isFinite(direct) && direct >= 0) return direct;
-  const nested = Number(safeEventData(event).duration);
+  if (event?.duration != null) {
+    const direct = Number(event.duration);
+    if (Number.isFinite(direct) && direct >= 0) return direct;
+  }
+  const nestedValue = safeEventData(event).duration;
+  if (nestedValue == null) return null;
+  const nested = Number(nestedValue);
   return Number.isFinite(nested) && nested >= 0 ? nested : null;
 }
 
@@ -511,8 +515,15 @@ function queryJsonVersions(db, days, now) {
     const current = latestByDevice.get(event.deviceId);
     const ts = ensureFiniteNumber(event.ts);
     const receivedAt = ensureFiniteNumber(event.receivedAt);
-    if (!current || ts > current.ts || (ts === current.ts && receivedAt > current.receivedAt)) {
-      latestByDevice.set(event.deviceId, { version, ts, receivedAt });
+    const eventId = String(event.eventId || "");
+    const isNewer =
+      !current ||
+      ts > current.ts ||
+      (ts === current.ts &&
+        (receivedAt > current.receivedAt ||
+          (receivedAt === current.receivedAt && eventId > current.eventId)));
+    if (isNewer) {
+      latestByDevice.set(event.deviceId, { version, ts, receivedAt, eventId });
     }
   }
   const counts = new Map();
