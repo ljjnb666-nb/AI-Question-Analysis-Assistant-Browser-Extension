@@ -309,7 +309,7 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     const { res } = await login(portal);
     expect(res.statusCode).toBe(429);
     expect(res.headers["Retry-After"]).toBe("5");
-    expect(parsePayload(res).error).toBe("ADMIN_RATE_LIMITED");
+    expect(parsePayload(res).error).toBe("rate limit exceeded; retry after 5s");
     expect(res.headers["Set-Cookie"]).toBeUndefined();
   });
 });
