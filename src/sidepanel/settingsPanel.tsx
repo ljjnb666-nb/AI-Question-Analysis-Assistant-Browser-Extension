@@ -162,41 +162,63 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     }).catch(() => { /* Failed initialization leaves the form unconfigured; no legacy fallback. */ });
 
     void getAIConnectionActiveMetadata().then((meta) => {
-      if (!disposed && meta) {
-        setActiveMetadata(meta);
+      if (!disposed) {
+        setActiveMetadata(meta ?? null);
       }
-    }).catch(() => {});
+    }).catch(() => {
+      if (!disposed) {
+        setActiveMetadata(null);
+      }
+    });
     return () => {
       disposed = true;
     };
   }, []);
 
-  // Invalidate Ready and refresh committed summary whenever authoritative aiConnectionState changes in storage
+  // Invalidate Ready, clear active metadata immediately, and reconcile editor draft whenever authoritative aiConnectionState changes in storage
   useEffect(() => {
     const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
       if (area === "local" && changes.aiConnectionState) {
         setValidatedReceipt(null);
         setCommittedTestResult(null);
-        void Promise.all([loadSettings(), getAIConnectionEditorView(), getAIConnectionActiveMetadata()]).then(([settings, editor, freshMeta]) => {
+        setActiveMetadata(null);
+        void Promise.all([
+          loadSettings().catch(() => null),
+          getAIConnectionEditorView().catch(() => null),
+          getAIConnectionActiveMetadata().catch(() => null),
+        ]).then(([settings, editor, freshMeta]) => {
           if (freshMeta) {
             setActiveMetadata(freshMeta);
+          } else {
+            setActiveMetadata(null);
           }
           if (editor) {
             const nextPresetId = (editor.presetId as ProviderId) || "anthropic";
             const nextProtocol = (editor.presetId === "custom" && editor.protocol === "anthropic_messages" ? "anthropic" : "openai") as "openai" | "anthropic";
+            setProviderId(nextPresetId);
+            setModel(editor.selectedModelId);
+            setHasCredential(editor.hasCredential);
+            setCustomUrl(editor.endpointOverride ?? "");
+            setCustomProtocol(nextProtocol);
+            setApiKey("");
+            setIsCredentialCleared(false);
+            setTestResult(null);
+
             setStoredSnapshot({
               presetId: nextPresetId,
               selectedModelId: editor.selectedModelId,
               endpointOverride: editor.endpointOverride,
               protocol: nextProtocol,
               hasCredential: editor.hasCredential,
-              preferredRoute: settings.preferredRoute ?? "auto",
-              analyticsBaseUrl: settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL,
-              enableAnalytics: settings.enableAnalytics ?? false,
-              language: settings.language ?? "zh",
+              preferredRoute: settings?.preferredRoute ?? "auto",
+              analyticsBaseUrl: settings?.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL,
+              enableAnalytics: settings?.enableAnalytics ?? false,
+              language: settings?.language ?? "zh",
             });
           }
-        }).catch(() => {});
+        }).catch(() => {
+          setActiveMetadata(null);
+        });
       }
     };
     if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
@@ -475,6 +497,19 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setCommittedTestResult(null);
     try {
       // INVARIANT: DO NOT call saveCurrentDraft! Unsaved editor drafts are never committed by Home retest.
+      const beforeMeta = await getAIConnectionActiveMetadata().catch(() => null);
+      if (!beforeMeta) {
+        setValidatedReceipt(null);
+        setActiveMetadata(null);
+        const feedback = userFeedback(
+          "error",
+          isEn ? "AI connection metadata unavailable." : "无法获取 AI 连接元数据。",
+        );
+        setCommittedTestResult(feedback);
+        setTestResult(feedback);
+        return;
+      }
+
       const readiness = await getAIConnectionReadiness();
       if (!readiness.ready) {
         const warningFeedback = userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), { code: readiness.code });
@@ -491,19 +526,51 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         source: "manual_capture",
       };
       const result = await parseQuestion(testBlock, { preferredRoute: "text", language: lang });
-      const freshMeta = await getAIConnectionActiveMetadata().catch(() => null);
-      if (!freshMeta) {
+      const afterMeta = await getAIConnectionActiveMetadata().catch(() => null);
+      if (!afterMeta) {
         setValidatedReceipt(null);
         setActiveMetadata(null);
-      } else {
-        setActiveMetadata(freshMeta);
-        setValidatedReceipt({
-          connectionId: freshMeta.id,
-          connectionRevision: freshMeta.connectionRevision,
-          credentialRevision: freshMeta.credentialRevision,
-          validationGeneration: freshMeta.validation?.generation,
-        });
+        const feedback = userFeedback(
+          "warning",
+          isEn ? "Configuration changed during test. Please re-test." : "测试期间配置已发生变化，请重新测试。",
+          { code: "CONFIGURATION_CHANGED" }
+        );
+        setCommittedTestResult(feedback);
+        setTestResult(feedback);
+        return;
       }
+
+      const isGenerationMatch =
+        beforeMeta.validation?.generation === undefined ||
+        afterMeta.validation?.generation === undefined ||
+        beforeMeta.validation.generation === afterMeta.validation.generation;
+
+      const isAuthorityMatch =
+        beforeMeta.id === afterMeta.id &&
+        beforeMeta.connectionRevision === afterMeta.connectionRevision &&
+        (beforeMeta.credentialRevision ?? 0) === (afterMeta.credentialRevision ?? 0) &&
+        isGenerationMatch;
+
+      if (!isAuthorityMatch) {
+        setValidatedReceipt(null);
+        setActiveMetadata(afterMeta);
+        const feedback = userFeedback(
+          "warning",
+          isEn ? "Configuration changed during test. Please re-test." : "测试期间配置已发生变化，请重新测试。",
+          { code: "CONFIGURATION_CHANGED" }
+        );
+        setCommittedTestResult(feedback);
+        setTestResult(feedback);
+        return;
+      }
+
+      setActiveMetadata(afterMeta);
+      setValidatedReceipt({
+        connectionId: afterMeta.id,
+        connectionRevision: afterMeta.connectionRevision,
+        credentialRevision: afterMeta.credentialRevision,
+        validationGeneration: afterMeta.validation?.generation,
+      });
 
       const routeLabel =
         result.routeUsed === "vision"
@@ -541,6 +608,20 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setTestResult(null);
     try {
       await saveCurrentDraft();
+
+      const beforeMeta = await getAIConnectionActiveMetadata().catch(() => null);
+      if (!beforeMeta) {
+        setValidatedReceipt(null);
+        setActiveMetadata(null);
+        const feedback = userFeedback(
+          "error",
+          isEn ? "AI connection metadata unavailable." : "无法获取 AI 连接元数据。",
+        );
+        setTestResult(feedback);
+        setCommittedTestResult(feedback);
+        return;
+      }
+
       const readiness = await getAIConnectionReadiness();
       if (!readiness.ready) {
         setTestResult(userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), { code: readiness.code }));
@@ -556,19 +637,51 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         source: "manual_capture",
       };
       const result = await parseQuestion(testBlock, { preferredRoute: "text", language: lang });
-      const freshMeta = await getAIConnectionActiveMetadata().catch(() => null);
-      if (!freshMeta) {
+      const afterMeta = await getAIConnectionActiveMetadata().catch(() => null);
+      if (!afterMeta) {
         setValidatedReceipt(null);
         setActiveMetadata(null);
-      } else {
-        setActiveMetadata(freshMeta);
-        setValidatedReceipt({
-          connectionId: freshMeta.id,
-          connectionRevision: freshMeta.connectionRevision,
-          credentialRevision: freshMeta.credentialRevision,
-          validationGeneration: freshMeta.validation?.generation,
-        });
+        const feedback = userFeedback(
+          "warning",
+          isEn ? "Configuration changed during test. Please re-test." : "测试期间配置已发生变化，请重新测试。",
+          { code: "CONFIGURATION_CHANGED" }
+        );
+        setTestResult(feedback);
+        setCommittedTestResult(feedback);
+        return;
       }
+
+      const isGenerationMatch =
+        beforeMeta.validation?.generation === undefined ||
+        afterMeta.validation?.generation === undefined ||
+        beforeMeta.validation.generation === afterMeta.validation.generation;
+
+      const isAuthorityMatch =
+        beforeMeta.id === afterMeta.id &&
+        beforeMeta.connectionRevision === afterMeta.connectionRevision &&
+        (beforeMeta.credentialRevision ?? 0) === (afterMeta.credentialRevision ?? 0) &&
+        isGenerationMatch;
+
+      if (!isAuthorityMatch) {
+        setValidatedReceipt(null);
+        setActiveMetadata(afterMeta);
+        const feedback = userFeedback(
+          "warning",
+          isEn ? "Configuration changed during test. Please re-test." : "测试期间配置已发生变化，请重新测试。",
+          { code: "CONFIGURATION_CHANGED" }
+        );
+        setTestResult(feedback);
+        setCommittedTestResult(feedback);
+        return;
+      }
+
+      setActiveMetadata(afterMeta);
+      setValidatedReceipt({
+        connectionId: afterMeta.id,
+        connectionRevision: afterMeta.connectionRevision,
+        credentialRevision: afterMeta.credentialRevision,
+        validationGeneration: afterMeta.validation?.generation,
+      });
 
       const routeLabel =
         result.routeUsed === "vision"

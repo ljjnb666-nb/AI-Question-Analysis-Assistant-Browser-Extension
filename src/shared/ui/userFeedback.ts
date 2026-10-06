@@ -28,6 +28,7 @@ export function userFeedback(
 }
 
 export const AUTHORITY_LOST = "AUTHORITY_LOST" as const;
+export const CONFIGURATION_CHANGED = "CONFIGURATION_CHANGED" as const;
 
 /**
  * Central known-code mapping (UI-00B PART B). Every entry gives the natural
@@ -132,6 +133,11 @@ const KNOWN_CODE_COPY: Record<string, { zh: string; en: string; tone: UserFeedba
   USER_STATE_SNAPSHOT_UNAVAILABLE: {
     zh: "无法获取题目当前状态，请重新识别后再填写。",
     en: "Could not read the question's current state. Re-detect it before filling.",
+    tone: "warning",
+  },
+  CONFIGURATION_CHANGED: {
+    zh: "测试期间配置已发生变化，请重新测试。",
+    en: "Configuration changed during test. Please re-test.",
     tone: "warning",
   },
 };

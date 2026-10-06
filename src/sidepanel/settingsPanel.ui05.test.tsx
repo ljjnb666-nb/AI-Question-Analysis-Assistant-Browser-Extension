@@ -1097,7 +1097,22 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
       ok: true,
       metadata: { id: "conn-ui05-test", hasCredential: true } as any,
     } as any);
-    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue(null as any);
+    vi.mocked(getAIConnectionActiveMetadata)
+      .mockResolvedValueOnce({
+        id: "conn-ui05-test",
+        presetId: "anthropic",
+        connectionRevision: 1,
+        credentialRevision: 1,
+        hasCredential: true,
+      } as any)
+      .mockResolvedValueOnce({
+        id: "conn-ui05-test",
+        presetId: "anthropic",
+        connectionRevision: 1,
+        credentialRevision: 1,
+        hasCredential: true,
+      } as any)
+      .mockResolvedValue(null as any);
 
     render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
@@ -1605,5 +1620,183 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
 
     // Assert no Chinese characters in the guide text
     expect(guide.textContent).not.toMatch(/[\u4e00-\u9fa5]/);
+  });
+
+  // UI-05 Review Fix 05: Regressions
+  it("AUTHORITY_SWITCH_DURING_TEST_PREVENTS_FALSE_READY: mock authority change during parseQuestion fails validation closed", async () => {
+    setupConnectionMock({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", hasCredential: true });
+    const metaA = {
+      id: "conn-a",
+      presetId: "anthropic",
+      selectedModelId: "claude-opus-4.8",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      hasCredential: true,
+      validation: { status: "never_tested" },
+    };
+    const metaB = {
+      id: "conn-b",
+      presetId: "openai",
+      selectedModelId: "gpt-4o",
+      connectionRevision: 2,
+      credentialRevision: 2,
+      hasCredential: true,
+      validation: { status: "never_tested" },
+    };
+
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue(metaA as any);
+
+    // During parseQuestion execution, backend authority switches to B
+    vi.mocked(parseQuestion).mockImplementation(async () => {
+      vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue(metaB as any);
+      return createMockParseResult();
+    });
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true");
+    });
+
+    // Initial Ready banner absent
+    expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+
+    // Trigger test from Home
+    fireEvent.click(screen.getByTestId("home-test-connection-btn"));
+
+    await waitFor(() => {
+      expect(parseQuestion).toHaveBeenCalled();
+    });
+
+    // Expected: Ready banner ABSENT (B must NOT inherit successful validation from A)
+    expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+    // Feedback displays configuration changed
+    expect(screen.getByText("测试期间配置已发生变化，请重新测试。")).toBeInTheDocument();
+    // Status reflects need to re-test / error
+    const summaryCard = screen.getByTestId("settings-home-summary-card");
+    expect(within(summaryCard).getByText("连接失败")).toBeInTheDocument();
+  });
+
+  it("EXTERNAL_AUTHORITY_CHANGE_REFRESH_FAILURE_FAILS_CLOSED: storage change clears active metadata and refresh failure never stays Ready", async () => {
+    setupConnectionMock({ presetId: "anthropic", hasCredential: true });
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      hasCredential: true,
+      validation: {
+        status: "validated",
+        generation: 1,
+        validatedConnectionRevision: 1,
+        validatedCredentialRevision: 1,
+      },
+    } as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+    });
+
+    // Mock refresh failure / null metadata on external storage change
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue(null as any);
+
+    // Emit aiConnectionState storage change
+    const listeners = vi.mocked(chrome.storage.onChanged.addListener).mock.calls.map(([fn]) => fn);
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ aiConnectionState: { oldValue: {}, newValue: {} } as any }, "local");
+      }
+    });
+
+    // Expected: Ready immediately disappears and active metadata is not honored
+    await waitFor(() => {
+      expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+    });
+    const summaryCard = screen.getByTestId("settings-home-summary-card");
+    expect(within(summaryCard).getByText("需要重新测试")).toBeInTheDocument();
+  });
+
+  it("EXTERNAL_AUTHORITY_CHANGE_RECONCILES_EDITOR_DRAFT: external authority change to OpenAI reconciles editor and prevents reverting on save", async () => {
+    setupConnectionMock({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", hasCredential: true });
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      selectedModelId: "claude-opus-4.8",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      hasCredential: true,
+    } as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true");
+    });
+
+    // External authority changes to OpenAI
+    vi.mocked(getAIConnectionEditorView).mockResolvedValue({
+      presetId: "openai",
+      selectedModelId: "gpt-5.4-mini",
+      endpointOverride: null,
+      protocol: "openai_chat_completions",
+      hasCredential: true,
+    });
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-openai",
+      presetId: "openai",
+      selectedModelId: "gpt-5.4-mini",
+      connectionRevision: 2,
+      credentialRevision: 2,
+      hasCredential: true,
+    } as any);
+
+    // Emit aiConnectionState storage change
+    const listeners = vi.mocked(chrome.storage.onChanged.addListener).mock.calls.map(([fn]) => fn);
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ aiConnectionState: { oldValue: {}, newValue: {} } as any }, "local");
+      }
+    });
+
+    // Home summary updates to OpenAI
+    await waitFor(() => {
+      const summaryCard = screen.getByTestId("settings-home-summary-card");
+      expect(within(summaryCard).getByText("OpenAI (GPT)")).toBeInTheDocument();
+      expect(within(summaryCard).getByText("gpt-5.4-mini")).toBeInTheDocument();
+    });
+
+    // Open Editor
+    fireEvent.click(screen.getByTestId("home-edit-connection-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-editor-view")).not.toHaveAttribute("hidden");
+    });
+
+    // Editor shows OpenAI, authoritative model gpt-5.4-mini, credential saved, blank API key
+    const editorView = screen.getByTestId("settings-editor-view");
+    expect(within(editorView).getByText(/已保存密钥/)).toBeInTheDocument();
+    expect(screen.getByDisplayValue("gpt-5.4-mini")).toBeInTheDocument();
+    const apiKeyInput = screen.getByTestId("settings-api-key-input") as HTMLInputElement;
+    expect(apiKeyInput.value).toBe("");
+
+    // Save in editor: must NOT silently revert to Anthropic
+    vi.mocked(updateActiveAIConnection).mockClear();
+    const saveBtn = await screen.findByRole("button", { name: "保存设置" });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateActiveAIConnection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          presetId: "openai",
+          selectedModelId: "gpt-5.4-mini",
+          credential: { action: "KEEP" },
+        }),
+      );
+    });
+    expect(updateActiveAIConnection).not.toHaveBeenCalledWith(
+      expect.objectContaining({ presetId: "anthropic" }),
+    );
   });
 });

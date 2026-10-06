@@ -153,5 +153,26 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
   });
 });
 
-vi.mock("@/shared/utils/aiConnectionClient", () => ({ getAIConnectionActiveMetadata: vi.fn(async () => null), getAIConnectionEditorView: vi.fn(async () => ({ ...connectionFixture, selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages" })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/shared/utils/aiConnectionClient", () => ({
+  getAIConnectionActiveMetadata: vi.fn(async () => ({
+    id: "conn-ui00a-test",
+    presetId: connectionFixture.presetId,
+    connectionRevision: 1,
+    credentialRevision: connectionFixture.hasCredential ? 1 : 0,
+    hasCredential: Boolean(connectionFixture.hasCredential),
+    selectedModelId: "claude-opus-4.8",
+  })),
+  getAIConnectionEditorView: vi.fn(async () => ({ ...connectionFixture, selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages" })),
+  updateActiveAIConnection: vi.fn(async () => ({
+    ok: true,
+    metadata: {
+      id: "conn-ui00a-test",
+      presetId: connectionFixture.presetId,
+      connectionRevision: 1,
+      credentialRevision: connectionFixture.hasCredential ? 1 : 0,
+      hasCredential: Boolean(connectionFixture.hasCredential),
+      selectedModelId: "claude-opus-4.8",
+    },
+  })),
+}));
 vi.mock("@/shared/utils/aiSolvePreferences", () => ({ getAIConnectionReadiness: async () => connectionFixture.presetId === "ollama" || connectionFixture.hasCredential ? { ready: true } : { ready: false, code: "AI_CREDENTIAL_REQUIRED" } }));
