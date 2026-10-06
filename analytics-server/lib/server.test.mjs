@@ -388,6 +388,23 @@ describe("analytics handler", () => {
     }
   });
 
+  it("rejects cross-origin admin login before issuing any session", async () => {
+    const createAdminSessionToken = vi.fn(() => "must-not-be-issued");
+    const handler = createHandler({ createAdminSessionToken });
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/admin/login",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: "https://evil.example",
+      },
+      body: formBody("real-admin-secret"),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(parsePayload(res).error).toBe("ADMIN_ORIGIN_REJECTED");
+    expect(createAdminSessionToken).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid admin login without a cookie or admin data load", async () => {
     const loadDbImpl = vi.fn();
     const handler = createHandler({ loadDbImpl });
@@ -449,6 +466,22 @@ describe("analytics handler", () => {
     expect(res.statusCode).toBe(404);
     expect(parsePayload(res).error.code).toBe("ADMIN_RESOURCE_NOT_FOUND");
     expect(res.payload).not.toContain("analyticsHandler");
+  });
+
+  it("rejects cross-origin logout without revoking the live admin session", async () => {
+    const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
+    const signedIn = await login(handler);
+    const cookie = sessionCookie(signedIn.res);
+    const rejected = await invoke(handler, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: { cookie, origin: "https://evil.example" },
+    });
+    expect(rejected.res.statusCode).toBe(403);
+    expect(parsePayload(rejected.res).error).toBe("ADMIN_ORIGIN_REJECTED");
+
+    const session = await invoke(handler, { url: "/admin/api/session", headers: { cookie } });
+    expect(session.res.statusCode).toBe(200);
   });
 
   it("revokes the admin session on logout and clears the admin-path cookie", async () => {
