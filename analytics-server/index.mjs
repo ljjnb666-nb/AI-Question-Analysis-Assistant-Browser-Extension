@@ -1,6 +1,9 @@
 import { createServer } from "node:http";
 import { isMailerConfigured, sendVerificationCodeEmail } from "./lib/mailer.mjs";
 import { createAnalyticsHandler } from "./lib/server.mjs";
+import { assertProductionStorageAuthority } from "./lib/store.mjs";
+
+assertProductionStorageAuthority();
 
 const PORT = Number(process.env.ANALYTICS_PORT || 8787);
 const HOST = String(process.env.ANALYTICS_HOST || "0.0.0.0").trim() || "0.0.0.0";
