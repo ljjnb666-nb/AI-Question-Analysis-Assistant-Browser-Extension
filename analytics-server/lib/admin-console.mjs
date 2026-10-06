@@ -423,11 +423,14 @@ export function createAdminPortal({
         const statusCode = error instanceof AdminPortalError ? error.statusCode : 500;
         const code = stableAdminErrorCode(error);
         const headers = error?.retryAfter ? { "Retry-After": String(error.retryAfter) } : null;
+        const payload = pathname.startsWith("/admin/api/")
+          ? { ok: false, error: { code } }
+          : { ok: false, error: code };
         if (headers) {
           res.writeHead(statusCode, { ...adminHeaders("application/json; charset=utf-8"), ...headers });
-          res.end(JSON.stringify({ ok: false, error: { code } }));
+          res.end(JSON.stringify(payload));
         } else {
-          sendAdminJson(res, statusCode, { ok: false, error: { code } });
+          sendAdminJson(res, statusCode, payload);
         }
         return true;
       }
