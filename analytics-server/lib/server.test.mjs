@@ -333,39 +333,94 @@ describe("analytics handler", () => {
     expect(res.headers.Vary).toBe("Origin");
   });
 
-  it("fails closed when admin configuration is missing across all protected routes", async () => {
+  it("redirects the legacy root to the independent admin console without consuming query credentials", async () => {
+    const loadDbImpl = vi.fn();
+    const handler = createHandler({ loadDbImpl });
+    const { res } = await invoke(handler, { url: "/?adminToken=real-admin-secret" });
+    expect(res.statusCode).toBe(303);
+    expect(res.headers.Location).toBe("/admin");
+    expect(String(res.payload || "")).not.toContain("real-admin-secret");
+    expect(loadDbImpl).not.toHaveBeenCalled();
+  });
+
+  it("strips query credentials from every Admin GET surface", async () => {
+    const handler = createHandler();
+    for (const url of [
+      "/admin?adminToken=query-credential",
+      "/admin/login?adminToken=query-credential",
+      "/admin/api/session?adminToken=query-credential&next=1",
+    ]) {
+      const { res } = await invoke(handler, { url });
+      expect(res.statusCode, url).toBe(303);
+      expect(res.headers.Location, url).not.toContain("adminToken");
+      expect(res.headers.Location, url).not.toContain("query-credential");
+    }
+  });
+
+  it("fails closed when admin configuration is missing across protected admin and metrics routes", async () => {
     const loadDbImpl = vi.fn();
     const handler = createHandler({ adminToken: "", loadDbImpl });
-    for (const url of ["/", "/admin/data", "/analytics/summary", "/analytics/timeseries"]) {
+    for (const url of ["/admin/login", "/admin", "/admin/api/session", "/admin/data", "/analytics/summary", "/analytics/timeseries"]) {
       const { res } = await invoke(handler, { url });
       expect(res.statusCode, url).toBe(503);
-      expect(parsePayload(res).error).toBe("ADMIN_AUTH_NOT_CONFIGURED");
+      const payload = parsePayload(res);
+      expect(payload.error === "ADMIN_AUTH_NOT_CONFIGURED" || payload.error?.code === "ADMIN_AUTH_NOT_CONFIGURED").toBe(true);
     }
     expect(loadDbImpl).not.toHaveBeenCalled();
   });
 
-  it("renders a POST-only login gate without loading admin data", async () => {
+  it("renders a POST-only native login gate with strict admin security headers", async () => {
     const loadDbImpl = vi.fn();
     const handler = createHandler({ loadDbImpl });
-    const { res } = await invoke(handler, { url: "/" });
+    const { res } = await invoke(handler, { url: "/admin/login" });
     expect(res.statusCode).toBe(200);
     expect(res.payload).toContain('method="POST" action="/admin/login"');
     expect(res.payload).not.toContain('method="GET"');
+    expect(res.payload).not.toContain("real-admin-secret");
+    expect(res.headers["Content-Security-Policy"]).toContain("default-src 'self'");
+    expect(res.headers["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
+    expect(res.headers["X-Content-Type-Options"]).toBe("nosniff");
+    expect(res.headers["Referrer-Policy"]).toBe("no-referrer");
     expect(loadDbImpl).not.toHaveBeenCalled();
   });
 
-  it("rejects query-token authority and strips the legacy root query", async () => {
+  it("strips query-token credentials before rejecting unauthenticated legacy Admin data access", async () => {
     const loadDbImpl = vi.fn(() => ({ devices: [], users: [], analytics_events: [], email_verification_codes: [] }));
     const handler = createHandler({ loadDbImpl });
-    const data = await invoke(handler, { url: "/admin/data?adminToken=real-admin-secret" });
-    expect(data.res.statusCode).toBe(401);
-    expect(data.res.payload).not.toContain("real-admin-secret");
+    const stripped = await invoke(handler, { url: "/admin/data?adminToken=query-credential" });
+    expect(stripped.res.statusCode).toBe(303);
+    expect(stripped.res.headers.Location).toBe("/admin/data");
+    expect(String(stripped.res.payload || "")).not.toContain("query-credential");
 
-    const root = await invoke(handler, { url: "/?adminToken=real-admin-secret" });
-    expect(root.res.statusCode).toBe(303);
-    expect(root.res.headers.Location).toBe("/");
-    expect(String(root.res.payload || "")).not.toContain("real-admin-secret");
+    const data = await invoke(handler, { url: "/admin/data" });
+    expect(data.res.statusCode).toBe(401);
     expect(loadDbImpl).not.toHaveBeenCalled();
+  });
+
+  it("redirects unauthenticated admin application routes to the native login gate", async () => {
+    const handler = createHandler();
+    for (const url of ["/admin", "/admin/users", "/admin/analytics", "/admin/system", "/admin/audit"]) {
+      const { res } = await invoke(handler, { url });
+      expect(res.statusCode, url).toBe(303);
+      expect(res.headers.Location, url).toBe("/admin/login");
+    }
+  });
+
+  it("rejects cross-origin admin login before issuing any session", async () => {
+    const createAdminSessionToken = vi.fn(() => "must-not-be-issued");
+    const handler = createHandler({ createAdminSessionToken });
+    const { res } = await invoke(handler, {
+      method: "POST",
+      url: "/admin/login",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: "https://evil.example",
+      },
+      body: formBody("real-admin-secret"),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(parsePayload(res).error).toBe("ADMIN_ORIGIN_REJECTED");
+    expect(createAdminSessionToken).not.toHaveBeenCalled();
   });
 
   it("rejects invalid admin login without a cookie or admin data load", async () => {
@@ -378,15 +433,15 @@ describe("analytics handler", () => {
     expect(loadDbImpl).not.toHaveBeenCalled();
   });
 
-  it("exchanges the long-lived secret for a bounded strict, httpOnly session cookie", async () => {
+  it("exchanges the long-lived secret for a bounded strict, httpOnly admin-path session cookie", async () => {
     const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
     const { res } = await login(handler);
     expect(res.statusCode).toBe(303);
-    expect(res.headers.Location).toBe("/");
+    expect(res.headers.Location).toBe("/admin");
     const cookie = res.headers["Set-Cookie"];
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("SameSite=Strict");
-    expect(cookie).toContain("Path=/");
+    expect(cookie).toContain("Path=/admin");
     expect(cookie).toContain("Max-Age=28800");
     expect(cookie).not.toContain("real-admin-secret");
     expect(cookie).toContain("short-session-credential");
@@ -400,17 +455,82 @@ describe("analytics handler", () => {
     }
   });
 
-  it("renders the dashboard for a session without embedding either credential", async () => {
+  it("uses the HttpOnly cookie as browser admin authority and never accepts the long-lived bearer on admin APIs", async () => {
     const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
     const signedIn = await login(handler);
-    const { res } = await invoke(handler, { url: "/", headers: { cookie: sessionCookie(signedIn.res) } });
-    expect(res.statusCode).toBe(200);
-    expect(res.payload).toMatch(/插件使用状态面板/);
-    expect(res.payload).not.toContain("real-admin-secret");
-    expect(res.payload).not.toContain("short-session-credential");
-    expect(res.payload).not.toContain("adminToken=");
-    expect(res.payload).not.toContain("tokenQuery");
-    expect(res.payload).toContain('fetch("/admin/data", { cache: "no-store" })');
+    const cookie = sessionCookie(signedIn.res);
+
+    const authorized = await invoke(handler, { url: "/admin/api/session", headers: { cookie } });
+    expect(authorized.res.statusCode).toBe(200);
+    expect(parsePayload(authorized.res).ok).toBe(true);
+    expect(authorized.res.payload).not.toContain("real-admin-secret");
+    expect(authorized.res.payload).not.toContain("short-session-credential");
+
+    const bearerOnly = await invoke(handler, {
+      url: "/admin/api/session",
+      headers: { authorization: "Bearer real-admin-secret" },
+    });
+    expect(bearerOnly.res.statusCode).toBe(401);
+    expect(parsePayload(bearerOnly.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
+  });
+
+  it("rejects admin asset traversal outside the isolated artifact root", async () => {
+    const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
+    const signedIn = await login(handler);
+    const { res } = await invoke(handler, {
+      url: "/admin/assets/..%2F..%2Fanalytics-server%2Flib%2Fserver.mjs",
+      headers: { cookie: sessionCookie(signedIn.res) },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(parsePayload(res).error.code).toBe("ADMIN_RESOURCE_NOT_FOUND");
+    expect(res.payload).not.toContain("analyticsHandler");
+  });
+
+  it("rejects cross-origin logout without revoking the live admin session", async () => {
+    const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
+    const signedIn = await login(handler);
+    const cookie = sessionCookie(signedIn.res);
+    const rejected = await invoke(handler, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: { cookie, origin: "https://evil.example" },
+    });
+    expect(rejected.res.statusCode).toBe(403);
+    expect(parsePayload(rejected.res).error).toBe("ADMIN_ORIGIN_REJECTED");
+
+    const session = await invoke(handler, { url: "/admin/api/session", headers: { cookie } });
+    expect(session.res.statusCode).toBe(200);
+  });
+
+  it("revokes the admin session on logout and clears the admin-path cookie", async () => {
+    const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
+    const signedIn = await login(handler);
+    const cookie = sessionCookie(signedIn.res);
+    const loggedOut = await invoke(handler, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: { cookie },
+    });
+    expect(loggedOut.res.statusCode).toBe(303);
+    expect(loggedOut.res.headers.Location).toBe("/admin/login");
+    expect(loggedOut.res.headers["Set-Cookie"]).toContain("Path=/admin");
+    expect(loggedOut.res.headers["Set-Cookie"]).toContain("Max-Age=0");
+
+    const session = await invoke(handler, { url: "/admin/api/session", headers: { cookie } });
+    expect(session.res.statusCode).toBe(401);
+    expect(parsePayload(session.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
+  });
+
+  it("returns the stable Admin API not-found contract for unknown namespace routes", async () => {
+    const handler = createHandler();
+    const { res } = await invoke(handler, { url: "/admin/api/not-a-route" });
+    expect(res.statusCode).toBe(404);
+    expect(parsePayload(res)).toEqual({
+      ok: false,
+      error: { code: "ADMIN_RESOURCE_NOT_FOUND" },
+    });
+    expect(res.headers["Content-Security-Policy"]).toContain("default-src 'self'");
+    expect(res.headers["X-Content-Type-Options"]).toBe("nosniff");
   });
 
   it("authorizes admin data with the session cookie and rejects query credentials", async () => {
@@ -429,8 +549,9 @@ describe("analytics handler", () => {
     const handler = createHandler({ nowImpl: () => now, adminSessionTtlMs: 500 });
     const signedIn = await login(handler);
     now += 501;
-    const { res } = await invoke(handler, { url: "/admin/data", headers: { cookie: sessionCookie(signedIn.res) } });
+    const { res } = await invoke(handler, { url: "/admin/api/session", headers: { cookie: sessionCookie(signedIn.res) } });
     expect(res.statusCode).toBe(401);
+    expect(parsePayload(res).error.code).toBe("ADMIN_SESSION_REQUIRED");
   });
 
   it("retains explicit Bearer API access and rejects the same credential in a query", async () => {

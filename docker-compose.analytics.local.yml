@@ -1,6 +1,9 @@
 services:
   analytics-server:
-    image: syncmusic-backend
+    build:
+      context: .
+      dockerfile: Dockerfile.analytics
+    image: quiz-solver-analytics:phase11-local
     container_name: quiz-solver-analytics-local
     entrypoint: []
     command: ["node", "analytics-server/index.mjs"]
@@ -14,7 +17,7 @@ services:
       NODE_ENV: production
       ANALYTICS_HOST: 0.0.0.0
       ANALYTICS_PORT: 8787
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://analytics.082515.online}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8787}
       ANALYTICS_ADMIN_TOKEN: ${ANALYTICS_ADMIN_TOKEN:-local-dev-admin-token}
     volumes:
-      - ./:/app
+      - ./analytics-server/data:/app/analytics-server/data

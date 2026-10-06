@@ -29,6 +29,12 @@ export function createAdminSessionStore({
     delete(token) {
       sessions.delete(String(token || ""));
     },
+    get(token) {
+      removeExpired();
+      const session = sessions.get(String(token || ""));
+      if (!session || session.expiresAt <= now()) return null;
+      return { expiresAt: session.expiresAt };
+    },
     has(token) {
       removeExpired();
       const session = sessions.get(String(token || ""));

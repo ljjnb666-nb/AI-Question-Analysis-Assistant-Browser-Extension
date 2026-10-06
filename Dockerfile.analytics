@@ -1,6 +1,15 @@
 ARG BASE_IMAGE=node:24-bookworm-slim
-FROM ${BASE_IMAGE}
 
+FROM ${BASE_IMAGE} AS admin-builder
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY admin-console ./admin-console
+COPY vite.admin.config.ts tsconfig.json tsconfig.tooling.json ./
+COPY tools/verify-admin-artifact.mjs ./tools/verify-admin-artifact.mjs
+RUN npm run build:admin && npm run verify:admin
+
+FROM ${BASE_IMAGE}
 WORKDIR /app
 ENTRYPOINT []
 
@@ -8,6 +17,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY analytics-server ./analytics-server
+COPY --from=admin-builder /app/dist-admin ./dist-admin
 
 ENV NODE_ENV=production
 ENV ANALYTICS_HOST=0.0.0.0

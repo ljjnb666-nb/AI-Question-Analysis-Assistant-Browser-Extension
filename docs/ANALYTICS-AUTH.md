@@ -9,10 +9,11 @@ set SMTP_USER=mailer@example.com
 set SMTP_PASS=your-smtp-password
 set SMTP_FROM=Quiz Solver <mailer@example.com>
 set ANALYTICS_ADMIN_TOKEN=replace-with-a-long-random-token
+npm run build:admin
 npm run analytics:server
 ```
 
-By default the server runs on port `8787`.
+By default the server runs on port `8787`. Production uses Node.js 24 and SQLite; the JSON fallback is compatibility/development behavior, not the production storage contract.
 
 - Local development example: `http://127.0.0.1:8787`
 - Public deployment example: `https://analytics.082515.online`
@@ -33,13 +34,16 @@ set PUBLIC_BASE_URL=https://analytics.082515.online
 - `POST /auth/session`: server-side session validation authority; requires `Authorization: Bearer <authToken>` and a `{ "userId": "..." }` body. Returns `{ ok: true, user: { userId, email }, expiresAt }` for a live session, or `401 AUTH_SESSION_INVALID` for any invalid, expired, revoked, or mismatched session
 - `POST /auth/logout`: validates the bearer session and revokes the stored token server-side; returns `401 AUTH_SESSION_INVALID` for unknown or already-revoked sessions
 - `POST /analytics/events`: anonymous/authenticated event ingestion
-- `GET /analytics/summary`: daily + rolling metrics summary, requires an admin session cookie or `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
-- `GET /analytics/timeseries?days=14`: recent DAU/install/activation/registration series, requires an admin session cookie or `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
-- `GET /`: analytics admin login gate and dashboard
+- `GET /analytics/summary`: legacy metrics API; browser Admin Console does not use this route. Machine/API callers may use `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
+- `GET /analytics/timeseries?days=14`: legacy timeseries API; browser Admin Console does not use this route. Machine/API callers may use `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
+- `GET /`: redirects to the independent Admin Console at `/admin`
+- `GET /admin/login`: native, POST-only admin login document
 - `POST /admin/login`: exchanges a form-encoded admin token for a short-lived browser session
+- `GET /admin/api/session`: cookie-only browser Admin session authority; the long-lived admin bearer is not accepted here
+- `GET /admin`, `/admin/analytics`, `/admin/users`, `/admin/system`, `/admin/audit`: independent Admin Console application routes
 - `POST /admin/logout`: invalidates the current browser admin session
 
-The dashboard submits the admin token in the login request body. Admin tokens in query parameters are never accepted. Browser sessions expire after 8 hours, are limited to 64 active sessions, and use an `HttpOnly`, `SameSite=Strict` cookie (`Secure` in production). Admin login allows 10 attempts per IP in a 15-minute window. If `ANALYTICS_ADMIN_TOKEN` is blank or missing, protected routes fail closed with `503 ADMIN_AUTH_NOT_CONFIGURED` and do not load analytics data.
+The dashboard submits the admin token in the login request body. Admin tokens in query parameters are never accepted. Browser sessions expire after 8 hours, are limited to 64 active sessions, and use an `HttpOnly`, `SameSite=Strict` cookie scoped to `/admin` (`Secure` in production). Admin login allows 10 attempts per IP in a 15-minute window. If `ANALYTICS_ADMIN_TOKEN` is blank or missing, protected routes fail closed with `503 ADMIN_AUTH_NOT_CONFIGURED` and do not load analytics data.
 
 ## Storage
 

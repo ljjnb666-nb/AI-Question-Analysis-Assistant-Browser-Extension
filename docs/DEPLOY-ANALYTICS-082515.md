@@ -18,10 +18,10 @@ If you use IPv6, also add an `AAAA` record.
 
 ## 2. Server runtime
 
-Install Node.js 20+ on the server, then deploy the repo and run:
+Install Node.js 24 on the server, then deploy the repo and install the locked dependencies:
 
 ```bash
-npm install
+npm ci
 ```
 
 ## 3. Environment variables
@@ -52,13 +52,17 @@ You can start from the checked-in template:
 cp .env.analytics.prod.example .env.analytics.prod
 ```
 
-## 4. Start the backend
+## 4. Build the Admin Console and start the backend
+
+For a non-Docker deployment, build and verify the independent Admin artifact before starting the server:
 
 ```bash
+npm run build:admin
+npm run verify:admin
 npm run analytics:server
 ```
 
-The server will listen on all interfaces and store data in SQLite.
+The server will listen on all interfaces and store data in SQLite. If `dist-admin` is missing or unreadable, protected Admin routes fail closed instead of falling back to the legacy inline dashboard.
 
 If you prefer Docker on the server, use:
 
@@ -83,13 +87,14 @@ Check these URLs after deployment:
 - `https://analytics.082515.online/healthz`
 - `https://analytics.082515.online/`
 
-The dashboard page should load, and the extension should send events to:
+The root should redirect to `/admin`; `/admin/login` should load the native admin login gate, and the extension should send events to:
 
 - `POST https://analytics.082515.online/analytics/events`
 
 ## 7. Important notes
 
-- `GET /admin/data` is currently readable without admin auth because it is used by the built-in dashboard.
-- `GET /analytics/summary` and `GET /analytics/timeseries` still require `Authorization: Bearer <ANALYTICS_ADMIN_TOKEN>`.
-- SQLite is acceptable for early-stage deployment on a single server, but not ideal for horizontal scaling.
+- `GET /admin/data` requires an admin session cookie or the legacy admin bearer; query-string admin credentials are rejected.
+- Browser Admin Console APIs under `/admin/api/*` use the short-lived HttpOnly admin session and do not accept the long-lived admin bearer as browser authority.
+- `GET /analytics/summary` and `GET /analytics/timeseries` retain `Authorization: Bearer <ANALYTICS_ADMIN_TOKEN>` for legacy machine/API compatibility.
+- Production uses the independent `dist-admin` artifact packaged by `Dockerfile.analytics` and SQLite on a single Node process. Admin sessions and rate limits are process-local, so horizontal scaling requires shared authorities first.
 - If this becomes production traffic, move the database file to a persistent volume and add backups.

@@ -18,6 +18,18 @@ function getDataDir() {
   return process.env.ANALYTICS_DATA_DIR || join(ROOT_DIR, "..", "data");
 }
 const SQLITE_SUPPORTED = typeof DatabaseSync === "function";
+
+export function assertProductionStorageAuthority({
+  nodeEnv = process.env.NODE_ENV,
+  sqliteSupported = SQLITE_SUPPORTED,
+} = {}) {
+  const isProduction = String(nodeEnv || "").trim().toLowerCase() === "production";
+  if (isProduction && !sqliteSupported) {
+    throw new Error("PRODUCTION_SQLITE_REQUIRED");
+  }
+  return sqliteSupported ? "sqlite" : "json";
+}
+
 export const ANALYTICS_EVENT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 export const CURRENT_ANALYTICS_PRIVACY_EPOCH = 1;
 export const AUTH_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
