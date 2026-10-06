@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAdminSessionStore } from "./admin-sessions.mjs";
 import {
   ADMIN_CSP,
@@ -79,6 +79,15 @@ function createHarness({
   nowImpl = () => 1_000,
   ttlMs = 8 * 60 * 60 * 1000,
   rateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
+  adminReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
+  adminReadModels = {
+    overview: vi.fn((days) => ({ generatedAt: "2026-10-07T00:00:00.000Z", analyticsScope: "opt_in_only", window: { days } })),
+    timeseries: vi.fn((days) => ({ kind: "timeseries", analyticsScope: "opt_in_only", window: { days }, data: [] })),
+    providers: vi.fn((days) => ({ kind: "providers", analyticsScope: "opt_in_only", window: { days }, data: [] })),
+    errors: vi.fn((days) => ({ kind: "errors", analyticsScope: "opt_in_only", window: { days }, data: [] })),
+    versions: vi.fn((days) => ({ kind: "versions", analyticsScope: "opt_in_only", window: { days }, data: [] })),
+    latency: vi.fn((days) => ({ kind: "latency", analyticsScope: "opt_in_only", window: { days }, data: [] })),
+  },
   isProduction = () => false,
 } = {}) {
   let sequence = 0;
@@ -93,6 +102,8 @@ function createHarness({
     adminSessions,
     adminSessionTtlMs: ttlMs,
     adminLoginRateLimiter: rateLimiter,
+    adminReadRateLimiter,
+    adminReadModels,
     nowImpl,
     publicBaseUrl,
     adminDistDir,
@@ -135,6 +146,135 @@ async function login(portal, token = "real-admin-secret", headers = {}) {
 function cookiePair(res) {
   return String(res.headers["Set-Cookie"] || "").split(";", 1)[0];
 }
+
+describe("Phase 11C1 admin analytics API authority", () => {
+  it("C1-API-01 rejects aggregate reads without the HttpOnly Admin session", async () => {
+    const { portal, adminReadModels } = createHarness();
+    const { res } = await invoke(portal, { url: "/admin/api/overview" });
+    expect(res.statusCode).toBe(401);
+    expect(parsePayload(res).error.code).toBe("ADMIN_SESSION_REQUIRED");
+    expect(adminReadModels.overview).not.toHaveBeenCalled();
+  });
+
+  it("C1-API-02 never accepts the long-lived Admin bearer as browser analytics authority", async () => {
+    const { portal, adminReadModels } = createHarness();
+    const { res } = await invoke(portal, {
+      url: "/admin/api/analytics/timeseries",
+      headers: { authorization: "Bearer real-admin-secret" },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(parsePayload(res).error.code).toBe("ADMIN_SESSION_REQUIRED");
+    expect(adminReadModels.timeseries).not.toHaveBeenCalled();
+  });
+
+  it("C1-API-03 serves all frozen read-model routes from the authenticated cookie", async () => {
+    const { portal, adminReadModels } = createHarness();
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    const cases = [
+      ["/admin/api/overview?days=30", "overview"],
+      ["/admin/api/analytics/timeseries?days=30", "timeseries"],
+      ["/admin/api/analytics/providers?days=30", "providers"],
+      ["/admin/api/analytics/errors?days=30", "errors"],
+      ["/admin/api/analytics/versions?days=30", "versions"],
+      ["/admin/api/analytics/latency?days=30", "latency"],
+    ];
+    for (const [url, operation] of cases) {
+      const { res } = await invoke(portal, { url, headers: { cookie } });
+      expect(res.statusCode, url).toBe(200);
+      expect(parsePayload(res).ok, url).toBe(true);
+      expect(adminReadModels[operation], url).toHaveBeenCalledWith(30);
+    }
+  });
+
+  it("C1-API-04 applies the 14-day default and rejects malformed or out-of-retention windows", async () => {
+    const { portal, adminReadModels } = createHarness();
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+
+    const defaultWindow = await invoke(portal, {
+      url: "/admin/api/analytics/providers",
+      headers: { cookie },
+    });
+    expect(defaultWindow.res.statusCode).toBe(200);
+    expect(adminReadModels.providers).toHaveBeenCalledWith(14);
+
+    for (const value of ["0", "91", "-1", "1.5", "abc"]) {
+      const { res } = await invoke(portal, {
+        url: `/admin/api/analytics/providers?days=${encodeURIComponent(value)}`,
+        headers: { cookie },
+      });
+      expect(res.statusCode, value).toBe(400);
+      expect(parsePayload(res).error.code, value).toBe("INVALID_ADMIN_QUERY");
+    }
+  });
+
+  it("C1-API-05 rejects non-GET reads and preserves the stable unknown-route 404", async () => {
+    const { portal } = createHarness();
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+
+    const mutation = await invoke(portal, {
+      method: "POST",
+      url: "/admin/api/overview",
+      headers: { cookie },
+    });
+    expect(mutation.res.statusCode).toBe(405);
+    expect(parsePayload(mutation.res).error.code).toBe("ADMIN_METHOD_NOT_ALLOWED");
+
+    const missing = await invoke(portal, {
+      url: "/admin/api/analytics/not-real",
+      headers: { cookie },
+    });
+    expect(missing.res.statusCode).toBe(404);
+    expect(parsePayload(missing.res).error.code).toBe("ADMIN_RESOURCE_NOT_FOUND");
+  });
+
+  it("C1-API-06 rate limits aggregate reads without consuming the login limiter", async () => {
+    const adminReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: false, resetAt: 6_000 })),
+    };
+    const { portal, adminReadModels } = createHarness({
+      adminReadRateLimiter,
+      nowImpl: () => 1_000,
+    });
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    const { res } = await invoke(portal, {
+      url: "/admin/api/overview",
+      headers: { cookie },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.headers["Retry-After"]).toBe("5");
+    expect(parsePayload(res).error.code).toBe("ADMIN_RATE_LIMITED");
+    expect(adminReadModels.overview).not.toHaveBeenCalled();
+  });
+
+  it("C1-API-07 hides read-model failures behind ADMIN_STORAGE_UNAVAILABLE", async () => {
+    const storageError = Object.assign(new Error("sqlite /secret/path failed"), {
+      code: "ADMIN_STORAGE_UNAVAILABLE",
+      statusCode: 503,
+    });
+    const adminReadModels = {
+      overview: vi.fn(() => {
+        throw storageError;
+      }),
+    };
+    const { portal } = createHarness({ adminReadModels });
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    const { res } = await invoke(portal, {
+      url: "/admin/api/overview",
+      headers: { cookie },
+    });
+    expect(res.statusCode).toBe(503);
+    expect(parsePayload(res)).toEqual({
+      ok: false,
+      error: { code: "ADMIN_STORAGE_UNAVAILABLE" },
+    });
+    expect(String(res.payload)).not.toContain("secret/path");
+  });
+});
 
 describe("Phase 11B1-R1 admin portal authority", () => {
   it("R1-ADMIN-01 redirects root to the independent Admin surface", async () => {
