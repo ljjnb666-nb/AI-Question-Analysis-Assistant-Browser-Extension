@@ -1,9 +1,7 @@
 import { URL } from "node:url";
-import { createHash, timingSafeEqual } from "node:crypto";
 import { buildAnalyticsSummary, buildTimeSeries } from "./metrics.mjs";
 import {
   createEmailVerificationCodeInStorage,
-  getStorageBackendInfo,
   loadDb,
   loginUserInStorage,
   recordAnalyticsEventInStorage,
@@ -19,12 +17,14 @@ import {
 } from "./security.mjs";
 import { normalizeRemoteAnalyticsEvent } from "./telemetry.mjs";
 import { ADMIN_SESSION_MAX_COUNT, ADMIN_SESSION_TTL_MS, createAdminSessionStore } from "./admin-sessions.mjs";
+import {
+  createAdminPortal,
+  hasAdminAuthority,
+  requireConfiguredAdminToken,
+} from "./admin-console.mjs";
 
 const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
 const EXTENSION_ORIGIN_PREFIX = "chrome-extension://";
-const ADMIN_SESSION_COOKIE = "analytics_admin_session";
-const ADMIN_LOGIN_LIMIT = 10;
-const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
 class HttpError extends Error {
   constructor(statusCode, message) {
@@ -59,765 +59,9 @@ function jsonHeaders(req) {
   };
 }
 
-function htmlHeaders(req) {
-  return {
-    "Content-Type": "text/html; charset=utf-8",
-    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-    Pragma: "no-cache",
-    Expires: "0",
-    "Referrer-Policy": "no-referrer",
-    ...buildCorsHeaders(req),
-  };
-}
-
 function sendJson(req, res, statusCode, payload) {
   res.writeHead(statusCode, jsonHeaders(req));
   res.end(JSON.stringify(payload));
-}
-
-function sendHtml(req, res, statusCode, html) {
-  res.writeHead(statusCode, htmlHeaders(req));
-  res.end(html);
-}
-
-function renderAdminTokenGateHtml(publicBaseUrl) {
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Analytics Admin Access</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #09111f;
-      --panel: rgba(11, 20, 37, 0.88);
-      --line: rgba(163, 193, 255, 0.14);
-      --text: #eef4ff;
-      --muted: #96a8c3;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100dvh;
-      display: grid;
-      place-items: center;
-      padding: 24px;
-      font-family: "Bahnschrift", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      color: var(--text);
-      background:
-        radial-gradient(circle at top left, rgba(94, 162, 255, 0.24), transparent 26%),
-        linear-gradient(180deg, #08101d 0%, var(--bg) 100%);
-    }
-    .panel {
-      width: min(100%, 460px);
-      padding: 28px;
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      background: var(--panel);
-      box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
-    }
-    h1 {
-      margin: 0 0 12px;
-      font-size: 32px;
-      letter-spacing: -0.04em;
-    }
-    p {
-      margin: 0 0 18px;
-      color: var(--muted);
-      line-height: 1.7;
-    }
-    label {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 13px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-    input {
-      width: 100%;
-      padding: 14px 16px;
-      border: 1px solid rgba(163, 193, 255, 0.16);
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--text);
-      font: inherit;
-    }
-    button {
-      margin-top: 14px;
-      width: 100%;
-      padding: 14px 16px;
-      border: 0;
-      border-radius: 999px;
-      background: linear-gradient(180deg, #79b5ff 0%, #4e91f8 100%);
-      color: #08101d;
-      font: inherit;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .meta {
-      margin-top: 14px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-  </style>
-</head>
-<body>
-  <form class="panel" method="POST" action="/admin/login">
-    <h1>需要 Admin Token</h1>
-    <p>请输入管理口令以建立短期安全会话。</p>
-    <label for="adminToken">Admin Token</label>
-    <input id="adminToken" name="adminToken" type="password" autocomplete="current-password" required>
-    <button type="submit">进入 Dashboard</button>
-    <div class="meta">服务地址：${publicBaseUrl}</div>
-  </form>
-</body>
-</html>`;
-}
-
-function renderDashboardHtml(summary, series, publicBaseUrl, storageInfo) {
-  const initialData = JSON.stringify({ summary, series }).replace(/</g, "\\u003c");
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>插件使用状态面板</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #09111f;
-      --panel: rgba(11, 20, 37, 0.82);
-      --panel-strong: rgba(14, 26, 48, 0.94);
-      --line: rgba(163, 193, 255, 0.14);
-      --text: #eef4ff;
-      --muted: #96a8c3;
-      --accent: #5ea2ff;
-      --accent-2: #65f0c7;
-      --accent-3: #ffb05b;
-      --accent-4: #d08bff;
-      --success: #65f0c7;
-      --shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
-      --radius: 22px;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100dvh;
-      font-family: "Bahnschrift", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      color: var(--text);
-      background:
-        radial-gradient(circle at top left, rgba(94, 162, 255, 0.24), transparent 26%),
-        radial-gradient(circle at 85% 10%, rgba(101, 240, 199, 0.15), transparent 24%),
-        radial-gradient(circle at 50% 100%, rgba(208, 139, 255, 0.10), transparent 36%),
-        linear-gradient(180deg, #08101d 0%, var(--bg) 100%);
-    }
-    .shell {
-      max-width: 1360px;
-      margin: 0 auto;
-      padding: 28px 20px 42px;
-    }
-    .hero,
-    .workspace {
-      display: grid;
-      gap: 16px;
-    }
-    .hero {
-      grid-template-columns: 1.4fr 0.8fr;
-      margin-bottom: 18px;
-    }
-    .workspace {
-      grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
-    }
-    .hero-main,
-    .hero-side,
-    .metric,
-    .panel {
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--panel);
-      backdrop-filter: blur(18px);
-      box-shadow: var(--shadow);
-    }
-    .hero-main {
-      padding: 26px 28px 24px;
-      background:
-        linear-gradient(135deg, rgba(94, 162, 255, 0.14), rgba(11, 20, 37, 0) 38%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0) 32%),
-        var(--panel-strong);
-    }
-    .hero-side,
-    .panel {
-      padding: 22px;
-    }
-    .hero-side {
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      gap: 18px;
-    }
-    .eyebrow,
-    .metric-label,
-    .side-label,
-    .hero-note-label,
-    .table thead th {
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-    }
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 14px;
-      color: var(--accent-2);
-      letter-spacing: 0.16em;
-    }
-    .eyebrow::before {
-      content: "";
-      width: 26px;
-      height: 1px;
-      background: currentColor;
-    }
-    h1 {
-      margin: 0 0 10px;
-      max-width: 10ch;
-      font-size: clamp(42px, 7vw, 64px);
-      line-height: 0.95;
-      letter-spacing: -0.05em;
-    }
-    .lead,
-    .hero-note-sub,
-    .panel-copy,
-    .metric-hint,
-    .meta,
-    .side-copy {
-      color: var(--muted);
-      line-height: 1.6;
-    }
-    .lead,
-    .side-copy {
-      font-size: 15px;
-    }
-    .hero-footer,
-    .metric-grid {
-      display: grid;
-      gap: 14px;
-    }
-    .hero-footer {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      margin-top: 22px;
-    }
-    .hero-note {
-      padding: 14px;
-      border: 1px solid rgba(163, 193, 255, 0.10);
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.02);
-    }
-    .hero-note-value,
-    .side-value,
-    .metric-value {
-      font-weight: 700;
-      letter-spacing: -0.04em;
-    }
-    .hero-note-value {
-      font-size: 20px;
-    }
-    .side-value {
-      font-size: 28px;
-    }
-    .metric-grid {
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      margin-bottom: 18px;
-    }
-    .metric {
-      padding: 18px 18px 16px;
-    }
-    .metric-value {
-      font-size: clamp(28px, 4vw, 38px);
-      line-height: 0.95;
-      margin: 10px 0;
-    }
-    .panel {
-      display: flex;
-      flex-direction: column;
-      min-height: 520px;
-    }
-    .panel-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: end;
-      gap: 16px;
-      margin-bottom: 18px;
-    }
-    .panel-title {
-      margin: 0;
-      font-size: 22px;
-      letter-spacing: -0.03em;
-    }
-    .chart-shell,
-    .table-card {
-      flex: 1;
-      padding: 18px;
-      border: 1px solid rgba(163, 193, 255, 0.08);
-      border-radius: 18px;
-      background:
-        linear-gradient(180deg, rgba(94, 162, 255, 0.05), rgba(255, 255, 255, 0.01)),
-        rgba(255, 255, 255, 0.01);
-    }
-    .table-card {
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-    }
-    .table-shell {
-      flex: 1;
-      min-height: 0;
-      overflow: auto;
-      padding-right: 4px;
-    }
-    .chart {
-      position: relative;
-      min-height: 280px;
-    }
-    .chart-tooltip {
-      position: absolute;
-      left: 0;
-      top: 0;
-      z-index: 2;
-      min-width: 120px;
-      padding: 10px 12px;
-      border: 1px solid rgba(163, 193, 255, 0.18);
-      border-radius: 14px;
-      background: rgba(7, 14, 28, 0.96);
-      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.34);
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 120ms ease;
-    }
-    .chart-tooltip.is-visible {
-      opacity: 1;
-    }
-    .chart-tooltip-date {
-      color: var(--muted);
-      font-size: 11px;
-      margin-bottom: 6px;
-    }
-    .chart-tooltip-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 12px;
-      white-space: nowrap;
-    }
-    .chart-tooltip-dot,
-    .legend-swatch {
-      width: 10px;
-      height: 10px;
-      border-radius: 999px;
-      flex: 0 0 auto;
-    }
-    .legend {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-      margin-top: 12px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .legend-item {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-    .table thead th {
-      padding: 0 0 12px;
-      border-bottom: 1px solid var(--line);
-      text-align: left;
-    }
-    .table tbody td {
-      padding: 14px 0;
-      border-bottom: 1px solid rgba(163, 193, 255, 0.08);
-      color: #d7e4f9;
-    }
-    .pager {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding-top: 14px;
-      margin-top: 14px;
-      border-top: 1px solid rgba(163, 193, 255, 0.08);
-    }
-    .pager-actions {
-      display: flex;
-      gap: 8px;
-    }
-    .actions {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-    button {
-      appearance: none;
-      border-radius: 999px;
-      font: inherit;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .actions button {
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      background: linear-gradient(180deg, #79b5ff 0%, #4e91f8 100%);
-      color: #08101d;
-      padding: 12px 16px;
-    }
-    .pager-btn {
-      border: 1px solid rgba(163, 193, 255, 0.14);
-      background: rgba(255, 255, 255, 0.03);
-      color: var(--text);
-      padding: 9px 12px;
-      font-size: 12px;
-    }
-    .empty {
-      color: var(--muted);
-      padding: 18px 0 6px;
-      font-size: 14px;
-    }
-    .status {
-      margin-top: 14px;
-      color: var(--success);
-      font-size: 14px;
-      min-height: 20px;
-    }
-    @media (max-width: 1120px) {
-      .hero,
-      .workspace {
-        grid-template-columns: 1fr;
-      }
-      .metric-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-      .panel {
-        min-height: auto;
-      }
-    }
-    @media (max-width: 640px) {
-      .shell {
-        padding: 18px 14px 28px;
-      }
-      h1 {
-        max-width: none;
-        font-size: 38px;
-      }
-      .hero-footer,
-      .metric-grid {
-        grid-template-columns: 1fr;
-      }
-      .panel-head,
-      .pager {
-        align-items: start;
-        flex-direction: column;
-      }
-    }
-  </style>
-</head>
-<body>
-  <div class="shell">
-    <div class="hero">
-      <section class="hero-main">
-        <div class="eyebrow">本地运营视图</div>
-        <h1>一眼看清插件使用状态</h1>
-        <div class="lead">直接在本地 analytics server 里查看已选择加入统计的设备使用情况和账号注册情况。安装与使用指标仅代表同意发送统计的设备，不代表全部安装量。</div>
-        <div class="hero-footer">
-          <div class="hero-note">
-            <div class="hero-note-label">观察窗口</div>
-            <div class="hero-note-value">14 天</div>
-            <div class="hero-note-sub">滚动趋势加上每日明细。</div>
-          </div>
-          <div class="hero-note">
-            <div class="hero-note-label">数据来源</div>
-            <div class="hero-note-value">${storageInfo.label}</div>
-            <div class="hero-note-sub">${storageInfo.detail}</div>
-          </div>
-          <div class="hero-note">
-            <div class="hero-note-label">视图模式</div>
-            <div class="hero-note-value">监控</div>
-            <div class="hero-note-sub">只读的运营监控面板。</div>
-          </div>
-        </div>
-      </section>
-      <aside class="hero-side">
-        <div>
-          <div class="side-label">当前快照</div>
-          <div class="side-value" id="snapshotDevices">0 台设备</div>
-          <div class="side-copy" id="snapshotCopy"></div>
-        </div>
-        <div class="actions">
-          <button id="refreshBtn" type="button">刷新面板</button>
-          <form method="POST" action="/admin/logout"><button type="submit">退出</button></form>
-          <div class="meta">${publicBaseUrl}</div>
-        </div>
-      </aside>
-    </div>
-    <div class="metric-grid" id="metricGrid"></div>
-    <div class="workspace">
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <h2 class="panel-title">14 天活跃趋势</h2>
-            <div class="panel-copy">把同意统计设备的使用、安装、激活和账号注册按日展示。</div>
-          </div>
-          <div class="meta" id="generatedAt"></div>
-        </div>
-        <div class="chart-shell">
-          <div class="chart" id="chart"></div>
-          <div class="legend">
-            <span class="legend-item"><span class="legend-swatch" style="background:#5ea2ff"></span>日活</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#ffb05b"></span>安装</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#65f0c7"></span>激活</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#d08bff"></span>注册</span>
-          </div>
-        </div>
-      </section>
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <h2 class="panel-title">每日明细</h2>
-            <div class="panel-copy">用表格对照推广、测试和导入用户的日子。</div>
-          </div>
-        </div>
-        <div class="table-card">
-          <div class="table-shell" id="tableWrap"></div>
-          <div class="pager" id="tablePager"></div>
-        </div>
-      </section>
-    </div>
-    <div class="status" id="status"></div>
-  </div>
-  <script>
-    const stateHolder = ${initialData};
-    const metricGrid = document.getElementById("metricGrid");
-    const chart = document.getElementById("chart");
-    const tableWrap = document.getElementById("tableWrap");
-    const tablePager = document.getElementById("tablePager");
-    const status = document.getElementById("status");
-    const generatedAt = document.getElementById("generatedAt");
-    const refreshBtn = document.getElementById("refreshBtn");
-    const snapshotDevices = document.getElementById("snapshotDevices");
-    const snapshotCopy = document.getElementById("snapshotCopy");
-    const TABLE_PAGE_SIZE = 7;
-    const LEGEND = [
-      { key: "dau", color: "#5ea2ff", label: "日活" },
-      { key: "installs", color: "#ffb05b", label: "安装" },
-      { key: "activations", color: "#65f0c7", label: "激活" },
-      { key: "registrations", color: "#d08bff", label: "注册" },
-    ];
-    let tablePage = 0;
-    let state = stateHolder;
-
-    function formatNumber(value) {
-      return new Intl.NumberFormat("en-US").format(Number(value || 0));
-    }
-
-    function metricCard(label, value, hint) {
-      return '<article class="metric">' +
-        '<div class="metric-label">' + label + "</div>" +
-        '<div class="metric-value">' + value + "</div>" +
-        '<div class="metric-hint">' + hint + "</div>" +
-      "</article>";
-    }
-
-    function renderMetrics(summary) {
-      metricGrid.innerHTML = [
-        metricCard("今日日活", formatNumber(summary.daily.dau), "今天产生可选使用统计事件的设备数。"),
-        metricCard("今日安装", formatNumber(summary.daily.installs), "今天发送安装事件的同意统计设备。"),
-        metricCard("今日激活", formatNumber(summary.daily.activations), "同意统计且完成关键设置或产生使用事件的设备。"),
-        metricCard("账号关联设备", formatNumber(summary.totals.devices), "账号服务中关联过的设备，不是总安装量。"),
-        metricCard("注册用户", formatNumber(summary.totals.registeredUsers), "当前成功注册的账号数。"),
-      ].join("");
-    }
-
-    function renderSnapshot(summary) {
-      snapshotDevices.textContent = formatNumber(summary.totals.devices) + " 台设备";
-      snapshotCopy.textContent =
-        "WAU " + formatNumber(summary.rolling.wau) +
-        "，MAU " + formatNumber(summary.rolling.mau) +
-        "，累计事件 " + formatNumber(summary.totals.events) + "。";
-      generatedAt.textContent = "生成时间 " + new Date(summary.generatedAt).toLocaleString();
-    }
-
-    function buildSeriesPoints(series, key, maxValue, width, height, padding) {
-      return series.map((item, index) => {
-        const x = padding + (index * (width - padding * 2) / Math.max(1, series.length - 1));
-        const y = height - padding - ((item[key] || 0) / Math.max(1, maxValue)) * (height - padding * 2);
-        return { x, y };
-      });
-    }
-
-    function buildSmoothPath(points) {
-      if (!points.length) return "";
-      if (points.length === 1) return "M " + points[0].x.toFixed(1) + " " + points[0].y.toFixed(1);
-      const tension = 0.18;
-      let path = "M " + points[0].x.toFixed(1) + " " + points[0].y.toFixed(1);
-      for (let index = 0; index < points.length - 1; index += 1) {
-        const prev = points[Math.max(0, index - 1)];
-        const current = points[index];
-        const next = points[index + 1];
-        const after = points[Math.min(points.length - 1, index + 2)];
-        const cp1x = current.x + (next.x - prev.x) * tension;
-        const cp1y = current.y + (next.y - prev.y) * tension;
-        const cp2x = next.x - (after.x - current.x) * tension;
-        const cp2y = next.y - (after.y - current.y) * tension;
-        path += " C " +
-          cp1x.toFixed(1) + " " + cp1y.toFixed(1) + ", " +
-          cp2x.toFixed(1) + " " + cp2y.toFixed(1) + ", " +
-          next.x.toFixed(1) + " " + next.y.toFixed(1);
-      }
-      return path;
-    }
-
-    function clamp(value, min, max) {
-      return Math.min(max, Math.max(min, value));
-    }
-
-    function renderChart(series) {
-      if (!series.length) {
-        chart.innerHTML = '<div class="empty">暂时还没有趋势数据。</div>';
-        return;
-      }
-      const width = 860;
-      const height = 280;
-      const padding = 26;
-      const maxValue = Math.max(1, ...series.flatMap((item) => [item.dau, item.installs, item.activations, item.registrations]));
-      const guides = Array.from({ length: 4 }, (_, index) => {
-        const y = padding + index * ((height - padding * 2) / 3);
-        return '<line x1="' + padding + '" y1="' + y.toFixed(1) + '" x2="' + (width - padding) + '" y2="' + y.toFixed(1) + '" stroke="rgba(163,193,255,0.08)" stroke-dasharray="4 8" />';
-      }).join("");
-      const lines = LEGEND.map((item) => {
-        const points = buildSeriesPoints(series, item.key, maxValue, width, height, padding);
-        return '<path fill="none" stroke="' + item.color + '" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" d="' + buildSmoothPath(points) + '" />';
-      }).join("");
-      const step = (width - padding * 2) / Math.max(1, series.length - 1);
-      const hits = series.map((item, index) => {
-        const x = padding + (index * (width - padding * 2) / Math.max(1, series.length - 1));
-        const hitX = index === 0 ? padding - step * 0.35 : x - step * 0.5;
-        const hitWidth = index === 0 || index === series.length - 1 ? step * 0.85 : step;
-        return '<rect class="chart-hit" x="' + hitX.toFixed(1) + '" y="0" width="' + hitWidth.toFixed(1) + '" height="' + height + '" fill="rgba(255,255,255,0.001)" data-index="' + index + '" />';
-      }).join("");
-      const labels = series.map((item, index) => {
-        const x = padding + (index * (width - padding * 2) / Math.max(1, series.length - 1));
-        return '<text x="' + x.toFixed(1) + '" y="' + (height - 6) + '" font-size="11" fill="#7f96b8" text-anchor="middle">' + item.date.slice(5) + "</text>";
-      }).join("");
-      chart.innerHTML =
-        '<div class="chart-tooltip" id="chartTooltip"></div>' +
-        '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="analytics trend chart">' +
-          guides +
-          '<line x1="' + padding + '" y1="' + (height - padding) + '" x2="' + (width - padding) + '" y2="' + (height - padding) + '" stroke="rgba(163,193,255,0.18)" />' +
-          lines +
-          hits +
-          labels +
-        "</svg>";
-      const tooltip = document.getElementById("chartTooltip");
-      chart.querySelectorAll(".chart-hit").forEach((node) => {
-        node.addEventListener("mouseenter", (event) => {
-          const target = event.currentTarget;
-          if (!(target instanceof Element) || !tooltip) return;
-          const index = Number(target.getAttribute("data-index") || "0");
-          const item = series[index];
-          tooltip.innerHTML =
-            '<div class="chart-tooltip-date">' + item.date + "</div>" +
-            LEGEND.map((legend) =>
-              '<div class="chart-tooltip-row"><span class="chart-tooltip-dot" style="background:' + legend.color + '"></span><span>' + legend.label + "：" + formatNumber(item[legend.key] || 0) + "</span></div>"
-            ).join("");
-          tooltip.classList.add("is-visible");
-        });
-        node.addEventListener("mousemove", (event) => {
-          if (!tooltip) return;
-          const rect = chart.getBoundingClientRect();
-          const tooltipWidth = tooltip.offsetWidth || 160;
-          const tooltipHeight = tooltip.offsetHeight || 120;
-          const left = clamp(event.clientX - rect.left + 14, 8, rect.width - tooltipWidth - 8);
-          const top = clamp(event.clientY - rect.top - tooltipHeight - 14, 8, rect.height - tooltipHeight - 8);
-          tooltip.style.left = left + "px";
-          tooltip.style.top = top + "px";
-        });
-      });
-      chart.addEventListener("mouseleave", () => {
-        if (tooltip) tooltip.classList.remove("is-visible");
-      });
-    }
-
-    function renderTable(series) {
-      if (!series.length) {
-        tableWrap.innerHTML = '<div class="empty">暂时还没有统计数据。</div>';
-        tablePager.innerHTML = "";
-        return;
-      }
-      const reversed = series.slice().reverse();
-      const pageCount = Math.max(1, Math.ceil(reversed.length / TABLE_PAGE_SIZE));
-      tablePage = Math.min(tablePage, pageCount - 1);
-      const start = tablePage * TABLE_PAGE_SIZE;
-      const pageItems = reversed.slice(start, start + TABLE_PAGE_SIZE);
-      const rows = pageItems.map((item) =>
-        "<tr><td>" + item.date + "</td><td>" + formatNumber(item.dau) + "</td><td>" + formatNumber(item.installs) + "</td><td>" + formatNumber(item.activations) + "</td><td>" + formatNumber(item.registrations) + "</td></tr>"
-      ).join("");
-      tableWrap.innerHTML =
-        '<table class="table">' +
-          "<thead><tr><th>日期</th><th>日活</th><th>安装</th><th>激活</th><th>注册</th></tr></thead>" +
-          "<tbody>" + rows + "</tbody>" +
-        "</table>";
-      tablePager.innerHTML =
-        '<div class="meta">第 ' + (tablePage + 1) + ' / ' + pageCount + ' 页，显示 ' + (start + 1) + '-' + (start + pageItems.length) + " 条记录</div>" +
-        '<div class="pager-actions">' +
-          '<button class="pager-btn" type="button" data-page="prev"' + (tablePage === 0 ? " disabled" : "") + ">上一页</button>" +
-          '<button class="pager-btn" type="button" data-page="next"' + (tablePage >= pageCount - 1 ? " disabled" : "") + ">下一页</button>" +
-        "</div>";
-      const prevBtn = tablePager.querySelector('[data-page="prev"]');
-      const nextBtn = tablePager.querySelector('[data-page="next"]');
-      if (prevBtn) prevBtn.addEventListener("click", () => { tablePage = Math.max(0, tablePage - 1); renderTable(state.series); });
-      if (nextBtn) nextBtn.addEventListener("click", () => { tablePage = Math.min(pageCount - 1, tablePage + 1); renderTable(state.series); });
-    }
-
-    function render(nextState) {
-      state = nextState;
-      tablePage = 0;
-      renderMetrics(state.summary);
-      renderSnapshot(state.summary);
-      renderChart(state.series);
-      renderTable(state.series);
-      status.textContent = "面板已同步到 " + new Date(state.summary.generatedAt).toLocaleString();
-    }
-
-    async function refreshData() {
-      refreshBtn.disabled = true;
-      status.textContent = "正在刷新面板...";
-      try {
-        const response = await fetch("/admin/data", { cache: "no-store" });
-        if (!response.ok) throw new Error("HTTP " + response.status);
-        const payload = await response.json();
-        render({ summary: payload.summary, series: payload.series });
-      } catch (error) {
-        status.textContent = "刷新失败：" + (error && error.message ? error.message : String(error));
-      } finally {
-        refreshBtn.disabled = false;
-      }
-    }
-
-    refreshBtn.addEventListener("click", refreshData);
-    render(state);
-  </script>
-</body>
-</html>`;
 }
 
 function ensureTrustedBrowserOrigin(req) {
@@ -862,62 +106,10 @@ async function readJsonBody(req, maxBytes = DEFAULT_BODY_LIMIT_BYTES) {
   }
 }
 
-async function readAdminLoginBody(req) {
-  const contentType = String(req.headers["content-type"] || "")
-    .split(";", 1)[0]
-    .trim()
-    .toLowerCase();
-  if (contentType !== "application/x-www-form-urlencoded") {
-    throw new HttpError(415, "admin login requires form-encoded body");
-  }
-  const raw = await readRequestText(req);
-  return new URLSearchParams(raw).get("adminToken") || "";
-}
-
 function getBearerToken(req) {
   const authHeader = req.headers.authorization || "";
   const match = /^Bearer\s+(.+)$/i.exec(authHeader);
   return match?.[1] || "";
-}
-
-function getCookieValue(req, name) {
-  const cookieHeader = String(req.headers.cookie || "");
-  for (const entry of cookieHeader.split(";")) {
-    const separator = entry.indexOf("=");
-    if (separator < 0 || entry.slice(0, separator).trim() !== name) continue;
-    return entry.slice(separator + 1).trim();
-  }
-  return "";
-}
-
-function requireConfiguredAdminToken(expectedToken) {
-  const normalized = String(expectedToken || "").trim();
-  if (!normalized) throw new HttpError(503, "ADMIN_AUTH_NOT_CONFIGURED");
-  return normalized;
-}
-
-function adminTokensMatch(actual, expected) {
-  const actualDigest = createHash("sha256").update(String(actual)).digest();
-  const expectedDigest = createHash("sha256").update(String(expected)).digest();
-  return actualDigest.length === expectedDigest.length && timingSafeEqual(actualDigest, expectedDigest);
-}
-
-function hasAdminAuthority(req, expectedToken, sessionStore, allowBearer = false) {
-  const session = getCookieValue(req, ADMIN_SESSION_COOKIE);
-  if (session && sessionStore.has(session)) return true;
-  const bearer = allowBearer ? getBearerToken(req) : "";
-  return Boolean(bearer && adminTokensMatch(bearer, expectedToken));
-}
-
-function redirect(res, location, cookie) {
-  const headers = {
-    Location: location,
-    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-    "Referrer-Policy": "no-referrer",
-  };
-  if (cookie) headers["Set-Cookie"] = cookie;
-  res.writeHead(303, headers);
-  res.end();
 }
 
 function enforceRateLimit(rateLimiter, key, limit, windowMs, nowImpl = () => Date.now()) {
@@ -948,6 +140,7 @@ export function createAnalyticsHandler(options = {}) {
     revokeUserSessionImpl = revokeUserSessionInStorage,
     sendVerificationCodeEmail,
     validateUserSessionImpl = validateUserSessionInStorage,
+    adminDistDir,
   } = options;
 
   if (typeof isMailerConfigured !== "function") {
@@ -984,6 +177,16 @@ export function createAnalyticsHandler(options = {}) {
     timeseriesIp: createNamespaceLimiter(),
   };
 
+  const adminPortal = createAdminPortal({
+    adminToken,
+    adminSessions,
+    adminSessionTtlMs,
+    adminDistDir,
+    loginRateLimiter: rateLimiters.adminLogin,
+    nowImpl,
+    publicBaseUrl,
+  });
+
   return async function analyticsHandler(req, res) {
     if (!req.url) {
       sendJson(req, res, 404, { ok: false, error: "missing url" });
@@ -1004,55 +207,24 @@ export function createAnalyticsHandler(options = {}) {
         return;
       }
 
-      if (req.method === "GET" && url.pathname === "/") {
-        if (url.searchParams.has("adminToken")) {
-          redirect(res, "/");
+      // Admin portal: /, /admin, /admin/login, /admin/logout, /admin/api/*,
+      // and the dist-admin shell. Legacy /admin/data stays below, owned by the
+      // machine Bearer API surface.
+      if (url.pathname === "/" || url.pathname === "/admin" || url.pathname.startsWith("/admin/")) {
+        try {
+          const handled = await adminPortal.handle(req, res, url, ip);
+          if (handled) return;
+        } catch (error) {
+          // Defense in depth: the portal catches its own errors; this boundary
+          // guarantees no internal detail escapes the Admin namespace.
+          console.error(
+            "[analytics-server] admin portal boundary",
+            url.pathname,
+            error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+          );
+          sendJson(req, res, 500, { ok: false, error: "ADMIN_INTERNAL_ERROR" });
           return;
         }
-        const normalizedAdminToken = requireConfiguredAdminToken(adminToken);
-        if (!hasAdminAuthority(req, normalizedAdminToken, adminSessions)) {
-          sendHtml(req, res, 200, renderAdminTokenGateHtml(publicBaseUrl));
-          return;
-        }
-        const db = loadDbImpl();
-        sendHtml(
-          req,
-          res,
-          200,
-          renderDashboardHtml(
-            buildAnalyticsSummary(db),
-            buildTimeSeries(db, 14),
-            publicBaseUrl,
-            getStorageBackendInfo(),
-          ),
-        );
-        return;
-      }
-
-      if (req.method === "POST" && url.pathname === "/admin/login") {
-        const normalizedAdminToken = requireConfiguredAdminToken(adminToken);
-        enforceRateLimit(rateLimiters.adminLogin, `admin-login:ip:${ip}`, ADMIN_LOGIN_LIMIT, ADMIN_LOGIN_WINDOW_MS, nowImpl);
-        const submittedToken = await readAdminLoginBody(req);
-        if (!submittedToken || !adminTokensMatch(submittedToken, normalizedAdminToken)) {
-          sendHtml(req, res, 401, "<!doctype html><title>Unauthorized</title><p>Admin authentication failed.</p>");
-          return;
-        }
-        const session = adminSessions.issue();
-        const secure = process.env.NODE_ENV === "production" || publicBaseUrl.startsWith("https://");
-        const cookie = `${ADMIN_SESSION_COOKIE}=${session.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(adminSessionTtlMs / 1000)}${secure ? "; Secure" : ""}`;
-        redirect(res, "/", cookie);
-        return;
-      }
-
-      if (req.method === "POST" && url.pathname === "/admin/logout") {
-        const session = getCookieValue(req, ADMIN_SESSION_COOKIE);
-        if (session) adminSessions.delete(session);
-        redirect(
-          res,
-          "/",
-          `${ADMIN_SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${process.env.NODE_ENV === "production" || publicBaseUrl.startsWith("https://") ? "; Secure" : ""}`,
-        );
-        return;
       }
 
       if (req.method === "GET" && url.pathname === "/admin/data") {
@@ -1225,7 +397,8 @@ export function createAnalyticsHandler(options = {}) {
 
       sendJson(req, res, 404, { ok: false, error: "not found" });
     } catch (err) {
-      const statusCode = err instanceof HttpError ? err.statusCode : 400;
+      // HttpError and AdminHttpError both carry an authoritative statusCode.
+      const statusCode = err instanceof Error && typeof err.statusCode === "number" ? err.statusCode : 400;
       sendJson(req, res, statusCode, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   };

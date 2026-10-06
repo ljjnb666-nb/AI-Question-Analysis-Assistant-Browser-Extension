@@ -25,14 +25,21 @@ export function createAdminSessionStore({
     }
   }
 
+  function resolve(token) {
+    removeExpired();
+    const session = sessions.get(String(token || ""));
+    return session && session.expiresAt > now() ? { expiresAt: session.expiresAt } : null;
+  }
+
   return {
     delete(token) {
       sessions.delete(String(token || ""));
     },
+    // Read-only lookup for authoritative session metadata (expiry only, never
+    // the credential itself); has() stays the boolean authority check.
+    get: resolve,
     has(token) {
-      removeExpired();
-      const session = sessions.get(String(token || ""));
-      return Boolean(session && session.expiresAt > now());
+      return resolve(token) !== null;
     },
     issue() {
       removeExpired();
