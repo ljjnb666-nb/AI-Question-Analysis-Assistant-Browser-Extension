@@ -9,6 +9,7 @@ set SMTP_USER=mailer@example.com
 set SMTP_PASS=your-smtp-password
 set SMTP_FROM=Quiz Solver <mailer@example.com>
 set ANALYTICS_ADMIN_TOKEN=replace-with-a-long-random-token
+npm run build:admin
 npm run analytics:server
 ```
 
@@ -33,8 +34,8 @@ set PUBLIC_BASE_URL=https://analytics.082515.online
 - `POST /auth/session`: server-side session validation authority; requires `Authorization: Bearer <authToken>` and a `{ "userId": "..." }` body. Returns `{ ok: true, user: { userId, email }, expiresAt }` for a live session, or `401 AUTH_SESSION_INVALID` for any invalid, expired, revoked, or mismatched session
 - `POST /auth/logout`: validates the bearer session and revokes the stored token server-side; returns `401 AUTH_SESSION_INVALID` for unknown or already-revoked sessions
 - `POST /analytics/events`: anonymous/authenticated event ingestion
-- `GET /analytics/summary`: daily + rolling metrics summary, requires an admin session cookie or `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
-- `GET /analytics/timeseries?days=14`: recent DAU/install/activation/registration series, requires an admin session cookie or `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
+- `GET /analytics/summary`: legacy metrics API; browser Admin Console does not use this route. Machine/API callers may use `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
+- `GET /analytics/timeseries?days=14`: legacy timeseries API; browser Admin Console does not use this route. Machine/API callers may use `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
 - `GET /`: redirects to the independent Admin Console at `/admin`
 - `GET /admin/login`: native, POST-only admin login document
 - `POST /admin/login`: exchanges a form-encoded admin token for a short-lived browser session
