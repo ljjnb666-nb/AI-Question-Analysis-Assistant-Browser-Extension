@@ -110,6 +110,20 @@ jobs:
       - name: Verify built extension artifact
         run: npm run verify:artifact
 
+      - name: Build admin console
+        run: npm run build:admin
+
+      - name: Verify admin console artifact
+        run: npm run verify:admin
+
+      - name: Upload verified admin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quiz-solver-admin-${{ steps.source.outputs.sha }}
+          path: dist-admin/
+          if-no-files-found: error
+          retention-days: 10
+
       - name: Upload verified extension artifact
         uses: actions/upload-artifact@v4
         with:
