@@ -63,13 +63,15 @@ npm run build
 
 ## 本地 Analytics/Auth 后端
 
-测试统计或鉴权相关流程时，可启动本地后端：
+测试统计、鉴权或独立管理后台相关流程时，先构建并验证 Admin Console，再启动本地后端：
 
 ```bash
+npm run build:admin
+npm run verify:admin
 npm run analytics:server
 ```
 
-后端代码位于 `analytics-server/`，数据通过 SQLite 持久化存储。安全说明和本地配置见 [docs/ANALYTICS-AUTH.md](./docs/ANALYTICS-AUTH.md)。
+管理后台入口为 `/admin`，其构建产物位于独立的 `dist-admin/`，不会进入扩展 `dist/`。后端代码位于 `analytics-server/`，生产运行时使用 Node.js 24 + SQLite。安全说明和本地配置见 [docs/ANALYTICS-AUTH.md](./docs/ANALYTICS-AUTH.md)。
 
 ## 质量检查
 
