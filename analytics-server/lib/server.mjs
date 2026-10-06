@@ -1,7 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
-import { extname, resolve, sep } from "node:path";
-import { URL, fileURLToPath } from "node:url";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { URL } from "node:url";
 import { buildAnalyticsSummary, buildTimeSeries } from "./metrics.mjs";
 import {
   createEmailVerificationCodeInStorage,
@@ -20,26 +17,14 @@ import {
 } from "./security.mjs";
 import { normalizeRemoteAnalyticsEvent } from "./telemetry.mjs";
 import { ADMIN_SESSION_MAX_COUNT, ADMIN_SESSION_TTL_MS, createAdminSessionStore } from "./admin-sessions.mjs";
+import {
+  createAdminPortal,
+  hasAdminAuthority,
+  requireConfiguredAdminToken,
+} from "./admin-console.mjs";
 
 const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
 const EXTENSION_ORIGIN_PREFIX = "chrome-extension://";
-const ADMIN_SESSION_COOKIE = "analytics_admin_session";
-const ADMIN_LOGIN_LIMIT = 10;
-const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const ADMIN_DIST_DIR = fileURLToPath(new URL("../../dist-admin/", import.meta.url));
-const ADMIN_APP_PATHS = new Set(["/admin", "/admin/", "/admin/analytics", "/admin/users", "/admin/system", "/admin/audit"]);
-const ADMIN_CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self' data:",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "frame-ancestors 'none'",
-  "form-action 'self'",
-].join("; ");
-
 class HttpError extends Error {
   constructor(statusCode, message) {
     super(message);
@@ -76,94 +61,6 @@ function jsonHeaders(req) {
 function sendJson(req, res, statusCode, payload) {
   res.writeHead(statusCode, jsonHeaders(req));
   res.end(JSON.stringify(payload));
-}
-
-function adminHeaders(contentType, cacheControl = "no-store") {
-  return {
-    "Content-Type": contentType,
-    "Cache-Control": cacheControl,
-    "Content-Security-Policy": ADMIN_CSP,
-    "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
-  };
-}
-
-function sendAdminHtml(res, statusCode, html) {
-  res.writeHead(statusCode, adminHeaders("text/html; charset=utf-8"));
-  res.end(html);
-}
-
-function sendAdminJson(res, statusCode, payload) {
-  res.writeHead(statusCode, adminHeaders("application/json; charset=utf-8"));
-  res.end(JSON.stringify(payload));
-}
-
-function adminAssetContentType(filePath) {
-  switch (extname(filePath).toLowerCase()) {
-    case ".css":
-      return "text/css; charset=utf-8";
-    case ".js":
-      return "text/javascript; charset=utf-8";
-    case ".svg":
-      return "image/svg+xml";
-    case ".png":
-      return "image/png";
-    case ".webp":
-      return "image/webp";
-    default:
-      return "application/octet-stream";
-  }
-}
-
-function sendAdminFile(res, filePath, { html = false } = {}) {
-  if (!existsSync(filePath)) {
-    sendAdminJson(res, 503, { ok: false, error: { code: "ADMIN_APP_NOT_BUILT" } });
-    return;
-  }
-  const contentType = html ? "text/html; charset=utf-8" : adminAssetContentType(filePath);
-  const cacheControl = html ? "no-store" : "public, max-age=31536000, immutable";
-  try {
-    const body = readFileSync(filePath);
-    res.writeHead(200, adminHeaders(contentType, cacheControl));
-    res.end(body);
-  } catch {
-    sendAdminJson(res, 503, { ok: false, error: { code: "ADMIN_APP_UNAVAILABLE" } });
-  }
-}
-
-function resolveAdminAsset(pathname) {
-  let relativePath;
-  try {
-    relativePath = decodeURIComponent(pathname.slice("/admin/".length));
-  } catch {
-    return null;
-  }
-  const fullPath = resolve(ADMIN_DIST_DIR, relativePath);
-  if (!fullPath.startsWith(`${resolve(ADMIN_DIST_DIR)}${sep}`)) return null;
-  return fullPath;
-}
-
-function renderAdminTokenGateHtml() {
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="referrer" content="no-referrer">
-  <title>Quiz Solver Admin Login</title>
-</head>
-<body>
-  <main>
-    <form method="POST" action="/admin/login">
-      <h1>Quiz Solver 管理后台</h1>
-      <p>请输入管理口令以建立短期安全会话。</p>
-      <label for="adminToken">Admin Token</label>
-      <input id="adminToken" name="adminToken" type="password" autocomplete="current-password" required>
-      <button type="submit">登录</button>
-    </form>
-  </main>
-</body>
-</html>`;
 }
 
 function ensureTrustedBrowserOrigin(req) {
@@ -208,80 +105,10 @@ async function readJsonBody(req, maxBytes = DEFAULT_BODY_LIMIT_BYTES) {
   }
 }
 
-async function readAdminLoginBody(req) {
-  const contentType = String(req.headers["content-type"] || "")
-    .split(";", 1)[0]
-    .trim()
-    .toLowerCase();
-  if (contentType !== "application/x-www-form-urlencoded") {
-    throw new HttpError(415, "admin login requires form-encoded body");
-  }
-  const raw = await readRequestText(req);
-  return new URLSearchParams(raw).get("adminToken") || "";
-}
-
 function getBearerToken(req) {
   const authHeader = req.headers.authorization || "";
   const match = /^Bearer\s+(.+)$/i.exec(authHeader);
   return match?.[1] || "";
-}
-
-function getCookieValue(req, name) {
-  const cookieHeader = String(req.headers.cookie || "");
-  for (const entry of cookieHeader.split(";")) {
-    const separator = entry.indexOf("=");
-    if (separator < 0 || entry.slice(0, separator).trim() !== name) continue;
-    return entry.slice(separator + 1).trim();
-  }
-  return "";
-}
-
-function requireConfiguredAdminToken(expectedToken) {
-  const normalized = String(expectedToken || "").trim();
-  if (!normalized) throw new HttpError(503, "ADMIN_AUTH_NOT_CONFIGURED");
-  return normalized;
-}
-
-function adminTokensMatch(actual, expected) {
-  const actualDigest = createHash("sha256").update(String(actual)).digest();
-  const expectedDigest = createHash("sha256").update(String(expected)).digest();
-  return actualDigest.length === expectedDigest.length && timingSafeEqual(actualDigest, expectedDigest);
-}
-
-function ensureAdminMutationOrigin(req, publicBaseUrl) {
-  const origin = String(req.headers.origin || "").trim();
-  if (!origin) return;
-  let expectedOrigin;
-  try {
-    expectedOrigin = new URL(publicBaseUrl).origin;
-  } catch {
-    throw new HttpError(503, "ADMIN_PUBLIC_ORIGIN_INVALID");
-  }
-  if (origin !== expectedOrigin) {
-    throw new HttpError(403, "ADMIN_ORIGIN_REJECTED");
-  }
-}
-
-function getAdminSession(req, sessionStore) {
-  const sessionToken = getCookieValue(req, ADMIN_SESSION_COOKIE);
-  return sessionToken ? sessionStore.get(sessionToken) : null;
-}
-
-function hasAdminAuthority(req, expectedToken, sessionStore, allowBearer = false) {
-  if (getAdminSession(req, sessionStore)) return true;
-  const bearer = allowBearer ? getBearerToken(req) : "";
-  return Boolean(bearer && adminTokensMatch(bearer, expectedToken));
-}
-
-function redirect(res, location, cookie) {
-  const headers = {
-    Location: location,
-    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-    "Referrer-Policy": "no-referrer",
-  };
-  if (cookie) headers["Set-Cookie"] = cookie;
-  res.writeHead(303, headers);
-  res.end();
 }
 
 function enforceRateLimit(rateLimiter, key, limit, windowMs, nowImpl = () => Date.now()) {
@@ -348,6 +175,15 @@ export function createAnalyticsHandler(options = {}) {
     timeseriesIp: createNamespaceLimiter(),
   };
 
+  const adminPortal = createAdminPortal({
+    adminToken,
+    adminSessions,
+    adminSessionTtlMs,
+    adminLoginRateLimiter: rateLimiters.adminLogin,
+    nowImpl,
+    publicBaseUrl,
+  });
+
   return async function analyticsHandler(req, res) {
     if (!req.url) {
       sendJson(req, res, 404, { ok: false, error: "missing url" });
@@ -368,92 +204,7 @@ export function createAnalyticsHandler(options = {}) {
         return;
       }
 
-      if (req.method === "GET" && url.pathname === "/") {
-        redirect(res, "/admin");
-        return;
-      }
-
-      if (req.method === "GET" && url.pathname.startsWith("/admin") && url.searchParams.has("adminToken")) {
-        url.searchParams.delete("adminToken");
-        const sanitizedQuery = url.searchParams.toString();
-        redirect(res, `${url.pathname}${sanitizedQuery ? `?${sanitizedQuery}` : ""}`);
-        return;
-      }
-
-      if (req.method === "GET" && url.pathname === "/admin/login") {
-        requireConfiguredAdminToken(adminToken);
-        if (getAdminSession(req, adminSessions)) {
-          redirect(res, "/admin");
-          return;
-        }
-        sendAdminHtml(res, 200, renderAdminTokenGateHtml());
-        return;
-      }
-
-      if (req.method === "GET" && url.pathname === "/admin/api/session") {
-        requireConfiguredAdminToken(adminToken);
-        const session = getAdminSession(req, adminSessions);
-        if (!session) {
-          sendAdminJson(res, 401, { ok: false, error: { code: "ADMIN_SESSION_REQUIRED" } });
-          return;
-        }
-        sendAdminJson(res, 200, {
-          ok: true,
-          expiresAt: new Date(session.expiresAt).toISOString(),
-        });
-        return;
-      }
-
-      if (req.method === "GET" && url.pathname.startsWith("/admin/assets/")) {
-        requireConfiguredAdminToken(adminToken);
-        if (!getAdminSession(req, adminSessions)) {
-          sendAdminJson(res, 401, { ok: false, error: { code: "ADMIN_SESSION_REQUIRED" } });
-          return;
-        }
-        const assetPath = resolveAdminAsset(url.pathname);
-        if (!assetPath) {
-          sendAdminJson(res, 404, { ok: false, error: { code: "ADMIN_RESOURCE_NOT_FOUND" } });
-          return;
-        }
-        sendAdminFile(res, assetPath);
-        return;
-      }
-
-      if (req.method === "GET" && ADMIN_APP_PATHS.has(url.pathname)) {
-        requireConfiguredAdminToken(adminToken);
-        if (!getAdminSession(req, adminSessions)) {
-          redirect(res, "/admin/login");
-          return;
-        }
-        sendAdminFile(res, resolve(ADMIN_DIST_DIR, "index.html"), { html: true });
-        return;
-      }
-
-      if (req.method === "POST" && url.pathname === "/admin/login") {
-        ensureAdminMutationOrigin(req, publicBaseUrl);
-        const normalizedAdminToken = requireConfiguredAdminToken(adminToken);
-        enforceRateLimit(rateLimiters.adminLogin, `admin-login:ip:${ip}`, ADMIN_LOGIN_LIMIT, ADMIN_LOGIN_WINDOW_MS, nowImpl);
-        const submittedToken = await readAdminLoginBody(req);
-        if (!submittedToken || !adminTokensMatch(submittedToken, normalizedAdminToken)) {
-          sendAdminHtml(res, 401, "<!doctype html><html><head><meta charset=\"utf-8\"><title>Unauthorized</title></head><body><p>Admin authentication failed.</p></body></html>");
-          return;
-        }
-        const session = adminSessions.issue();
-        const secure = process.env.NODE_ENV === "production" || publicBaseUrl.startsWith("https://");
-        const cookie = `${ADMIN_SESSION_COOKIE}=${session.token}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=${Math.floor(adminSessionTtlMs / 1000)}${secure ? "; Secure" : ""}`;
-        redirect(res, "/admin", cookie);
-        return;
-      }
-
-      if (req.method === "POST" && url.pathname === "/admin/logout") {
-        ensureAdminMutationOrigin(req, publicBaseUrl);
-        const session = getCookieValue(req, ADMIN_SESSION_COOKIE);
-        if (session) adminSessions.delete(session);
-        redirect(
-          res,
-          "/admin/login",
-          `${ADMIN_SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=0${process.env.NODE_ENV === "production" || publicBaseUrl.startsWith("https://") ? "; Secure" : ""}`,
-        );
+      if (await adminPortal.handle(req, res, url, ip)) {
         return;
       }
 
@@ -625,26 +376,8 @@ export function createAnalyticsHandler(options = {}) {
         return;
       }
 
-      if (url.pathname.startsWith("/admin/api/")) {
-        sendAdminJson(res, 404, { ok: false, error: { code: "ADMIN_RESOURCE_NOT_FOUND" } });
-        return;
-      }
-
       sendJson(req, res, 404, { ok: false, error: "not found" });
     } catch (err) {
-      if (url.pathname.startsWith("/admin/api/")) {
-        const knownCode = err instanceof HttpError ? String(err.message || "") : "";
-        const allowedCodes = new Set([
-          "ADMIN_AUTH_NOT_CONFIGURED",
-          "ADMIN_SESSION_REQUIRED",
-          "ADMIN_RATE_LIMITED",
-          "ADMIN_RESOURCE_NOT_FOUND",
-        ]);
-        const code = allowedCodes.has(knownCode) ? knownCode : "ADMIN_INTERNAL_ERROR";
-        const statusCode = err instanceof HttpError ? err.statusCode : 500;
-        sendAdminJson(res, statusCode, { ok: false, error: { code } });
-        return;
-      }
       const statusCode = err instanceof HttpError ? err.statusCode : 400;
       sendJson(req, res, statusCode, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
