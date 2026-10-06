@@ -296,6 +296,7 @@ async function handleAdminReadApi({
   res,
   url,
   ip,
+  adminToken,
   adminSessions,
   adminReadRateLimiter,
   adminReadModels,
@@ -315,6 +316,7 @@ async function handleAdminReadApi({
     sendAdminJson(res, 405, { ok: false, error: { code: "ADMIN_METHOD_NOT_ALLOWED" } });
     return true;
   }
+  requireConfiguredAdminToken(adminToken);
   requireAdminApiSession(req, adminSessions);
   consumeAdminReadRateLimit(adminReadRateLimiter, ip, nowImpl);
   const days = parseAdminDays(url);
@@ -457,6 +459,7 @@ export function createAdminPortal({
             res,
             url,
             ip,
+            adminToken,
             adminSessions,
             adminReadRateLimiter,
             adminReadModels,
