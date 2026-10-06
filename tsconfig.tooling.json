@@ -1,14 +1,22 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "lib": ["ES2020", "DOM"],
-    "types": ["node"]
+    "lib": [
+      "ES2020",
+      "DOM"
+    ],
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "e2e/**/*.ts",
     "playwright.config.ts",
     "vite.config.ts",
     "vite.contentRuntime.config.ts",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "vite.admin.config.ts",
+    "admin-console/**/*.ts",
+    "admin-console/**/*.tsx"
   ]
 }
