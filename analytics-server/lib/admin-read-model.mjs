@@ -25,6 +25,8 @@ const ERROR_CATEGORIES = new Set([
   "unknown",
 ]);
 const VERSION_PATTERN = /^\d+(?:\.\d+){1,3}(?:[-+][\w.-]{1,16})?$/;
+const VERSION_ROW_LIMIT = 100;
+const VERSION_TEXT_LIMIT = 64;
 
 export class AdminReadModelError extends Error {
   constructor(code = "ADMIN_STORAGE_UNAVAILABLE", statusCode = 503) {
@@ -86,7 +88,11 @@ function normalizeErrorCategory(value) {
 }
 
 function normalizeVersion(value) {
-  return typeof value === "string" && VERSION_PATTERN.test(value) ? value : null;
+  return typeof value === "string" &&
+    value.length <= VERSION_TEXT_LIMIT &&
+    VERSION_PATTERN.test(value)
+    ? value
+    : null;
 }
 
 function observedDuration(event) {
@@ -462,7 +468,8 @@ function querySqliteVersions(database, days, now) {
        FROM ranked
        WHERE rank = 1
        GROUP BY extensionVersion
-       ORDER BY devices DESC, extensionVersion ASC`,
+       ORDER BY devices DESC, extensionVersion ASC
+       LIMIT ${VERSION_ROW_LIMIT}`,
     )
     .all(window.from, window.toExclusive);
   return rows
@@ -490,7 +497,8 @@ function queryJsonVersions(db, days, now) {
   }
   return [...counts.entries()]
     .map(([extensionVersion, devices]) => ({ extensionVersion, devices }))
-    .sort((a, b) => b.devices - a.devices || a.extensionVersion.localeCompare(b.extensionVersion));
+    .sort((a, b) => b.devices - a.devices || a.extensionVersion.localeCompare(b.extensionVersion))
+    .slice(0, VERSION_ROW_LIMIT);
 }
 
 function querySqliteLatency(database, days, now) {
