@@ -8,6 +8,7 @@ export default tseslint.config(
   {
     ignores: [
       "dist/**",
+      "dist-admin/**",
       "output/**",
       "coverage/**",
       "node_modules/**",
@@ -29,18 +30,22 @@ export default tseslint.config(
     ...config,
     files: [
       "src/**/*.{ts,tsx,mts,cts}",
+      "admin-console/**/*.{ts,tsx,mts,cts}",
       "analytics-server/**/*.{ts,tsx,mts,cts}",
       "e2e/**/*.{ts,tsx,mts,cts}",
       "playwright.config.ts",
+      "vite.admin.config.ts",
       "vite.contentRuntime.config.ts",
     ],
   })),
   {
     files: [
       "src/**/*.{ts,tsx,mts,cts}",
+      "admin-console/**/*.{ts,tsx,mts,cts}",
       "analytics-server/**/*.{ts,tsx,mts,cts}",
       "e2e/**/*.{ts,tsx,mts,cts}",
       "playwright.config.ts",
+      "vite.admin.config.ts",
       "vite.contentRuntime.config.ts",
     ],
     languageOptions: {
