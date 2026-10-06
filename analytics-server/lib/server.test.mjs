@@ -390,7 +390,7 @@ describe("analytics handler", () => {
     const stripped = await invoke(handler, { url: "/admin/data?adminToken=query-credential" });
     expect(stripped.res.statusCode).toBe(303);
     expect(stripped.res.headers.Location).toBe("/admin/data");
-    expect(stripped.res.payload).not.toContain("query-credential");
+    expect(String(stripped.res.payload || "")).not.toContain("query-credential");
 
     const data = await invoke(handler, { url: "/admin/data" });
     expect(data.res.statusCode).toBe(401);
