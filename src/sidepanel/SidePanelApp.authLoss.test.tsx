@@ -437,4 +437,4 @@ vi.mock("@/shared/utils/aiSolvePreferences", async () => {
   };
 });
 
-vi.mock("@/shared/utils/aiConnectionClient", () => ({ ensureAIConnectionAuthorityReady: vi.fn(async () => ({ ok: true })), sendAIConnectionCommand: vi.fn(async () => ({ ok: true, metadata: { presetId: "anthropic" } })), getAIConnectionEditorView: vi.fn(async () => ({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages", hasCredential: true })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/shared/utils/aiConnectionClient", () => ({ getAIConnectionActiveMetadata: vi.fn(async () => null), ensureAIConnectionAuthorityReady: vi.fn(async () => ({ ok: true })), sendAIConnectionCommand: vi.fn(async () => ({ ok: true, metadata: { presetId: "anthropic" } })), getAIConnectionEditorView: vi.fn(async () => ({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages", hasCredential: true })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));

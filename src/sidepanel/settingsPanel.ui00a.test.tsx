@@ -92,7 +92,7 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
       resultSource: "mock",
     });
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
     await waitFor(() => expect(screen.getByRole("button", { name: /连接测试/ })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: /连接测试/ }));
@@ -117,7 +117,7 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
       resultSource: "provider",
     });
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
     await waitFor(() => expect(screen.getByRole("button", { name: /连接测试/ })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: /连接测试/ }));
@@ -129,7 +129,7 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
   it("UI00A-RF01: a required-key provider without a key shows the config hint, never mock-fallback copy", async () => {
     mockStoredSettings("anthropic", "");
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
     await waitFor(() => expect(screen.getByText(/此服务商需要 API Key 才能进行真实解析。/)).toBeInTheDocument());
     expect(screen.getByText(/尚未填写 API Key。配置后才能进行 AI 解析和连接测试。/)).toBeInTheDocument();
 
@@ -144,7 +144,7 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
   it("UI00A-RF01: a key-optional provider is described as usable without a key and shows no missing-key hint", async () => {
     mockStoredSettings("ollama", "");
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
     await waitFor(() => expect(screen.getByText(/此服务商可以不填写 API Key。/)).toBeInTheDocument());
 
     expect(screen.queryByText(/尚未填写 API Key/)).toBeNull();
@@ -153,5 +153,26 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
   });
 });
 
-vi.mock("@/shared/utils/aiConnectionClient", () => ({ getAIConnectionEditorView: vi.fn(async () => ({ ...connectionFixture, selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages" })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/shared/utils/aiConnectionClient", () => ({
+  getAIConnectionActiveMetadata: vi.fn(async () => ({
+    id: "conn-ui00a-test",
+    presetId: connectionFixture.presetId,
+    connectionRevision: 1,
+    credentialRevision: connectionFixture.hasCredential ? 1 : 0,
+    hasCredential: Boolean(connectionFixture.hasCredential),
+    selectedModelId: "claude-opus-4.8",
+  })),
+  getAIConnectionEditorView: vi.fn(async () => ({ ...connectionFixture, selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages" })),
+  updateActiveAIConnection: vi.fn(async () => ({
+    ok: true,
+    metadata: {
+      id: "conn-ui00a-test",
+      presetId: connectionFixture.presetId,
+      connectionRevision: 1,
+      credentialRevision: connectionFixture.hasCredential ? 1 : 0,
+      hasCredential: Boolean(connectionFixture.hasCredential),
+      selectedModelId: "claude-opus-4.8",
+    },
+  })),
+}));
 vi.mock("@/shared/utils/aiSolvePreferences", () => ({ getAIConnectionReadiness: async () => connectionFixture.presetId === "ollama" || connectionFixture.hasCredential ? { ready: true } : { ready: false, code: "AI_CREDENTIAL_REQUIRED" } }));

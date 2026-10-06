@@ -29,3 +29,9 @@ export async function getAIConnectionEditorView() {
 export function updateActiveAIConnection(patch: AIConnectionUpdatePatch) {
   return sendAIConnectionCommand({ type: "AI_CONNECTION_UPDATE_ACTIVE", patch });
 }
+
+export async function getAIConnectionActiveMetadata() {
+  const response = await sendAIConnectionCommand({ type: "AI_CONNECTION_GET_ACTIVE_METADATA" });
+  return response.metadata;
+}
+

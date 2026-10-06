@@ -67,11 +67,7 @@ describe("SettingsTab", () => {
       analyticsBaseUrl: DEFAULT_ANALYTICS_BASE_URL,
     });
 
-    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("claude-opus-4.8")).toBeInTheDocument();
-    });
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="catalog" />);
 
     fireEvent.click(screen.getByRole("button", { name: /OpenAI \(GPT\)/i }));
 
@@ -85,18 +81,33 @@ describe("SettingsTab", () => {
       preferredRoute: "auto", language: "zh", enableAnalytics: false, analyticsConsentVersion: 1, deviceId: "dev-1", analyticsBaseUrl: DEFAULT_ANALYTICS_BASE_URL,
     });
     const save = vi.spyOn(storage, "saveSettings").mockResolvedValue(undefined);
-    const view = render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    const view = render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} initialView="editor" />);
 
+    // RF07: bootstrap is fail-closed; the editor enables only after the coherent authority read resolves
+    await waitFor(() => expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true"));
     const toggle = await screen.findByRole("checkbox", { name: "开启可选使用情况统计" });
     expect(screen.getByText(/关闭统计不会影响账号登录或 AI 解析功能/)).toBeInTheDocument();
     fireEvent.click(toggle);
     fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
     await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ enableAnalytics: true })));
 
-    view.rerender(<SettingsTab lang="en" onLanguageChange={vi.fn()} />);
+    view.rerender(<SettingsTab lang="en" onLanguageChange={vi.fn()} initialView="editor" />);
     await screen.findByRole("checkbox", { name: "Enable optional usage analytics" });
     expect(screen.getByText(/Turning analytics off does not affect account sign-in or AI parsing/)).toBeInTheDocument();
   });
 });
 
-vi.mock("@/shared/utils/aiConnectionClient", () => ({ getAIConnectionEditorView: vi.fn(async () => ({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages", hasCredential: false })), updateActiveAIConnection: vi.fn(async () => ({ ok: true })) }));
+// RF07: active metadata resolves coherently so the fail-closed bootstrap enables the editor
+vi.mock("@/shared/utils/aiConnectionClient", () => ({
+  getAIConnectionActiveMetadata: vi.fn(async () => ({
+    id: "conn-anthropic",
+    presetId: "anthropic",
+    selectedModelId: "claude-opus-4.8",
+    connectionRevision: 1,
+    credentialRevision: 0,
+    hasCredential: false,
+    validation: { status: "untested" },
+  })),
+  getAIConnectionEditorView: vi.fn(async () => ({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", endpointOverride: null, protocol: "anthropic_messages", hasCredential: false })),
+  updateActiveAIConnection: vi.fn(async () => ({ ok: true })),
+}));
