@@ -36,7 +36,9 @@ export function createAdminSessionStore({
       return { expiresAt: session.expiresAt };
     },
     has(token) {
-      return Boolean(this.get(token));
+      removeExpired();
+      const session = sessions.get(String(token || ""));
+      return Boolean(session && session.expiresAt > now());
     },
     issue() {
       removeExpired();
