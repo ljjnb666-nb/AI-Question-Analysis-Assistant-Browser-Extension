@@ -1460,4 +1460,150 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
       expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
     });
   });
+
+  // UI-05 Review Fix 04: Regressions
+  it("EPHEMERAL_READY_SURVIVES_UNSAVED_DRAFT: ephemeral test receipt survives unsaved draft changes and discard", async () => {
+    setupConnectionMock({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", hasCredential: true });
+    // Use actual common path: validation.status = "never_tested" (NOT seeded as "validated")
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      hasCredential: true,
+      validation: {
+        status: "never_tested",
+      },
+    } as any);
+    vi.mocked(parseQuestion).mockResolvedValue(createMockParseResult());
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    // Initially unvalidated: shows re-test / untested
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true");
+    });
+    expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+
+    // Perform real connection test from Home
+    fireEvent.click(screen.getByTestId("home-test-connection-btn"));
+
+    // Real test success yields fresh metadata + ephemeral validatedReceipt -> Home Ready!
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+      expect(screen.getByText("AI 配置已就绪")).toBeInTheDocument();
+    });
+
+    // User navigates: Home -> Catalog -> Custom
+    fireEvent.click(screen.getByTestId("home-change-service-btn"));
+    const customCard = await screen.findByTestId("provider-card-custom");
+    fireEvent.click(customCard);
+
+    // In Editor: Custom draft is uncommitted
+    expect(screen.getByTestId("settings-editor-view")).not.toHaveAttribute("hidden");
+
+    // Also modify custom URL
+    const urlInput = screen.getByTestId("settings-base-url-input");
+    fireEvent.change(urlInput, { target: { value: "https://my-custom.api" } });
+
+    // DO NOT SAVE! Return Home / discard draft
+    fireEvent.click(screen.getByTestId("nav-editor-done-to-home"));
+
+    // Expected:
+    // Home still shows committed Anthropic
+    expect(screen.getByTestId("settings-home-view")).not.toHaveAttribute("hidden");
+    const summaryCardAfterReturn = screen.getByTestId("settings-home-summary-card");
+    expect(within(summaryCardAfterReturn).getByText("Anthropic (Claude)")).toBeInTheDocument();
+    // Home still shows Ready (ephemeral receipt was NOT destroyed by draft changes)
+    expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+    expect(screen.getByText("AI 配置已就绪")).toBeInTheDocument();
+
+    // Active authority unchanged: updateActiveAIConnection was not called for Custom
+    expect(updateActiveAIConnection).not.toHaveBeenCalledWith(expect.objectContaining({ presetId: "custom" }));
+  });
+
+  it("SAME_PROVIDER_SELECTION_PRESERVES_MODEL_AND_CREDENTIAL: re-selecting current provider from catalog preserves model and credential presence", async () => {
+    setupConnectionMock({
+      presetId: "anthropic",
+      selectedModelId: "claude-haiku-4.5", // Non-default model
+      hasCredential: true,
+    });
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      selectedModelId: "claude-haiku-4.5",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      hasCredential: true,
+    } as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true");
+    });
+
+    // Home -> Change AI Service -> Catalog
+    fireEvent.click(screen.getByTestId("home-change-service-btn"));
+    expect(screen.getByTestId("settings-catalog-view")).not.toHaveAttribute("hidden");
+
+    // Click Anthropic again
+    const anthropicCard = await screen.findByTestId("provider-card-anthropic");
+    fireEvent.click(anthropicCard);
+
+    // Navigates to Editor
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-editor-view")).not.toHaveAttribute("hidden");
+    });
+
+    // Stored credential badge still visible in Editor
+    const editorView = screen.getByTestId("settings-editor-view");
+    expect(within(editorView).getByText(/已保存密钥/)).toBeInTheDocument();
+    // Secret input blank (no secret hydration)
+    const apiKeyInput = screen.getByTestId("settings-api-key-input") as HTMLInputElement;
+    expect(apiKeyInput.value).toBe("");
+    // Same non-default model still selected
+    expect(screen.getByDisplayValue("claude-haiku-4.5")).toBeInTheDocument();
+
+    // Save with blank API key
+    vi.mocked(updateActiveAIConnection).mockClear();
+    const saveBtn = await screen.findByRole("button", { name: "保存设置" });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateActiveAIConnection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          presetId: "anthropic",
+          selectedModelId: "claude-haiku-4.5",
+          credential: { action: "KEEP" },
+        }),
+      );
+    });
+  });
+
+  it("ENGLISH_STEP2_COPY_NO_CHINESE: unconfigured authenticated first-run in English shows natural English Step 2 without Chinese", async () => {
+    setupConnectionMock({ hasCredential: false }, { language: "en" });
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      hasCredential: false,
+    } as any);
+
+    render(<SettingsTab lang="en" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-run-setup-guide")).toBeInTheDocument();
+    });
+
+    const guide = screen.getByTestId("first-run-setup-guide");
+    expect(within(guide).getByText("Step 2: Choose AI Provider")).toBeInTheDocument();
+    expect(
+      within(guide).getByText("Enter an API key to enable AI solving and connection testing."),
+    ).toBeInTheDocument();
+
+    // Assert no Chinese characters in the guide text
+    expect(guide.textContent).not.toMatch(/[\u4e00-\u9fa5]/);
+  });
 });

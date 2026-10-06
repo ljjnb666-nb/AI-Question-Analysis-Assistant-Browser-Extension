@@ -214,11 +214,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     if (providerId !== storedSnapshot.presetId) return true;
     if (apiKey.trim().length > 0) return true;
     if (isCredentialCleared && storedSnapshot.hasCredential) return true;
-    if ((model || provider.defaultModel) !== (storedSnapshot.selectedModelId || provider.defaultModel)) return true;
+    if (model !== (storedSnapshot.selectedModelId ?? "")) return true;
     if (customUrl !== (storedSnapshot.endpointOverride ?? "")) return true;
     if (providerId === "custom" && customProtocol !== storedSnapshot.protocol) return true;
     return false;
-  }, [storedSnapshot, providerId, apiKey, isCredentialCleared, model, provider.defaultModel, customUrl, customProtocol]);
+  }, [storedSnapshot, providerId, apiKey, isCredentialCleared, model, customUrl, customProtocol]);
 
   const generalSettingsDirty = useMemo(() => {
     if (!storedSnapshot) return false;
@@ -358,11 +358,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   );
 
   const handleProviderChange = (id: ProviderId) => {
-    if (id !== providerId) {
-      setCustomUrl("");
-      if (id === "custom") {
-        setCustomProtocol("openai");
-      }
+    if (id === providerId) {
+      setApiKey("");
+      return;
     }
     setProviderId(id);
     setModel(getProvider(id).defaultModel);
@@ -370,13 +368,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setHasCredential(false);
     setIsCredentialCleared(false);
     setTestResult(null);
-    setValidatedReceipt(null);
+    setCustomUrl("");
+    if (id === "custom") {
+      setCustomProtocol("openai");
+    }
   };
 
   const handleApiKeyChange = (val: string) => {
     setApiKey(val);
     setTestResult(null);
-    setValidatedReceipt(null);
   };
 
   const handleClearCredential = () => {
@@ -384,25 +384,21 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setHasCredential(false);
     setIsCredentialCleared(true);
     setTestResult(null);
-    setValidatedReceipt(null);
   };
 
   const handleModelChange = (val: string) => {
     setModel(val);
     setTestResult(null);
-    setValidatedReceipt(null);
   };
 
   const handleCustomUrlChange = (val: string) => {
     setCustomUrl(val);
     setTestResult(null);
-    setValidatedReceipt(null);
   };
 
   const handleCustomProtocolChange = (val: "openai" | "anthropic") => {
     setCustomProtocol(val);
     setTestResult(null);
-    setValidatedReceipt(null);
   };
 
   const handleHomeLanguageChange = async (nextLang: UILang) => {
@@ -430,6 +426,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       protocolOverride: customProtocol === "anthropic" ? "anthropic_messages" : "openai_chat_completions",
       credential: credentialAction,
     });
+    setValidatedReceipt(null);
+    setCommittedTestResult(null);
     if (committed.metadata) {
       setActiveMetadata(committed.metadata);
     }
@@ -729,7 +727,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             </div>
             <p style={{ margin: 0, fontSize: 12, color: orbitColors.text.secondary, lineHeight: 1.5 }}>
               {isEn
-                ? "尚未填写 API Key。配置后才能进行 AI 解析和连接测试。"
+                ? "Enter an API key to enable AI solving and connection testing."
                 : "尚未填写 API Key。配置后才能进行 AI 解析和连接测试。"}
             </p>
             <UiButton
