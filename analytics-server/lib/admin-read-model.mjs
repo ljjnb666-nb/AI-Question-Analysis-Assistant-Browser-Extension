@@ -187,6 +187,7 @@ function querySqliteOverview(database, days, now) {
   return {
     generatedAt: new Date(now).toISOString(),
     analyticsScope: "opt_in_only",
+    accountScope: "all_registered_accounts",
     window: {
       days,
       from: new Date(window.from).toISOString(),
@@ -238,6 +239,7 @@ function queryJsonOverview(db, days, now) {
   return {
     generatedAt: new Date(now).toISOString(),
     analyticsScope: "opt_in_only",
+    accountScope: "all_registered_accounts",
     window: {
       days,
       from: new Date(window.from).toISOString(),
@@ -568,10 +570,19 @@ function readWithFallback(sqlite, json) {
 
 function analyticsEnvelope(kind, days, now, data) {
   const window = buildWindow(days, now);
+  const metric = {
+    timeseries: "observed_activity_and_parse_outcomes",
+    providers: "observed_parse_outcomes_by_provider",
+    errors: "observed_parse_errors_by_category",
+    versions: "latest_observed_version_per_opt_in_device",
+    latency: "observed_parse_outcome_duration_ms",
+  }[kind];
   return {
     kind,
+    metric,
     generatedAt: new Date(now).toISOString(),
     analyticsScope: "opt_in_only",
+    ...(kind === "timeseries" ? { accountScope: "all_registered_accounts" } : {}),
     window: {
       days,
       from: new Date(window.from).toISOString(),
