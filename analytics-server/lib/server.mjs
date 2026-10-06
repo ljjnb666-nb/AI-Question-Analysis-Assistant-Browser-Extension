@@ -594,6 +594,19 @@ export function createAnalyticsHandler(options = {}) {
 
       sendJson(req, res, 404, { ok: false, error: "not found" });
     } catch (err) {
+      if (url.pathname.startsWith("/admin/api/")) {
+        const knownCode = err instanceof HttpError ? String(err.message || "") : "";
+        const allowedCodes = new Set([
+          "ADMIN_AUTH_NOT_CONFIGURED",
+          "ADMIN_SESSION_REQUIRED",
+          "ADMIN_RATE_LIMITED",
+          "ADMIN_RESOURCE_NOT_FOUND",
+        ]);
+        const code = allowedCodes.has(knownCode) ? knownCode : "ADMIN_INTERNAL_ERROR";
+        const statusCode = err instanceof HttpError ? err.statusCode : 500;
+        sendAdminJson(res, statusCode, { ok: false, error: { code } });
+        return;
+      }
       const statusCode = err instanceof HttpError ? err.statusCode : 400;
       sendJson(req, res, statusCode, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
