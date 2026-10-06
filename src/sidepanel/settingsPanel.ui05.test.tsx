@@ -1697,10 +1697,12 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true");
     });
 
-    // Mock refresh failure / null metadata on external storage change
+    // Mock refresh failure on external storage change
     vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue(null as any);
+    vi.mocked(getAIConnectionEditorView).mockResolvedValue(null as any);
 
     // Emit aiConnectionState storage change
     const listeners = vi.mocked(chrome.storage.onChanged.addListener).mock.calls.map(([fn]) => fn);
@@ -1710,12 +1712,308 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
       }
     });
 
-    // Expected: Ready immediately disappears and active metadata is not honored
+    // Expected: Ready disappears and home fails closed
     await waitFor(() => {
       expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "false");
     });
     const summaryCard = screen.getByTestId("settings-home-summary-card");
-    expect(within(summaryCard).getByText("需要重新测试")).toBeInTheDocument();
+    expect(within(summaryCard).getByText("AI 连接不可用")).toBeInTheDocument();
+    expect(within(summaryCard).getByText("需重新获取")).toBeInTheDocument();
+    expect(within(summaryCard).queryByText("Anthropic (Claude)")).toBeNull();
+
+    // Open Editor: editor is marked unavailable, shows notice, and save is disabled
+    fireEvent.click(screen.getByTestId("home-edit-connection-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-editor-view")).not.toHaveAttribute("hidden");
+    });
+    expect(screen.getByTestId("settings-editor-unavailable-notice")).toBeInTheDocument();
+    const saveBtn = screen.getByRole("button", { name: "保存设置" });
+    expect(saveBtn).toBeDisabled();
+
+    vi.mocked(updateActiveAIConnection).mockClear();
+    fireEvent.click(saveBtn);
+    expect(updateActiveAIConnection).not.toHaveBeenCalled();
+  });
+
+  it("TOTAL_REFRESH_FAILURE_FAILS_CLOSED_EN: storage change refresh failure in English renders natural fail-closed labels", async () => {
+    setupConnectionMock({ presetId: "anthropic", hasCredential: true }, { language: "en" });
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      hasCredential: true,
+      validation: {
+        status: "validated",
+        generation: 1,
+        validatedConnectionRevision: 1,
+        validatedCredentialRevision: 1,
+      },
+    } as any);
+
+    render(<SettingsTab lang="en" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true");
+    });
+
+    // Mock refresh failure on external storage change
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue(null as any);
+    vi.mocked(getAIConnectionEditorView).mockResolvedValue(null as any);
+
+    // Emit aiConnectionState storage change
+    const listeners = vi.mocked(chrome.storage.onChanged.addListener).mock.calls.map(([fn]) => fn);
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ aiConnectionState: { oldValue: {}, newValue: {} } as any }, "local");
+      }
+    });
+
+    // Expected: Ready disappears and home fails closed in English
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "false");
+    });
+    const summaryCard = screen.getByTestId("settings-home-summary-card");
+    expect(within(summaryCard).getByText("AI Connection Unavailable")).toBeInTheDocument();
+    expect(within(summaryCard).getByText("Needs refresh")).toBeInTheDocument();
+    expect(within(summaryCard).queryByText("Anthropic (Claude)")).toBeNull();
+  });
+
+  it("METADATA_NEW_EDITOR_FAILS: Home shows new metadata but Editor is unavailable and cannot save stale draft", async () => {
+    setupConnectionMock({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", hasCredential: true });
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      selectedModelId: "claude-opus-4.8",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      hasCredential: true,
+    } as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "true");
+    });
+
+    // External authority changes to OpenAI, but editor fetch fails
+    vi.mocked(getAIConnectionEditorView).mockResolvedValue(null as any);
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-openai",
+      presetId: "openai",
+      selectedModelId: "gpt-5.4-mini",
+      connectionRevision: 2,
+      credentialRevision: 2,
+      hasCredential: true,
+    } as any);
+
+    // Emit aiConnectionState storage change
+    const listeners = vi.mocked(chrome.storage.onChanged.addListener).mock.calls.map(([fn]) => fn);
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ aiConnectionState: { oldValue: {}, newValue: {} } as any }, "local");
+      }
+    });
+
+    // Home summary updates safely to OpenAI from authoritative metadata
+    await waitFor(() => {
+      const summaryCard = screen.getByTestId("settings-home-summary-card");
+      expect(within(summaryCard).getByText("OpenAI (GPT)")).toBeInTheDocument();
+      expect(within(summaryCard).getByText("gpt-5.4-mini")).toBeInTheDocument();
+    });
+
+    // Open Editor: editor is unavailable, save is disabled, cannot revert OpenAI
+    fireEvent.click(screen.getByTestId("home-edit-connection-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-editor-view")).not.toHaveAttribute("hidden");
+    });
+    expect(screen.getByTestId("settings-editor-unavailable-notice")).toBeInTheDocument();
+    const saveBtn = screen.getByRole("button", { name: "保存设置" });
+    expect(saveBtn).toBeDisabled();
+
+    vi.mocked(updateActiveAIConnection).mockClear();
+    fireEvent.click(saveBtn);
+    expect(updateActiveAIConnection).not.toHaveBeenCalled();
+  });
+
+  it("OLDER_REFRESH_CANNOT_OVERWRITE_NEWER: older out-of-order refresh result is dropped by authority generation fence", async () => {
+    setupConnectionMock({ presetId: "anthropic", selectedModelId: "claude-opus-4.8", hasCredential: true });
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-anthropic",
+      presetId: "anthropic",
+      selectedModelId: "claude-opus-4.8",
+      connectionRevision: 1,
+      credentialRevision: 1,
+      hasCredential: true,
+    } as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      const summaryCard = screen.getByTestId("settings-home-summary-card");
+      expect(within(summaryCard).getByText("claude-opus-4.8")).toBeInTheDocument();
+    });
+
+    // Deferred resolvers for Refresh B
+    let resolveMetaB!: (val: any) => void;
+    let resolveEditorB!: (val: any) => void;
+    const metaBPromise = new Promise((res) => { resolveMetaB = res; });
+    const editorBPromise = new Promise((res) => { resolveEditorB = res; });
+
+    // Storage change B triggers
+    vi.mocked(getAIConnectionActiveMetadata).mockReturnValueOnce(metaBPromise as any);
+    vi.mocked(getAIConnectionEditorView).mockReturnValueOnce(editorBPromise as any);
+
+    const listeners = vi.mocked(chrome.storage.onChanged.addListener).mock.calls.map(([fn]) => fn);
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ aiConnectionState: { oldValue: {}, newValue: {} } as any }, "local");
+      }
+    });
+
+    // Storage change C triggers and resolves immediately with OpenAI
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-openai",
+      presetId: "openai",
+      selectedModelId: "gpt-5.4-mini",
+      connectionRevision: 3,
+      credentialRevision: 3,
+      hasCredential: true,
+    } as any);
+    vi.mocked(getAIConnectionEditorView).mockResolvedValue({
+      presetId: "openai",
+      selectedModelId: "gpt-5.4-mini",
+      endpointOverride: null,
+      protocol: "openai_chat_completions",
+      hasCredential: true,
+    });
+
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ aiConnectionState: { oldValue: {}, newValue: {} } as any }, "local");
+      }
+    });
+
+    // UI applies C
+    await waitFor(() => {
+      const summaryCard = screen.getByTestId("settings-home-summary-card");
+      expect(within(summaryCard).getByText("OpenAI (GPT)")).toBeInTheDocument();
+      expect(within(summaryCard).getByText("gpt-5.4-mini")).toBeInTheDocument();
+    });
+
+    // Now release older Refresh B (Anthropic, rev 2)
+    await act(async () => {
+      resolveMetaB({
+        id: "conn-anthropic",
+        presetId: "anthropic",
+        selectedModelId: "claude-sonnet-4.6",
+        connectionRevision: 2,
+        credentialRevision: 2,
+        hasCredential: true,
+      });
+      resolveEditorB({
+        presetId: "anthropic",
+        selectedModelId: "claude-sonnet-4.6",
+        endpointOverride: null,
+        protocol: "anthropic_messages",
+        hasCredential: true,
+      });
+    });
+
+    // Expected final UI: remains C (OpenAI / gpt-5.4-mini), older B was dropped
+    const summaryCard = screen.getByTestId("settings-home-summary-card");
+    expect(within(summaryCard).getByText("OpenAI (GPT)")).toBeInTheDocument();
+    expect(within(summaryCard).getByText("gpt-5.4-mini")).toBeInTheDocument();
+    expect(within(summaryCard).queryByText("claude-sonnet-4.6")).toBeNull();
+  });
+
+  it("INITIAL_LOAD_CANNOT_OVERWRITE_STORAGE_REFRESH: slow initial mount load cannot overwrite newer storage change refresh", async () => {
+    // Deferred resolvers for Initial Load A
+    let resolveMetaA!: (val: any) => void;
+    let resolveEditorA!: (val: any) => void;
+    let resolveSettingsA!: (val: any) => void;
+    const metaAPromise = new Promise((res) => { resolveMetaA = res; });
+    const editorAPromise = new Promise((res) => { resolveEditorA = res; });
+    const settingsAPromise = new Promise((res) => { resolveSettingsA = res; });
+
+    vi.mocked(getAIConnectionActiveMetadata).mockReturnValueOnce(metaAPromise as any);
+    vi.mocked(getAIConnectionEditorView).mockReturnValueOnce(editorAPromise as any);
+    vi.spyOn(storage, "loadSettings").mockReturnValueOnce(settingsAPromise as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    // Storage change B occurs before Initial Load A finishes
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
+      id: "conn-openai",
+      presetId: "openai",
+      selectedModelId: "gpt-5.4-mini",
+      connectionRevision: 2,
+      credentialRevision: 2,
+      hasCredential: true,
+    } as any);
+    vi.mocked(getAIConnectionEditorView).mockResolvedValue({
+      presetId: "openai",
+      selectedModelId: "gpt-5.4-mini",
+      endpointOverride: null,
+      protocol: "openai_chat_completions",
+      hasCredential: true,
+    });
+    vi.spyOn(storage, "loadSettings").mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      preferredRoute: "auto",
+      analyticsBaseUrl: "https://analytics.example.com",
+      enableAnalytics: false,
+      language: "zh",
+      deviceId: "dev-test",
+    });
+
+    const listeners = vi.mocked(chrome.storage.onChanged.addListener).mock.calls.map(([fn]) => fn);
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ aiConnectionState: { oldValue: {}, newValue: {} } as any }, "local");
+      }
+    });
+
+    // Storage change B completes and UI reflects OpenAI
+    await waitFor(() => {
+      const summaryCard = screen.getByTestId("settings-home-summary-card");
+      expect(within(summaryCard).getByText("OpenAI (GPT)")).toBeInTheDocument();
+      expect(within(summaryCard).getByText("gpt-5.4-mini")).toBeInTheDocument();
+    });
+
+    // Now resolve slow Initial Load A (Anthropic)
+    await act(async () => {
+      resolveSettingsA({
+        ...DEFAULT_SETTINGS,
+        preferredRoute: "auto",
+        analyticsBaseUrl: "https://analytics.example.com",
+        enableAnalytics: false,
+        language: "zh",
+        deviceId: "dev-test",
+      });
+      resolveEditorA({
+        presetId: "anthropic",
+        selectedModelId: "claude-opus-4.8",
+        endpointOverride: null,
+        protocol: "anthropic_messages",
+        hasCredential: true,
+      });
+      resolveMetaA({
+        id: "conn-anthropic",
+        presetId: "anthropic",
+        selectedModelId: "claude-opus-4.8",
+        connectionRevision: 1,
+        credentialRevision: 1,
+        hasCredential: true,
+      });
+    });
+
+    // Expected: final UI remains OpenAI (B), stale Initial Load A was dropped
+    const summaryCard = screen.getByTestId("settings-home-summary-card");
+    expect(within(summaryCard).getByText("OpenAI (GPT)")).toBeInTheDocument();
+    expect(within(summaryCard).getByText("gpt-5.4-mini")).toBeInTheDocument();
+    expect(within(summaryCard).queryByText("claude-opus-4.8")).toBeNull();
   });
 
   it("EXTERNAL_AUTHORITY_CHANGE_RECONCILES_EDITOR_DRAFT: external authority change to OpenAI reconciles editor and prevents reverting on save", async () => {
@@ -1800,3 +2098,4 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
     );
   });
 });
+

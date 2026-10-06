@@ -94,7 +94,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   const [committedTestResult, setCommittedTestResult] = useState<UserFeedback | null>(null);
   const [validatedReceipt, setValidatedReceipt] = useState<AuthorityValidationReceipt | null>(null);
   const [activeMetadata, setActiveMetadata] = useState<ConnectionMetadata | null>(null);
+  const [isConnectionAuthorityAvailable, setIsConnectionAuthorityAvailable] = useState(true);
+  const [isEditorAvailable, setIsEditorAvailable] = useState(true);
   const [deviceId, setDeviceId] = useState("");
+  const authorityRefreshGenerationRef = useRef(0);
 
   const [storedSnapshot, setStoredSnapshot] = useState<{
     presetId: ProviderId;
@@ -129,70 +132,110 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
   useEffect(() => {
     let disposed = false;
-    void Promise.all([loadSettings(), getAIConnectionEditorView()]).then(([settings, editor]) => {
-      if (disposed) return;
-      const initialPresetId = (editor.presetId as ProviderId) || "anthropic";
-      const initialProtocol = (editor.presetId === "custom" && editor.protocol === "anthropic_messages" ? "anthropic" : "openai") as "openai" | "anthropic";
-      setProviderId(initialPresetId);
-      setApiKey("");
-      setHasCredential(editor.hasCredential);
-      setModel(editor.selectedModelId);
-      setRoute(settings.preferredRoute ?? "auto");
-      setCustomUrl(editor.endpointOverride ?? "");
-      setAnalyticsBaseUrl(settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL);
-      setEnableAnalytics(settings.enableAnalytics ?? false);
-      setCustomProtocol(initialProtocol);
-      setLang(settings.language ?? initialLangRef.current ?? "zh");
-      setDeviceId(settings.deviceId ?? "");
-      if (editor.hasCredential || editor.presetId === "ollama") {
-        setSavedOnce(true);
+    const generation = ++authorityRefreshGenerationRef.current;
+
+    void Promise.all([
+      loadSettings().catch(() => null),
+      getAIConnectionEditorView().catch(() => null),
+      getAIConnectionActiveMetadata().catch(() => null),
+    ]).then(([settings, editor, meta]) => {
+      if (disposed || generation !== authorityRefreshGenerationRef.current) return;
+
+      if (settings) {
+        setRoute(settings.preferredRoute ?? "auto");
+        setAnalyticsBaseUrl(settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL);
+        setEnableAnalytics(settings.enableAnalytics ?? false);
+        setLang(settings.language ?? initialLangRef.current ?? "zh");
+        setDeviceId(settings.deviceId ?? "");
       }
 
-      setStoredSnapshot({
-        presetId: initialPresetId,
-        selectedModelId: editor.selectedModelId,
-        endpointOverride: editor.endpointOverride,
-        protocol: initialProtocol,
-        hasCredential: editor.hasCredential,
-        preferredRoute: settings.preferredRoute ?? "auto",
-        analyticsBaseUrl: settings.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL,
-        enableAnalytics: settings.enableAnalytics ?? false,
-        language: settings.language ?? "zh",
-      });
-    }).catch(() => { /* Failed initialization leaves the form unconfigured; no legacy fallback. */ });
+      if (meta) {
+        setActiveMetadata(meta);
+        setIsConnectionAuthorityAvailable(true);
+      } else {
+        setActiveMetadata(null);
+        setIsConnectionAuthorityAvailable(false);
+      }
 
-    void getAIConnectionActiveMetadata().then((meta) => {
-      if (!disposed) {
-        setActiveMetadata(meta ?? null);
+      if (editor) {
+        setIsEditorAvailable(true);
+        const initialPresetId = (editor.presetId as ProviderId) || "anthropic";
+        const initialProtocol = (editor.presetId === "custom" && editor.protocol === "anthropic_messages" ? "anthropic" : "openai") as "openai" | "anthropic";
+        setProviderId(initialPresetId);
+        setApiKey("");
+        setHasCredential(editor.hasCredential);
+        setModel(editor.selectedModelId);
+        setCustomUrl(editor.endpointOverride ?? "");
+        setCustomProtocol(initialProtocol);
+        if (editor.hasCredential || editor.presetId === "ollama") {
+          setSavedOnce(true);
+        }
+
+        setStoredSnapshot({
+          presetId: initialPresetId,
+          selectedModelId: editor.selectedModelId,
+          endpointOverride: editor.endpointOverride,
+          protocol: initialProtocol,
+          hasCredential: editor.hasCredential,
+          preferredRoute: settings?.preferredRoute ?? "auto",
+          analyticsBaseUrl: settings?.analyticsBaseUrl ?? DEFAULT_ANALYTICS_BASE_URL,
+          enableAnalytics: settings?.enableAnalytics ?? false,
+          language: settings?.language ?? "zh",
+        });
+      } else if (meta) {
+        setIsEditorAvailable(false);
+        const initialPresetId = (meta.presetId as ProviderId) || "anthropic";
+        setProviderId(initialPresetId);
+        setModel(meta.selectedModelId);
+        setHasCredential(meta.hasCredential);
+        setCustomUrl("");
+        setApiKey("");
+        setStoredSnapshot(null);
+      } else {
+        setIsEditorAvailable(false);
+        setStoredSnapshot(null);
       }
     }).catch(() => {
-      if (!disposed) {
-        setActiveMetadata(null);
-      }
+      if (disposed || generation !== authorityRefreshGenerationRef.current) return;
+      setActiveMetadata(null);
+      setIsConnectionAuthorityAvailable(false);
+      setIsEditorAvailable(false);
+      setStoredSnapshot(null);
     });
+
     return () => {
       disposed = true;
     };
   }, []);
 
-  // Invalidate Ready, clear active metadata immediately, and reconcile editor draft whenever authoritative aiConnectionState changes in storage
+  // Invalidate Ready, clear active metadata & snapshots immediately, and reconcile editor draft whenever authoritative aiConnectionState changes in storage
   useEffect(() => {
     const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
       if (area === "local" && changes.aiConnectionState) {
+        const generation = ++authorityRefreshGenerationRef.current;
         setValidatedReceipt(null);
         setCommittedTestResult(null);
         setActiveMetadata(null);
+        setIsConnectionAuthorityAvailable(false);
+        setIsEditorAvailable(false);
+
         void Promise.all([
           loadSettings().catch(() => null),
           getAIConnectionEditorView().catch(() => null),
           getAIConnectionActiveMetadata().catch(() => null),
         ]).then(([settings, editor, freshMeta]) => {
+          if (generation !== authorityRefreshGenerationRef.current) return;
+
           if (freshMeta) {
             setActiveMetadata(freshMeta);
+            setIsConnectionAuthorityAvailable(true);
           } else {
             setActiveMetadata(null);
+            setIsConnectionAuthorityAvailable(false);
           }
+
           if (editor) {
+            setIsEditorAvailable(true);
             const nextPresetId = (editor.presetId as ProviderId) || "anthropic";
             const nextProtocol = (editor.presetId === "custom" && editor.protocol === "anthropic_messages" ? "anthropic" : "openai") as "openai" | "anthropic";
             setProviderId(nextPresetId);
@@ -215,9 +258,34 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               enableAnalytics: settings?.enableAnalytics ?? false,
               language: settings?.language ?? "zh",
             });
+          } else if (freshMeta) {
+            // Metadata succeeded but editor view failed
+            setIsEditorAvailable(false);
+            const nextPresetId = (freshMeta.presetId as ProviderId) || "anthropic";
+            setProviderId(nextPresetId);
+            setModel(freshMeta.selectedModelId);
+            setHasCredential(freshMeta.hasCredential);
+            setCustomUrl("");
+            setApiKey("");
+            setIsCredentialCleared(false);
+            setTestResult(null);
+            setStoredSnapshot(null);
+          } else {
+            // Total refresh failure
+            setIsEditorAvailable(false);
+            setIsConnectionAuthorityAvailable(false);
+            setActiveMetadata(null);
+            setStoredSnapshot(null);
+            setApiKey("");
+            setIsCredentialCleared(false);
+            setTestResult(null);
           }
         }).catch(() => {
+          if (generation !== authorityRefreshGenerationRef.current) return;
           setActiveMetadata(null);
+          setIsConnectionAuthorityAvailable(false);
+          setIsEditorAvailable(false);
+          setStoredSnapshot(null);
         });
       }
     };
@@ -259,17 +327,21 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   );
 
   // Committed active connection strictly represents stored / authoritative backend state, ignoring unsaved editor drafts
-  // Committed active connection strictly represents stored / authoritative backend state, ignoring unsaved editor drafts
-  const committedPresetId = (activeMetadata?.presetId ?? storedSnapshot?.presetId ?? "anthropic") as ProviderId;
+  const isAuthorityAvailable = Boolean(activeMetadata || (isConnectionAuthorityAvailable && storedSnapshot));
+  const committedPresetId = (activeMetadata?.presetId ?? (isConnectionAuthorityAvailable ? storedSnapshot?.presetId : undefined) ?? "anthropic") as ProviderId;
   const committedProvider = getProvider(committedPresetId);
-  const committedModel = activeMetadata?.selectedModelId || storedSnapshot?.selectedModelId || committedProvider.defaultModel;
-  const committedHasCredential = activeMetadata ? activeMetadata.hasCredential : Boolean(storedSnapshot?.hasCredential);
-  const committedKeyOptional = committedProvider.keyOptional;
-  const isCommittedConfigured = Boolean(committedKeyOptional || committedHasCredential);
+  const committedProviderName = isAuthorityAvailable ? committedProvider.name : (isEn ? "AI Connection Unavailable" : "AI 连接不可用");
+  const committedModel = isAuthorityAvailable
+    ? (activeMetadata?.selectedModelId || storedSnapshot?.selectedModelId || committedProvider.defaultModel)
+    : (isEn ? "Needs refresh" : "需重新获取");
+  const committedHasCredential = activeMetadata ? activeMetadata.hasCredential : (isAuthorityAvailable ? Boolean(storedSnapshot?.hasCredential) : false);
+  const committedKeyOptional = isAuthorityAvailable ? committedProvider.keyOptional : false;
+  const isCommittedConfigured = Boolean(isAuthorityAvailable && (committedKeyOptional || committedHasCredential));
 
   // Validation status for committed active connection:
   // Reload Ready only if persisted validation status is "validated" and matches connectionRevision + credentialRevision
   const isPersistedValidationMatch = Boolean(
+    isAuthorityAvailable &&
     activeMetadata &&
     activeMetadata.validation?.status === "validated" &&
     activeMetadata.validation.validatedConnectionRevision === activeMetadata.connectionRevision &&
@@ -278,6 +350,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
   // In-session test receipt matches active metadata revisions
   const isReceiptMatch = Boolean(
+    isAuthorityAvailable &&
     validatedReceipt &&
     activeMetadata &&
     (committedTestResult?.tone === "success" || testResult?.tone === "success") &&
@@ -289,7 +362,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       validatedReceipt.validationGeneration === activeMetadata.validation.generation)
   );
 
-  const isCommittedValidated = Boolean(activeMetadata && (isReceiptMatch || isPersistedValidationMatch));
+  const isCommittedValidated = Boolean(isAuthorityAvailable && activeMetadata && (isReceiptMatch || isPersistedValidationMatch));
 
   // In editor, validation is invalidated if connection draft is dirty (provider/model/key/url/protocol changed)
   const isValidated = useMemo(() => {
@@ -317,10 +390,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         isDirty: false, // Committed connection is never dirty from unsaved editor drafts
         testing: testingTarget === "committed",
         testResult: committedTestResult,
-        savedOnce: savedOnce || isCommittedConfigured,
+        savedOnce: Boolean(isAuthorityAvailable && (savedOnce || isCommittedConfigured)),
         isValidated: isCommittedValidated,
       }),
-    [isCommittedConfigured, testingTarget, committedTestResult, savedOnce, isCommittedValidated],
+    [isAuthorityAvailable, isCommittedConfigured, testingTarget, committedTestResult, savedOnce, isCommittedValidated],
   );
 
   const currentSetupStatus = view === "home" ? homeSetupStatus : setupStatus;
@@ -477,6 +550,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   };
 
   const handleSave = async () => {
+    if (!isEditorAvailable) {
+      setTestResult(
+        userFeedback(
+          "warning",
+          isEn ? "Connection state changed. Reload / retry." : "连接状态已变更，请重新加载或重试。",
+        ),
+      );
+      return;
+    }
     try {
       await saveCurrentDraft();
       logEvent("settings_saved", { providerId, route });
@@ -604,6 +686,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
   // Test editor draft by saving it to committed state first, then verifying the new connection
   const handleTestEditor = async () => {
+    if (!isEditorAvailable) {
+      setTestResult(
+        userFeedback(
+          "warning",
+          isEn ? "Connection state changed. Reload / retry." : "连接状态已变更，请重新加载或重试。",
+        ),
+      );
+      return;
+    }
     setTestingTarget("editor");
     setTestResult(null);
     try {
@@ -855,7 +946,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
         {/* 2. Active AI Connection Summary Card (renders committed connection, NOT unsaved editor draft) */}
         <SettingsHomeSummaryCard
-          providerName={committedProvider.name}
+          providerName={committedProviderName}
           modelName={committedModel}
           connectionStatus={homeSetupStatus}
           hasCredential={committedHasCredential}
@@ -1024,7 +1115,29 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           setRoute={setRoute}
         />
 
+        {!isEditorAvailable ? (
+          <div
+            data-testid="settings-editor-unavailable-notice"
+            style={{
+              padding: "10px 14px",
+              borderRadius: orbitRadius.md,
+              background: "rgba(239, 68, 68, 0.1)",
+              border: `1px solid ${orbitColors.semantic.errorBorder}`,
+              color: orbitColors.semantic.error,
+              fontSize: 12,
+              lineHeight: 1.5,
+              marginTop: 10,
+              marginBottom: 10,
+            }}
+          >
+            {isEn
+              ? "Connection state changed. Reload / retry."
+              : "连接状态已变更，请重新加载或重试。"}
+          </div>
+        ) : null}
+
         <SettingsActionsSection
+          disabled={!isEditorAvailable}
           isDirty={isDirty}
           isEn={isEn}
           onSave={() => void handleSave()}

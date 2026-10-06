@@ -1396,7 +1396,8 @@ export const SettingsActionsSection: React.FC<{
   saved: boolean;
   testResult: UserFeedback | null;
   testing: boolean;
-}> = ({ isDirty = false, isEn, onSave, onTest, saved, testResult, testing }) => {
+  disabled?: boolean;
+}> = ({ isDirty = false, isEn, onSave, onTest, saved, testResult, testing, disabled = false }) => {
   const copy = getSettingsCopy(isEn ? "en" : "zh");
 
   const toneStyles: Record<string, { border: string; background: string; color: string }> = {
@@ -1439,13 +1440,13 @@ export const SettingsActionsSection: React.FC<{
           overflow: "hidden",
         }}
       >
-        <UiButton primary={isDirty || !saved} onClick={onSave}>
+        <UiButton primary={isDirty || !saved} onClick={onSave} disabled={disabled}>
           {saved ? (isEn ? "Saved" : "已保存") : isEn ? "Save Settings" : "保存设置"}
         </UiButton>
 
         <UiButton
           onClick={onTest}
-          disabled={testing}
+          disabled={testing || disabled}
           aria-label={
             testing
               ? isEn
