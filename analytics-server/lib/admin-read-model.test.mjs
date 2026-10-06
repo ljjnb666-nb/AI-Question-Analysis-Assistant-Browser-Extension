@@ -353,4 +353,34 @@ describe("Phase 11C1 analytics read models", () => {
       { date: "2026-10-07", samples: 0, averageMs: null },
     ]);
   });
+  it("C1-RM-08 filters oversized version labels at the Admin read boundary", () => {
+    const now = ms("2026-10-07T12:00:00.000Z");
+    saveDb({
+      analyticsPrivacyEpoch: 1,
+      devices: [],
+      users: [],
+      analytics_events: [
+        event({
+          id: "evt-1",
+          name: "popup_opened",
+          at: "2026-10-07T08:00:00.000Z",
+          deviceId: "dev-a",
+          version: `1.2.${"9".repeat(80)}`,
+        }),
+        event({
+          id: "evt-2",
+          name: "popup_opened",
+          at: "2026-10-07T09:00:00.000Z",
+          deviceId: "dev-b",
+          version: "0.2.1",
+        }),
+      ],
+      email_verification_codes: [],
+    });
+
+    const response = createAdminAnalyticsReadModels({ now: () => now }).versions(14);
+    expect(response.data).toEqual([{ extensionVersion: "0.2.1", devices: 1 }]);
+    expect(JSON.stringify(response)).not.toContain("9".repeat(80));
+  });
+
 });
