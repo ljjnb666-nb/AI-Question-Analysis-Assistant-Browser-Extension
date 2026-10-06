@@ -1,29 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { AdminShell } from "./components/AdminShell";
+import { AlertCircleIcon, RefreshIcon } from "./components/Icons";
 import "./admin.css";
 
-type SessionState =
+export type SessionState =
   | { status: "loading" }
   | { status: "authenticated"; expiresAt: string | null }
   | { status: "error"; message: string };
 
-const pages = new Map([
-  ["/admin", ["概览", "Overview foundation is ready. Metrics arrive in Phase 11C."]],
-  ["/admin/analytics", ["分析", "Analytics read models arrive in Phase 11C."]],
-  ["/admin/users", ["用户", "Read-only user administration arrives in Phase 11D."]],
-  ["/admin/system", ["系统", "Sanitized system health arrives in Phase 11D."]],
-  ["/admin/audit", ["审计", "Admin audit history arrives in Phase 11E."]],
-]);
-
-function normalizePath(pathname: string): string {
+export function normalizePath(pathname: string): string {
   const trimmed = pathname.replace(/\/+$/, "");
   return trimmed || "/admin";
 }
 
-function AdminApp() {
+export function AdminApp(): React.JSX.Element {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
   const currentPath = normalizePath(window.location.pathname);
-  const page = pages.get(currentPath) ?? ["管理后台", "This Admin route is not available."];
 
   useEffect(() => {
     const controller = new AbortController();
@@ -40,16 +33,27 @@ function AdminApp() {
           return null;
         }
         if (!response.ok) throw new Error("ADMIN_SESSION_CHECK_FAILED");
-        return response.json() as Promise<{ ok: true; expiresAt?: string | null }>;
+        return response.json() as Promise<{
+          ok: true;
+          expiresAt?: string | null;
+        }>;
       })
       .then((payload) => {
-        if (payload) setSession({ status: "authenticated", expiresAt: payload.expiresAt ?? null });
+        if (payload) {
+          setSession({
+            status: "authenticated",
+            expiresAt: payload.expiresAt ?? null,
+          });
+        }
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         setSession({
           status: "error",
-          message: error instanceof Error ? error.message : "ADMIN_SESSION_CHECK_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "ADMIN_SESSION_CHECK_FAILED",
         });
       });
 
@@ -57,53 +61,58 @@ function AdminApp() {
   }, []);
 
   if (session.status === "loading") {
-    return <main className="auth-state" aria-live="polite">正在验证管理员会话…</main>;
-  }
-
-  if (session.status === "error") {
     return (
-      <main className="auth-state" role="alert">
-        管理后台暂时不可用。请刷新页面后重试。
+      <main className="admin-auth-screen" aria-live="polite">
+        <div className="admin-auth-card">
+          <div className="admin-auth-brand">
+            <div className="admin-brand-icon" aria-hidden="true">
+              QS
+            </div>
+            <strong className="admin-brand-title">Quiz Solver</strong>
+            <span className="admin-brand-subtitle">管理后台</span>
+          </div>
+          <div className="admin-auth-loader">
+            <div className="admin-spinner" aria-hidden="true" />
+            <p className="admin-auth-loading-text">正在验证管理员会话…</p>
+            <p className="admin-auth-hint">请稍候，正在验证访问权限</p>
+          </div>
+        </div>
       </main>
     );
   }
 
-  return (
-    <div className="admin-layout">
-      <aside className="admin-sidebar" aria-label="管理后台导航">
-        <div>
-          <strong>Quiz Solver</strong>
-          <p>Admin Console</p>
+  if (session.status === "error") {
+    return (
+      <main className="admin-auth-screen" role="alert">
+        <div className="admin-auth-card admin-auth-card-error">
+          <div className="admin-error-icon-wrap" aria-hidden="true">
+            <AlertCircleIcon size={32} />
+          </div>
+          <h1 className="admin-error-title">管理后台暂时不可用</h1>
+          <p className="admin-error-desc">
+            管理后台暂时不可用。请刷新页面后重试。
+          </p>
+          <button
+            type="button"
+            className="admin-retry-btn"
+            onClick={() => window.location.reload()}
+          >
+            <RefreshIcon size={16} />
+            <span>刷新页面</span>
+          </button>
         </div>
-        <nav>
-          {[...pages.entries()].map(([href, [label]]) => (
-            <a key={href} href={href} aria-current={currentPath === href ? "page" : undefined}>
-              {label}
-            </a>
-          ))}
-        </nav>
-        <form method="POST" action="/admin/logout">
-          <button type="submit">退出登录</button>
-        </form>
-      </aside>
-      <main className="admin-main">
-        <header>
-          <p className="eyebrow">独立管理后台</p>
-          <h1>{page[0]}</h1>
-        </header>
-        <section className="admin-card">
-          <p>{page[1]}</p>
-          <p className="muted">当前阶段只冻结平台、安全和构建边界，不展示虚构业务数据。</p>
-        </section>
       </main>
-    </div>
-  );
+    );
+  }
+
+  return <AdminShell currentPath={currentPath} expiresAt={session.expiresAt} />;
 }
 
-const root = document.getElementById("root");
-if (!root) throw new Error("Admin root element is missing");
-createRoot(root).render(
-  <React.StrictMode>
-    <AdminApp />
-  </React.StrictMode>,
-);
+const rootElement = document.getElementById("root");
+if (rootElement) {
+  createRoot(rootElement).render(
+    <React.StrictMode>
+      <AdminApp />
+    </React.StrictMode>,
+  );
+}
