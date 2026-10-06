@@ -73,6 +73,11 @@ function jsonHeaders(req) {
   };
 }
 
+function sendJson(req, res, statusCode, payload) {
+  res.writeHead(statusCode, jsonHeaders(req));
+  res.end(JSON.stringify(payload));
+}
+
 function adminHeaders(contentType, cacheControl = "no-store") {
   return {
     "Content-Type": contentType,
