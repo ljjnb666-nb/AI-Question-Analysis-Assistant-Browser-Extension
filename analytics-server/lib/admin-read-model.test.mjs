@@ -424,4 +424,62 @@ describe("Phase 11C1 analytics read models", () => {
     ]);
   });
 
+  it("C1-RM-10 falls back to normalized data.duration when top-level duration is null", () => {
+    const now = ms("2026-10-07T12:00:00.000Z");
+    saveDb({
+      analyticsPrivacyEpoch: 1,
+      devices: [],
+      users: [],
+      analytics_events: [
+        event({
+          id: "evt-duration",
+          name: "parse_success",
+          at: "2026-10-06T08:00:00.000Z",
+          deviceId: "dev-a",
+          data: { provider: "openai", duration: 250 },
+        }),
+      ],
+      email_verification_codes: [],
+    });
+
+    const response = createAdminAnalyticsReadModels({ now: () => now }).latency(3);
+    expect(response.data[1]).toEqual({
+      date: "2026-10-06",
+      samples: 1,
+      averageMs: 250,
+    });
+    expect(createAdminAnalyticsReadModels({ now: () => now }).overview(14).observed.parseOutcomeLatencyWindowMs)
+      .toEqual({ samples: 1, average: 250 });
+  });
+
+  it("C1-RM-11 uses eventId DESC as the final latest-version tie breaker", () => {
+    const now = ms("2026-10-07T12:00:00.000Z");
+    const at = "2026-10-07T08:00:00.000Z";
+    saveDb({
+      analyticsPrivacyEpoch: 1,
+      devices: [],
+      users: [],
+      analytics_events: [
+        event({
+          id: "evt-a",
+          name: "popup_opened",
+          at,
+          deviceId: "dev-a",
+          version: "1.0.0",
+        }),
+        event({
+          id: "evt-z",
+          name: "popup_opened",
+          at,
+          deviceId: "dev-a",
+          version: "2.0.0",
+        }),
+      ],
+      email_verification_codes: [],
+    });
+
+    const response = createAdminAnalyticsReadModels({ now: () => now }).versions(14);
+    expect(response.data).toEqual([{ extensionVersion: "2.0.0", devices: 1 }]);
+  });
+
 });
