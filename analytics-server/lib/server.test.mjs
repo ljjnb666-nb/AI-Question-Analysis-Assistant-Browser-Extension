@@ -439,6 +439,37 @@ describe("analytics handler", () => {
     expect(parsePayload(bearerOnly.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
   });
 
+  it("rejects admin asset traversal outside the isolated artifact root", async () => {
+    const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
+    const signedIn = await login(handler);
+    const { res } = await invoke(handler, {
+      url: "/admin/assets/%2e%2e/%2e%2e/analytics-server/lib/server.mjs",
+      headers: { cookie: sessionCookie(signedIn.res) },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(parsePayload(res).error.code).toBe("ADMIN_RESOURCE_NOT_FOUND");
+    expect(res.payload).not.toContain("analyticsHandler");
+  });
+
+  it("revokes the admin session on logout and clears the admin-path cookie", async () => {
+    const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
+    const signedIn = await login(handler);
+    const cookie = sessionCookie(signedIn.res);
+    const loggedOut = await invoke(handler, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: { cookie },
+    });
+    expect(loggedOut.res.statusCode).toBe(303);
+    expect(loggedOut.res.headers.Location).toBe("/admin/login");
+    expect(loggedOut.res.headers["Set-Cookie"]).toContain("Path=/admin");
+    expect(loggedOut.res.headers["Set-Cookie"]).toContain("Max-Age=0");
+
+    const session = await invoke(handler, { url: "/admin/api/session", headers: { cookie } });
+    expect(session.res.statusCode).toBe(401);
+    expect(parsePayload(session.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
+  });
+
   it("authorizes admin data with the session cookie and rejects query credentials", async () => {
     const handler = createHandler();
     const signedIn = await login(handler);
