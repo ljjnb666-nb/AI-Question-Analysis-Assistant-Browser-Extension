@@ -503,6 +503,18 @@ describe("analytics handler", () => {
     expect(parsePayload(session.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
   });
 
+  it("returns the stable Admin API not-found contract for unknown namespace routes", async () => {
+    const handler = createHandler();
+    const { res } = await invoke(handler, { url: "/admin/api/not-a-route" });
+    expect(res.statusCode).toBe(404);
+    expect(parsePayload(res)).toEqual({
+      ok: false,
+      error: { code: "ADMIN_RESOURCE_NOT_FOUND" },
+    });
+    expect(res.headers["Content-Security-Policy"]).toContain("default-src 'self'");
+    expect(res.headers["X-Content-Type-Options"]).toBe("nosniff");
+  });
+
   it("authorizes admin data with the session cookie and rejects query credentials", async () => {
     const handler = createHandler();
     const signedIn = await login(handler);
