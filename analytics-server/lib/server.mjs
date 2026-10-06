@@ -373,6 +373,13 @@ export function createAnalyticsHandler(options = {}) {
         return;
       }
 
+      if (req.method === "GET" && url.pathname.startsWith("/admin") && url.searchParams.has("adminToken")) {
+        url.searchParams.delete("adminToken");
+        const sanitizedQuery = url.searchParams.toString();
+        redirect(res, `${url.pathname}${sanitizedQuery ? `?${sanitizedQuery}` : ""}`);
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/admin/login") {
         requireConfiguredAdminToken(adminToken);
         if (getAdminSession(req, adminSessions)) {
