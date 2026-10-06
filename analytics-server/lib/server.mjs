@@ -618,6 +618,11 @@ export function createAnalyticsHandler(options = {}) {
         return;
       }
 
+      if (url.pathname.startsWith("/admin/api/")) {
+        sendAdminJson(res, 404, { ok: false, error: { code: "ADMIN_RESOURCE_NOT_FOUND" } });
+        return;
+      }
+
       sendJson(req, res, 404, { ok: false, error: "not found" });
     } catch (err) {
       if (url.pathname.startsWith("/admin/api/")) {
