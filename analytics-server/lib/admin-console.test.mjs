@@ -156,6 +156,18 @@ describe("Phase 11C1 admin analytics API authority", () => {
     expect(adminReadModels.overview).not.toHaveBeenCalled();
   });
 
+  it("C1-API-01B keeps aggregate APIs fail-closed when Admin auth is not configured", async () => {
+    const { portal, adminSessions, adminReadModels } = createHarness({ adminToken: "" });
+    const issued = adminSessions.issue();
+    const { res } = await invoke(portal, {
+      url: "/admin/api/overview",
+      headers: { cookie: `analytics_admin_session=${issued.token}` },
+    });
+    expect(res.statusCode).toBe(503);
+    expect(parsePayload(res).error.code).toBe("ADMIN_AUTH_NOT_CONFIGURED");
+    expect(adminReadModels.overview).not.toHaveBeenCalled();
+  });
+
   it("C1-API-02 never accepts the long-lived Admin bearer as browser analytics authority", async () => {
     const { portal, adminReadModels } = createHarness();
     const { res } = await invoke(portal, {
