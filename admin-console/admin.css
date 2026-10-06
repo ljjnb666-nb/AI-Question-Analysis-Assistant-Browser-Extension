@@ -713,13 +713,19 @@ a {
     bottom: 0;
     width: 280px;
     transform: translateX(-100%);
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+      visibility 0.25s ease;
     box-shadow: none;
     z-index: 100;
   }
 
   .admin-sidebar.is-mobile-open {
     transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
     box-shadow:
       0 10px 25px -5px rgba(0, 0, 0, 0.1),
       0 8px 10px -6px rgba(0, 0, 0, 0.1);

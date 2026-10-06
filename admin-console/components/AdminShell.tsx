@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Sidebar } from "./Sidebar";
 import { PageHeader } from "./PageHeader";
 import {
@@ -46,6 +46,9 @@ export function AdminShell({
   expiresAt,
 }: AdminShellProps): React.JSX.Element {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(false);
 
   const toggleMobile = useCallback(() => {
     setIsMobileOpen((prev) => !prev);
@@ -54,6 +57,19 @@ export function AdminShell({
   const closeMobile = useCallback(() => {
     setIsMobileOpen(false);
   }, []);
+
+  useEffect(() => {
+    if (isMobileOpen) {
+      wasOpenRef.current = true;
+      const timer = setTimeout(() => {
+        closeButtonRef.current?.focus();
+      }, 0);
+      return () => clearTimeout(timer);
+    } else if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      triggerRef.current?.focus();
+    }
+  }, [isMobileOpen]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -80,19 +96,19 @@ export function AdminShell({
               description="管理后台基础设施已经就绪。核心指标将在数据模型接入后展示。"
             />
             <section className="admin-grid-metrics" aria-label="核心指标占位">
-              <MetricPlaceholderCard label="活跃设备" />
-              <MetricPlaceholderCard label="解析请求数" />
-              <MetricPlaceholderCard label="解析成功率" />
-              <MetricPlaceholderCard label="平均响应时延" />
+              <MetricPlaceholderCard label="已授权活跃设备" />
+              <MetricPlaceholderCard label="解析结果数" />
+              <MetricPlaceholderCard label="观测解析结果成功率" />
+              <MetricPlaceholderCard label="观测解析耗时" />
             </section>
             <div className="admin-grid-sections">
               <PlaceholderSection
                 title="使用情况概览"
-                subtitle="展示设备活跃度与调用频次统计"
+                subtitle="展示已授权设备活跃度与解析结果统计"
               />
               <PlaceholderSection
                 title="版本分布"
-                subtitle="展示扩展与客户端版本分布比例"
+                subtitle="展示已授权设备的最新观测扩展版本分布"
               />
             </div>
           </>
@@ -106,19 +122,19 @@ export function AdminShell({
               description="趋势、解析结果、提供商分布、错误分类及版本分布指标将在分析模型接入后展示。"
             />
             <section className="admin-grid-metrics" aria-label="分析指标占位">
-              <MetricPlaceholderCard label="总解析量" />
-              <MetricPlaceholderCard label="模型调用分布" />
-              <MetricPlaceholderCard label="错误分类分布" />
-              <MetricPlaceholderCard label="活跃版本数" />
+              <MetricPlaceholderCard label="解析结果数" />
+              <MetricPlaceholderCard label="解析结果提供商分布" />
+              <MetricPlaceholderCard label="解析错误分类" />
+              <MetricPlaceholderCard label="观测版本分布" />
             </section>
             <div className="admin-grid-sections">
               <PlaceholderSection
-                title="解析请求趋势"
+                title="解析结果趋势"
                 subtitle="展示匿名、已授权的时间序列统计"
               />
               <PlaceholderSection
-                title="提供商与模型占比"
-                subtitle="展示各 AI 服务商调用分布情况"
+                title="解析结果提供商分布"
+                subtitle="展示各提供商观测到的解析结果分布"
               />
             </div>
           </>
@@ -232,6 +248,7 @@ export function AdminShell({
         currentPath={currentPath}
         isMobileOpen={isMobileOpen}
         onCloseMobile={closeMobile}
+        closeButtonRef={closeButtonRef}
       />
       <div className="admin-main-wrapper">
         <PageHeader
@@ -240,6 +257,7 @@ export function AdminShell({
           expiresAt={expiresAt}
           onToggleMobile={toggleMobile}
           isMobileOpen={isMobileOpen}
+          triggerRef={triggerRef}
         />
         <main className="admin-main-content">
           <div className="admin-content-inner">{renderContent()}</div>

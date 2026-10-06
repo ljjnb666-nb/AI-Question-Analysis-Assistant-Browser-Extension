@@ -8,6 +8,7 @@ interface PageHeaderProps {
   expiresAt: string | null;
   onToggleMobile?: () => void;
   isMobileOpen?: boolean;
+  triggerRef?: React.RefObject<HTMLButtonElement>;
 }
 
 export function PageHeader({
@@ -16,6 +17,7 @@ export function PageHeader({
   expiresAt,
   onToggleMobile,
   isMobileOpen = false,
+  triggerRef,
 }: PageHeaderProps): React.JSX.Element {
   return (
     <header className="admin-page-header">
@@ -23,11 +25,13 @@ export function PageHeader({
         <div className="admin-header-left">
           {onToggleMobile && (
             <button
+              ref={triggerRef}
               type="button"
               className="admin-mobile-menu-btn"
               onClick={onToggleMobile}
               aria-label={isMobileOpen ? "关闭导航菜单" : "打开导航菜单"}
               aria-expanded={isMobileOpen}
+              aria-controls="admin-navigation-drawer"
             >
               <MenuIcon size={20} />
             </button>

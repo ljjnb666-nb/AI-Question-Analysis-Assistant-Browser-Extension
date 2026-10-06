@@ -27,13 +27,36 @@ interface SidebarProps {
   currentPath: string;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
+  closeButtonRef?: React.RefObject<HTMLButtonElement>;
 }
 
 export function Sidebar({
   currentPath,
   isMobileOpen = false,
   onCloseMobile,
+  closeButtonRef,
 }: SidebarProps): React.JSX.Element {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (!isMobileOpen) return;
+    if (e.key === "Tab") {
+      const aside = e.currentTarget;
+      const focusables = aside.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  };
+
   return (
     <>
       {isMobileOpen && (
@@ -44,8 +67,10 @@ export function Sidebar({
         />
       )}
       <aside
+        id="admin-navigation-drawer"
         className={`admin-sidebar ${isMobileOpen ? "is-mobile-open" : ""}`}
         aria-label="管理后台导航"
+        onKeyDown={handleKeyDown}
       >
         <div className="admin-sidebar-header">
           <div className="admin-brand">
@@ -59,6 +84,7 @@ export function Sidebar({
           </div>
           {isMobileOpen && onCloseMobile && (
             <button
+              ref={closeButtonRef}
               type="button"
               className="admin-mobile-close-btn"
               onClick={onCloseMobile}
