@@ -139,7 +139,6 @@ function getDatabase() {
     CREATE INDEX IF NOT EXISTS idx_analytics_events_ts ON analytics_events(ts);
     CREATE INDEX IF NOT EXISTS idx_analytics_events_event_ts ON analytics_events(event, ts);
     CREATE INDEX IF NOT EXISTS idx_analytics_events_device_ts ON analytics_events(deviceId, ts);
-    CREATE INDEX IF NOT EXISTS idx_analytics_events_version_ts ON analytics_events(extensionVersion, ts);
     CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(createdAt);
   `);
 
