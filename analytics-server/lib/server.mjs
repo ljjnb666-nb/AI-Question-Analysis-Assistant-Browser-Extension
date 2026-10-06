@@ -248,6 +248,20 @@ function adminTokensMatch(actual, expected) {
   return actualDigest.length === expectedDigest.length && timingSafeEqual(actualDigest, expectedDigest);
 }
 
+function ensureAdminMutationOrigin(req, publicBaseUrl) {
+  const origin = String(req.headers.origin || "").trim();
+  if (!origin) return;
+  let expectedOrigin;
+  try {
+    expectedOrigin = new URL(publicBaseUrl).origin;
+  } catch {
+    throw new HttpError(503, "ADMIN_PUBLIC_ORIGIN_INVALID");
+  }
+  if (origin !== expectedOrigin) {
+    throw new HttpError(403, "ADMIN_ORIGIN_REJECTED");
+  }
+}
+
 function getAdminSession(req, sessionStore) {
   const sessionToken = getCookieValue(req, ADMIN_SESSION_COOKIE);
   return sessionToken ? sessionStore.get(sessionToken) : null;
@@ -409,6 +423,7 @@ export function createAnalyticsHandler(options = {}) {
       }
 
       if (req.method === "POST" && url.pathname === "/admin/login") {
+        ensureAdminMutationOrigin(req, publicBaseUrl);
         const normalizedAdminToken = requireConfiguredAdminToken(adminToken);
         enforceRateLimit(rateLimiters.adminLogin, `admin-login:ip:${ip}`, ADMIN_LOGIN_LIMIT, ADMIN_LOGIN_WINDOW_MS, nowImpl);
         const submittedToken = await readAdminLoginBody(req);
@@ -424,6 +439,7 @@ export function createAnalyticsHandler(options = {}) {
       }
 
       if (req.method === "POST" && url.pathname === "/admin/logout") {
+        ensureAdminMutationOrigin(req, publicBaseUrl);
         const session = getCookieValue(req, ADMIN_SESSION_COOKIE);
         if (session) adminSessions.delete(session);
         redirect(
