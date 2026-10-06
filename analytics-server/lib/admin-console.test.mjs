@@ -109,7 +109,7 @@ function createHarness({
     adminDistDir,
     isProduction,
   });
-  return { portal, adminSessions, adminDistDir };
+  return { portal, adminSessions, adminDistDir, adminReadModels };
 }
 
 async function invoke(portal, {
