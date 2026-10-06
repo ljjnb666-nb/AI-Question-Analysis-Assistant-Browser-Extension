@@ -463,6 +463,7 @@ function querySqliteVersions(database, days, now) {
          FROM analytics_events
          WHERE ts >= ? AND ts < ?
            AND extensionVersion IS NOT NULL
+           AND length(extensionVersion) <= ${VERSION_TEXT_LIMIT}
        )
        SELECT extensionVersion, COUNT(*) AS devices
        FROM ranked
