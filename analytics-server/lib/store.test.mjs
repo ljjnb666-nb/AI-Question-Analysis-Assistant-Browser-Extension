@@ -22,6 +22,7 @@ vi.mock("node:crypto", async (importOriginal) => {
 import {
   ANALYTICS_EVENT_RETENTION_MS,
   AUTH_SESSION_TTL_MS,
+  assertProductionStorageAuthority,
   createEmailVerificationCode,
   createEmailVerificationCodeInStorage,
   createUser,
@@ -60,6 +61,17 @@ function createDb() {
 }
 
 describe("analytics store", () => {
+  it("PROD_STORAGE_01 fails closed when production SQLite authority is unavailable", () => {
+    expect(() =>
+      assertProductionStorageAuthority({ nodeEnv: "production", sqliteSupported: false }),
+    ).toThrow("PRODUCTION_SQLITE_REQUIRED");
+  });
+
+  it("PROD_STORAGE_02 keeps JSON fallback limited to non-production compatibility", () => {
+    expect(assertProductionStorageAuthority({ nodeEnv: "test", sqliteSupported: false })).toBe("json");
+    expect(assertProductionStorageAuthority({ nodeEnv: "production", sqliteSupported: true })).toBe("sqlite");
+  });
+
   it("stores verification codes hashed and verifies them", () => {
     const db = createDb();
     const { code } = createEmailVerificationCode(db, "user@example.com");
