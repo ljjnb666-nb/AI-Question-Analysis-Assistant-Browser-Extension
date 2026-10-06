@@ -2,10 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { extname, resolve, sep } from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { normalizeAdminAnalyticsDays } from "./admin-read-model.mjs";
 
 export const ADMIN_SESSION_COOKIE = "analytics_admin_session";
 export const ADMIN_LOGIN_LIMIT = 10;
 export const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+export const ADMIN_READ_LIMIT = 120;
+export const ADMIN_READ_WINDOW_MS = 5 * 60 * 1000;
 
 const DEFAULT_ADMIN_DIST_DIR = fileURLToPath(new URL("../../dist-admin/", import.meta.url));
 const ADMIN_APP_PATHS = new Set([
@@ -264,6 +267,66 @@ function consumeAdminLoginRateLimit(rateLimiter, ip, nowImpl) {
   }
 }
 
+function consumeAdminReadRateLimit(rateLimiter, ip, nowImpl) {
+  const result = rateLimiter.consume(`admin-read:ip:${ip}`, ADMIN_READ_LIMIT, ADMIN_READ_WINDOW_MS);
+  if (!result.allowed) {
+    const retryAfter = Math.max(1, Math.ceil((result.resetAt - nowImpl()) / 1000));
+    const error = new AdminPortalError(429, "ADMIN_RATE_LIMITED");
+    error.retryAfter = retryAfter;
+    throw error;
+  }
+}
+
+function requireAdminApiSession(req, adminSessions) {
+  const session = getAdminSession(req, adminSessions);
+  if (!session) throw new AdminPortalError(401, "ADMIN_SESSION_REQUIRED");
+  return session;
+}
+
+function parseAdminDays(url) {
+  const days = normalizeAdminAnalyticsDays(url.searchParams.get("days"));
+  if (days == null) throw new AdminPortalError(400, "INVALID_ADMIN_QUERY");
+  return days;
+}
+
+async function handleAdminReadApi({
+  pathname,
+  method,
+  req,
+  res,
+  url,
+  ip,
+  adminSessions,
+  adminReadRateLimiter,
+  adminReadModels,
+  nowImpl,
+}) {
+  const routes = {
+    "/admin/api/overview": "overview",
+    "/admin/api/analytics/timeseries": "timeseries",
+    "/admin/api/analytics/providers": "providers",
+    "/admin/api/analytics/errors": "errors",
+    "/admin/api/analytics/versions": "versions",
+    "/admin/api/analytics/latency": "latency",
+  };
+  const operation = routes[pathname];
+  if (!operation) return false;
+  if (method !== "GET") {
+    sendAdminJson(res, 405, { ok: false, error: { code: "ADMIN_METHOD_NOT_ALLOWED" } });
+    return true;
+  }
+  requireAdminApiSession(req, adminSessions);
+  consumeAdminReadRateLimit(adminReadRateLimiter, ip, nowImpl);
+  const days = parseAdminDays(url);
+  const handler = adminReadModels?.[operation];
+  if (typeof handler !== "function") {
+    throw new AdminPortalError(503, "ADMIN_STORAGE_UNAVAILABLE");
+  }
+  const payload = await handler(days);
+  sendAdminJson(res, 200, { ok: true, ...payload });
+  return true;
+}
+
 function stableAdminErrorCode(error) {
   const allowed = new Set([
     "ADMIN_AUTH_NOT_CONFIGURED",
@@ -274,10 +337,11 @@ function stableAdminErrorCode(error) {
     "ADMIN_LOGIN_REQUIRES_FORM",
     "ADMIN_PUBLIC_ORIGIN_INVALID",
     "ADMIN_ORIGIN_REJECTED",
+    "INVALID_ADMIN_QUERY",
+    "ADMIN_STORAGE_UNAVAILABLE",
   ]);
-  return error instanceof AdminPortalError && allowed.has(error.code)
-    ? error.code
-    : "ADMIN_INTERNAL_ERROR";
+  const code = typeof error?.code === "string" ? error.code : "";
+  return allowed.has(code) ? code : "ADMIN_INTERNAL_ERROR";
 }
 
 export function createAdminPortal({
@@ -285,6 +349,8 @@ export function createAdminPortal({
   adminSessions,
   adminSessionTtlMs,
   adminLoginRateLimiter,
+  adminReadRateLimiter,
+  adminReadModels,
   nowImpl = () => Date.now(),
   publicBaseUrl,
   adminDistDir = DEFAULT_ADMIN_DIST_DIR,
@@ -295,6 +361,9 @@ export function createAdminPortal({
   }
   if (!adminLoginRateLimiter || typeof adminLoginRateLimiter.consume !== "function") {
     throw new TypeError("adminLoginRateLimiter is required");
+  }
+  if (!adminReadRateLimiter || typeof adminReadRateLimiter.consume !== "function") {
+    throw new TypeError("adminReadRateLimiter is required");
   }
 
   return {
@@ -380,6 +449,23 @@ export function createAdminPortal({
           return true;
         }
 
+        if (
+          await handleAdminReadApi({
+            pathname,
+            method,
+            req,
+            res,
+            url,
+            ip,
+            adminSessions,
+            adminReadRateLimiter,
+            adminReadModels,
+            nowImpl,
+          })
+        ) {
+          return true;
+        }
+
         if (pathname.startsWith("/admin/api/")) {
           sendAdminJson(res, 404, { ok: false, error: { code: "ADMIN_RESOURCE_NOT_FOUND" } });
           return true;
@@ -420,7 +506,13 @@ export function createAdminPortal({
 
         return false;
       } catch (error) {
-        const statusCode = error instanceof AdminPortalError ? error.statusCode : 500;
+        const externalStatusCode = Number(error?.statusCode);
+        const statusCode =
+          error instanceof AdminPortalError
+            ? error.statusCode
+            : Number.isInteger(externalStatusCode) && externalStatusCode >= 400 && externalStatusCode <= 599
+              ? externalStatusCode
+              : 500;
         const code = stableAdminErrorCode(error);
         const headers = error?.retryAfter ? { "Retry-After": String(error.retryAfter) } : null;
         const publicError =
