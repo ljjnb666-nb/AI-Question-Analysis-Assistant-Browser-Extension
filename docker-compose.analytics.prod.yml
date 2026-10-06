@@ -1,6 +1,9 @@
 services:
   analytics-server:
-    image: syncmusic-backend
+    build:
+      context: .
+      dockerfile: Dockerfile.analytics
+    image: quiz-solver-analytics:phase11
     container_name: quiz-solver-analytics-prod
     entrypoint: []
     command: ["node", "analytics-server/index.mjs"]
@@ -15,4 +18,4 @@ services:
       ANALYTICS_HOST: 0.0.0.0
       ANALYTICS_PORT: 8787
     volumes:
-      - ./:/app
+      - ./analytics-server/data:/app/analytics-server/data
