@@ -423,9 +423,13 @@ export function createAdminPortal({
         const statusCode = error instanceof AdminPortalError ? error.statusCode : 500;
         const code = stableAdminErrorCode(error);
         const headers = error?.retryAfter ? { "Retry-After": String(error.retryAfter) } : null;
+        const publicError =
+          code === "ADMIN_RATE_LIMITED" && error?.retryAfter
+            ? `rate limit exceeded; retry after ${error.retryAfter}s`
+            : code;
         const payload = pathname.startsWith("/admin/api/")
           ? { ok: false, error: { code } }
-          : { ok: false, error: code };
+          : { ok: false, error: publicError };
         if (headers) {
           res.writeHead(statusCode, { ...adminHeaders("application/json; charset=utf-8"), ...headers });
           res.end(JSON.stringify(payload));
