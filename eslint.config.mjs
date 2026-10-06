@@ -34,6 +34,7 @@ export default tseslint.config(
       "e2e/**/*.{ts,tsx,mts,cts}",
       "playwright.config.ts",
       "vite.contentRuntime.config.ts",
+      "vite.admin.config.ts",
     ],
   })),
   {
@@ -44,6 +45,7 @@ export default tseslint.config(
       "e2e/**/*.{ts,tsx,mts,cts}",
       "playwright.config.ts",
       "vite.contentRuntime.config.ts",
+      "vite.admin.config.ts",
     ],
     languageOptions: {
       globals: {

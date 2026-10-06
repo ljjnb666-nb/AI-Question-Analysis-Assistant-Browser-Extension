@@ -220,7 +220,7 @@ function assertSameOrigin(req) {
   const origin = String(req.headers.origin || "").trim();
   if (!origin) return;
   const host = String(req.headers.host || "").trim();
-  let originHost = "";
+  let originHost;
   try {
     originHost = new URL(origin).host;
   } catch {
@@ -387,7 +387,7 @@ export function createAdminPortal({
 
   async function handleShell(req, res, pathname) {
     const candidate = pathname === "/admin" || pathname === "/admin/" ? "" : pathname.slice("/admin/".length);
-    let decoded = candidate;
+    let decoded;
     try {
       decoded = decodeURIComponent(candidate);
     } catch {
