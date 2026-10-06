@@ -18,10 +18,10 @@ If you use IPv6, also add an `AAAA` record.
 
 ## 2. Server runtime
 
-Install Node.js 24 on the server, then deploy the repo and run:
+Install Node.js 24 on the server, then deploy the repo and install the locked dependencies:
 
 ```bash
-npm install
+npm ci
 ```
 
 ## 3. Environment variables
@@ -52,13 +52,17 @@ You can start from the checked-in template:
 cp .env.analytics.prod.example .env.analytics.prod
 ```
 
-## 4. Start the backend
+## 4. Build the Admin Console and start the backend
+
+For a non-Docker deployment, build and verify the independent Admin artifact before starting the server:
 
 ```bash
+npm run build:admin
+npm run verify:admin
 npm run analytics:server
 ```
 
-The server will listen on all interfaces and store data in SQLite.
+The server will listen on all interfaces and store data in SQLite. If `dist-admin` is missing or unreadable, protected Admin routes fail closed instead of falling back to the legacy inline dashboard.
 
 If you prefer Docker on the server, use:
 
