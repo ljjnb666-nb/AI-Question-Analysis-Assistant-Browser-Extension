@@ -95,6 +95,27 @@ function normalizeVersion(value) {
     : null;
 }
 
+const VERSION_VALIDATOR_SQL = "admin_read_model_valid_version";
+const versionValidatedDatabases = new WeakSet();
+
+// The Admin DTO only accepts normalizeVersion() output, so the SQL ranking must
+// exclude rejected versions the same way the JSON fallback does — otherwise a
+// device whose latest in-window event carries a malformed (but short) version
+// wins rank 1 and then disappears from the output entirely.
+function ensureVersionValidator(database) {
+  if (versionValidatedDatabases.has(database)) return;
+  database.function(VERSION_VALIDATOR_SQL, { deterministic: true }, (value) =>
+    normalizeVersion(value) ? 1 : 0,
+  );
+  versionValidatedDatabases.add(database);
+}
+
+// SQLite ORDER BY compares with BINARY collation; mirror that with codepoint
+// order so both storage paths return identically ordered rows.
+function compareAscending(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function observedDuration(event) {
   const direct = Number(event?.duration);
   if (Number.isFinite(direct) && direct >= 0) return direct;
@@ -396,7 +417,7 @@ function queryJsonProviders(db, days, now) {
       outcomes: row.success + row.error,
       successRatio: ratio(row.success, row.success + row.error),
     }))
-    .sort((a, b) => b.outcomes - a.outcomes || a.provider.localeCompare(b.provider));
+    .sort((a, b) => b.outcomes - a.outcomes || compareAscending(a.provider, b.provider));
 }
 
 function querySqliteErrors(database, days, now) {
@@ -430,7 +451,7 @@ function querySqliteErrors(database, days, now) {
     existing.exhaustedCount += ensureFiniteNumber(row.exhaustedCount);
     grouped.set(category, existing);
   }
-  return [...grouped.values()].sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+  return [...grouped.values()].sort((a, b) => b.count - a.count || compareAscending(a.category, b.category));
 }
 
 function queryJsonErrors(db, days, now) {
@@ -445,10 +466,11 @@ function queryJsonErrors(db, days, now) {
     if (data.exhausted === true) row.exhaustedCount += 1;
     grouped.set(category, row);
   }
-  return [...grouped.values()].sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+  return [...grouped.values()].sort((a, b) => b.count - a.count || compareAscending(a.category, b.category));
 }
 
 function querySqliteVersions(database, days, now) {
+  ensureVersionValidator(database);
   const window = buildWindow(days, now);
   const rows = database
     .prepare(
@@ -464,6 +486,7 @@ function querySqliteVersions(database, days, now) {
          WHERE ts >= ? AND ts < ?
            AND extensionVersion IS NOT NULL
            AND length(extensionVersion) <= ${VERSION_TEXT_LIMIT}
+           AND ${VERSION_VALIDATOR_SQL}(extensionVersion) = 1
        )
        SELECT extensionVersion, COUNT(*) AS devices
        FROM ranked
@@ -498,7 +521,7 @@ function queryJsonVersions(db, days, now) {
   }
   return [...counts.entries()]
     .map(([extensionVersion, devices]) => ({ extensionVersion, devices }))
-    .sort((a, b) => b.devices - a.devices || a.extensionVersion.localeCompare(b.extensionVersion))
+    .sort((a, b) => b.devices - a.devices || compareAscending(a.extensionVersion, b.extensionVersion))
     .slice(0, VERSION_ROW_LIMIT);
 }
 
