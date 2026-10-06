@@ -27,7 +27,7 @@ const ADMIN_SESSION_COOKIE = "analytics_admin_session";
 const ADMIN_LOGIN_LIMIT = 10;
 const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const ADMIN_DIST_DIR = fileURLToPath(new URL("../../dist-admin/", import.meta.url));
-const ADMIN_APP_PATHS = new Set(["/admin", "/admin/analytics", "/admin/users", "/admin/system", "/admin/audit"]);
+const ADMIN_APP_PATHS = new Set(["/admin", "/admin/", "/admin/analytics", "/admin/users", "/admin/system", "/admin/audit"]);
 const ADMIN_CSP = [
   "default-src 'self'",
   "script-src 'self'",
@@ -122,8 +122,13 @@ function sendAdminFile(res, filePath, { html = false } = {}) {
   }
   const contentType = html ? "text/html; charset=utf-8" : adminAssetContentType(filePath);
   const cacheControl = html ? "no-store" : "public, max-age=31536000, immutable";
-  res.writeHead(200, adminHeaders(contentType, cacheControl));
-  res.end(readFileSync(filePath));
+  try {
+    const body = readFileSync(filePath);
+    res.writeHead(200, adminHeaders(contentType, cacheControl));
+    res.end(body);
+  } catch {
+    sendAdminJson(res, 503, { ok: false, error: { code: "ADMIN_APP_UNAVAILABLE" } });
+  }
 }
 
 function resolveAdminAsset(pathname) {
