@@ -20,5 +20,5 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src", "e2e/fixtures/ui04.tsx"]
+  "include": ["src", "admin-console/src", "e2e/fixtures/ui04.tsx"]
 }

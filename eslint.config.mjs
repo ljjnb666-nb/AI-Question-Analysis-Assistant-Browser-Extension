@@ -30,6 +30,7 @@ export default tseslint.config(
     files: [
       "src/**/*.{ts,tsx,mts,cts}",
       "analytics-server/**/*.{ts,tsx,mts,cts}",
+      "admin-console/**/*.{ts,tsx,mts,cts}",
       "e2e/**/*.{ts,tsx,mts,cts}",
       "playwright.config.ts",
       "vite.contentRuntime.config.ts",
@@ -39,6 +40,7 @@ export default tseslint.config(
     files: [
       "src/**/*.{ts,tsx,mts,cts}",
       "analytics-server/**/*.{ts,tsx,mts,cts}",
+      "admin-console/**/*.{ts,tsx,mts,cts}",
       "e2e/**/*.{ts,tsx,mts,cts}",
       "playwright.config.ts",
       "vite.contentRuntime.config.ts",

@@ -9,6 +9,7 @@
     "playwright.config.ts",
     "vite.config.ts",
     "vite.contentRuntime.config.ts",
+    "vite.admin.config.ts",
     "vitest.config.ts"
   ]
 }

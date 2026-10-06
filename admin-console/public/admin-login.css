@@ -1,0 +1,60 @@
+/* Server-rendered login page stylesheet, served from the dist-admin artifact
+   so the Admin CSP never needs style-src 'unsafe-inline'. Phase 11B2 owns the
+   visual design. */
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.admin-login-panel {
+  width: min(100%, 420px);
+  padding: 28px;
+  border: 1px solid #8886;
+  border-radius: 16px;
+}
+
+.admin-login-panel h1 {
+  margin: 0 0 12px;
+  font-size: 24px;
+}
+
+.admin-login-panel label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.admin-login-panel input {
+  width: 100%;
+  padding: 12px 14px;
+  font: inherit;
+}
+
+.admin-login-panel button {
+  margin-top: 14px;
+  width: 100%;
+  padding: 12px 14px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-meta {
+  margin-top: 14px;
+  color: #888;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
