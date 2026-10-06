@@ -384,12 +384,16 @@ describe("analytics handler", () => {
     expect(loadDbImpl).not.toHaveBeenCalled();
   });
 
-  it("rejects query-token authority on legacy data routes", async () => {
+  it("strips query-token credentials before rejecting unauthenticated legacy Admin data access", async () => {
     const loadDbImpl = vi.fn(() => ({ devices: [], users: [], analytics_events: [], email_verification_codes: [] }));
     const handler = createHandler({ loadDbImpl });
-    const data = await invoke(handler, { url: "/admin/data?adminToken=real-admin-secret" });
+    const stripped = await invoke(handler, { url: "/admin/data?adminToken=query-credential" });
+    expect(stripped.res.statusCode).toBe(303);
+    expect(stripped.res.headers.Location).toBe("/admin/data");
+    expect(stripped.res.payload).not.toContain("query-credential");
+
+    const data = await invoke(handler, { url: "/admin/data" });
     expect(data.res.statusCode).toBe(401);
-    expect(data.res.payload).not.toContain("real-admin-secret");
     expect(loadDbImpl).not.toHaveBeenCalled();
   });
 
