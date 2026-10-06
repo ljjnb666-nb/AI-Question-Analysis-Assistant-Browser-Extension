@@ -343,6 +343,20 @@ describe("analytics handler", () => {
     expect(loadDbImpl).not.toHaveBeenCalled();
   });
 
+  it("strips query credentials from every Admin GET surface", async () => {
+    const handler = createHandler();
+    for (const url of [
+      "/admin?adminToken=query-credential",
+      "/admin/login?adminToken=query-credential",
+      "/admin/api/session?adminToken=query-credential&next=1",
+    ]) {
+      const { res } = await invoke(handler, { url });
+      expect(res.statusCode, url).toBe(303);
+      expect(res.headers.Location, url).not.toContain("adminToken");
+      expect(res.headers.Location, url).not.toContain("query-credential");
+    }
+  });
+
   it("fails closed when admin configuration is missing across protected admin and metrics routes", async () => {
     const loadDbImpl = vi.fn();
     const handler = createHandler({ adminToken: "", loadDbImpl });
