@@ -1,4 +1,6 @@
-import { URL } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
+import { extname, resolve, sep } from "node:path";
+import { URL, fileURLToPath } from "node:url";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { buildAnalyticsSummary, buildTimeSeries } from "./metrics.mjs";
 import {
@@ -25,6 +27,19 @@ const EXTENSION_ORIGIN_PREFIX = "chrome-extension://";
 const ADMIN_SESSION_COOKIE = "analytics_admin_session";
 const ADMIN_LOGIN_LIMIT = 10;
 const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const ADMIN_DIST_DIR = fileURLToPath(new URL("../../dist-admin/", import.meta.url));
+const ADMIN_APP_PATHS = new Set(["/admin", "/admin/analytics", "/admin/users", "/admin/system", "/admin/audit"]);
+const ADMIN_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+].join("; ");
 
 class HttpError extends Error {
   constructor(statusCode, message) {
@@ -80,99 +95,85 @@ function sendHtml(req, res, statusCode, html) {
   res.end(html);
 }
 
-function renderAdminTokenGateHtml(publicBaseUrl) {
+function adminHeaders(contentType, cacheControl = "no-store") {
+  return {
+    "Content-Type": contentType,
+    "Cache-Control": cacheControl,
+    "Content-Security-Policy": ADMIN_CSP,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+  };
+}
+
+function sendAdminHtml(res, statusCode, html) {
+  res.writeHead(statusCode, adminHeaders("text/html; charset=utf-8"));
+  res.end(html);
+}
+
+function sendAdminJson(res, statusCode, payload) {
+  res.writeHead(statusCode, adminHeaders("application/json; charset=utf-8"));
+  res.end(JSON.stringify(payload));
+}
+
+function adminAssetContentType(filePath) {
+  switch (extname(filePath).toLowerCase()) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".js":
+      return "text/javascript; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".png":
+      return "image/png";
+    case ".webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function sendAdminFile(res, filePath, { html = false } = {}) {
+  if (!existsSync(filePath)) {
+    sendAdminJson(res, 503, { ok: false, error: { code: "ADMIN_APP_NOT_BUILT" } });
+    return;
+  }
+  const contentType = html ? "text/html; charset=utf-8" : adminAssetContentType(filePath);
+  const cacheControl = html ? "no-store" : "public, max-age=31536000, immutable";
+  res.writeHead(200, adminHeaders(contentType, cacheControl));
+  res.end(readFileSync(filePath));
+}
+
+function resolveAdminAsset(pathname) {
+  let relativePath;
+  try {
+    relativePath = decodeURIComponent(pathname.slice("/admin/".length));
+  } catch {
+    return null;
+  }
+  const fullPath = resolve(ADMIN_DIST_DIR, relativePath);
+  if (!fullPath.startsWith(`${resolve(ADMIN_DIST_DIR)}${sep}`)) return null;
+  return fullPath;
+}
+
+function renderAdminTokenGateHtml() {
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Analytics Admin Access</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #09111f;
-      --panel: rgba(11, 20, 37, 0.88);
-      --line: rgba(163, 193, 255, 0.14);
-      --text: #eef4ff;
-      --muted: #96a8c3;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100dvh;
-      display: grid;
-      place-items: center;
-      padding: 24px;
-      font-family: "Bahnschrift", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      color: var(--text);
-      background:
-        radial-gradient(circle at top left, rgba(94, 162, 255, 0.24), transparent 26%),
-        linear-gradient(180deg, #08101d 0%, var(--bg) 100%);
-    }
-    .panel {
-      width: min(100%, 460px);
-      padding: 28px;
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      background: var(--panel);
-      box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
-    }
-    h1 {
-      margin: 0 0 12px;
-      font-size: 32px;
-      letter-spacing: -0.04em;
-    }
-    p {
-      margin: 0 0 18px;
-      color: var(--muted);
-      line-height: 1.7;
-    }
-    label {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 13px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-    input {
-      width: 100%;
-      padding: 14px 16px;
-      border: 1px solid rgba(163, 193, 255, 0.16);
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--text);
-      font: inherit;
-    }
-    button {
-      margin-top: 14px;
-      width: 100%;
-      padding: 14px 16px;
-      border: 0;
-      border-radius: 999px;
-      background: linear-gradient(180deg, #79b5ff 0%, #4e91f8 100%);
-      color: #08101d;
-      font: inherit;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .meta {
-      margin-top: 14px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-  </style>
+  <meta name="referrer" content="no-referrer">
+  <title>Quiz Solver Admin Login</title>
 </head>
 <body>
-  <form class="panel" method="POST" action="/admin/login">
-    <h1>需要 Admin Token</h1>
-    <p>请输入管理口令以建立短期安全会话。</p>
-    <label for="adminToken">Admin Token</label>
-    <input id="adminToken" name="adminToken" type="password" autocomplete="current-password" required>
-    <button type="submit">进入 Dashboard</button>
-    <div class="meta">服务地址：${publicBaseUrl}</div>
-  </form>
+  <main>
+    <form method="POST" action="/admin/login">
+      <h1>Quiz Solver 管理后台</h1>
+      <p>请输入管理口令以建立短期安全会话。</p>
+      <label for="adminToken">Admin Token</label>
+      <input id="adminToken" name="adminToken" type="password" autocomplete="current-password" required>
+      <button type="submit">登录</button>
+    </form>
+  </main>
 </body>
 </html>`;
 }
@@ -902,9 +903,13 @@ function adminTokensMatch(actual, expected) {
   return actualDigest.length === expectedDigest.length && timingSafeEqual(actualDigest, expectedDigest);
 }
 
+function getAdminSession(req, sessionStore) {
+  const sessionToken = getCookieValue(req, ADMIN_SESSION_COOKIE);
+  return sessionToken ? sessionStore.get(sessionToken) : null;
+}
+
 function hasAdminAuthority(req, expectedToken, sessionStore, allowBearer = false) {
-  const session = getCookieValue(req, ADMIN_SESSION_COOKIE);
-  if (session && sessionStore.has(session)) return true;
+  if (getAdminSession(req, sessionStore)) return true;
   const bearer = allowBearer ? getBearerToken(req) : "";
   return Boolean(bearer && adminTokensMatch(bearer, expectedToken));
 }
@@ -1005,27 +1010,56 @@ export function createAnalyticsHandler(options = {}) {
       }
 
       if (req.method === "GET" && url.pathname === "/") {
-        if (url.searchParams.has("adminToken")) {
-          redirect(res, "/");
+        redirect(res, "/admin");
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/admin/login") {
+        requireConfiguredAdminToken(adminToken);
+        if (getAdminSession(req, adminSessions)) {
+          redirect(res, "/admin");
           return;
         }
-        const normalizedAdminToken = requireConfiguredAdminToken(adminToken);
-        if (!hasAdminAuthority(req, normalizedAdminToken, adminSessions)) {
-          sendHtml(req, res, 200, renderAdminTokenGateHtml(publicBaseUrl));
+        sendAdminHtml(res, 200, renderAdminTokenGateHtml());
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/admin/api/session") {
+        requireConfiguredAdminToken(adminToken);
+        const session = getAdminSession(req, adminSessions);
+        if (!session) {
+          sendAdminJson(res, 401, { ok: false, error: { code: "ADMIN_SESSION_REQUIRED" } });
           return;
         }
-        const db = loadDbImpl();
-        sendHtml(
-          req,
-          res,
-          200,
-          renderDashboardHtml(
-            buildAnalyticsSummary(db),
-            buildTimeSeries(db, 14),
-            publicBaseUrl,
-            getStorageBackendInfo(),
-          ),
-        );
+        sendAdminJson(res, 200, {
+          ok: true,
+          expiresAt: new Date(session.expiresAt).toISOString(),
+        });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname.startsWith("/admin/assets/")) {
+        requireConfiguredAdminToken(adminToken);
+        if (!getAdminSession(req, adminSessions)) {
+          sendAdminJson(res, 401, { ok: false, error: { code: "ADMIN_SESSION_REQUIRED" } });
+          return;
+        }
+        const assetPath = resolveAdminAsset(url.pathname);
+        if (!assetPath) {
+          sendAdminJson(res, 404, { ok: false, error: { code: "ADMIN_RESOURCE_NOT_FOUND" } });
+          return;
+        }
+        sendAdminFile(res, assetPath);
+        return;
+      }
+
+      if (req.method === "GET" && ADMIN_APP_PATHS.has(url.pathname)) {
+        requireConfiguredAdminToken(adminToken);
+        if (!getAdminSession(req, adminSessions)) {
+          redirect(res, "/admin/login");
+          return;
+        }
+        sendAdminFile(res, resolve(ADMIN_DIST_DIR, "index.html"), { html: true });
         return;
       }
 
@@ -1039,8 +1073,8 @@ export function createAnalyticsHandler(options = {}) {
         }
         const session = adminSessions.issue();
         const secure = process.env.NODE_ENV === "production" || publicBaseUrl.startsWith("https://");
-        const cookie = `${ADMIN_SESSION_COOKIE}=${session.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(adminSessionTtlMs / 1000)}${secure ? "; Secure" : ""}`;
-        redirect(res, "/", cookie);
+        const cookie = `${ADMIN_SESSION_COOKIE}=${session.token}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=${Math.floor(adminSessionTtlMs / 1000)}${secure ? "; Secure" : ""}`;
+        redirect(res, "/admin", cookie);
         return;
       }
 
@@ -1049,8 +1083,8 @@ export function createAnalyticsHandler(options = {}) {
         if (session) adminSessions.delete(session);
         redirect(
           res,
-          "/",
-          `${ADMIN_SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${process.env.NODE_ENV === "production" || publicBaseUrl.startsWith("https://") ? "; Secure" : ""}`,
+          "/admin/login",
+          `${ADMIN_SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=0${process.env.NODE_ENV === "production" || publicBaseUrl.startsWith("https://") ? "; Secure" : ""}`,
         );
         return;
       }
