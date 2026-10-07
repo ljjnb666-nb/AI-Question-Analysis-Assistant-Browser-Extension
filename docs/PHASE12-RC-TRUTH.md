@@ -10,7 +10,8 @@ A candidate is authoritative only when one exact source SHA binds all of the fol
 
 - the verified Chrome MV3 extension artifact;
 - the verified independent Admin Console artifact;
-- the production analytics/auth/Admin server container image;
+- the production analytics/auth/Admin server container image and retrievable compressed image archive;
+- the pinned Node/npm toolchain used by CI and the server image;
 - the product version used by `package.json`, source manifest, and built extension manifest;
 - the exact pinned production container base image;
 - successful extension and Admin real-browser gates that precede RC assembly.
@@ -43,11 +44,13 @@ The generated manifest contains:
 - `version`
 - extension manifest version, version, file count, and tree SHA-256
 - Admin file count and tree SHA-256
+- pinned Node version and npm package-manager version
 - analytics server Docker image ID
+- compressed server-image archive filename, size, and SHA-256
 - immutable base-image reference
 - production Compose default image identity
 
-The generated file is CI evidence and is not source-controlled. CI uploads it as `quiz-solver-rc-manifest-<sourceSha>`.
+The generated file is CI evidence and is not source-controlled. CI always uploads it as `quiz-solver-rc-manifest-<sourceSha>`. On pull-request and `main` runs, CI also retains the exact compressed server image as `quiz-solver-analytics-image-<sourceSha>` so the server candidate referenced by the manifest is retrievable rather than runner-local only.
 
 ## Non-goals of 12A
 
