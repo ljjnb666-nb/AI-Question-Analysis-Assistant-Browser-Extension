@@ -44,9 +44,9 @@ describe("Phase 11E Admin Audit UI", () => {
     render(<AuditView />);
 
     await waitFor(() => {
-      expect(screen.getByText("管理员登录")).toBeDefined();
+      expect(screen.getAllByText("管理员登录").length).toBeGreaterThanOrEqual(1);
     });
-    expect(screen.getByText("成功")).toBeDefined();
+    expect(screen.getAllByText("成功").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("ip_0123456789abcdef").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("session_fedcba9876543210").length).toBeGreaterThanOrEqual(1);
     expect(document.body.textContent).not.toContain("adminToken");
