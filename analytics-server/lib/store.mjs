@@ -33,6 +33,8 @@ export function assertProductionStorageAuthority({
 export const ANALYTICS_EVENT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 export const CURRENT_ANALYTICS_PRIVACY_EPOCH = 1;
 export const AUTH_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const ADMIN_AUDIT_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+export const ADMIN_AUDIT_MAX_EVENTS = 10_000;
 
 let dbInstance = null;
 
@@ -42,6 +44,7 @@ function createEmptyDb() {
     users: [],
     analytics_events: [],
     email_verification_codes: [],
+    admin_audit_events: [],
     analyticsPrivacyEpoch: CURRENT_ANALYTICS_PRIVACY_EPOCH,
   };
 }
@@ -136,11 +139,21 @@ function getDatabase() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS admin_audit_events (
+      auditId TEXT PRIMARY KEY,
+      event TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      ipHash TEXT,
+      sessionTag TEXT,
+      metadataJson TEXT
+    );
     CREATE INDEX IF NOT EXISTS idx_analytics_events_ts ON analytics_events(ts);
     CREATE INDEX IF NOT EXISTS idx_analytics_events_event_ts ON analytics_events(event, ts);
     CREATE INDEX IF NOT EXISTS idx_analytics_events_device_ts ON analytics_events(deviceId, ts);
     CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(createdAt);
     CREATE INDEX IF NOT EXISTS idx_devices_user_last_seen ON devices(userId, lastSeenAt);
+    CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_events(createdAt DESC, auditId DESC);
   `);
 
   // Schema migration must complete before anything that reads or writes
@@ -265,6 +278,7 @@ export function loadDbFromJsonFile() {
     devices: Array.isArray(parsed.devices) ? parsed.devices : [],
     users: Array.isArray(parsed.users) ? parsed.users.map(normalizeUserRecord) : [],
     analytics_events: Array.isArray(parsed.analytics_events) ? parsed.analytics_events : [],
+    admin_audit_events: Array.isArray(parsed.admin_audit_events) ? parsed.admin_audit_events : [],
     analyticsPrivacyEpoch: Number(parsed.analyticsPrivacyEpoch ?? 0),
     email_verification_codes: Array.isArray(parsed.email_verification_codes)
       ? parsed.email_verification_codes.map(normalizeVerificationCodeRecord)
@@ -332,6 +346,20 @@ export function loadDb() {
     )
     .all()
     .map(normalizeVerificationCodeRecord);
+  const admin_audit_events = database
+    .prepare(
+      "SELECT auditId, event, outcome, createdAt, ipHash, sessionTag, metadataJson FROM admin_audit_events ORDER BY createdAt ASC, auditId ASC",
+    )
+    .all()
+    .map((row) => ({
+      auditId: row.auditId,
+      event: row.event,
+      outcome: row.outcome,
+      createdAt: row.createdAt,
+      ipHash: row.ipHash ?? null,
+      sessionTag: row.sessionTag ?? null,
+      metadata: safeParseJson(row.metadataJson, null),
+    }));
   const analyticsPrivacyEpoch = Number(
     database.prepare("SELECT value FROM analytics_metadata WHERE key = ?").get("analyticsPrivacyEpoch")?.value ?? 0,
   );
@@ -341,6 +369,7 @@ export function loadDb() {
     users,
     analytics_events,
     email_verification_codes,
+    admin_audit_events,
     analyticsPrivacyEpoch,
   };
 }
@@ -371,6 +400,7 @@ export function saveDb(db) {
       DELETE FROM users;
       DELETE FROM analytics_events;
       DELETE FROM email_verification_codes;
+      DELETE FROM admin_audit_events;
     `);
 
     const insertDevice = database.prepare(
@@ -438,10 +468,130 @@ export function saveDb(db) {
         code.consumedAt ?? null,
       );
     }
+    const insertAudit = database.prepare(
+      "INSERT INTO admin_audit_events (auditId, event, outcome, createdAt, ipHash, sessionTag, metadataJson) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    for (const entry of Array.isArray(db.admin_audit_events) ? db.admin_audit_events : []) {
+      insertAudit.run(
+        entry.auditId,
+        entry.event,
+        entry.outcome,
+        entry.createdAt,
+        entry.ipHash ?? null,
+        entry.sessionTag ?? null,
+        entry.metadata == null ? null : JSON.stringify(entry.metadata),
+      );
+    }
     database
       .prepare("INSERT INTO analytics_metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .run("analyticsPrivacyEpoch", String(Number(db.analyticsPrivacyEpoch ?? CURRENT_ANALYTICS_PRIVACY_EPOCH)));
   });
+}
+
+function pruneAdminAuditSqlite(database, now = Date.now()) {
+  database
+    .prepare("DELETE FROM admin_audit_events WHERE createdAt < ?")
+    .run(now - ADMIN_AUDIT_RETENTION_MS);
+  database.exec(`
+    DELETE FROM admin_audit_events
+    WHERE auditId IN (
+      SELECT auditId
+      FROM admin_audit_events
+      ORDER BY createdAt DESC, auditId DESC
+      LIMIT -1 OFFSET ${ADMIN_AUDIT_MAX_EVENTS}
+    )
+  `);
+}
+
+function pruneAdminAuditJson(db, now = Date.now()) {
+  const cutoff = now - ADMIN_AUDIT_RETENTION_MS;
+  const rows = (Array.isArray(db.admin_audit_events) ? db.admin_audit_events : [])
+    .filter((entry) => Number.isFinite(Number(entry?.createdAt)) && Number(entry.createdAt) >= cutoff)
+    .sort((left, right) => {
+      const delta = Number(right.createdAt) - Number(left.createdAt);
+      if (delta !== 0) return delta;
+      return String(right.auditId).localeCompare(String(left.auditId), "en");
+    })
+    .slice(0, ADMIN_AUDIT_MAX_EVENTS);
+  const changed = rows.length !== (Array.isArray(db.admin_audit_events) ? db.admin_audit_events.length : 0);
+  db.admin_audit_events = rows;
+  return changed;
+}
+
+export function recordAdminAuditEventInStorage(entry) {
+  if (!SQLITE_SUPPORTED) {
+    const db = loadDbFromJsonFile();
+    db.admin_audit_events = Array.isArray(db.admin_audit_events) ? db.admin_audit_events : [];
+    db.admin_audit_events.push(entry);
+    pruneAdminAuditJson(db, entry.createdAt);
+    saveDbToJsonFile(db);
+    return entry;
+  }
+  return runInTransaction((database) => {
+    database
+      .prepare(
+        "INSERT INTO admin_audit_events (auditId, event, outcome, createdAt, ipHash, sessionTag, metadataJson) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        entry.auditId,
+        entry.event,
+        entry.outcome,
+        entry.createdAt,
+        entry.ipHash ?? null,
+        entry.sessionTag ?? null,
+        entry.metadata == null ? null : JSON.stringify(entry.metadata),
+      );
+    pruneAdminAuditSqlite(database, entry.createdAt);
+    return entry;
+  });
+}
+
+export function readAdminAuditEventsInStorage({
+  limit,
+  cursorCreatedAt = null,
+  cursorAuditId = null,
+} = {}) {
+  if (!SQLITE_SUPPORTED) {
+    const db = loadDbFromJsonFile();
+    if (pruneAdminAuditJson(db)) saveDbToJsonFile(db);
+    return (Array.isArray(db.admin_audit_events) ? db.admin_audit_events : [])
+      .filter((entry) => {
+        if (cursorCreatedAt == null || cursorAuditId == null) return true;
+        const createdAt = Number(entry.createdAt);
+        return createdAt < cursorCreatedAt ||
+          (createdAt === cursorCreatedAt && String(entry.auditId) < cursorAuditId);
+      })
+      .sort((left, right) => {
+        const delta = Number(right.createdAt) - Number(left.createdAt);
+        if (delta !== 0) return delta;
+        return String(right.auditId).localeCompare(String(left.auditId), "en");
+      })
+      .slice(0, limit)
+      .map((entry) => ({ ...entry }));
+  }
+
+  const database = getDatabase();
+  pruneAdminAuditSqlite(database);
+  if (cursorCreatedAt == null || cursorAuditId == null) {
+    return database
+      .prepare(
+        "SELECT auditId, event, outcome, createdAt, ipHash, sessionTag, metadataJson FROM admin_audit_events ORDER BY createdAt DESC, auditId DESC LIMIT ?",
+      )
+      .all(limit)
+      .map((row) => ({
+        ...row,
+        metadata: safeParseJson(row.metadataJson, null),
+      }));
+  }
+  return database
+    .prepare(
+      "SELECT auditId, event, outcome, createdAt, ipHash, sessionTag, metadataJson FROM admin_audit_events WHERE createdAt < ? OR (createdAt = ? AND auditId < ?) ORDER BY createdAt DESC, auditId DESC LIMIT ?",
+    )
+    .all(cursorCreatedAt, cursorCreatedAt, cursorAuditId, limit)
+    .map((row) => ({
+      ...row,
+      metadata: safeParseJson(row.metadataJson, null),
+    }));
 }
 
 export function generateId(prefix) {
