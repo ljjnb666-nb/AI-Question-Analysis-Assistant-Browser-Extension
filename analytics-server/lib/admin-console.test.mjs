@@ -722,4 +722,169 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     expect(parsePayload(res).error).toBe("rate limit exceeded; retry after 5s");
     expect(res.headers["Set-Cookie"]).toBeUndefined();
   });
+
+  it("E-PORTAL-01 returns per-session CSRF without exposing the session cookie value", async () => {
+    const { portal } = createHarness();
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    const { res } = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const payload = parsePayload(res);
+    expect(payload.csrfToken).toBe("csrf-1");
+    expect(String(res.payload)).not.toContain("session-1");
+    expect(res.headers["Cache-Control"]).toBe("no-store");
+  });
+
+  it("E-PORTAL-02 rejects missing/wrong logout CSRF and preserves the live session", async () => {
+    const { portal, adminAuditRecorder } = createHarness();
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+
+    for (const csrfToken of ["", "wrong-csrf"]) {
+      const rejected = await invoke(portal, {
+        method: "POST",
+        url: "/admin/logout",
+        headers: {
+          cookie,
+          origin: "https://analytics.example.test",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ csrfToken }).toString(),
+      });
+      expect(rejected.res.statusCode, csrfToken).toBe(403);
+      expect(parsePayload(rejected.res).error, csrfToken).toBe("ADMIN_CSRF_REJECTED");
+
+      const stillLive = await invoke(portal, {
+        url: "/admin/api/session",
+        headers: { cookie },
+      });
+      expect(stillLive.res.statusCode, csrfToken).toBe(200);
+    }
+
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "admin_csrf_rejected",
+        outcome: "rejected",
+        metadata: expect.objectContaining({ path: "/admin/logout" }),
+      }),
+    );
+  });
+
+  it("E-PORTAL-03 audits login failure, login success, and logout without raw secrets", async () => {
+    const adminAuditRecorder = vi.fn();
+    const { portal } = createHarness({ adminAuditRecorder });
+
+    const failed = await login(portal, "wrong-secret");
+    expect(failed.res.statusCode).toBe(401);
+
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    const sessionState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    const csrfToken = parsePayload(sessionState.res).csrfToken;
+
+    const logout = await invoke(portal, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: {
+        cookie,
+        origin: "https://analytics.example.test",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ csrfToken }).toString(),
+    });
+    expect(logout.res.statusCode).toBe(303);
+
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "admin_login", outcome: "failure" }),
+    );
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "admin_login", outcome: "success" }),
+    );
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "admin_logout", outcome: "success" }),
+    );
+
+    const serializedCalls = JSON.stringify(adminAuditRecorder.mock.calls);
+    expect(serializedCalls).not.toContain("real-admin-secret");
+    expect(serializedCalls).not.toContain("wrong-secret");
+    expect(serializedCalls).not.toContain(csrfToken);
+  });
+
+  it("E-PORTAL-04 keeps the Audit read API cookie-only and bounded", async () => {
+    const adminAuditReadModel = {
+      list: vi.fn((query) => ({
+        generatedAt: "2026-10-07T12:00:00.000Z",
+        data: [],
+        page: { limit: query.limit, nextCursor: null },
+      })),
+    };
+    const { portal } = createHarness({ adminAuditReadModel });
+
+    const anonymous = await invoke(portal, { url: "/admin/api/audit" });
+    expect(anonymous.res.statusCode).toBe(401);
+
+    const bearer = await invoke(portal, {
+      url: "/admin/api/audit",
+      headers: { authorization: "Bearer real-admin-secret" },
+    });
+    expect(bearer.res.statusCode).toBe(401);
+
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    const ok = await invoke(portal, {
+      url: "/admin/api/audit?limit=25",
+      headers: { cookie },
+    });
+    expect(ok.res.statusCode).toBe(200);
+    expect(adminAuditReadModel.list).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 25, cursor: null }),
+    );
+
+    const unknown = await invoke(portal, {
+      url: "/admin/api/audit?q=secret",
+      headers: { cookie },
+    });
+    expect(unknown.res.statusCode).toBe(400);
+    expect(parsePayload(unknown.res).error.code).toBe("INVALID_ADMIN_QUERY");
+  });
+
+  it("E-PORTAL-05 applies hardened security headers to redirects and errors", async () => {
+    const { portal } = createHarness();
+
+    const root = await invoke(portal, { url: "/" });
+    expect(root.res.statusCode).toBe(303);
+    expect(root.res.headers["Content-Security-Policy"]).toBe(ADMIN_CSP);
+    expect(root.res.headers["X-Frame-Options"]).toBe("DENY");
+    expect(root.res.headers["Cross-Origin-Opener-Policy"]).toBe("same-origin");
+    expect(root.res.headers["Cross-Origin-Resource-Policy"]).toBe("same-origin");
+    expect(root.res.headers["Permissions-Policy"]).toContain("camera=()");
+
+    const unknown = await invoke(portal, { url: "/admin/api/not-real" });
+    expect(unknown.res.statusCode).toBe(404);
+    expect(unknown.res.headers["Content-Security-Policy"]).toBe(ADMIN_CSP);
+    expect(unknown.res.headers["X-Frame-Options"]).toBe("DENY");
+  });
+
+  it("E-PORTAL-06 fails closed if a successful login cannot be audited", async () => {
+    const { portal } = createHarness({
+      adminAuditRecorder: vi.fn(() => {
+        const error = new Error("ADMIN_STORAGE_UNAVAILABLE");
+        error.code = "ADMIN_STORAGE_UNAVAILABLE";
+        error.statusCode = 503;
+        throw error;
+      }),
+    });
+
+    const loginAttempt = await login(portal);
+    expect(loginAttempt.res.statusCode).toBe(503);
+    expect(loginAttempt.res.headers["Set-Cookie"]).toBeUndefined();
+    expect(parsePayload(loginAttempt.res).error).toBe("ADMIN_STORAGE_UNAVAILABLE");
+  });
+
 });
