@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { BrowserContext, Worker } from "@playwright/test";
+import type { BrowserContext, Page, Worker } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
 
@@ -98,7 +98,7 @@ async function getWorkspaceSnapshot(worker: Worker, tabId: number, expectedUrl: 
   }, { id: tabId, url: expectedUrl });
 }
 
-async function readPageProbe(page: import("@playwright/test").Page): Promise<Phase13PageProbe> {
+async function readPageProbe(page: Page): Promise<Phase13PageProbe> {
   return page.evaluate(() => {
     const state = window as Window & typeof globalThis & {
       __phase13SubmitCount?: number;
