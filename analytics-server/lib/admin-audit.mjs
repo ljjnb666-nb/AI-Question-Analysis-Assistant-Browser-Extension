@@ -20,6 +20,8 @@ export const ADMIN_AUDIT_EVENTS = Object.freeze({
   ORIGIN_REJECTED: "admin_origin_rejected",
   MUTATION_REJECTED: "admin_mutation_rejected",
 });
+const ALLOWED_EVENTS = new Set(Object.values(ADMIN_AUDIT_EVENTS));
+const ALLOWED_OUTCOMES = new Set(["success", "failure", "rejected"]);
 
 export class AdminAuditError extends Error {
   constructor(code = "ADMIN_STORAGE_UNAVAILABLE", statusCode = 503) {
@@ -127,7 +129,9 @@ function toDto(entry) {
   if (
     !boundedString(entry?.auditId, 128) ||
     !boundedString(entry?.event, MAX_EVENT_LENGTH) ||
-    !boundedString(entry?.outcome, MAX_OUTCOME_LENGTH)
+    !ALLOWED_EVENTS.has(entry.event) ||
+    !boundedString(entry?.outcome, MAX_OUTCOME_LENGTH) ||
+    !ALLOWED_OUTCOMES.has(entry.outcome)
   ) {
     throw new AdminAuditError();
   }
@@ -159,7 +163,9 @@ export function createAdminAuditRecorder({
   }) {
     if (
       !boundedString(event, MAX_EVENT_LENGTH) ||
-      !boundedString(outcome, MAX_OUTCOME_LENGTH)
+      !ALLOWED_EVENTS.has(event) ||
+      !boundedString(outcome, MAX_OUTCOME_LENGTH) ||
+      !ALLOWED_OUTCOMES.has(outcome)
     ) {
       throw new AdminAuditError("ADMIN_INTERNAL_ERROR", 500);
     }
