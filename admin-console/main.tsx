@@ -6,7 +6,7 @@ import "./admin.css";
 
 export type SessionState =
   | { status: "loading" }
-  | { status: "authenticated"; expiresAt: string | null }
+  | { status: "authenticated"; expiresAt: string | null; csrfToken: string }
   | { status: "error"; message: string };
 
 export function normalizePath(pathname: string): string {
@@ -36,13 +36,16 @@ export function AdminApp(): React.JSX.Element {
         return response.json() as Promise<{
           ok: true;
           expiresAt?: string | null;
+          csrfToken?: string;
         }>;
       })
       .then((payload) => {
         if (payload) {
+          if (!payload.csrfToken) throw new Error("ADMIN_CSRF_TOKEN_MISSING");
           setSession({
             status: "authenticated",
             expiresAt: payload.expiresAt ?? null,
+            csrfToken: payload.csrfToken,
           });
         }
       })
@@ -105,7 +108,13 @@ export function AdminApp(): React.JSX.Element {
     );
   }
 
-  return <AdminShell currentPath={currentPath} expiresAt={session.expiresAt} />;
+  return (
+    <AdminShell
+      currentPath={currentPath}
+      expiresAt={session.expiresAt}
+      csrfToken={session.csrfToken}
+    />
+  );
 }
 
 const rootElement = document.getElementById("root");
