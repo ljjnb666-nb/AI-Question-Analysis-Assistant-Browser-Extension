@@ -202,10 +202,14 @@ test("@phase12b REAL_USER_ACTIVATION_ACTIVE_TAB_LIFECYCLE proves screenshot gran
 
     const xAction = await invokeRealBrowserActionShortcut();
 
-    const grantedCapture = await expect.poll(
-      async () => captureViaProductionRoute(worker, targetTabId),
+    await expect.poll(
+      async () => {
+        const response = await captureViaProductionRoute(worker, targetTabId);
+        return response.dataUrl?.startsWith("data:image/png;base64,") === true;
+      },
       { timeout: 10_000, intervals: [200, 400, 800] },
-    ).toMatchObject({ error: undefined }).then(async () => captureViaProductionRoute(worker, targetTabId));
+    ).toBe(true);
+    const grantedCapture = await captureViaProductionRoute(worker, targetTabId);
 
     expect(grantedCapture.error).toBeUndefined();
     const grantedPng = inspectPng(grantedCapture.dataUrl);
