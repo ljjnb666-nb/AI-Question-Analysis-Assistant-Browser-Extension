@@ -69,6 +69,7 @@ function createHandler(options = {}) {
     adminToken: "real-admin-secret",
     isMailerConfigured: () => false,
     loadDbImpl: () => ({ devices: [], users: [], analytics_events: [], email_verification_codes: [] }),
+    adminAuditRecorderImpl: vi.fn(),
     sendVerificationCodeEmail: vi.fn(),
     ...options,
   });
