@@ -385,6 +385,9 @@ describe("analytics handler", () => {
     const { res } = await invoke(handler, { url: "/admin/login" });
     expect(res.statusCode).toBe(200);
     expect(res.payload).toContain('method="POST" action="/admin/login"');
+    expect(res.payload).toContain('href="/admin/login.css"');
+    expect(res.payload).toContain('class="admin-login-panel"');
+    expect(res.payload).not.toContain("<style");
     expect(res.payload).not.toContain('method="GET"');
     expect(res.payload).not.toContain("real-admin-secret");
     expect(res.headers["Content-Security-Policy"]).toContain("default-src 'self'");
@@ -392,6 +395,18 @@ describe("analytics handler", () => {
     expect(res.headers["X-Content-Type-Options"]).toBe("nosniff");
     expect(res.headers["Referrer-Policy"]).toBe("strict-origin");
     expect(loadDbImpl).not.toHaveBeenCalled();
+  });
+
+  it("serves the native Admin login stylesheet as a public same-origin static resource", async () => {
+    const handler = createHandler();
+    const { res } = await invoke(handler, { url: "/admin/login.css" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["Content-Type"]).toBe("text/css; charset=utf-8");
+    expect(res.headers["Content-Security-Policy"]).toContain("style-src 'self'");
+    expect(res.headers["Referrer-Policy"]).toBe("strict-origin");
+    expect(res.payload).toContain(".admin-login-panel");
+    expect(res.payload).toContain(".admin-login-submit");
+    expect(res.payload).not.toContain("real-admin-secret");
   });
 
   it("strips query-token credentials before rejecting unauthenticated legacy Admin data access", async () => {
