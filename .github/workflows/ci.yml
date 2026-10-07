@@ -439,10 +439,19 @@ jobs:
           grep -qi '^referrer-policy: strict-origin' /tmp/rc-admin-headers.txt
           grep -q 'Quiz Solver 管理后台' /tmp/rc-admin-login.html
 
+      - name: Export exact production analytics image
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.image_tag }}
+        run: |
+          docker save "${IMAGE_TAG}" | gzip -n -9 > quiz-solver-analytics-image.tar.gz
+          test -s quiz-solver-analytics-image.tar.gz
+          sha256sum quiz-solver-analytics-image.tar.gz
+
       - name: Generate RC identity manifest
         env:
           RC_SOURCE_SHA: ${{ steps.source.outputs.sha }}
           RC_ANALYTICS_IMAGE_ID: ${{ steps.image.outputs.image_id }}
+          RC_ANALYTICS_ARCHIVE_PATH: quiz-solver-analytics-image.tar.gz
         run: |
           npm run rc:manifest
           node -e 'const fs=require("fs");const m=JSON.parse(fs.readFileSync("rc-manifest.json","utf8"));if(m.sourceSha!==process.env.RC_SOURCE_SHA)process.exit(1);console.log(JSON.stringify(m,null,2))'
@@ -454,6 +463,15 @@ jobs:
         with:
           name: quiz-solver-rc-manifest-${{ steps.source.outputs.sha }}
           path: rc-manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload retrievable RC analytics image
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: quiz-solver-analytics-image-${{ steps.source.outputs.sha }}
+          path: quiz-solver-analytics-image.tar.gz
           if-no-files-found: error
           retention-days: 30
 
