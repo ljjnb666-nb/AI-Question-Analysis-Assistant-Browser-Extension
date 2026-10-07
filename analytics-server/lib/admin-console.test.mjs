@@ -267,6 +267,13 @@ describe("Phase 11D1 Admin Users/System API authority", () => {
     expect(badCursor.res.statusCode).toBe(400);
     expect(parsePayload(badCursor.res).error.code).toBe("INVALID_ADMIN_QUERY");
 
+    const unknownUsersQuery = await invoke(portal, {
+      url: "/admin/api/users?page=2",
+      headers: { cookie },
+    });
+    expect(unknownUsersQuery.res.statusCode).toBe(400);
+    expect(parsePayload(unknownUsersQuery.res).error.code).toBe("INVALID_ADMIN_QUERY");
+
     const systemQuery = await invoke(portal, {
       url: "/admin/api/system?verbose=1",
       headers: { cookie },
