@@ -39,7 +39,7 @@ set PUBLIC_BASE_URL=https://analytics.082515.online
 - `GET /`: redirects to the independent Admin Console at `/admin`
 - `GET /admin/login`: native, POST-only admin login document
 - `POST /admin/login`: exchanges a form-encoded admin token for a short-lived browser session
-- `GET /admin/api/session`: cookie-only browser Admin session authority; the long-lived admin bearer is not accepted here
+- `GET /admin/api/session`: cookie-only browser Admin session authority; returns session expiry plus the per-session CSRF token used only for same-origin Admin mutations. The long-lived admin bearer is not accepted here
 - `GET /admin/api/overview?days=14`: cookie-only aggregate overview. Telemetry activity is explicitly labeled `opt_in_only`; registered-account counts are labeled separately as `all_registered_accounts`
 - `GET /admin/api/analytics/timeseries?days=14`: dense daily opt-in activity / observed install / parse outcome series plus separately scoped account registrations
 - `GET /admin/api/analytics/providers?days=14`: observed parse outcomes grouped by provider; this is not a current-user provider configuration distribution
@@ -48,14 +48,31 @@ set PUBLIC_BASE_URL=https://analytics.082515.online
 - `GET /admin/api/analytics/latency?days=14`: observed parse-outcome duration samples and daily averages
 - `GET /admin/api/users?limit=50&cursor=...&q=...`: cookie-only, read-only user directory. Returns only `userId`, `email`, `createdAt`, `linkedDeviceCount`, and `latestDeviceSeenAt`. Device ownership/counts come from `devices.userId`, not denormalized `users.deviceIdsJson`. Pagination is deterministic `createdAt DESC, userId DESC` with an opaque cursor; `limit` is 1–100 (default 50), and optional `q` is a bounded, case-insensitive literal substring search over email/userId.
 - `GET /admin/api/system`: cookie-only, read-only sanitized current-process snapshot. Exposes only generated time, current process uptime, storage driver, mailer-configured boolean, single-process authority semantics, analytics retention days, and privacy epoch. It never exposes filesystem paths, environment values, SMTP details, CPU/RAM/disk metrics, historical uptime, or fabricated health/SLA data.
+- `GET /admin/api/audit?limit=50&cursor=...`: cookie-only, read-only security audit timeline. The cursor is opaque; `limit` is a strict integer from 1–100 (default 50). Audit reads have an isolated bounded rate-limit namespace and never accept the long-lived Admin bearer.
 - `GET /admin`, `/admin/analytics`, `/admin/users`, `/admin/system`, `/admin/audit`: independent Admin Console application routes
-- `POST /admin/logout`: invalidates the current browser admin session
+- `POST /admin/logout`: invalidates the current browser admin session. A live session must pass the configured Origin check and submit its per-session CSRF token as form data before the session is revoked.
 
 The dashboard submits the admin token in the login request body. Admin tokens in query parameters are never accepted. Browser sessions expire after 8 hours, are limited to 64 active sessions, and use an `HttpOnly`, `SameSite=Strict` cookie scoped to `/admin` (`Secure` in production). Admin login allows 10 attempts per IP in a 15-minute window. If `ANALYTICS_ADMIN_TOKEN` is blank or missing, protected routes fail closed with `503 ADMIN_AUTH_NOT_CONFIGURED` and do not load analytics data.
 
 The Admin analytics read APIs accept only integer `days` values from 1 through 90 (default 14), matching the analytics retention window. They are session-cookie only, use a separate bounded read-rate namespace, return aggregate allowlisted DTOs, and do not serialize raw database rows. Missing denominators are represented as `null` ratios rather than fabricated zero-percent results.
 
 The Admin Users/System read APIs are also browser-session-cookie only and do not accept the long-lived Admin bearer. They use limiter namespaces separate from login and analytics reads. The Users path never calls the broad raw `loadDb()` reader; SQLite selects only allowlisted user fields plus device aggregates, and the JSON compatibility path constructs the same DTO explicitly. Password hashes/salts, account auth tokens/hashes/salts/expiries, verification-code records, denormalized device-id arrays, and raw device ids are never part of these responses. The System path is a current-process snapshot only: `email.configured` means configuration is present, not that SMTP delivery was probed successfully; `service.status = "ok"` means the protected request was handled successfully by the current process, not an SLA or all-subsystem-health claim.
+
+### Admin Audit and CSRF closure
+
+The Admin security audit is a separate authority from anonymous product analytics. SQLite stores it in `admin_audit_events`; JSON remains compatibility/development behavior. Audit entries are retained for at most 180 days and the write path additionally caps retained entries at 10,000. Audit list reads are bounded, cursor-paginated, and do not perform retention deletes as a side effect.
+
+The event vocabulary is intentionally small: Admin login, Admin logout, CSRF rejection, Origin rejection, and unsupported Admin mutation rejection. Outcomes are limited to `success`, `failure`, and `rejected`. Metadata is allowlisted to a bounded HTTP method, an Admin path without query parameters, and a fixed reason vocabulary. The audit contract never stores or returns the long-lived Admin token, browser session cookie/token, CSRF token, email address, account user id, raw device id, request body, raw URL query, or raw IP address.
+
+For correlation without persisting raw network/session identifiers, the server stores short pseudonymous source/session tags generated with HMAC-SHA-256. When the Admin secret is configured, that server-only secret is used as key material; the key is not stored in the audit table or returned to the browser. These tags are linkable pseudonyms for operational correlation, not user identities.
+
+Each Admin browser session has its own random CSRF token. The token is returned only by the authenticated, same-origin `/admin/api/session` response, kept in frontend memory, and submitted by the native logout form. It is not stored in localStorage/sessionStorage, placed in URLs, or written to Audit. A token from one Admin session cannot authorize a different session.
+
+Successful Admin login and live-session logout are fail-closed with respect to Audit: if the required Audit write fails, the success path is not allowed to pretend it completed. Security rejection events are also audited; if rejection auditing itself fails, the Admin request degrades to an opaque storage failure rather than exposing internal details.
+
+Admin browser sessions and their CSRF tokens remain process-local and bounded. A backend process restart invalidates existing Admin sessions and requires re-login. Persistent Audit records survive that restart. This distinction is intentional: Audit persistence must not turn session state into distributed or durable authentication authority.
+
+All Admin HTML, JSON, asset, redirect, and failure responses use the Admin security header policy, including CSP, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, same-origin opener/resource policies, and a restrictive permissions policy. No account-management mutation (ban/delete/role/password/device revoke/etc.) is introduced by this phase.
 
 ## Storage
 
