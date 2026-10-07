@@ -140,6 +140,7 @@ function getDatabase() {
     CREATE INDEX IF NOT EXISTS idx_analytics_events_event_ts ON analytics_events(event, ts);
     CREATE INDEX IF NOT EXISTS idx_analytics_events_device_ts ON analytics_events(deviceId, ts);
     CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(createdAt);
+    CREATE INDEX IF NOT EXISTS idx_devices_user_last_seen ON devices(userId, lastSeenAt);
   `);
 
   // Schema migration must complete before anything that reads or writes
