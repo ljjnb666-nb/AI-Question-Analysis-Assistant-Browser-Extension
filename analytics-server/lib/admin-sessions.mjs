@@ -5,6 +5,7 @@ export const ADMIN_SESSION_MAX_COUNT = 64;
 
 export function createAdminSessionStore({
   createToken = () => randomBytes(32).toString("base64url"),
+  createCsrfToken = () => randomBytes(32).toString("base64url"),
   maxSessions = ADMIN_SESSION_MAX_COUNT,
   now = () => Date.now(),
   ttlMs = ADMIN_SESSION_TTL_MS,
@@ -33,7 +34,10 @@ export function createAdminSessionStore({
       removeExpired();
       const session = sessions.get(String(token || ""));
       if (!session || session.expiresAt <= now()) return null;
-      return { expiresAt: session.expiresAt };
+      return {
+        expiresAt: session.expiresAt,
+        csrfToken: session.csrfToken,
+      };
     },
     has(token) {
       removeExpired();
@@ -51,9 +55,14 @@ export function createAdminSessionStore({
         token = createToken();
       } while (sessions.has(token));
 
+      let csrfToken;
+      do {
+        csrfToken = createCsrfToken();
+      } while (!csrfToken || csrfToken === token);
+
       const expiresAt = now() + ttlMs;
-      sessions.set(token, { expiresAt });
-      return { token, expiresAt };
+      sessions.set(token, { expiresAt, csrfToken });
+      return { token, expiresAt, csrfToken };
     },
     get size() {
       removeExpired();
