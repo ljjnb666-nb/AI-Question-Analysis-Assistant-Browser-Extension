@@ -141,15 +141,34 @@ function authorityDenied(response: CaptureResponse | BlockCaptureResponse): bool
 }
 
 async function invokeRealBrowserActionShortcut(): Promise<{ windowId: string; windowName: string }> {
-  const active = await execFileAsync("xdotool", ["getactivewindow"]);
-  const windowId = active.stdout.trim();
-  if (!windowId) throw new Error("xdotool did not report an active Chromium window");
+  const search = await execFileAsync("xdotool", [
+    "search",
+    "--onlyvisible",
+    "--name",
+    "Phase 12B A /one",
+  ]);
+  const windowIds = search.stdout.split(/\s+/).map((value) => value.trim()).filter(Boolean);
+  if (windowIds.length === 0) {
+    throw new Error("xdotool did not find the visible Phase 12B Chromium window");
+  }
 
-  const name = await execFileAsync("xdotool", ["getwindowname", windowId]);
-  const windowName = name.stdout.trim();
+  let windowId = "";
+  let windowName = "";
+  for (const candidate of windowIds) {
+    const name = await execFileAsync("xdotool", ["getwindowname", candidate]);
+    if (name.stdout.includes("Phase 12B A /one")) {
+      windowId = candidate;
+      windowName = name.stdout.trim();
+      break;
+    }
+  }
+  if (!windowId) {
+    throw new Error("xdotool found windows but none matched the Phase 12B browser title");
+  }
 
-  await execFileAsync("xdotool", ["windowactivate", "--sync", windowId]);
-  await execFileAsync("xdotool", ["key", "--window", windowId, "ctrl+shift+y"]);
+  await execFileAsync("xdotool", ["windowraise", windowId]);
+  await execFileAsync("xdotool", ["windowfocus", "--sync", windowId]);
+  await execFileAsync("xdotool", ["key", "ctrl+shift+y"]);
   return { windowId, windowName };
 }
 
