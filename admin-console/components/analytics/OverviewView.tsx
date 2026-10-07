@@ -75,6 +75,7 @@ export function OverviewView(): React.JSX.Element {
           loading={loading}
           generatedAt={data?.generatedAt}
           label="概览窗口"
+          showRangeSelector={false}
         />
       </div>
 

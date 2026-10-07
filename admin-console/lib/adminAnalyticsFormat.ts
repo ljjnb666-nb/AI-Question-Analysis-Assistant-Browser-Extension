@@ -128,3 +128,21 @@ export function getAdminErrorMessage(errorCodeOrError: unknown): string {
       return "数据加载失败，请稍后重试";
   }
 }
+
+export function getLatestGeneratedAt(
+  timestamps: Array<string | null | undefined>,
+): string | null {
+  let latestTime = -Infinity;
+  let latestIso: string | null = null;
+
+  for (const ts of timestamps) {
+    if (!ts) continue;
+    const time = Date.parse(ts);
+    if (!Number.isNaN(time) && time > latestTime) {
+      latestTime = time;
+      latestIso = ts;
+    }
+  }
+
+  return latestIso;
+}

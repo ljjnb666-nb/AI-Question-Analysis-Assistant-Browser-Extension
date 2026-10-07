@@ -4,6 +4,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { AdminApp, normalizePath } from "./main";
 import { AdminShell } from "./components/AdminShell";
 import { SessionStatus } from "./components/SessionStatus";
+import { LatencyChart } from "./components/analytics/LatencyChart";
 import {
   formatDuration,
   formatNumber,
@@ -11,6 +12,7 @@ import {
   formatProviderName,
   formatErrorCategory,
   getAdminErrorMessage,
+  getLatestGeneratedAt,
 } from "./lib/adminAnalyticsFormat";
 import type {
   AdminOverviewResponse,
@@ -582,8 +584,8 @@ describe("Admin Console UI & Analytics UI Tests", () => {
       expect(screen.getByText("0.1.9")).toBeDefined();
 
       // Default 14 days button selected
-      const btn14 = screen.getByRole("radio", { name: "14 天" });
-      expect(btn14.getAttribute("aria-checked")).toBe("true");
+      const btn14 = screen.getByRole("button", { name: "14 天" });
+      expect(btn14.getAttribute("aria-pressed")).toBe("true");
 
       // Scope Disclosure
       expect(
@@ -644,7 +646,7 @@ describe("Admin Console UI & Analytics UI Tests", () => {
       });
 
       // Switch to 30 days
-      const btn30 = screen.getByRole("radio", { name: "30 天" });
+      const btn30 = screen.getByRole("button", { name: "30 天" });
       fireEvent.click(btn30);
 
       await waitFor(() => {
@@ -652,10 +654,10 @@ describe("Admin Console UI & Analytics UI Tests", () => {
           fetchedUrls.some((u) => u.includes("timeseries?days=30")),
         ).toBe(true);
       });
-      expect(btn30.getAttribute("aria-checked")).toBe("true");
+      expect(btn30.getAttribute("aria-pressed")).toBe("true");
 
       // Switch to 90 days
-      const btn90 = screen.getByRole("radio", { name: "90 天" });
+      const btn90 = screen.getByRole("button", { name: "90 天" });
       fireEvent.click(btn90);
 
       await waitFor(() => {
@@ -758,6 +760,7 @@ describe("Admin Console UI & Analytics UI Tests", () => {
         json: async () => ({
           ok: true,
           data: [],
+          window: { days: 14, from: "2026-09-24T00:00:00.000Z", to: "2026-10-07T10:00:00.000Z", retentionDays: 90 },
           generatedAt: "2026-10-07T10:00:00.000Z",
         }),
       } as Response);
@@ -1092,7 +1095,7 @@ describe("Admin Console UI & Analytics UI Tests", () => {
       });
 
       // User clicks 30 days (slow request)
-      const btn30 = screen.getByRole("radio", { name: "30 天" });
+      const btn30 = screen.getByRole("button", { name: "30 天" });
       fireEvent.click(btn30);
 
       await waitFor(() => {
@@ -1100,7 +1103,7 @@ describe("Admin Console UI & Analytics UI Tests", () => {
       });
 
       // User clicks 7 days (fast request)
-      const btn7 = screen.getByRole("radio", { name: "7 天" });
+      const btn7 = screen.getByRole("button", { name: "7 天" });
       fireEvent.click(btn7);
 
       // Fast 7 days request resolves and updates UI
@@ -1134,6 +1137,300 @@ describe("Admin Console UI & Analytics UI Tests", () => {
       // Ensure 7 days data remains visible (not overwritten by 30 days response)
       expect(screen.getAllByText(/888/).length).toBeGreaterThanOrEqual(1);
       expect(screen.queryByText(/222/)).toBeNull();
+    });
+  });
+
+  describe("Phase 11C2-R1 Regression & Repair Tests", () => {
+    it("C2-R1-OVERVIEW-01: Overview does not expose fake 7/14/30/90 control while retaining refresh", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_OVERVIEW,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("今日已授权活跃设备")).toBeDefined();
+      });
+
+      // Segmented period buttons must NOT be present on /admin
+      expect(screen.queryByRole("button", { name: "7 天" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "14 天" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "30 天" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "90 天" })).toBeNull();
+
+      // Refresh button and timestamp remain available
+      expect(screen.getByRole("button", { name: "刷新数据" })).toBeDefined();
+      expect(screen.getByText(/数据生成时间/)).toBeDefined();
+    });
+
+    it("C2-R1-WINDOW-01: new period never renders old-period response (shows loading during switch)", async () => {
+      const resolvers90Days: Record<string, (res: Response) => void> = {};
+
+      vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+        const url = String(input);
+        if (url.includes("days=14")) {
+          if (url.includes("timeseries")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => MOCK_TIMESERIES,
+            } as Response);
+          }
+          if (url.includes("providers")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => MOCK_PROVIDERS,
+            } as Response);
+          }
+          if (url.includes("errors")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => MOCK_ERRORS,
+            } as Response);
+          }
+          if (url.includes("versions")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => MOCK_VERSIONS,
+            } as Response);
+          }
+          if (url.includes("latency")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => MOCK_LATENCY,
+            } as Response);
+          }
+        }
+
+        if (url.includes("days=90")) {
+          return new Promise<Response>((resolve) => {
+            if (url.includes("providers")) resolvers90Days.providers = resolve;
+            if (url.includes("timeseries")) resolvers90Days.timeseries = resolve;
+            if (url.includes("errors")) resolvers90Days.errors = resolve;
+            if (url.includes("versions")) resolvers90Days.versions = resolve;
+            if (url.includes("latency")) resolvers90Days.latency = resolve;
+          });
+        }
+
+        return Promise.reject(new Error("Unknown route"));
+      });
+
+      render(<AdminShell currentPath="/admin/analytics" expiresAt={null} />);
+
+      // Wait for initial 14-day data to load
+      await waitFor(() => {
+        expect(screen.getByText("OpenAI")).toBeDefined();
+        expect(screen.getByText("最近 14 日观测到的成功与失败解析结果时间序列分布")).toBeDefined();
+      });
+
+      // User clicks 90 days button
+      const btn90 = screen.getByRole("button", { name: "90 天" });
+      fireEvent.click(btn90);
+
+      // Label immediately updates to 90 days
+      expect(screen.getByText("最近 90 日观测到的成功与失败解析结果时间序列分布")).toBeDefined();
+      expect(btn90.getAttribute("aria-pressed")).toBe("true");
+
+      // BEFORE 90-day response arrives: old 14-day provider "OpenAI" must NOT be rendered under 90-day label
+      expect(screen.queryByText("OpenAI")).toBeNull();
+
+      // SectionState renders loading state
+      const loadingBoxes = document.querySelectorAll(".admin-spinner, [aria-busy='true']");
+      expect(loadingBoxes.length).toBeGreaterThanOrEqual(1);
+
+      // Resolve 90-day responses
+      act(() => {
+        resolvers90Days.providers?.({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ...MOCK_PROVIDERS,
+            window: { ...MOCK_PROVIDERS.window, days: 90 },
+            data: [
+              {
+                provider: "qwen",
+                success: 900,
+                error: 90,
+                outcomes: 990,
+                successRatio: 900 / 990,
+              },
+            ],
+          }),
+        } as Response);
+      });
+
+      // Now 90-day data becomes visible
+      await waitFor(() => {
+        expect(screen.getByText("Qwen")).toBeDefined();
+      });
+    });
+
+    it("C2-R1-LATENCY-01: null sample breaks line segment and does not connect across gap", () => {
+      const latencyGapData = [
+        { date: "2026-10-01", samples: 5, averageMs: 200 },
+        { date: "2026-10-02", samples: 0, averageMs: null },
+        { date: "2026-10-03", samples: 8, averageMs: 500 },
+      ];
+
+      const { container } = render(<LatencyChart data={latencyGapData} />);
+
+      // Polylines rendered: since day 2 is null, Day 1 is length 1 and Day 3 is length 1
+      // Neither forms a multi-point segment, so 0 connecting polylines exist across the gap
+      const polylines = container.querySelectorAll("polyline.admin-line-warning");
+      expect(polylines.length).toBe(0);
+
+      // Points rendered: Day 1 (circle), Day 2 (empty marker), Day 3 (circle)
+      const circles = container.querySelectorAll("circle");
+      expect(circles.length).toBe(3);
+
+      const emptyMarkers = container.querySelectorAll("circle.admin-point-empty");
+      expect(emptyMarkers.length).toBe(1);
+
+      // Textual / table fallback exists and shows 暂无样本 for Day 2
+      const toggleBtn = screen.getByRole("button", { name: "查看数据表格" });
+      fireEvent.click(toggleBtn);
+
+      const cells = screen.getAllByRole("cell");
+      expect(cells.some((c) => c.textContent?.includes("暂无样本"))).toBe(true);
+    });
+
+    it("C2-R1-TIME-01: latest generatedAt is selected from current valid responses", () => {
+      const timestamps = [
+        "2026-10-07T08:00:00.000Z",
+        "2026-10-07T10:15:30.000Z",
+        "2026-10-07T09:30:00.000Z",
+        null,
+        undefined,
+        "invalid-date",
+      ];
+
+      const latest = getLatestGeneratedAt(timestamps);
+      expect(latest).toBe("2026-10-07T10:15:30.000Z");
+
+      expect(getLatestGeneratedAt([null, undefined])).toBeNull();
+    });
+
+    it("C2-R1-RETRY-01: section retry only refetches the failed endpoint", async () => {
+      const fetchCounts = {
+        timeseries: 0,
+        providers: 0,
+        errors: 0,
+        versions: 0,
+        latency: 0,
+      };
+
+      vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+        const url = String(input);
+        if (url.includes("timeseries")) {
+          fetchCounts.timeseries++;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => MOCK_TIMESERIES,
+          } as Response);
+        }
+        if (url.includes("providers")) {
+          fetchCounts.providers++;
+          // First attempt fails, retry will succeed
+          if (fetchCounts.providers === 1) {
+            return Promise.resolve({
+              ok: false,
+              status: 503,
+              json: async () => ({ ok: false, error: { code: "ADMIN_STORAGE_UNAVAILABLE" } }),
+            } as Response);
+          }
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => MOCK_PROVIDERS,
+          } as Response);
+        }
+        if (url.includes("errors")) {
+          fetchCounts.errors++;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => MOCK_ERRORS,
+          } as Response);
+        }
+        if (url.includes("versions")) {
+          fetchCounts.versions++;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => MOCK_VERSIONS,
+          } as Response);
+        }
+        if (url.includes("latency")) {
+          fetchCounts.latency++;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => MOCK_LATENCY,
+          } as Response);
+        }
+        return Promise.reject(new Error("Unknown route"));
+      });
+
+      render(<AdminShell currentPath="/admin/analytics" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("数据暂时不可用，请稍后重试")).toBeDefined();
+      });
+
+      expect(fetchCounts.timeseries).toBe(1);
+      expect(fetchCounts.providers).toBe(1);
+      expect(fetchCounts.errors).toBe(1);
+      expect(fetchCounts.versions).toBe(1);
+      expect(fetchCounts.latency).toBe(1);
+
+      // Click retry in the providers section
+      const retryBtn = screen.getByRole("button", { name: "重试" });
+      fireEvent.click(retryBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText("OpenAI")).toBeDefined();
+      });
+
+      // Providers was retried (+1 = 2), but other 4 endpoints were NOT refetched!
+      expect(fetchCounts.providers).toBe(2);
+      expect(fetchCounts.timeseries).toBe(1);
+      expect(fetchCounts.errors).toBe(1);
+      expect(fetchCounts.versions).toBe(1);
+      expect(fetchCounts.latency).toBe(1);
+    });
+
+    it("C2-R1-ARIA-01: segmented control buttons use correct aria-pressed semantics", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_TIMESERIES,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/analytics" expiresAt={null} />);
+
+      const btn7 = screen.getByRole("button", { name: "7 天" });
+      const btn14 = screen.getByRole("button", { name: "14 天" });
+      const btn30 = screen.getByRole("button", { name: "30 天" });
+      const btn90 = screen.getByRole("button", { name: "90 天" });
+
+      expect(btn14.getAttribute("aria-pressed")).toBe("true");
+      expect(btn7.getAttribute("aria-pressed")).toBe("false");
+      expect(btn30.getAttribute("aria-pressed")).toBe("false");
+      expect(btn90.getAttribute("aria-pressed")).toBe("false");
+
+      act(() => {
+        fireEvent.click(btn30);
+      });
+
+      expect(btn30.getAttribute("aria-pressed")).toBe("true");
+      expect(btn14.getAttribute("aria-pressed")).toBe("false");
     });
   });
 });

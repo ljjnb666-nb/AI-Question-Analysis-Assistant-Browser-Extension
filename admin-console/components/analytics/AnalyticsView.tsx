@@ -14,7 +14,10 @@ import {
   fetchAdminTimeseries,
   fetchAdminVersions,
 } from "../../lib/adminAnalyticsApi";
-import { getAdminErrorMessage } from "../../lib/adminAnalyticsFormat";
+import {
+  getAdminErrorMessage,
+  getLatestGeneratedAt,
+} from "../../lib/adminAnalyticsFormat";
 import { AnalyticsToolbar } from "./AnalyticsToolbar";
 import { ParseOutcomesTrend, ActivityTrend } from "./TrendChart";
 import { ProviderBreakdown } from "./ProviderBreakdown";
@@ -24,19 +27,17 @@ import { LatencyChart } from "./LatencyChart";
 import { SectionState } from "./SectionState";
 import { InfoIcon } from "../Icons";
 
+type EndpointKey = "timeseries" | "providers" | "errors" | "versions" | "latency";
+
 export function AnalyticsView(): React.JSX.Element {
   const [days, setDays] = useState<AdminAnalyticsDays>(14);
 
   // Independent state per section for partial failure resilience
-  const [timeseries, setTimeseries] = useState<AdminTimeseriesResponse | null>(
-    null,
-  );
+  const [timeseries, setTimeseries] = useState<AdminTimeseriesResponse | null>(null);
   const [timeseriesLoading, setTimeseriesLoading] = useState(true);
   const [timeseriesError, setTimeseriesError] = useState<string | null>(null);
 
-  const [providers, setProviders] = useState<AdminProvidersResponse | null>(
-    null,
-  );
+  const [providers, setProviders] = useState<AdminProvidersResponse | null>(null);
   const [providersLoading, setProvidersLoading] = useState(true);
   const [providersError, setProvidersError] = useState<string | null>(null);
 
@@ -52,102 +53,152 @@ export function AnalyticsView(): React.JSX.Element {
   const [latencyLoading, setLatencyLoading] = useState(true);
   const [latencyError, setLatencyError] = useState<string | null>(null);
 
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const abortControllersRef = useRef<Partial<Record<EndpointKey, AbortController>>>({});
+
+  // 1. Scoped Timeseries loader
+  const loadTimeseries = useCallback((targetDays: AdminAnalyticsDays) => {
+    abortControllersRef.current.timeseries?.abort();
+    const controller = new AbortController();
+    abortControllersRef.current.timeseries = controller;
+    const signal = controller.signal;
+
+    setTimeseriesLoading(true);
+    setTimeseriesError(null);
+
+    fetchAdminTimeseries(targetDays, signal)
+      .then((res) => {
+        if (signal.aborted) return;
+        setTimeseries(res);
+        setTimeseriesLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted) return;
+        setTimeseriesError(getAdminErrorMessage(err));
+        setTimeseriesLoading(false);
+      });
+  }, []);
+
+  // 2. Scoped Providers loader
+  const loadProviders = useCallback((targetDays: AdminAnalyticsDays) => {
+    abortControllersRef.current.providers?.abort();
+    const controller = new AbortController();
+    abortControllersRef.current.providers = controller;
+    const signal = controller.signal;
+
+    setProvidersLoading(true);
+    setProvidersError(null);
+
+    fetchAdminProviders(targetDays, signal)
+      .then((res) => {
+        if (signal.aborted) return;
+        setProviders(res);
+        setProvidersLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted) return;
+        setProvidersError(getAdminErrorMessage(err));
+        setProvidersLoading(false);
+      });
+  }, []);
+
+  // 3. Scoped Errors loader
+  const loadErrors = useCallback((targetDays: AdminAnalyticsDays) => {
+    abortControllersRef.current.errors?.abort();
+    const controller = new AbortController();
+    abortControllersRef.current.errors = controller;
+    const signal = controller.signal;
+
+    setErrorsLoading(true);
+    setErrorsError(null);
+
+    fetchAdminErrors(targetDays, signal)
+      .then((res) => {
+        if (signal.aborted) return;
+        setErrorsData(res);
+        setErrorsLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted) return;
+        setErrorsError(getAdminErrorMessage(err));
+        setErrorsLoading(false);
+      });
+  }, []);
+
+  // 4. Scoped Versions loader
+  const loadVersions = useCallback((targetDays: AdminAnalyticsDays) => {
+    abortControllersRef.current.versions?.abort();
+    const controller = new AbortController();
+    abortControllersRef.current.versions = controller;
+    const signal = controller.signal;
+
+    setVersionsLoading(true);
+    setVersionsError(null);
+
+    fetchAdminVersions(targetDays, signal)
+      .then((res) => {
+        if (signal.aborted) return;
+        setVersions(res);
+        setVersionsLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted) return;
+        setVersionsError(getAdminErrorMessage(err));
+        setVersionsLoading(false);
+      });
+  }, []);
+
+  // 5. Scoped Latency loader
+  const loadLatency = useCallback((targetDays: AdminAnalyticsDays) => {
+    abortControllersRef.current.latency?.abort();
+    const controller = new AbortController();
+    abortControllersRef.current.latency = controller;
+    const signal = controller.signal;
+
+    setLatencyLoading(true);
+    setLatencyError(null);
+
+    fetchAdminLatency(targetDays, signal)
+      .then((res) => {
+        if (signal.aborted) return;
+        setLatency(res);
+        setLatencyLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted) return;
+        setLatencyError(getAdminErrorMessage(err));
+        setLatencyLoading(false);
+      });
+  }, []);
 
   const loadAll = useCallback(
     (targetDays: AdminAnalyticsDays) => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-      const signal = controller.signal;
-
-      setTimeseriesLoading(true);
-      setTimeseriesError(null);
-      setProvidersLoading(true);
-      setProvidersError(null);
-      setErrorsLoading(true);
-      setErrorsError(null);
-      setVersionsLoading(true);
-      setVersionsError(null);
-      setLatencyLoading(true);
-      setLatencyError(null);
-
-      // 1. Timeseries
-      fetchAdminTimeseries(targetDays, signal)
-        .then((res) => {
-          if (signal.aborted) return;
-          setTimeseries(res);
-          setTimeseriesLoading(false);
-        })
-        .catch((err: unknown) => {
-          if (signal.aborted) return;
-          setTimeseriesError(getAdminErrorMessage(err));
-          setTimeseriesLoading(false);
-        });
-
-      // 2. Providers
-      fetchAdminProviders(targetDays, signal)
-        .then((res) => {
-          if (signal.aborted) return;
-          setProviders(res);
-          setProvidersLoading(false);
-        })
-        .catch((err: unknown) => {
-          if (signal.aborted) return;
-          setProvidersError(getAdminErrorMessage(err));
-          setProvidersLoading(false);
-        });
-
-      // 3. Errors
-      fetchAdminErrors(targetDays, signal)
-        .then((res) => {
-          if (signal.aborted) return;
-          setErrorsData(res);
-          setErrorsLoading(false);
-        })
-        .catch((err: unknown) => {
-          if (signal.aborted) return;
-          setErrorsError(getAdminErrorMessage(err));
-          setErrorsLoading(false);
-        });
-
-      // 4. Versions
-      fetchAdminVersions(targetDays, signal)
-        .then((res) => {
-          if (signal.aborted) return;
-          setVersions(res);
-          setVersionsLoading(false);
-        })
-        .catch((err: unknown) => {
-          if (signal.aborted) return;
-          setVersionsError(getAdminErrorMessage(err));
-          setVersionsLoading(false);
-        });
-
-      // 5. Latency
-      fetchAdminLatency(targetDays, signal)
-        .then((res) => {
-          if (signal.aborted) return;
-          setLatency(res);
-          setLatencyLoading(false);
-        })
-        .catch((err: unknown) => {
-          if (signal.aborted) return;
-          setLatencyError(getAdminErrorMessage(err));
-          setLatencyLoading(false);
-        });
+      loadTimeseries(targetDays);
+      loadProviders(targetDays);
+      loadErrors(targetDays);
+      loadVersions(targetDays);
+      loadLatency(targetDays);
     },
-    [],
+    [loadTimeseries, loadProviders, loadErrors, loadVersions, loadLatency],
   );
 
   useEffect(() => {
     loadAll(days);
+    const controllers = abortControllersRef.current;
     return () => {
-      abortControllerRef.current?.abort();
+      controllers.timeseries?.abort();
+      controllers.providers?.abort();
+      controllers.errors?.abort();
+      controllers.versions?.abort();
+      controllers.latency?.abort();
     };
   }, [days, loadAll]);
+
+  // Window-matching responses only (prevents rendering stale window data under new window label)
+  const currentTimeseries = timeseries?.window?.days === days ? timeseries : null;
+  const currentProviders = providers?.window?.days === days ? providers : null;
+  const currentErrors = errorsData?.window?.days === days ? errorsData : null;
+  const currentVersions = versions?.window?.days === days ? versions : null;
+  const currentLatency = latency?.window?.days === days ? latency : null;
 
   const isAnyLoading =
     timeseriesLoading ||
@@ -156,14 +207,14 @@ export function AnalyticsView(): React.JSX.Element {
     versionsLoading ||
     latencyLoading;
 
-  // Pick latest generatedAt from available responses
-  const generatedAt =
-    timeseries?.generatedAt ||
-    providers?.generatedAt ||
-    errorsData?.generatedAt ||
-    versions?.generatedAt ||
-    latency?.generatedAt ||
-    null;
+  // Pick latest generatedAt from currently valid responses
+  const generatedAt = getLatestGeneratedAt([
+    currentTimeseries?.generatedAt,
+    currentProviders?.generatedAt,
+    currentErrors?.generatedAt,
+    currentVersions?.generatedAt,
+    currentLatency?.generatedAt,
+  ]);
 
   return (
     <div className="admin-view-container">
@@ -199,13 +250,13 @@ export function AnalyticsView(): React.JSX.Element {
         </div>
         <div className="admin-section-body">
           <SectionState
-            loading={timeseriesLoading && !timeseries}
+            loading={timeseriesLoading || (!currentTimeseries && !timeseriesError)}
             error={timeseriesError}
-            empty={Boolean(timeseries && timeseries.data.length === 0)}
+            empty={Boolean(currentTimeseries && currentTimeseries.data.length === 0)}
             emptyMessage="当前时间范围内暂无解析结果趋势数据"
-            onRetry={() => loadAll(days)}
+            onRetry={() => loadTimeseries(days)}
           >
-            {timeseries && <ParseOutcomesTrend data={timeseries.data} />}
+            {currentTimeseries && <ParseOutcomesTrend data={currentTimeseries.data} />}
           </SectionState>
         </div>
       </section>
@@ -220,13 +271,13 @@ export function AnalyticsView(): React.JSX.Element {
         </div>
         <div className="admin-section-body">
           <SectionState
-            loading={timeseriesLoading && !timeseries}
+            loading={timeseriesLoading || (!currentTimeseries && !timeseriesError)}
             error={timeseriesError}
-            empty={Boolean(timeseries && timeseries.data.length === 0)}
+            empty={Boolean(currentTimeseries && currentTimeseries.data.length === 0)}
             emptyMessage="当前时间范围内暂无活跃设备数据"
-            onRetry={() => loadAll(days)}
+            onRetry={() => loadTimeseries(days)}
           >
-            {timeseries && <ActivityTrend data={timeseries.data} />}
+            {currentTimeseries && <ActivityTrend data={currentTimeseries.data} />}
           </SectionState>
         </div>
       </section>
@@ -242,13 +293,13 @@ export function AnalyticsView(): React.JSX.Element {
           </div>
           <div className="admin-section-body">
             <SectionState
-              loading={providersLoading && !providers}
+              loading={providersLoading || (!currentProviders && !providersError)}
               error={providersError}
-              empty={Boolean(providers && providers.data.length === 0)}
+              empty={Boolean(currentProviders && currentProviders.data.length === 0)}
               emptyMessage="当前时间范围内暂无解析结果提供商数据"
-              onRetry={() => loadAll(days)}
+              onRetry={() => loadProviders(days)}
             >
-              {providers && <ProviderBreakdown data={providers.data} />}
+              {currentProviders && <ProviderBreakdown data={currentProviders.data} />}
             </SectionState>
           </div>
         </section>
@@ -262,13 +313,13 @@ export function AnalyticsView(): React.JSX.Element {
           </div>
           <div className="admin-section-body">
             <SectionState
-              loading={errorsLoading && !errorsData}
+              loading={errorsLoading || (!currentErrors && !errorsError)}
               error={errorsError}
-              empty={Boolean(errorsData && errorsData.data.length === 0)}
+              empty={Boolean(currentErrors && currentErrors.data.length === 0)}
               emptyMessage="当前时间范围内暂无解析错误数据"
-              onRetry={() => loadAll(days)}
+              onRetry={() => loadErrors(days)}
             >
-              {errorsData && <ErrorBreakdown data={errorsData.data} />}
+              {currentErrors && <ErrorBreakdown data={currentErrors.data} />}
             </SectionState>
           </div>
         </section>
@@ -285,13 +336,13 @@ export function AnalyticsView(): React.JSX.Element {
           </div>
           <div className="admin-section-body">
             <SectionState
-              loading={versionsLoading && !versions}
+              loading={versionsLoading || (!currentVersions && !versionsError)}
               error={versionsError}
-              empty={Boolean(versions && versions.data.length === 0)}
+              empty={Boolean(currentVersions && currentVersions.data.length === 0)}
               emptyMessage="当前时间范围内暂无版本数据"
-              onRetry={() => loadAll(days)}
+              onRetry={() => loadVersions(days)}
             >
-              {versions && <VersionBreakdown data={versions.data} />}
+              {currentVersions && <VersionBreakdown data={currentVersions.data} />}
             </SectionState>
           </div>
         </section>
@@ -305,13 +356,13 @@ export function AnalyticsView(): React.JSX.Element {
           </div>
           <div className="admin-section-body">
             <SectionState
-              loading={latencyLoading && !latency}
+              loading={latencyLoading || (!currentLatency && !latencyError)}
               error={latencyError}
-              empty={Boolean(latency && latency.data.length === 0)}
+              empty={Boolean(currentLatency && currentLatency.data.length === 0)}
               emptyMessage="当前时间范围内暂无耗时数据"
-              onRetry={() => loadAll(days)}
+              onRetry={() => loadLatency(days)}
             >
-              {latency && <LatencyChart data={latency.data} />}
+              {currentLatency && <LatencyChart data={currentLatency.data} />}
             </SectionState>
           </div>
         </section>

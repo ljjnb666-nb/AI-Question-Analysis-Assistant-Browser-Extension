@@ -61,16 +61,26 @@ export function LatencyChart({ data }: LatencyChartProps): React.JSX.Element {
     y: padTop + plotHeight * (1 - pct),
   }));
 
-  // Build SVG polyline for connected valid points
-  const pointsString = data
-    .map((d, idx) => {
-      if (d.samples === 0 || d.averageMs == null) return null;
+  // Build SVG polyline segments for contiguous valid sample sequences
+  const segments: string[] = [];
+  let currentSegment: string[] = [];
+
+  data.forEach((d, idx) => {
+    if (d.samples > 0 && d.averageMs != null && Number.isFinite(d.averageMs)) {
       const x = padLeft + (numItems > 1 ? idx * slotWidth : plotWidth / 2);
       const y = padTop + plotHeight * (1 - Math.min(1, d.averageMs / maxMs));
-      return `${x},${y}`;
-    })
-    .filter((pt): pt is string => pt !== null)
-    .join(" ");
+      currentSegment.push(`${x},${y}`);
+    } else {
+      if (currentSegment.length > 1) {
+        segments.push(currentSegment.join(" "));
+      }
+      currentSegment = [];
+    }
+  });
+
+  if (currentSegment.length > 1) {
+    segments.push(currentSegment.join(" "));
+  }
 
   return (
     <div className="admin-chart-container">
@@ -125,14 +135,15 @@ export function LatencyChart({ data }: LatencyChartProps): React.JSX.Element {
               </g>
             ))}
 
-            {/* Polyline */}
-            {pointsString && (
+            {/* Polyline Segments */}
+            {segments.map((segPoints, idx) => (
               <polyline
-                points={pointsString}
+                key={idx}
+                points={segPoints}
                 className="admin-line-warning"
                 fill="none"
               />
-            )}
+            ))}
 
             {/* Data points */}
             {data.map((d, idx) => {
