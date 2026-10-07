@@ -108,7 +108,7 @@ async function capture(
   });
 }
 
-test.describe("Phase 11F Admin real-browser final gate", () => {
+test.describe("@admin Phase 11F Admin real-browser final gate", () => {
   test.describe.configure({ mode: "serial", timeout: 120_000 });
 
   test.beforeAll(async () => {
