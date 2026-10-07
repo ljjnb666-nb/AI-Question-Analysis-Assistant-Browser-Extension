@@ -1,4 +1,3 @@
-/// <reference types="chrome" />
 import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import http from "node:http";
@@ -9,6 +8,28 @@ import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
 
 const execFileAsync = promisify(execFile);
+
+type Phase12BTab = { id?: number; active?: boolean; url?: string };
+type Phase12BInjectionResult = { result?: unknown };
+declare const chrome: {
+  commands: {
+    getAll: () => Promise<Array<{ name?: string; shortcut?: string }>>;
+  };
+  tabs: {
+    query: (query: { active?: boolean; currentWindow?: boolean }) => Promise<Phase12BTab[]>;
+    sendMessage: (tabId: number, message: unknown) => Promise<unknown>;
+  };
+  scripting: {
+    executeScript: (options: {
+      target: { tabId: number };
+      files?: string[];
+      func?: () => Promise<unknown>;
+    }) => Promise<Phase12BInjectionResult[]>;
+  };
+  runtime: {
+    sendMessage: (message: unknown) => Promise<unknown>;
+  };
+};
 
 type CaptureResponse = { dataUrl?: string; error?: string };
 type BlockCaptureResponse = { ok?: boolean; dataUrl?: string; error?: string };
