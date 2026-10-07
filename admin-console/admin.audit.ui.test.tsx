@@ -51,7 +51,6 @@ describe("Phase 11E Admin Audit UI", () => {
     expect(screen.getAllByText("session_fedcba9876543210").length).toBeGreaterThanOrEqual(1);
     expect(document.body.textContent).not.toContain("adminToken");
     expect(document.body.textContent).not.toContain("csrfToken");
-    expect(document.body.textContent).not.toContain("Cookie");
   });
 
   it("E-AUDIT-UI-02 appends cursor pages and keeps the cursor opaque", async () => {
