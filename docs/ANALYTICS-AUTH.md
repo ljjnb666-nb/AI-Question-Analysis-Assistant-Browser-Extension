@@ -72,7 +72,7 @@ Successful Admin login and live-session logout are fail-closed with respect to A
 
 Admin browser sessions and their CSRF tokens remain process-local and bounded. A backend process restart invalidates existing Admin sessions and requires re-login. Persistent Audit records survive that restart. This distinction is intentional: Audit persistence must not turn session state into distributed or durable authentication authority.
 
-All Browser Admin Portal responses under `/admin` and `/admin/api/*`—including HTML, JSON, assets, redirects, and failures—use the Admin security header policy, including CSP, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, same-origin opener/resource policies, and a restrictive permissions policy. The legacy machine-compatible `/admin/data` route remains outside this Browser Admin Portal contract so its historical cross-origin/API compatibility is not silently changed. No account-management mutation (ban/delete/role/password/device revoke/etc.) is introduced by this phase.
+All Browser Admin Portal responses under `/admin` and `/admin/api/*`—including HTML, JSON, assets, redirects, and failures—use the Admin security header policy, including CSP, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin`, `X-Frame-Options: DENY`, same-origin opener/resource policies, and a restrictive permissions policy. The legacy machine-compatible `/admin/data` route remains outside this Browser Admin Portal contract so its historical cross-origin/API compatibility is not silently changed. No account-management mutation (ban/delete/role/password/device revoke/etc.) is introduced by this phase.
 
 ## Storage
 
@@ -100,4 +100,4 @@ Security notes:
 - The extension generates a local `deviceId` automatically.
 - Usage analytics is optional and **off by default**; events are sent only after the user explicitly turns the setting on and saves it. Before consent, no analytics events are uploaded.
 - Core events are uploaded with `deviceId`, the consent protocol version, event name, timestamp, extension version, and a small allowlist of event-specific fields. They do not include the page hostname, question or answer content, screenshots or images, API key, auth token, password, verification code, email address, or client-supplied account identity. See [../PRIVACY.md](../PRIVACY.md) for the full data-flow contract.
-- The default analytics backend URL is `https://analytics.082515.online`.
+- The default analytics backend URL is `https://analytics.082515.online`.\n\n`strict-origin` is intentional: Admin login/logout are native same-origin form POSTs whose mutation guard requires a non-opaque `Origin`. The policy exposes only the origin (never the Admin path/query) on same-security-level requests while preserving the fail-closed exact-origin check; `Origin: null` remains rejected.
