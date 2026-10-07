@@ -203,7 +203,14 @@ export function createAnalyticsHandler(options = {}) {
   const adminAuditReadModel =
     adminAuditReadModelImpl || createAdminAuditReadModel({ now: nowImpl });
   const adminAuditRecorder =
-    adminAuditRecorderImpl || createAdminAuditRecorder({ now: nowImpl });
+    adminAuditRecorderImpl ||
+    createAdminAuditRecorder({
+      now: nowImpl,
+      tagKey:
+        typeof adminToken === "string" && Buffer.byteLength(adminToken, "utf8") >= 16
+          ? adminToken
+          : undefined,
+    });
   const adminPortal = createAdminPortal({
     adminToken,
     adminSessions,
