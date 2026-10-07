@@ -3,7 +3,8 @@
 ## Core Docs
 
 - `RELEASE-READINESS.md`: authoritative release-hardening status, frozen invariants, known safe limitations, and release gates
-- `PHASE12-RC-TRUTH.md`: Phase 12 release-candidate identity, bundle-truth, and real-browser acceptance contract
+- `PHASE12-RC-TRUTH.md`: Phase 12 release-candidate identity and bundle-truth contract
+- `PHASE12B-REAL-BROWSER-ACCEPTANCE.md`: Phase 12B real Chrome `activeTab` user-activation and lifecycle acceptance contract
 - `ARCHITECTURE.md`: module boundaries and refactor rules
 - `COMPATIBILITY-MATRIX.md`: deterministic DOM compatibility corpus and known safe limitations
 - `PERMISSIONS.md`: frozen production permission contract and screenshot-authority evidence

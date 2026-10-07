@@ -34,8 +34,21 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["content/contentRuntimeBootstrap.js"],
-      "matches": ["http://*/*", "https://*/*"]
+      "resources": [
+        "content/contentRuntimeBootstrap.js"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
     }
-  ]
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      }
+    }
+  }
 }
