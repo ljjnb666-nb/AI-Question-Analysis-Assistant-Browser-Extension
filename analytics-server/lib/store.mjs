@@ -163,6 +163,7 @@ function getDatabase() {
   maybeMigrateLegacyJson(dbInstance);
   migrateAnalyticsPrivacyEpochSqlite(dbInstance);
   pruneSqliteAnalyticsEvents(dbInstance, Date.now());
+  pruneAdminAuditSqlite(dbInstance, Date.now());
   return dbInstance;
 }
 
@@ -285,7 +286,9 @@ export function loadDbFromJsonFile() {
       : [],
   };
   const epochMigrated = migrateAnalyticsPrivacyEpochJson(db);
-  if (epochMigrated || pruneAnalyticsEvents(db)) saveDbToJsonFile(db);
+  const analyticsPruned = pruneAnalyticsEvents(db);
+  const auditPruned = pruneAdminAuditJson(db);
+  if (epochMigrated || analyticsPruned || auditPruned) saveDbToJsonFile(db);
   return db;
 }
 
@@ -510,7 +513,9 @@ function pruneAdminAuditJson(db, now = Date.now()) {
     .sort((left, right) => {
       const delta = Number(right.createdAt) - Number(left.createdAt);
       if (delta !== 0) return delta;
-      return String(right.auditId).localeCompare(String(left.auditId), "en");
+      const leftId = String(left.auditId);
+      const rightId = String(right.auditId);
+      return rightId < leftId ? -1 : rightId > leftId ? 1 : 0;
     })
     .slice(0, ADMIN_AUDIT_MAX_EVENTS);
   const changed = rows.length !== (Array.isArray(db.admin_audit_events) ? db.admin_audit_events.length : 0);
@@ -553,7 +558,6 @@ export function readAdminAuditEventsInStorage({
 } = {}) {
   if (!SQLITE_SUPPORTED) {
     const db = loadDbFromJsonFile();
-    if (pruneAdminAuditJson(db)) saveDbToJsonFile(db);
     return (Array.isArray(db.admin_audit_events) ? db.admin_audit_events : [])
       .filter((entry) => {
         if (cursorCreatedAt == null || cursorAuditId == null) return true;
@@ -564,14 +568,15 @@ export function readAdminAuditEventsInStorage({
       .sort((left, right) => {
         const delta = Number(right.createdAt) - Number(left.createdAt);
         if (delta !== 0) return delta;
-        return String(right.auditId).localeCompare(String(left.auditId), "en");
+        const leftId = String(left.auditId);
+      const rightId = String(right.auditId);
+      return rightId < leftId ? -1 : rightId > leftId ? 1 : 0;
       })
       .slice(0, limit)
       .map((entry) => ({ ...entry }));
   }
 
   const database = getDatabase();
-  pruneAdminAuditSqlite(database);
   if (cursorCreatedAt == null || cursorAuditId == null) {
     return database
       .prepare(
