@@ -23,7 +23,9 @@
     "test:run": "node --disable-warning=ExperimentalWarning ./node_modules/vitest/vitest.mjs run",
     "test:coverage": "node --disable-warning=ExperimentalWarning ./node_modules/vitest/vitest.mjs run --coverage",
     "test:e2e": "npm run build && npm run test:e2e:dist",
-    "test:e2e:dist": "playwright test",
+    "test:e2e:dist": "playwright test --grep-invert \"@admin\"",
+    "test:e2e:admin": "npm run build:admin && npm run test:e2e:admin:dist",
+    "test:e2e:admin:dist": "playwright test --grep \"@admin\"",
     "build:admin": "vite build -c vite.admin.config.ts",
     "verify:admin": "node tools/verify-admin-artifact.mjs",
     "test:artifact:admin": "node --test tools/verify-admin-artifact.node-test.mjs"

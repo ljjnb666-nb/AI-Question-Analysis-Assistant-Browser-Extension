@@ -611,6 +611,13 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     expect(parsePayload(rejected.res).error).toBe("ADMIN_ORIGIN_REJECTED");
     expect(rejected.res.headers["Set-Cookie"]).toBeUndefined();
 
+    const opaqueOrigin = await login(portal, "real-admin-secret", {
+      origin: "null",
+    });
+    expect(opaqueOrigin.res.statusCode).toBe(403);
+    expect(parsePayload(opaqueOrigin.res).error).toBe("ADMIN_ORIGIN_REJECTED");
+    expect(opaqueOrigin.res.headers["Set-Cookie"]).toBeUndefined();
+
     const accepted = await login(portal, "real-admin-secret", {
       origin: "https://analytics.example.test",
     });
@@ -908,10 +915,18 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     const root = await invoke(portal, { url: "/" });
     expect(root.res.statusCode).toBe(303);
     expect(root.res.headers["Content-Security-Policy"]).toBe(ADMIN_CSP);
+    expect(root.res.headers["Referrer-Policy"]).toBe("strict-origin");
     expect(root.res.headers["X-Frame-Options"]).toBe("DENY");
     expect(root.res.headers["Cross-Origin-Opener-Policy"]).toBe("same-origin");
     expect(root.res.headers["Cross-Origin-Resource-Policy"]).toBe("same-origin");
     expect(root.res.headers["Permissions-Policy"]).toContain("camera=()");
+
+    const loginPage = await invoke(portal, { url: "/admin/login" });
+    expect(loginPage.res.statusCode).toBe(200);
+    expect(loginPage.res.headers["Referrer-Policy"]).toBe("strict-origin");
+    expect(String(loginPage.res.payload)).toContain(
+      '<meta name="referrer" content="strict-origin">',
+    );
 
     const unknown = await invoke(portal, { url: "/admin/api/not-real" });
     expect(unknown.res.statusCode).toBe(404);

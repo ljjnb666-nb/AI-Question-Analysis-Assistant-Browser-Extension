@@ -11,7 +11,7 @@ function makeValidArtifact() {
   mkdirSync(path.join(distAdminDir, "assets"), { recursive: true });
   writeFileSync(
     path.join(distAdminDir, "index.html"),
-    '<!doctype html><link rel="stylesheet" href="/admin/assets/admin.css"><script type="module" src="/admin/assets/admin.js"></script>',
+    '<!doctype html><meta name="referrer" content="strict-origin"><link rel="stylesheet" href="/admin/assets/admin.css"><script type="module" src="/admin/assets/admin.js"></script>',
     "utf8",
   );
   writeFileSync(path.join(distAdminDir, "assets", "admin.js"), 'console.log("admin");\n', "utf8");
@@ -52,7 +52,7 @@ test("ADMIN11B1-R1-ART-03 requires at least one Admin JavaScript entry", () => {
   try {
     writeFileSync(
       path.join(fixture.distAdminDir, "index.html"),
-      '<link rel="stylesheet" href="/admin/assets/admin.css">',
+      '<meta name="referrer" content="strict-origin"><link rel="stylesheet" href="/admin/assets/admin.css">',
       "utf8",
     );
     assert.throws(
@@ -152,4 +152,22 @@ test("ADMIN11B1-R1-ART-09 rejects a missing dist-admin directory", () => {
     () => verifyAdminArtifact({ distAdminDir: path.join(os.tmpdir(), "quiz-admin-artifact-missing-r1") }),
     /dist-admin directory is missing/,
   );
+});
+
+
+test("ADMIN11F-ART-10 rejects an Admin artifact that regresses the SPA referrer policy", () => {
+  const fixture = makeValidArtifact();
+  try {
+    writeFileSync(
+      path.join(fixture.distAdminDir, "index.html"),
+      '<!doctype html><meta name="referrer" content="no-referrer"><script type="module" src="/admin/assets/admin.js"></script>',
+      "utf8",
+    );
+    assert.throws(
+      () => verifyAdminArtifact({ distAdminDir: fixture.distAdminDir }),
+      /meta referrer=strict-origin/,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
 });

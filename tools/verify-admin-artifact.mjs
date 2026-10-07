@@ -79,6 +79,9 @@ export function verifyAdminArtifact({
   if (!existsSync(indexPath)) fail("dist-admin/index.html is missing");
   const indexHtml = readFileSync(indexPath, "utf8");
   if (!indexHtml.trim()) fail("dist-admin/index.html is empty");
+  if (!/<meta\s+name=["']referrer["']\s+content=["']strict-origin["']\s*\/?\s*>/i.test(indexHtml)) {
+    fail("dist-admin/index.html must declare meta referrer=strict-origin");
+  }
 
   const references = collectLocalAssetReferences(indexHtml);
   let scriptCount = 0;

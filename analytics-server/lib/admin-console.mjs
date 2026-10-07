@@ -58,7 +58,11 @@ function adminSecurityHeaders() {
   return {
     "Content-Security-Policy": ADMIN_CSP,
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    // Native Admin login/logout use same-origin form POSTs and enforce the
+    // browser Origin header. `no-referrer` makes Chromium serialize Origin as
+    // `null` for such form submissions, so use the strictest origin-only policy
+    // that preserves a verifiable Origin on same-security-level requests.
+    "Referrer-Policy": "strict-origin",
     "X-Frame-Options": "DENY",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
@@ -160,25 +164,180 @@ function resolveAdminAsset(adminDistDir, pathname) {
   return fullPath;
 }
 
-function renderAdminLoginHtml() {
+const ADMIN_LOGIN_CSS = `
+:root {
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #0f172a;
+  background: #f8fafc;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.10), transparent 34rem),
+    linear-gradient(180deg, #f8fbff 0%, #f8fafc 45%, #f1f5f9 100%);
+}
+button, input { font: inherit; }
+.admin-login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+}
+.admin-login-panel {
+  width: min(100%, 440px);
+  padding: 32px;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+}
+.admin-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.admin-login-mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  background: #2563eb;
+  color: #ffffff;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.admin-login-eyebrow {
+  margin: 0 0 4px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.admin-login-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 24px;
+  line-height: 1.25;
+}
+.admin-login-intro {
+  margin: 0 0 24px;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.admin-login-error {
+  margin: -8px 0 20px;
+  padding: 11px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.admin-login-form {
+  display: grid;
+  gap: 10px;
+}
+.admin-login-label {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+}
+.admin-login-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  outline: none;
+  background: #ffffff;
+  color: #0f172a;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.admin-login-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+.admin-login-submit {
+  height: 44px;
+  margin-top: 6px;
+  border: 0;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 700;
+  transition: background 120ms ease, transform 120ms ease;
+}
+.admin-login-submit:hover { background: #1d4ed8; }
+.admin-login-submit:active { transform: translateY(1px); }
+.admin-login-submit:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 2px;
+}
+.admin-login-note {
+  margin: 20px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid #e2e8f0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.6;
+}
+@media (max-width: 480px) {
+  .admin-login-shell { padding: 20px 14px; }
+  .admin-login-panel { padding: 24px 20px; border-radius: 16px; }
+  .admin-login-title { font-size: 22px; }
+}
+`.trim();
+
+function renderAdminLoginHtml({ invalidCredentials = false } = {}) {
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="referrer" content="no-referrer">
+  <meta name="referrer" content="strict-origin">
   <meta name="robots" content="noindex, nofollow">
-  <title>Quiz Solver Admin Login</title>
+  <link rel="stylesheet" href="/admin/login.css">
+  <title>Quiz Solver 管理后台登录</title>
 </head>
 <body>
-  <main>
-    <form method="POST" action="/admin/login">
-      <h1>Quiz Solver 管理后台</h1>
-      <p>请输入管理口令以建立短期安全会话。</p>
-      <label for="adminToken">Admin Token</label>
-      <input id="adminToken" name="adminToken" type="password" autocomplete="current-password" required>
-      <button type="submit">登录</button>
-    </form>
+  <main class="admin-login-shell">
+    <section class="admin-login-panel" aria-labelledby="admin-login-title">
+      <div class="admin-login-brand">
+        <span class="admin-login-mark" aria-hidden="true">QS</span>
+        <div>
+          <p class="admin-login-eyebrow">独立管理后台</p>
+          <h1 id="admin-login-title" class="admin-login-title">Quiz Solver 管理后台</h1>
+        </div>
+      </div>
+      <p class="admin-login-intro">请输入管理员口令以建立短期安全会话。认证信息不会写入浏览器后台产物。</p>
+      ${invalidCredentials ? '<p class="admin-login-error" role="alert">管理口令无效，请检查后重试。</p>' : ""}
+      <form class="admin-login-form" method="POST" action="/admin/login">
+        <label class="admin-login-label" for="adminToken">管理员口令</label>
+        <input
+          class="admin-login-input"
+          id="adminToken"
+          name="adminToken"
+          type="password"
+          autocomplete="current-password"
+          placeholder="输入 Admin Token"
+          required
+          autofocus
+        >
+        <button class="admin-login-submit" type="submit">安全登录</button>
+      </form>
+      <p class="admin-login-note">登录成功后仅建立短期管理会话；后台操作仍受同源校验与 CSRF 防护约束。</p>
+    </section>
   </main>
 </body>
 </html>`;
@@ -626,6 +785,16 @@ export function createAdminPortal({
       if (pathname === "/admin/data") return false;
 
       try {
+        if (pathname === "/admin/login.css") {
+          if (method !== "GET") {
+            sendAdminJson(res, 405, { ok: false, error: { code: "ADMIN_METHOD_NOT_ALLOWED" } });
+            return true;
+          }
+          res.writeHead(200, adminHeaders("text/css; charset=utf-8", "public, max-age=3600"));
+          res.end(ADMIN_LOGIN_CSS);
+          return true;
+        }
+
         if (method === "GET" && pathname === "/") {
           redirectAdmin(res, "/admin");
           return true;
@@ -653,11 +822,7 @@ export function createAdminPortal({
                 ip,
                 metadata: { reason: "invalid_credentials" },
               });
-              sendAdminHtml(
-                res,
-                401,
-                '<!doctype html><html><head><meta charset="utf-8"><title>Unauthorized</title></head><body><p>Admin authentication failed.</p></body></html>',
-              );
+              sendAdminHtml(res, 401, renderAdminLoginHtml({ invalidCredentials: true }));
               return true;
             }
             const session = adminSessions.issue();
