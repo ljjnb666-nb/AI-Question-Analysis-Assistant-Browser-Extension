@@ -52,13 +52,16 @@ export function createAdminSessionStore({
 
       let token;
       do {
-        token = createToken();
-      } while (sessions.has(token));
+        token = String(createToken() || "");
+      } while (!token || sessions.has(token));
 
+      const csrfTokens = new Set(
+        [...sessions.values()].map((session) => session.csrfToken),
+      );
       let csrfToken;
       do {
-        csrfToken = createCsrfToken();
-      } while (!csrfToken || csrfToken === token);
+        csrfToken = String(createCsrfToken() || "");
+      } while (!csrfToken || csrfToken === token || csrfTokens.has(csrfToken));
 
       const expiresAt = now() + ttlMs;
       sessions.set(token, { expiresAt, csrfToken });
