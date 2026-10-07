@@ -656,14 +656,14 @@ describe("analytics handler", () => {
 
     try {
       const first = createAnalyticsHandler({
-        adminToken: "real-admin-secret",
+        adminToken: "short-admin",
         isMailerConfigured: () => false,
         sendVerificationCodeEmail: vi.fn(),
         createAdminSessionToken: () => "first-process-session",
         createAdminCsrfToken: () => "first-process-csrf",
         nowImpl: () => Date.parse("2026-10-07T12:00:00.000Z"),
       });
-      const firstLogin = await login(first);
+      const firstLogin = await login(first, "short-admin");
       const oldCookie = sessionCookie(firstLogin.res);
 
       const firstAudit = await invoke(first, {
@@ -671,19 +671,22 @@ describe("analytics handler", () => {
         headers: { cookie: oldCookie },
       });
       expect(firstAudit.res.statusCode).toBe(200);
-      expect(parsePayload(firstAudit.res).data).toEqual([
+      const firstEvents = parsePayload(firstAudit.res).data;
+      expect(firstEvents).toEqual([
         expect.objectContaining({
           event: "admin_login",
           outcome: "success",
         }),
       ]);
-      expect(firstAudit.res.payload).not.toContain("real-admin-secret");
+      const firstIpHash = firstEvents[0].ipHash;
+      expect(firstIpHash).toMatch(/^ip_[0-9a-f]{16}$/);
+      expect(firstAudit.res.payload).not.toContain("short-admin");
       expect(firstAudit.res.payload).not.toContain("first-process-session");
 
       resetDbConnectionForTests();
 
       const restarted = createAnalyticsHandler({
-        adminToken: "real-admin-secret",
+        adminToken: "short-admin",
         isMailerConfigured: () => false,
         sendVerificationCodeEmail: vi.fn(),
         createAdminSessionToken: () => "second-process-session",
@@ -697,7 +700,7 @@ describe("analytics handler", () => {
       });
       expect(oldSessionAfterRestart.res.statusCode).toBe(401);
 
-      const secondLogin = await login(restarted);
+      const secondLogin = await login(restarted, "short-admin");
       const newCookie = sessionCookie(secondLogin.res);
       const persistedAudit = await invoke(restarted, {
         url: "/admin/api/audit",
@@ -712,6 +715,8 @@ describe("analytics handler", () => {
       ]);
       expect(events[0].createdAt).toBe("2026-10-07T12:01:00.000Z");
       expect(events[1].createdAt).toBe("2026-10-07T12:00:00.000Z");
+      expect(events[0].ipHash).toBe(firstIpHash);
+      expect(events[1].ipHash).toBe(firstIpHash);
     } finally {
       resetDbConnectionForTests();
       if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
