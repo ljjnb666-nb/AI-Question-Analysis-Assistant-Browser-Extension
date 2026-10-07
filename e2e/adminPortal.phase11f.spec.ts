@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer as createPortProbe } from "node:net";
 import { tmpdir } from "node:os";
@@ -9,7 +9,7 @@ const ADMIN_TOKEN = "phase11f-admin-token-0123456789abcdef0123456789abcdef";
 const ADMIN_AUDIT_TAG_KEY =
   "phase11f-audit-tag-key-0123456789abcdef0123456789abcdef";
 
-let serverProcess: ChildProcessWithoutNullStreams | null = null;
+let serverProcess: ChildProcess | null = null;
 let dataDir = "";
 let baseUrl = "";
 let serverOutput = "";
@@ -103,7 +103,7 @@ test.describe("Phase 11F Admin real-browser final gate", () => {
     const port = await reservePort();
     baseUrl = `http://127.0.0.1:${port}`;
 
-    serverProcess = spawn(process.execPath, ["analytics-server/index.mjs"], {
+    const child = spawn(process.execPath, ["analytics-server/index.mjs"], {
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -118,10 +118,11 @@ test.describe("Phase 11F Admin real-browser final gate", () => {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    serverProcess.stdout.on("data", (chunk) => {
+    serverProcess = child;
+    child.stdout?.on("data", (chunk) => {
       serverOutput += chunk.toString();
     });
-    serverProcess.stderr.on("data", (chunk) => {
+    child.stderr?.on("data", (chunk) => {
       serverOutput += chunk.toString();
     });
 
