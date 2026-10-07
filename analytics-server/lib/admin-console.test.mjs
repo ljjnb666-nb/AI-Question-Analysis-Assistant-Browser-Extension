@@ -775,6 +775,52 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     );
   });
 
+  it("E-PORTAL-02B rejects a CSRF token issued to a different live Admin session", async () => {
+    const { portal } = createHarness();
+
+    const firstLogin = await login(portal);
+    const firstCookie = cookiePair(firstLogin.res);
+    const firstState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: firstCookie },
+    });
+    const firstCsrf = parsePayload(firstState.res).csrfToken;
+
+    const secondLogin = await login(portal);
+    const secondCookie = cookiePair(secondLogin.res);
+    const secondState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: secondCookie },
+    });
+    const secondCsrf = parsePayload(secondState.res).csrfToken;
+
+    expect(secondCsrf).not.toBe(firstCsrf);
+
+    const rejected = await invoke(portal, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: {
+        cookie: secondCookie,
+        origin: "https://analytics.example.test",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ csrfToken: firstCsrf }).toString(),
+    });
+    expect(rejected.res.statusCode).toBe(403);
+    expect(parsePayload(rejected.res).error).toBe("ADMIN_CSRF_REJECTED");
+
+    const firstStillLive = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: firstCookie },
+    });
+    const secondStillLive = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: secondCookie },
+    });
+    expect(firstStillLive.res.statusCode).toBe(200);
+    expect(secondStillLive.res.statusCode).toBe(200);
+  });
+
   it("E-PORTAL-03 audits login failure, login success, and logout without raw secrets", async () => {
     const adminAuditRecorder = vi.fn();
     const { portal } = createHarness({ adminAuditRecorder });
