@@ -61,6 +61,11 @@ async function login(page: Page): Promise<void> {
   await expect(
     page.getByRole("heading", { name: "Quiz Solver 管理后台" }),
   ).toBeVisible();
+  await expect(page.locator(".admin-login-panel")).toHaveCSS(
+    "border-radius",
+    "20px",
+  );
+  await expect(page.locator('link[href="/admin/login.css"]')).toHaveCount(1);
   await page.locator('input[name="adminToken"]').fill(ADMIN_TOKEN);
 
   const [loginResponse] = await Promise.all([
@@ -69,7 +74,7 @@ async function login(page: Page): Promise<void> {
         candidate.url() === `${baseUrl}/admin/login` &&
         candidate.request().method() === "POST",
     ),
-    page.getByRole("button", { name: "登录" }).click(),
+    page.getByRole("button", { name: "安全登录" }).click(),
   ]);
   const loginStatus = loginResponse.status();
   if (loginStatus !== 303) {
@@ -282,6 +287,13 @@ test.describe("@admin Phase 11F Admin real-browser final gate", () => {
 
     await page.goto(`${baseUrl}/admin`, { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(`${baseUrl}/admin/login`);
+    await expect(page.locator(".admin-login-panel")).toBeVisible();
+    await assertNoPageOverflow(page, "login @ 1440px");
     await capture(page, testInfo, "admin-post-logout-login.png");
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator(".admin-login-panel")).toBeVisible();
+    await assertNoPageOverflow(page, "login @ 390px");
+    await capture(page, testInfo, "admin-390-login.png");
   });
 });
