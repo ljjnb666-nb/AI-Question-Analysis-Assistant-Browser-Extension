@@ -163,7 +163,6 @@ function getDatabase() {
   maybeMigrateLegacyJson(dbInstance);
   migrateAnalyticsPrivacyEpochSqlite(dbInstance);
   pruneSqliteAnalyticsEvents(dbInstance, Date.now());
-  pruneAdminAuditSqlite(dbInstance, Date.now());
   return dbInstance;
 }
 
@@ -287,8 +286,7 @@ export function loadDbFromJsonFile() {
   };
   const epochMigrated = migrateAnalyticsPrivacyEpochJson(db);
   const analyticsPruned = pruneAnalyticsEvents(db);
-  const auditPruned = pruneAdminAuditJson(db);
-  if (epochMigrated || analyticsPruned || auditPruned) saveDbToJsonFile(db);
+  if (epochMigrated || analyticsPruned) saveDbToJsonFile(db);
   return db;
 }
 
@@ -555,13 +553,15 @@ export function readAdminAuditEventsInStorage({
   limit,
   cursorCreatedAt = null,
   cursorAuditId = null,
+  cutoffCreatedAt = 0,
 } = {}) {
   if (!SQLITE_SUPPORTED) {
     const db = loadDbFromJsonFile();
     return (Array.isArray(db.admin_audit_events) ? db.admin_audit_events : [])
       .filter((entry) => {
-        if (cursorCreatedAt == null || cursorAuditId == null) return true;
         const createdAt = Number(entry.createdAt);
+        if (!Number.isFinite(createdAt) || createdAt < cutoffCreatedAt) return false;
+        if (cursorCreatedAt == null || cursorAuditId == null) return true;
         return createdAt < cursorCreatedAt ||
           (createdAt === cursorCreatedAt && String(entry.auditId) < cursorAuditId);
       })
@@ -580,9 +580,9 @@ export function readAdminAuditEventsInStorage({
   if (cursorCreatedAt == null || cursorAuditId == null) {
     return database
       .prepare(
-        "SELECT auditId, event, outcome, createdAt, ipHash, sessionTag, metadataJson FROM admin_audit_events ORDER BY createdAt DESC, auditId DESC LIMIT ?",
+        "SELECT auditId, event, outcome, createdAt, ipHash, sessionTag, metadataJson FROM admin_audit_events WHERE createdAt >= ? ORDER BY createdAt DESC, auditId DESC LIMIT ?",
       )
-      .all(limit)
+      .all(cutoffCreatedAt, limit)
       .map((row) => ({
         ...row,
         metadata: safeParseJson(row.metadataJson, null),
@@ -590,9 +590,9 @@ export function readAdminAuditEventsInStorage({
   }
   return database
     .prepare(
-      "SELECT auditId, event, outcome, createdAt, ipHash, sessionTag, metadataJson FROM admin_audit_events WHERE createdAt < ? OR (createdAt = ? AND auditId < ?) ORDER BY createdAt DESC, auditId DESC LIMIT ?",
+      "SELECT auditId, event, outcome, createdAt, ipHash, sessionTag, metadataJson FROM admin_audit_events WHERE createdAt >= ? AND (createdAt < ? OR (createdAt = ? AND auditId < ?)) ORDER BY createdAt DESC, auditId DESC LIMIT ?",
     )
-    .all(cursorCreatedAt, cursorCreatedAt, cursorAuditId, limit)
+    .all(cutoffCreatedAt, cursorCreatedAt, cursorCreatedAt, cursorAuditId, limit)
     .map((row) => ({
       ...row,
       metadata: safeParseJson(row.metadataJson, null),
