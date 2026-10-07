@@ -20,7 +20,9 @@ The CI `rc_bundle` job is the Phase 12A authority. It runs only after both real-
 
 ### Phase 12B — Real Browser Acceptance
 
-Phase 12B consumes an accepted Phase 12A candidate and closes browser-only release boundaries that cannot be honestly inferred from unit/jsdom coverage. In particular, manual or otherwise authoritative evidence is still required for real toolbar `activeTab` grant success/lifecycle before it can be claimed as verified.
+Phase 12B consumes an accepted Phase 12A candidate and closes browser-only release boundaries that cannot be honestly inferred from unit/jsdom coverage. The dedicated `browser_acceptance` job runs against the verified extension artifact and uses OS/X11 keyboard input to invoke the production `_execute_action` command in real Chrome. This is a real user-invocation path for `activeTab`, not `chrome.action.openPopup()` called from extension JavaScript.
+
+The gate proves positive full-screen and block screenshot authority on the invoked tab, same-origin persistence, denial on a different never-invoked tab, restoration when returning to the still-authorized original tab, and revocation after cross-origin navigation. `rc_bundle` now depends on this gate. See [PHASE12B-REAL-BROWSER-ACCEPTANCE.md](./PHASE12B-REAL-BROWSER-ACCEPTANCE.md).
 
 Phase 12B must not turn known limitations into claimed support. Cross-origin iframe runtime coordination, closed shadow roots, unowned portal controls, and pointerdown partial-mutation behavior keep their existing documented status unless a separate scoped implementation changes them.
 
@@ -57,3 +59,12 @@ The generated file is CI evidence and is not source-controlled. CI always upload
 ## Non-goals of 12A
 
 12A does not publish a Chrome Web Store release, push a container to a registry, change question detection/fill behavior, expand site compatibility, or declare the remaining `activeTab` manual boundary complete. Those require later explicit gates.
+
+
+## Phase 12B invariants
+
+- **REAL_BROWSER_ACTION_INVOCATION_IS_REQUIRED_FOR_POSITIVE_ACTIVE_TAB_EVIDENCE** — only a real extension action invocation can satisfy the positive screenshot authority gate.
+- **ACTIVE_TAB_AUTHORITY_IS_TAB_SCOPED** — an uninvoked tab does not inherit another tab's screenshot authority.
+- **ACTIVE_TAB_AUTHORITY_IS_ORIGIN_LIFECYCLE_SCOPED** — same-origin navigation preserves the observed grant while cross-origin navigation revokes it.
+- **UNAUTHORIZED_SCREENSHOT_PATHS_FAIL_CLOSED** — missing authority produces an error and no fabricated image.
+- **RC_BUNDLE_REQUIRES_REAL_BROWSER_ACCEPTANCE** — release-candidate assembly waits for `browser_acceptance`.
