@@ -68,7 +68,7 @@ describe("Phase 11E Admin Audit authority", () => {
       metadata: {
         method: "POST",
         path: "/admin/login",
-        reason: "authenticated",
+        reason: "invalid_credentials",
       },
     });
     expect(response.data[0].ipHash).toMatch(/^ip_[0-9a-f]{16}$/);
