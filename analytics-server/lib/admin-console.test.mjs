@@ -80,6 +80,8 @@ function createHarness({
   ttlMs = 8 * 60 * 60 * 1000,
   rateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
   adminReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
+  adminUsersReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
+  adminSystemReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
   adminReadModels = {
     overview: vi.fn((days) => ({ generatedAt: "2026-10-07T00:00:00.000Z", analyticsScope: "opt_in_only", window: { days } })),
     timeseries: vi.fn((days) => ({ kind: "timeseries", analyticsScope: "opt_in_only", window: { days }, data: [] })),
@@ -87,6 +89,22 @@ function createHarness({
     errors: vi.fn((days) => ({ kind: "errors", analyticsScope: "opt_in_only", window: { days }, data: [] })),
     versions: vi.fn((days) => ({ kind: "versions", analyticsScope: "opt_in_only", window: { days }, data: [] })),
     latency: vi.fn((days) => ({ kind: "latency", analyticsScope: "opt_in_only", window: { days }, data: [] })),
+  },
+  adminManagementReadModels = {
+    users: vi.fn((query) => ({
+      generatedAt: "2026-10-07T00:00:00.000Z",
+      data: [],
+      page: { limit: query.limit, nextCursor: null },
+      query: { q: query.q },
+    })),
+    system: vi.fn(() => ({
+      generatedAt: "2026-10-07T00:00:00.000Z",
+      service: { status: "ok", uptimeSeconds: 10 },
+      storage: { driver: "sqlite" },
+      email: { configured: true },
+      deployment: { authority: "single_process" },
+      analytics: { retentionDays: 90, privacyEpoch: 1 },
+    })),
   },
   isProduction = () => false,
 } = {}) {
@@ -103,13 +121,22 @@ function createHarness({
     adminSessionTtlMs: ttlMs,
     adminLoginRateLimiter: rateLimiter,
     adminReadRateLimiter,
+    adminUsersReadRateLimiter,
+    adminSystemReadRateLimiter,
     adminReadModels,
+    adminManagementReadModels,
     nowImpl,
     publicBaseUrl,
     adminDistDir,
     isProduction,
   });
-  return { portal, adminSessions, adminDistDir, adminReadModels };
+  return {
+    portal,
+    adminSessions,
+    adminDistDir,
+    adminReadModels,
+    adminManagementReadModels,
+  };
 }
 
 async function invoke(portal, {
@@ -146,6 +173,204 @@ async function login(portal, token = "real-admin-secret", headers = {}) {
 function cookiePair(res) {
   return String(res.headers["Set-Cookie"] || "").split(";", 1)[0];
 }
+
+describe("Phase 11D1 Admin Users/System API authority", () => {
+  it("D1-API-01 keeps both management reads cookie-only", async () => {
+    const { portal, adminManagementReadModels } = createHarness();
+
+    for (const url of ["/admin/api/users", "/admin/api/system"]) {
+      const anonymous = await invoke(portal, { url });
+      expect(anonymous.res.statusCode, url).toBe(401);
+      expect(parsePayload(anonymous.res).error.code, url).toBe("ADMIN_SESSION_REQUIRED");
+
+      const bearer = await invoke(portal, {
+        url,
+        headers: { authorization: "Bearer real-admin-secret" },
+      });
+      expect(bearer.res.statusCode, url).toBe(401);
+      expect(parsePayload(bearer.res).error.code, url).toBe("ADMIN_SESSION_REQUIRED");
+    }
+
+    expect(adminManagementReadModels.users).not.toHaveBeenCalled();
+    expect(adminManagementReadModels.system).not.toHaveBeenCalled();
+  });
+
+  it("D1-API-02 fails closed when Admin auth is not configured even with a live session", async () => {
+    const { portal, adminSessions, adminManagementReadModels } = createHarness({
+      adminToken: "",
+    });
+    const issued = adminSessions.issue();
+
+    for (const url of ["/admin/api/users", "/admin/api/system"]) {
+      const { res } = await invoke(portal, {
+        url,
+        headers: { cookie: `analytics_admin_session=${issued.token}` },
+      });
+      expect(res.statusCode, url).toBe(503);
+      expect(parsePayload(res).error.code, url).toBe("ADMIN_AUTH_NOT_CONFIGURED");
+    }
+
+    expect(adminManagementReadModels.users).not.toHaveBeenCalled();
+    expect(adminManagementReadModels.system).not.toHaveBeenCalled();
+  });
+
+  it("D1-API-03 serves allowlisted Users/System reads from the authenticated cookie", async () => {
+    const { portal, adminManagementReadModels } = createHarness();
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+
+    const users = await invoke(portal, {
+      url: "/admin/api/users?limit=10&q=Alice%40Example.Test",
+      headers: { cookie },
+    });
+    expect(users.res.statusCode).toBe(200);
+    expect(parsePayload(users.res).ok).toBe(true);
+    expect(adminManagementReadModels.users).toHaveBeenCalledTimes(1);
+    expect(adminManagementReadModels.users.mock.calls[0][0]).toMatchObject({
+      limit: 10,
+      q: "alice@example.test",
+      cursor: null,
+    });
+
+    const system = await invoke(portal, {
+      url: "/admin/api/system",
+      headers: { cookie },
+    });
+    expect(system.res.statusCode).toBe(200);
+    expect(parsePayload(system.res)).toMatchObject({
+      ok: true,
+      service: { status: "ok" },
+      storage: { driver: "sqlite" },
+      deployment: { authority: "single_process" },
+    });
+    expect(adminManagementReadModels.system).toHaveBeenCalledTimes(1);
+  });
+
+  it("D1-API-04 rejects malformed Users queries and all System query parameters", async () => {
+    const { portal, adminManagementReadModels } = createHarness();
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+
+    for (const value of ["0", "101", "-1", "1.5", "abc", " 50 "]) {
+      const { res } = await invoke(portal, {
+        url: `/admin/api/users?limit=${encodeURIComponent(value)}`,
+        headers: { cookie },
+      });
+      expect(res.statusCode, value).toBe(400);
+      expect(parsePayload(res).error.code, value).toBe("INVALID_ADMIN_QUERY");
+    }
+
+    const badCursor = await invoke(portal, {
+      url: "/admin/api/users?cursor=%25%25%25",
+      headers: { cookie },
+    });
+    expect(badCursor.res.statusCode).toBe(400);
+    expect(parsePayload(badCursor.res).error.code).toBe("INVALID_ADMIN_QUERY");
+
+    const systemQuery = await invoke(portal, {
+      url: "/admin/api/system?verbose=1",
+      headers: { cookie },
+    });
+    expect(systemQuery.res.statusCode).toBe(400);
+    expect(parsePayload(systemQuery.res).error.code).toBe("INVALID_ADMIN_QUERY");
+
+    expect(adminManagementReadModels.system).not.toHaveBeenCalled();
+  });
+
+  it("D1-API-05 rejects management mutations with stable 405 codes", async () => {
+    const { portal, adminManagementReadModels } = createHarness();
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+
+    for (const url of ["/admin/api/users", "/admin/api/system"]) {
+      const { res } = await invoke(portal, {
+        method: "POST",
+        url,
+        headers: { cookie },
+      });
+      expect(res.statusCode, url).toBe(405);
+      expect(parsePayload(res).error.code, url).toBe("ADMIN_METHOD_NOT_ALLOWED");
+    }
+
+    expect(adminManagementReadModels.users).not.toHaveBeenCalled();
+    expect(adminManagementReadModels.system).not.toHaveBeenCalled();
+  });
+
+  it("D1-API-06 isolates Users/System read budgets from Analytics and login", async () => {
+    const adminUsersReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: false, resetAt: 6_000 })),
+    };
+    const adminSystemReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: true, resetAt: 6_000 })),
+    };
+    const adminReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: true, resetAt: 6_000 })),
+    };
+    const { portal, adminManagementReadModels, adminReadModels } = createHarness({
+      adminUsersReadRateLimiter,
+      adminSystemReadRateLimiter,
+      adminReadRateLimiter,
+      nowImpl: () => 1_000,
+    });
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+
+    const users = await invoke(portal, {
+      url: "/admin/api/users",
+      headers: { cookie },
+    });
+    expect(users.res.statusCode).toBe(429);
+    expect(users.res.headers["Retry-After"]).toBe("5");
+    expect(parsePayload(users.res).error.code).toBe("ADMIN_RATE_LIMITED");
+    expect(adminManagementReadModels.users).not.toHaveBeenCalled();
+
+    const system = await invoke(portal, {
+      url: "/admin/api/system",
+      headers: { cookie },
+    });
+    expect(system.res.statusCode).toBe(200);
+    expect(adminManagementReadModels.system).toHaveBeenCalledTimes(1);
+
+    const analytics = await invoke(portal, {
+      url: "/admin/api/overview",
+      headers: { cookie },
+    });
+    expect(analytics.res.statusCode).toBe(200);
+    expect(adminReadModels.overview).toHaveBeenCalledTimes(1);
+
+    expect(adminUsersReadRateLimiter.consume).toHaveBeenCalledTimes(1);
+    expect(adminSystemReadRateLimiter.consume).toHaveBeenCalledTimes(1);
+    expect(adminReadRateLimiter.consume).toHaveBeenCalledTimes(1);
+  });
+
+  it("D1-API-07 hides management read failures behind stable opaque errors", async () => {
+    const storageError = Object.assign(new Error("/private/data/analytics-db.sqlite"), {
+      code: "ADMIN_STORAGE_UNAVAILABLE",
+      statusCode: 503,
+    });
+    const adminManagementReadModels = {
+      users: vi.fn(() => {
+        throw storageError;
+      }),
+      system: vi.fn(() => {
+        throw storageError;
+      }),
+    };
+    const { portal } = createHarness({ adminManagementReadModels });
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+
+    for (const url of ["/admin/api/users", "/admin/api/system"]) {
+      const { res } = await invoke(portal, { url, headers: { cookie } });
+      expect(res.statusCode, url).toBe(503);
+      expect(parsePayload(res), url).toEqual({
+        ok: false,
+        error: { code: "ADMIN_STORAGE_UNAVAILABLE" },
+      });
+      expect(String(res.payload), url).not.toContain("/private/data");
+    }
+  });
+});
 
 describe("Phase 11C1 admin analytics API authority", () => {
   it("C1-API-01 rejects aggregate reads without the HttpOnly Admin session", async () => {
