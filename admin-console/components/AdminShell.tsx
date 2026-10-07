@@ -9,6 +9,8 @@ import {
 } from "./EmptyState";
 import { OverviewView } from "./analytics/OverviewView";
 import { AnalyticsView } from "./analytics/AnalyticsView";
+import { UsersView } from "./users/UsersView";
+import { SystemView } from "./system/SystemView";
 
 interface AdminShellProps {
   currentPath: string;
@@ -31,11 +33,11 @@ const PAGE_REGISTRY: Record<string, PageMeta> = {
   },
   "/admin/users": {
     title: "用户",
-    description: "查看已注册用户和账号关联设备。",
+    description: "查看已注册账号及其关联设备概况。",
   },
   "/admin/system": {
     title: "系统",
-    description: "查看后台服务和存储运行状态。",
+    description: "查看当前后台进程、存储和基础配置状态。",
   },
   "/admin/audit": {
     title: "审计",
@@ -97,61 +99,10 @@ export function AdminShell({
         return <AnalyticsView />;
 
       case "/admin/users":
-        return (
-          <>
-            <EmptyStateNotice
-              title="用户数据尚未接入"
-              description="用户管理与设备关联列表将在用户管理模块接入后展示。"
-            />
-            <section className="admin-grid-metrics" aria-label="用户指标占位">
-              <MetricPlaceholderCard label="注册用户总数" />
-              <MetricPlaceholderCard label="关联设备总数" />
-            </section>
-            <PlaceholderSection
-              title="已注册用户与设备"
-              subtitle="展示用户身份及绑定的扩展设备凭证状态"
-            >
-              <TablePlaceholder
-                headers={["用户标识", "注册时间", "关联设备数", "状态"]}
-                emptyMessage="暂无用户数据 · 等待接入"
-              />
-            </PlaceholderSection>
-          </>
-        );
+        return <UsersView />;
 
       case "/admin/system":
-        return (
-          <>
-            <EmptyStateNotice
-              title="系统状态数据尚未接入"
-              description="后台服务与存储运行健康指标将在系统监控接入后展示。"
-            />
-            <section className="admin-grid-metrics" aria-label="系统指标占位">
-              <MetricPlaceholderCard
-                label="分析服务状态"
-                statusText="等待监控接入"
-              />
-              <MetricPlaceholderCard
-                label="存储数据库"
-                statusText="等待监控接入"
-              />
-              <MetricPlaceholderCard
-                label="认证网关"
-                statusText="等待监控接入"
-              />
-            </section>
-            <div className="admin-grid-sections">
-              <PlaceholderSection
-                title="服务运行健康"
-                subtitle="展示后台服务进程与端口可用性"
-              />
-              <PlaceholderSection
-                title="存储与队列"
-                subtitle="展示持久化存储与后台任务执行状态"
-              />
-            </div>
-          </>
-        );
+        return <SystemView />;
 
       case "/admin/audit":
         return (

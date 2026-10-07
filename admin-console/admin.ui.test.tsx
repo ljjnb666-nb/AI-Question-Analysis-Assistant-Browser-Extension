@@ -14,6 +14,12 @@ import {
   getAdminErrorMessage,
   getLatestGeneratedAt,
 } from "./lib/adminAnalyticsFormat";
+import {
+  formatAdminDateTime,
+  formatUptimeDuration,
+  getUsersErrorMessage,
+  getSystemErrorMessage,
+} from "./lib/adminManagementFormat";
 import type {
   AdminOverviewResponse,
   AdminTimeseriesResponse,
@@ -22,6 +28,10 @@ import type {
   AdminVersionsResponse,
   AdminLatencyResponse,
 } from "./types/adminAnalytics";
+import type {
+  AdminUsersResponse,
+  AdminSystemResponse,
+} from "./types/adminManagement";
 
 const MOCK_OVERVIEW: AdminOverviewResponse = {
   ok: true,
@@ -198,6 +208,78 @@ const MOCK_LATENCY: AdminLatencyResponse = {
       averageMs: 360.8,
     },
   ],
+};
+
+const MOCK_USERS: AdminUsersResponse = {
+  ok: true,
+  generatedAt: "2026-10-07T10:00:00.000Z",
+  data: [
+    {
+      userId: "user_alice_123456",
+      email: "alice@example.com",
+      createdAt: "2026-09-01T08:30:00.000Z",
+      linkedDeviceCount: 2,
+      latestDeviceSeenAt: "2026-10-07T09:45:00.000Z",
+    },
+    {
+      userId: "user_bob_789012",
+      email: "bob@example.com",
+      createdAt: "2026-09-15T12:00:00.000Z",
+      linkedDeviceCount: 0,
+      latestDeviceSeenAt: null,
+    },
+  ],
+  page: {
+    limit: 50,
+    nextCursor: "opaque-next-cursor-token-123",
+  },
+  query: {
+    q: null,
+  },
+};
+
+const MOCK_SYSTEM_SQLITE: AdminSystemResponse = {
+  ok: true,
+  generatedAt: "2026-10-07T10:00:00.000Z",
+  service: {
+    status: "ok",
+    uptimeSeconds: 187400, // 2 days 4 hours
+  },
+  storage: {
+    driver: "sqlite",
+  },
+  email: {
+    configured: true,
+  },
+  deployment: {
+    authority: "single_process",
+  },
+  analytics: {
+    retentionDays: 90,
+    privacyEpoch: 1,
+  },
+};
+
+const MOCK_SYSTEM_JSON: AdminSystemResponse = {
+  ok: true,
+  generatedAt: "2026-10-07T10:00:00.000Z",
+  service: {
+    status: "ok",
+    uptimeSeconds: 45, // 45 seconds
+  },
+  storage: {
+    driver: "json",
+  },
+  email: {
+    configured: false,
+  },
+  deployment: {
+    authority: "single_process",
+  },
+  analytics: {
+    retentionDays: 90,
+    privacyEpoch: 1,
+  },
 };
 
 describe("Admin Console UI & Analytics UI Tests", () => {
@@ -816,8 +898,6 @@ describe("Admin Console UI & Analytics UI Tests", () => {
 
   describe("Preserved Navigation & Placeholder States for Other Routes", () => {
     const placeholderRoutes = [
-      { path: "/admin/users", title: "用户", notice: "用户数据尚未接入" },
-      { path: "/admin/system", title: "系统", notice: "系统状态数据尚未接入" },
       { path: "/admin/audit", title: "审计", notice: "审计记录尚未接入" },
     ];
 
@@ -1431,6 +1511,684 @@ describe("Admin Console UI & Analytics UI Tests", () => {
 
       expect(btn30.getAttribute("aria-pressed")).toBe("true");
       expect(btn14.getAttribute("aria-pressed")).toBe("false");
+    });
+  });
+
+  describe("Phase 11D2 Formatters & Helpers", () => {
+    it("formats uptime duration accurately in Chinese units", () => {
+      expect(formatUptimeDuration(45)).toBe("45 秒");
+      expect(formatUptimeDuration(120)).toBe("2 分钟");
+      expect(formatUptimeDuration(754)).toBe("12 分 34 秒");
+      expect(formatUptimeDuration(3600)).toBe("1 小时");
+      expect(formatUptimeDuration(11520)).toBe("3 小时 12 分");
+      expect(formatUptimeDuration(187200)).toBe("2 天 4 小时");
+      expect(formatUptimeDuration(86400)).toBe("1 天");
+      expect(formatUptimeDuration(0)).toBe("0 秒");
+      expect(formatUptimeDuration(-10)).toBe("0 秒");
+    });
+
+    it("maps management error codes to Chinese localized messages", () => {
+      expect(getUsersErrorMessage("ADMIN_RATE_LIMITED")).toBe("请求过于频繁，请稍后重试");
+      expect(getUsersErrorMessage("ADMIN_STORAGE_UNAVAILABLE")).toBe("用户数据暂时不可用");
+      expect(getUsersErrorMessage("ADMIN_AUTH_NOT_CONFIGURED")).toBe("管理后台认证尚未配置");
+      expect(getUsersErrorMessage("INVALID_ADMIN_QUERY")).toBe("请求参数无效");
+      expect(getUsersErrorMessage("ADMIN_INTERNAL_ERROR")).toBe("用户数据暂时不可用");
+
+      expect(getSystemErrorMessage("ADMIN_RATE_LIMITED")).toBe("请求过于频繁，请稍后重试");
+      expect(getSystemErrorMessage("ADMIN_STORAGE_UNAVAILABLE")).toBe("系统状态暂时不可用");
+      expect(getSystemErrorMessage("ADMIN_AUTH_NOT_CONFIGURED")).toBe("管理后台认证尚未配置");
+    });
+
+    it("formats datetime strings safely and returns fallback for null / invalid dates", () => {
+      const formatted = formatAdminDateTime("2026-10-07T10:00:00.000Z");
+      expect(formatted).toContain("2026/");
+      expect(formatAdminDateTime(null, "暂无观测")).toBe("暂无观测");
+      expect(formatAdminDateTime(undefined, "—")).toBe("—");
+      expect(formatAdminDateTime("invalid-date", "暂无观测")).toBe("暂无观测");
+    });
+  });
+
+  describe("Phase 11D2 Users Directory Tests", () => {
+    it("D2-USERS-01: initial loading state displays loading spinner", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      expect(screen.getByText("正在加载用户数据…")).toBeDefined();
+    });
+
+    it("D2-USERS-02: successful allowlisted rows are rendered in table", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_USERS,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText("bob@example.com").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText("user_alice_123456").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText("user_bob_789012").length).toBeGreaterThanOrEqual(1);
+      });
+
+      // Headers check
+      expect(screen.getByRole("columnheader", { name: "账号" })).toBeDefined();
+      expect(screen.getByRole("columnheader", { name: "用户 ID" })).toBeDefined();
+      expect(screen.getByRole("columnheader", { name: "注册时间" })).toBeDefined();
+      expect(screen.getByRole("columnheader", { name: "关联设备" })).toBeDefined();
+      expect(screen.getByRole("columnheader", { name: "最近设备观测" })).toBeDefined();
+    });
+
+    it("D2-USERS-03: empty users response renders empty notice", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ...MOCK_USERS,
+          data: [],
+          page: { limit: 50, nextCursor: null },
+        }),
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("暂无已注册用户")).toBeDefined();
+      });
+      expect(screen.queryByText("后台不可用")).toBeNull();
+    });
+
+    it("D2-USERS-04: search email / user ID submits query", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ...MOCK_USERS,
+          data: [MOCK_USERS.data[0]],
+          query: { q: "alice" },
+        }),
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      const input = screen.getByPlaceholderText("搜索邮箱或用户 ID");
+      fireEvent.change(input, { target: { value: "alice" } });
+
+      const searchBtn = screen.getByRole("button", { name: "搜索" });
+      act(() => {
+        fireEvent.click(searchBtn);
+      });
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledWith(
+          expect.stringContaining("q=alice"),
+          expect.anything(),
+        );
+      });
+    });
+
+    it("D2-USERS-05: clear search clears input and re-fetches first page with no query", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_USERS,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      const input = screen.getByPlaceholderText("搜索邮箱或用户 ID");
+      const searchBtn = screen.getByRole("button", { name: "搜索" });
+
+      act(() => {
+        fireEvent.change(input, { target: { value: "bob" } });
+        fireEvent.click(searchBtn);
+      });
+
+      // Click clear input icon
+      const clearBtn = screen.getByRole("button", { name: "清除搜索输入" });
+      act(() => {
+        fireEvent.click(clearBtn);
+      });
+
+      expect((input as HTMLInputElement).value).toBe("");
+      expect(fetchSpy).toHaveBeenCalled();
+    });
+
+    it("D2-USERS-06: cursor load more appends additional rows", async () => {
+      const secondPageUsers: AdminUsersResponse = {
+        ok: true,
+        generatedAt: "2026-10-07T10:05:00.000Z",
+        data: [
+          {
+            userId: "user_carol_345678",
+            email: "carol@example.com",
+            createdAt: "2026-09-20T14:00:00.000Z",
+            linkedDeviceCount: 1,
+            latestDeviceSeenAt: "2026-10-07T10:01:00.000Z",
+          },
+        ],
+        page: {
+          limit: 50,
+          nextCursor: null,
+        },
+        query: {
+          q: null,
+        },
+      };
+
+      vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+        const url = String(input);
+        if (url.includes("cursor=opaque-next-cursor-token-123")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => secondPageUsers,
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => MOCK_USERS,
+        } as Response);
+      });
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      const loadMoreBtn = screen.getByRole("button", { name: "加载更多" });
+      act(() => {
+        fireEvent.click(loadMoreBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText("carol@example.com").length).toBeGreaterThanOrEqual(1);
+        // Existing rows remain
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText("bob@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    it("D2-USERS-07: nextCursor null hides load-more button", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ...MOCK_USERS,
+          page: { limit: 50, nextCursor: null },
+        }),
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      expect(screen.queryByRole("button", { name: "加载更多" })).toBeNull();
+    });
+
+    it("D2-USERS-08: load-more failure keeps existing rows and shows inline retry", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+        const url = String(input);
+        if (url.includes("cursor=")) {
+          return Promise.resolve({
+            ok: false,
+            status: 503,
+            json: async () => ({ ok: false, error: { code: "ADMIN_STORAGE_UNAVAILABLE" } }),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => MOCK_USERS,
+        } as Response);
+      });
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      const loadMoreBtn = screen.getByRole("button", { name: "加载更多" });
+      act(() => {
+        fireEvent.click(loadMoreBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("用户数据暂时不可用")).toBeDefined();
+        // Existing users stay visible
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText("bob@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    it("D2-USERS-09: refresh resets to first page", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_USERS,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      const refreshBtn = screen.getByRole("button", { name: "刷新用户数据" });
+      act(() => {
+        fireEvent.click(refreshBtn);
+      });
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    it("D2-USERS-10: 401 redirects to /admin/login", async () => {
+      const replaceSpy = vi.fn();
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { replace: replaceSpy },
+      });
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 401,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(replaceSpy).toHaveBeenCalledWith("/admin/login");
+      });
+    });
+
+    it("D2-USERS-11: 429 displays Chinese localized message", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({ ok: false, error: { code: "ADMIN_RATE_LIMITED" } }),
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("请求过于频繁，请稍后重试")).toBeDefined();
+      });
+    });
+
+    it("D2-USERS-12: latestDeviceSeenAt null renders 暂无观测 and never falls back to fake date", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_USERS,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("暂无观测").length).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    it("D2-USERS-13: stale search response cannot overwrite new query", async () => {
+      const slowQueryState = {
+        resolve: null as ((res: Response) => void) | null,
+      };
+
+      vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+        const url = String(input);
+        const signal = (init as RequestInit)?.signal;
+
+        if (url.includes("q=alice")) {
+          return new Promise<Response>((resolve, reject) => {
+            slowQueryState.resolve = resolve;
+            signal?.addEventListener("abort", () => {
+              const abortErr = new Error("Aborted");
+              abortErr.name = "AbortError";
+              reject(abortErr);
+            });
+          });
+        }
+
+        if (url.includes("q=bob")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ...MOCK_USERS,
+              data: [MOCK_USERS.data[1]],
+              query: { q: "bob" },
+            }),
+          } as Response);
+        }
+
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => MOCK_USERS,
+        } as Response);
+      });
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      const form = screen.getByRole("search");
+      const input = screen.getByPlaceholderText("搜索邮箱或用户 ID");
+
+      // Search alice (slow)
+      fireEvent.change(input, { target: { value: "alice" } });
+      act(() => {
+        fireEvent.submit(form);
+      });
+
+      // Wait for alice request to be in flight
+      await waitFor(() => {
+        expect(slowQueryState.resolve).not.toBeNull();
+      });
+
+      // Search bob (fast) while alice is still pending
+      fireEvent.change(input, { target: { value: "bob" } });
+      act(() => {
+        fireEvent.submit(form);
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText("bob@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      // Now resolve slow alice response if possible
+      if (slowQueryState.resolve) {
+        slowQueryState.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ...MOCK_USERS,
+            data: [MOCK_USERS.data[0]],
+            query: { q: "alice" },
+          }),
+        } as Response);
+      }
+
+      // bob must remain visible, and alice must not appear
+      expect(screen.getAllByText("bob@example.com").length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryAllByText("alice@example.com").length).toBe(0);
+    });
+
+    it("D2-USERS-14: load-more is single-flight and disables button while loading", async () => {
+      let loadMoreFetchCount = 0;
+
+      vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+        const url = String(input);
+        if (url.includes("cursor=")) {
+          loadMoreFetchCount++;
+          return new Promise<Response>(() => {});
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => MOCK_USERS,
+        } as Response);
+      });
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      const loadMoreBtn = screen.getByRole("button", { name: "加载更多" });
+      act(() => {
+        fireEvent.click(loadMoreBtn);
+        fireEvent.click(loadMoreBtn); // Double click
+      });
+
+      expect(loadMoreFetchCount).toBe(1);
+    });
+
+    it("D2-USERS-TRUTH: locks truth copy and rejects ungrounded metric claims", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_USERS,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      const bodyText = document.body.textContent ?? "";
+      expect(bodyText).toContain("关联设备");
+      expect(bodyText).toContain("最近设备观测");
+      expect(bodyText).not.toContain("最后登录");
+      expect(bodyText).not.toContain("在线状态");
+      expect(bodyText).not.toContain("角色");
+      expect(bodyText).not.toContain("套餐");
+      expect(bodyText).not.toContain("总用户数");
+    });
+  });
+
+  describe("Phase 11D2 System Status Tests", () => {
+    it("D2-SYSTEM-01: initial loading state displays loading spinner", () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      expect(screen.getByText("正在加载系统状态…")).toBeDefined();
+    });
+
+    it("D2-SYSTEM-02: successful snapshot renders service, storage, email, deployment, analytics", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_SYSTEM_SQLITE,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("当前服务")).toBeDefined();
+        expect(screen.getByText("正常")).toBeDefined();
+        expect(screen.getByText("当前进程运行时长")).toBeDefined();
+        expect(screen.getByText("2 天 4 小时")).toBeDefined();
+        expect(screen.getByText("存储驱动")).toBeDefined();
+        expect(screen.getByText("SQLite")).toBeDefined();
+        expect(screen.getByText("邮件配置")).toBeDefined();
+        expect(screen.getByText("已配置")).toBeDefined();
+        expect(screen.getByText("运行权威")).toBeDefined();
+        expect(screen.getByText("单进程")).toBeDefined();
+        expect(screen.getByText("分析数据保留期")).toBeDefined();
+        expect(screen.getByText("90 天")).toBeDefined();
+        expect(screen.getByText("隐私纪元")).toBeDefined();
+        expect(screen.getByText("1")).toBeDefined();
+      });
+    });
+
+    it("D2-SYSTEM-03: SQLite storage driver description is displayed accurately", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_SYSTEM_SQLITE,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("当前后台使用 SQLite 作为数据存储。")).toBeDefined();
+      });
+    });
+
+    it("D2-SYSTEM-04: JSON compatibility storage driver description is displayed accurately", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_SYSTEM_JSON,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("JSON 兼容存储")).toBeDefined();
+        expect(screen.getByText("当前运行在 JSON 兼容存储模式。")).toBeDefined();
+      });
+    });
+
+    it("D2-SYSTEM-05: email configured true renders 已配置 with bounded disclosure", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_SYSTEM_SQLITE,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("已配置")).toBeDefined();
+        expect(screen.getByText("仅表示邮件发送配置已提供，不代表投递链路已验证。")).toBeDefined();
+      });
+    });
+
+    it("D2-SYSTEM-06: email configured false renders 未配置", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_SYSTEM_JSON,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("未配置")).toBeDefined();
+      });
+    });
+
+    it("D2-SYSTEM-08: refresh button refetches GET /admin/api/system", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_SYSTEM_SQLITE,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("当前服务")).toBeDefined();
+      });
+
+      const refreshBtn = screen.getByRole("button", { name: "刷新系统状态" });
+      act(() => {
+        fireEvent.click(refreshBtn);
+      });
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    it("D2-SYSTEM-09: 401 redirects to /admin/login", async () => {
+      const replaceSpy = vi.fn();
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { replace: replaceSpy },
+      });
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 401,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(replaceSpy).toHaveBeenCalledWith("/admin/login");
+      });
+    });
+
+    it("D2-SYSTEM-10: 429 displays Chinese localized error message", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({ ok: false, error: { code: "ADMIN_RATE_LIMITED" } }),
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("请求过于频繁，请稍后重试")).toBeDefined();
+      });
+    });
+
+    it("D2-SYSTEM-11: no fake infra metrics are displayed", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_SYSTEM_SQLITE,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("当前服务")).toBeDefined();
+      });
+
+      const bodyText = document.body.textContent ?? "";
+      expect(bodyText).not.toContain("CPU");
+      expect(bodyText).not.toContain("RAM");
+      expect(bodyText).not.toContain("QPS");
+      expect(bodyText).not.toContain("API 请求数");
+      expect(bodyText).not.toContain("P95");
+      expect(bodyText).not.toContain("P99");
+      expect(bodyText).not.toContain("数据库大小");
+      expect(bodyText).not.toContain("在线用户");
+      expect(bodyText).not.toContain("99.9%");
+    });
+
+    it("D2-SYSTEM-TRUTH: locks truth copy and rejects ungrounded operational claims", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => MOCK_SYSTEM_SQLITE,
+      } as Response);
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("当前服务")).toBeDefined();
+      });
+
+      const bodyText = document.body.textContent ?? "";
+      expect(bodyText).toContain("表示当前后台进程能够成功处理此状态请求。");
+      expect(bodyText).toContain("当前后台 Node 进程的持续运行时间。");
+      expect(bodyText).toContain("仅表示邮件发送配置已提供，不代表投递链路已验证。");
+      expect(bodyText).toContain("当前 Admin 会话与限流状态由单个服务进程维护。");
+      expect(bodyText).toContain("匿名统计分析事件的最长数据保留天数。");
+
+      expect(bodyText).not.toContain("所有服务健康");
+      expect(bodyText).not.toContain("系统一切正常");
+      expect(bodyText).not.toContain("邮件服务正常");
+      expect(bodyText).not.toContain("邮件发送成功");
+      expect(bodyText).not.toContain("分布式");
+      expect(bodyText).not.toContain("集群");
     });
   });
 });
