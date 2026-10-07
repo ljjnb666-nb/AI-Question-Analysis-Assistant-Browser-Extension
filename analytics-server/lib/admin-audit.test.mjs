@@ -131,6 +131,23 @@ describe("Phase 11E Admin Audit authority", () => {
     expect(() =>
       record({ event: ADMIN_AUDIT_EVENTS.LOGIN, outcome: "maybe" }),
     ).toThrow(AdminAuditError);
+
+    record({
+      event: ADMIN_AUDIT_EVENTS.MUTATION_REJECTED,
+      outcome: "rejected",
+      metadata: {
+        path: "/admin/api/attackerSecret123",
+        reason: "unsupported_mutation",
+      },
+    });
+    const sanitized = createAdminAuditReadModel({
+      now: () => Date.parse("2026-10-07T12:00:00.000Z"),
+    }).list();
+    const mutation = sanitized.data.find(
+      (item) => item.event === ADMIN_AUDIT_EVENTS.MUTATION_REJECTED,
+    );
+    expect(mutation?.metadata).toEqual({ reason: "unsupported_mutation" });
+    expect(JSON.stringify(sanitized)).not.toContain("attackerSecret123");
   });
 
   it("E-AUDIT-04 prunes records outside the security retention window", () => {
