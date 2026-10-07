@@ -20,6 +20,7 @@ const ALLOWED_REASONS = new Set([
   "admin_csrf_rejected",
   "admin_csrf_required",
   "unsupported_mutation",
+  "rate_limited",
 ]);
 
 export const ADMIN_AUDIT_EVENTS = Object.freeze({
