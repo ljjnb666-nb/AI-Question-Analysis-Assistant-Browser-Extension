@@ -38,11 +38,19 @@ function normalizeLimit(value) {
   return limit;
 }
 
+function hasAsciiControlCharacters(value) {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint <= 0x1f || codePoint === 0x7f) return true;
+  }
+  return false;
+}
+
 function normalizeQuery(value) {
   if (value == null) return null;
   const normalized = String(value).trim().toLowerCase();
   if (!normalized) return null;
-  if (normalized.length > MAX_QUERY_LENGTH || /[\u0000-\u001f\u007f]/.test(normalized)) invalidQuery();
+  if (normalized.length > MAX_QUERY_LENGTH || hasAsciiControlCharacters(normalized)) invalidQuery();
   return normalized;
 }
 
@@ -103,7 +111,7 @@ function decodeCursor(value, expectedQuery) {
         typeof parsed.q === "string" &&
         parsed.q.length > 0 &&
         parsed.q.length <= MAX_QUERY_LENGTH &&
-        !/[\u0000-\u001f\u007f]/.test(parsed.q)
+        !hasAsciiControlCharacters(parsed.q)
       )
     ) ||
     parsed.q !== expectedQuery
