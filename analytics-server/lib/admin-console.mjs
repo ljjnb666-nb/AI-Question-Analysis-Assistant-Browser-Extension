@@ -58,7 +58,7 @@ function adminSecurityHeaders() {
   return {
     "Content-Security-Policy": ADMIN_CSP,
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    // Native Admin login/logout use same-origin form POSTs and enforce the\n    // browser Origin header. `no-referrer` makes Chromium serialize Origin as\n    // `null` for such form submissions, so use the strictest origin-only policy\n    // that preserves a verifiable Origin on same-security-level requests.\n    "Referrer-Policy": "strict-origin",
     "X-Frame-Options": "DENY",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
@@ -166,7 +166,7 @@ function renderAdminLoginHtml() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="referrer" content="no-referrer">
+  <meta name="referrer" content="strict-origin">
   <meta name="robots" content="noindex, nofollow">
   <title>Quiz Solver Admin Login</title>
 </head>
