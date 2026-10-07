@@ -1,3 +1,4 @@
+/// <reference types="chrome" />
 import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import http from "node:http";
