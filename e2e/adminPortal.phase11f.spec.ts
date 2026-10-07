@@ -254,9 +254,11 @@ test.describe("Phase 11F Admin real-browser final gate", () => {
     }
 
     await page.setViewportSize({ width: 390, height: 844 });
-    const menuButton = page.getByRole("button", { name: "打开导航菜单" });
+    const menuButton = page.getByRole("button", { name: /导航菜单/ });
     await expect(menuButton).toBeVisible();
+    await expect(menuButton).toHaveAccessibleName("打开导航菜单");
     await menuButton.click();
+    await expect(menuButton).toHaveAccessibleName("关闭导航菜单");
     await expect(menuButton).toHaveAttribute("aria-expanded", "true");
     await expect(
       page.locator("#admin-navigation-drawer"),
