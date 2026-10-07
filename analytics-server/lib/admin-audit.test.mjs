@@ -190,6 +190,51 @@ describe("Phase 11E Admin Audit authority", () => {
     expect(loadDb().admin_audit_events).toEqual([]);
   });
 
+  it("E-AUDIT-07 rejects weak configured tag keys and keeps pseudonyms key-scoped", () => {
+    expect(() =>
+      createAdminAuditRecorder({ tagKey: "too-short" }),
+    ).toThrow(TypeError);
+
+    const entriesA = [];
+    const entriesB = [];
+    const common = {
+      now: () => Date.parse("2026-10-07T12:00:00.000Z"),
+      generateIdImpl: () => "adm_fixed",
+    };
+    const recordA = createAdminAuditRecorder({
+      ...common,
+      tagKey: "independent-audit-tag-key-A-32bytes",
+      recordImpl: (entry) => {
+        entriesA.push(entry);
+        return entry;
+      },
+    });
+    const recordB = createAdminAuditRecorder({
+      ...common,
+      tagKey: "independent-audit-tag-key-B-32bytes",
+      recordImpl: (entry) => {
+        entriesB.push(entry);
+        return entry;
+      },
+    });
+
+    recordA({
+      event: ADMIN_AUDIT_EVENTS.LOGIN,
+      outcome: "success",
+      ip: "203.0.113.10",
+      sessionToken: "same-session-secret",
+    });
+    recordB({
+      event: ADMIN_AUDIT_EVENTS.LOGIN,
+      outcome: "success",
+      ip: "203.0.113.10",
+      sessionToken: "same-session-secret",
+    });
+
+    expect(entriesA[0].ipHash).not.toBe(entriesB[0].ipHash);
+    expect(entriesA[0].sessionTag).not.toBe(entriesB[0].sessionTag);
+  });
+
   it("E-AUDIT-05 never leaks raw storage failures", () => {
     const read = createAdminAuditReadModel({
       now: () => Date.parse("2026-10-07T12:00:00.000Z"),
