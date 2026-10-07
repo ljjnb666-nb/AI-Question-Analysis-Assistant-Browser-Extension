@@ -60,7 +60,7 @@ The Admin Users/System read APIs are also browser-session-cookie only and do not
 
 ### Admin Audit and CSRF closure
 
-The Admin security audit is a separate authority from anonymous product analytics. SQLite stores it in `admin_audit_events`; JSON remains compatibility/development behavior. Audit entries are retained for at most 180 days and the write path additionally caps retained entries at 10,000. Audit list reads are bounded, cursor-paginated, and do not perform retention deletes as a side effect.
+The Admin security audit is a separate authority from anonymous product analytics. SQLite stores it in `admin_audit_events`; JSON remains compatibility/development behavior. The Audit policy window is 180 days and retained storage is capped at 10,000 rows. Physical housekeeping runs at service startup, every 24 hours while the service remains up, and on every Audit write; therefore storage cleanup may lag the 180-day boundary by at most one housekeeping interval on an otherwise idle long-running process. Audit list reads are bounded, cursor-paginated, and do not perform retention deletes as a side effect.
 
 The event vocabulary is intentionally small: Admin login, Admin logout, CSRF rejection, Origin rejection, and unsupported Admin mutation rejection. Outcomes are limited to `success`, `failure`, and `rejected`. Metadata is allowlisted to a bounded HTTP method, a fixed non-user-controlled Admin path vocabulary (unknown mutation paths collapse to `/admin/api/unknown`), and a fixed reason vocabulary. The audit contract never stores or returns the long-lived Admin token, browser session cookie/token, CSRF token, email address, account user id, raw device id, request body, raw URL query, or raw IP address.
 
