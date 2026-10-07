@@ -11,7 +11,7 @@ import { AuditView } from "./audit/AuditView";
 interface AdminShellProps {
   currentPath: string;
   expiresAt: string | null;
-  csrfToken: string;
+  csrfToken?: string;
 }
 
 interface PageMeta {
@@ -45,7 +45,7 @@ const PAGE_REGISTRY: Record<string, PageMeta> = {
 export function AdminShell({
   currentPath,
   expiresAt,
-  csrfToken,
+  csrfToken = "",
 }: AdminShellProps): React.JSX.Element {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
