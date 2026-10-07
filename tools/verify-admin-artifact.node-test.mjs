@@ -52,7 +52,7 @@ test("ADMIN11B1-R1-ART-03 requires at least one Admin JavaScript entry", () => {
   try {
     writeFileSync(
       path.join(fixture.distAdminDir, "index.html"),
-      '<link rel="stylesheet" href="/admin/assets/admin.css">',
+      '<meta name="referrer" content="strict-origin"><link rel="stylesheet" href="/admin/assets/admin.css">',
       "utf8",
     );
     assert.throws(
