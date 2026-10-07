@@ -7,6 +7,8 @@ import {
   PlaceholderSection,
   TablePlaceholder,
 } from "./EmptyState";
+import { OverviewView } from "./analytics/OverviewView";
+import { AnalyticsView } from "./analytics/AnalyticsView";
 
 interface AdminShellProps {
   currentPath: string;
@@ -89,56 +91,10 @@ export function AdminShell({
   const renderContent = () => {
     switch (currentPath) {
       case "/admin":
-        return (
-          <>
-            <EmptyStateNotice
-              title="概览数据尚未接入"
-              description="管理后台基础设施已经就绪。核心指标将在数据模型接入后展示。"
-            />
-            <section className="admin-grid-metrics" aria-label="核心指标占位">
-              <MetricPlaceholderCard label="已授权活跃设备" />
-              <MetricPlaceholderCard label="解析结果数" />
-              <MetricPlaceholderCard label="观测解析结果成功率" />
-              <MetricPlaceholderCard label="观测解析耗时" />
-            </section>
-            <div className="admin-grid-sections">
-              <PlaceholderSection
-                title="使用情况概览"
-                subtitle="展示已授权设备活跃度与解析结果统计"
-              />
-              <PlaceholderSection
-                title="版本分布"
-                subtitle="展示已授权设备的最新观测扩展版本分布"
-              />
-            </div>
-          </>
-        );
+        return <OverviewView />;
 
       case "/admin/analytics":
-        return (
-          <>
-            <EmptyStateNotice
-              title="分析数据尚未接入"
-              description="趋势、解析结果、提供商分布、错误分类及版本分布指标将在分析模型接入后展示。"
-            />
-            <section className="admin-grid-metrics" aria-label="分析指标占位">
-              <MetricPlaceholderCard label="解析结果数" />
-              <MetricPlaceholderCard label="解析结果提供商分布" />
-              <MetricPlaceholderCard label="解析错误分类" />
-              <MetricPlaceholderCard label="观测版本分布" />
-            </section>
-            <div className="admin-grid-sections">
-              <PlaceholderSection
-                title="解析结果趋势"
-                subtitle="展示匿名、已授权的时间序列统计"
-              />
-              <PlaceholderSection
-                title="解析结果提供商分布"
-                subtitle="展示各提供商观测到的解析结果分布"
-              />
-            </div>
-          </>
-        );
+        return <AnalyticsView />;
 
       case "/admin/users":
         return (
