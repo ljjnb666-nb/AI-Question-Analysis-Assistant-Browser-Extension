@@ -898,40 +898,57 @@ describe("Admin Console UI & Analytics UI Tests", () => {
     });
   });
 
-  describe("Preserved Navigation & Placeholder States for Other Routes", () => {
-    const placeholderRoutes = [
-      { path: "/admin/audit", title: "审计", notice: "审计记录尚未接入" },
-    ];
+  describe("Audit navigation and logout security contract", () => {
+    it("renders the live Audit route and preserves active navigation", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          generatedAt: "2026-10-07T12:00:00.000Z",
+          data: [],
+          page: { limit: 50, nextCursor: null },
+        }),
+      } as Response);
 
-    placeholderRoutes.forEach(({ path, title, notice }) => {
-      it(`preserves placeholder state for route ${path}`, () => {
-        render(
-          <AdminShell
-            currentPath={path}
-            expiresAt="2026-10-07T12:00:00.000Z"
-          />,
-        );
+      render(
+        <AdminShell
+          currentPath="/admin/audit"
+          expiresAt="2026-10-07T12:00:00.000Z"
+          csrfToken="csrf-visible-only-in-memory"
+        />,
+      );
 
-        expect(
-          screen.getByRole("heading", { level: 1, name: title }),
-        ).toBeDefined();
-
-        expect(screen.getByText(notice)).toBeDefined();
-
-        const activeLink = screen.getByRole("link", {
-          name: new RegExp(title),
-        });
-        expect(activeLink.getAttribute("aria-current")).toBe("page");
-        expect(activeLink.getAttribute("href")).toBe(path);
+      expect(screen.getByRole("heading", { level: 1, name: "审计" })).toBeDefined();
+      await waitFor(() => {
+        expect(screen.getByText("暂无审计记录")).toBeDefined();
       });
+      expect(screen.queryByText("审计记录尚未接入")).toBeNull();
+
+      const activeLink = screen.getByRole("link", { name: /审计/ });
+      expect(activeLink.getAttribute("aria-current")).toBe("page");
+      expect(activeLink.getAttribute("href")).toBe("/admin/audit");
     });
 
-    it("preserves authoritative logout contract form POST /admin/logout", () => {
-      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+    it("preserves POST logout and carries only the per-session CSRF field", () => {
+      render(
+        <AdminShell
+          currentPath="/admin/users"
+          expiresAt={null}
+          csrfToken="csrf-session-value"
+        />,
+      );
 
       const logoutForm = document.querySelector('form[action="/admin/logout"]');
       expect(logoutForm).not.toBeNull();
       expect(logoutForm?.getAttribute("method")).toBe("POST");
+
+      const csrfInput = logoutForm?.querySelector<HTMLInputElement>(
+        'input[name="csrfToken"]',
+      );
+      expect(csrfInput?.type).toBe("hidden");
+      expect(csrfInput?.value).toBe("csrf-session-value");
+      expect(logoutForm?.querySelector('input[name="adminToken"]')).toBeNull();
 
       const submitBtn = logoutForm?.querySelector('button[type="submit"]');
       expect(submitBtn?.textContent).toContain("退出登录");

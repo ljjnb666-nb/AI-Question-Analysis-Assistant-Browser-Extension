@@ -82,6 +82,8 @@ function createHarness({
   adminReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
   adminUsersReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
   adminSystemReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
+  adminAuditReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
+  adminSecurityAuditRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
   adminReadModels = {
     overview: vi.fn((days) => ({ generatedAt: "2026-10-07T00:00:00.000Z", analyticsScope: "opt_in_only", window: { days } })),
     timeseries: vi.fn((days) => ({ kind: "timeseries", analyticsScope: "opt_in_only", window: { days }, data: [] })),
@@ -106,11 +108,20 @@ function createHarness({
       analytics: { retentionDays: 90, privacyEpoch: 1 },
     })),
   },
+  adminAuditReadModel = {
+    list: vi.fn((query) => ({
+      generatedAt: "2026-10-07T00:00:00.000Z",
+      data: [],
+      page: { limit: query.limit, nextCursor: null },
+    })),
+  },
+  adminAuditRecorder = vi.fn(),
   isProduction = () => false,
 } = {}) {
   let sequence = 0;
   const adminSessions = createAdminSessionStore({
     createToken: () => `session-${++sequence}`,
+    createCsrfToken: () => `csrf-${sequence}`,
     maxSessions: 64,
     now: nowImpl,
     ttlMs,
@@ -123,8 +134,12 @@ function createHarness({
     adminReadRateLimiter,
     adminUsersReadRateLimiter,
     adminSystemReadRateLimiter,
+    adminAuditReadRateLimiter,
+    adminSecurityAuditRateLimiter,
     adminReadModels,
     adminManagementReadModels,
+    adminAuditReadModel,
+    adminAuditRecorder,
     nowImpl,
     publicBaseUrl,
     adminDistDir,
@@ -136,6 +151,8 @@ function createHarness({
     adminDistDir,
     adminReadModels,
     adminManagementReadModels,
+    adminAuditReadModel,
+    adminAuditRecorder,
   };
 }
 
@@ -669,10 +686,21 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     const signedIn = await login(portal);
     const cookie = cookiePair(signedIn.res);
 
+    const sessionState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    const csrfToken = parsePayload(sessionState.res).csrfToken;
+
     const logout = await invoke(portal, {
       method: "POST",
       url: "/admin/logout",
-      headers: { cookie, origin: "https://analytics.example.test" },
+      headers: {
+        cookie,
+        origin: "https://analytics.example.test",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ csrfToken }).toString(),
     });
     expect(logout.res.statusCode).toBe(303);
     expect(logout.res.headers.Location).toBe("/admin/login");
@@ -696,4 +724,430 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     expect(parsePayload(res).error).toBe("rate limit exceeded; retry after 5s");
     expect(res.headers["Set-Cookie"]).toBeUndefined();
   });
+
+  it("E-PORTAL-01 returns per-session CSRF without exposing the session cookie value", async () => {
+    const { portal } = createHarness();
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    const { res } = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const payload = parsePayload(res);
+    expect(payload.csrfToken).toBe("csrf-1");
+    expect(String(res.payload)).not.toContain("session-1");
+    expect(res.headers["Cache-Control"]).toBe("no-store");
+  });
+
+  it("E-PORTAL-02 rejects missing/wrong logout CSRF and preserves the live session", async () => {
+    const { portal, adminAuditRecorder } = createHarness();
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+
+    for (const csrfToken of ["", "wrong-csrf"]) {
+      const rejected = await invoke(portal, {
+        method: "POST",
+        url: "/admin/logout",
+        headers: {
+          cookie,
+          origin: "https://analytics.example.test",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ csrfToken }).toString(),
+      });
+      expect(rejected.res.statusCode, csrfToken).toBe(403);
+      expect(parsePayload(rejected.res).error, csrfToken).toBe("ADMIN_CSRF_REJECTED");
+
+      const stillLive = await invoke(portal, {
+        url: "/admin/api/session",
+        headers: { cookie },
+      });
+      expect(stillLive.res.statusCode, csrfToken).toBe(200);
+    }
+
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "admin_csrf_rejected",
+        outcome: "rejected",
+        metadata: expect.objectContaining({ path: "/admin/logout" }),
+      }),
+    );
+  });
+
+  it("E-PORTAL-02B rejects a CSRF token issued to a different live Admin session", async () => {
+    const { portal } = createHarness();
+
+    const firstLogin = await login(portal);
+    const firstCookie = cookiePair(firstLogin.res);
+    const firstState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: firstCookie },
+    });
+    const firstCsrf = parsePayload(firstState.res).csrfToken;
+
+    const secondLogin = await login(portal);
+    const secondCookie = cookiePair(secondLogin.res);
+    const secondState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: secondCookie },
+    });
+    const secondCsrf = parsePayload(secondState.res).csrfToken;
+
+    expect(secondCsrf).not.toBe(firstCsrf);
+
+    const rejected = await invoke(portal, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: {
+        cookie: secondCookie,
+        origin: "https://analytics.example.test",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ csrfToken: firstCsrf }).toString(),
+    });
+    expect(rejected.res.statusCode).toBe(403);
+    expect(parsePayload(rejected.res).error).toBe("ADMIN_CSRF_REJECTED");
+
+    const firstStillLive = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: firstCookie },
+    });
+    const secondStillLive = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: secondCookie },
+    });
+    expect(firstStillLive.res.statusCode).toBe(200);
+    expect(secondStillLive.res.statusCode).toBe(200);
+  });
+
+  it("E-PORTAL-03 audits login failure, login success, and logout without raw secrets", async () => {
+    const adminAuditRecorder = vi.fn();
+    const { portal } = createHarness({ adminAuditRecorder });
+
+    const failed = await login(portal, "wrong-secret");
+    expect(failed.res.statusCode).toBe(401);
+
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    const sessionState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    const csrfToken = parsePayload(sessionState.res).csrfToken;
+
+    const logout = await invoke(portal, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: {
+        cookie,
+        origin: "https://analytics.example.test",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ csrfToken }).toString(),
+    });
+    expect(logout.res.statusCode).toBe(303);
+
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "admin_login", outcome: "failure" }),
+    );
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "admin_login", outcome: "success" }),
+    );
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "admin_logout", outcome: "success" }),
+    );
+
+    const serializedCalls = JSON.stringify(adminAuditRecorder.mock.calls);
+    expect(serializedCalls).not.toContain("real-admin-secret");
+    expect(serializedCalls).not.toContain("wrong-secret");
+    expect(serializedCalls).not.toContain(csrfToken);
+  });
+
+  it("E-PORTAL-04 keeps the Audit read API cookie-only and bounded", async () => {
+    const adminAuditReadModel = {
+      list: vi.fn((query) => ({
+        generatedAt: "2026-10-07T12:00:00.000Z",
+        data: [],
+        page: { limit: query.limit, nextCursor: null },
+      })),
+    };
+    const { portal } = createHarness({ adminAuditReadModel });
+
+    const anonymous = await invoke(portal, { url: "/admin/api/audit" });
+    expect(anonymous.res.statusCode).toBe(401);
+
+    const bearer = await invoke(portal, {
+      url: "/admin/api/audit",
+      headers: { authorization: "Bearer real-admin-secret" },
+    });
+    expect(bearer.res.statusCode).toBe(401);
+
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    const ok = await invoke(portal, {
+      url: "/admin/api/audit?limit=25",
+      headers: { cookie },
+    });
+    expect(ok.res.statusCode).toBe(200);
+    expect(adminAuditReadModel.list).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 25, cursor: null }),
+    );
+
+    const unknown = await invoke(portal, {
+      url: "/admin/api/audit?q=secret",
+      headers: { cookie },
+    });
+    expect(unknown.res.statusCode).toBe(400);
+    expect(parsePayload(unknown.res).error.code).toBe("INVALID_ADMIN_QUERY");
+  });
+
+  it("E-PORTAL-05 applies hardened security headers to redirects and errors", async () => {
+    const { portal } = createHarness();
+
+    const root = await invoke(portal, { url: "/" });
+    expect(root.res.statusCode).toBe(303);
+    expect(root.res.headers["Content-Security-Policy"]).toBe(ADMIN_CSP);
+    expect(root.res.headers["X-Frame-Options"]).toBe("DENY");
+    expect(root.res.headers["Cross-Origin-Opener-Policy"]).toBe("same-origin");
+    expect(root.res.headers["Cross-Origin-Resource-Policy"]).toBe("same-origin");
+    expect(root.res.headers["Permissions-Policy"]).toContain("camera=()");
+
+    const unknown = await invoke(portal, { url: "/admin/api/not-real" });
+    expect(unknown.res.statusCode).toBe(404);
+    expect(unknown.res.headers["Content-Security-Policy"]).toBe(ADMIN_CSP);
+    expect(unknown.res.headers["X-Frame-Options"]).toBe("DENY");
+  });
+
+  it("E-PORTAL-07 isolates Audit read rate limits from other Admin reads", async () => {
+    const adminAuditReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: false, resetAt: 6_000 })),
+    };
+    const adminReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: true, resetAt: 6_000 })),
+    };
+    const adminUsersReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: true, resetAt: 6_000 })),
+    };
+    const adminSystemReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: true, resetAt: 6_000 })),
+    };
+    const {
+      portal,
+      adminReadModels,
+      adminManagementReadModels,
+      adminAuditReadModel,
+    } = createHarness({
+      adminAuditReadRateLimiter,
+      adminReadRateLimiter,
+      adminUsersReadRateLimiter,
+      adminSystemReadRateLimiter,
+      nowImpl: () => 1_000,
+    });
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+
+    const audit = await invoke(portal, {
+      url: "/admin/api/audit",
+      headers: { cookie },
+    });
+    expect(audit.res.statusCode).toBe(429);
+    expect(parsePayload(audit.res).error.code).toBe("ADMIN_RATE_LIMITED");
+    expect(adminAuditReadModel.list).not.toHaveBeenCalled();
+
+    const overview = await invoke(portal, {
+      url: "/admin/api/overview",
+      headers: { cookie },
+    });
+    expect(overview.res.statusCode).toBe(200);
+    expect(adminReadModels.overview).toHaveBeenCalledTimes(1);
+
+    const users = await invoke(portal, {
+      url: "/admin/api/users",
+      headers: { cookie },
+    });
+    expect(users.res.statusCode).toBe(200);
+    expect(adminManagementReadModels.users).toHaveBeenCalledTimes(1);
+
+    const system = await invoke(portal, {
+      url: "/admin/api/system",
+      headers: { cookie },
+    });
+    expect(system.res.statusCode).toBe(200);
+    expect(adminManagementReadModels.system).toHaveBeenCalledTimes(1);
+  });
+
+  it("E-PORTAL-10 bounds rejection-audit writes and ignores anonymous mutation spam", async () => {
+    const adminAuditRecorder = vi.fn();
+    const adminSecurityAuditRateLimiter = {
+      consume: vi.fn(() => ({ allowed: false, resetAt: 6_000 })),
+    };
+    const { portal } = createHarness({
+      adminAuditRecorder,
+      adminSecurityAuditRateLimiter,
+      nowImpl: () => 1_000,
+    });
+
+    const anonymousMutation = await invoke(portal, {
+      method: "POST",
+      url: "/admin/api/unknown-secret-looking-path",
+    });
+    expect(anonymousMutation.res.statusCode).toBe(404);
+    expect(adminAuditRecorder).not.toHaveBeenCalled();
+
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    adminAuditRecorder.mockClear();
+
+    const authenticatedMutation = await invoke(portal, {
+      method: "POST",
+      url: "/admin/api/users",
+      headers: { cookie },
+    });
+    expect(authenticatedMutation.res.statusCode).toBe(405);
+    expect(adminSecurityAuditRateLimiter.consume).toHaveBeenCalled();
+    expect(adminAuditRecorder).not.toHaveBeenCalled();
+
+    const crossOriginLogout = await invoke(portal, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: {
+        cookie,
+        origin: "https://evil.example",
+      },
+    });
+    expect(crossOriginLogout.res.statusCode).toBe(403);
+    expect(parsePayload(crossOriginLogout.res).error).toBe("ADMIN_ORIGIN_REJECTED");
+    expect(adminAuditRecorder).not.toHaveBeenCalled();
+  });
+
+  it("E-PORTAL-11 records authenticated mutation attempts with fixed path vocabulary", async () => {
+    const adminAuditRecorder = vi.fn();
+    const { portal } = createHarness({ adminAuditRecorder });
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    adminAuditRecorder.mockClear();
+
+    const known = await invoke(portal, {
+      method: "POST",
+      url: "/admin/api/users",
+      headers: { cookie },
+    });
+    expect(known.res.statusCode).toBe(405);
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "admin_mutation_rejected",
+        outcome: "rejected",
+        metadata: {
+          method: "POST",
+          path: "/admin/api/users",
+          reason: "unsupported_mutation",
+        },
+      }),
+    );
+
+    adminAuditRecorder.mockClear();
+    const unknown = await invoke(portal, {
+      method: "POST",
+      url: "/admin/api/attackerSecret123",
+      headers: { cookie },
+    });
+    expect(unknown.res.statusCode).toBe(404);
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          method: "POST",
+          path: "/admin/api/unknown",
+          reason: "unsupported_mutation",
+        },
+      }),
+    );
+    expect(JSON.stringify(adminAuditRecorder.mock.calls)).not.toContain(
+      "attackerSecret123",
+    );
+  });
+
+  it("E-PORTAL-08 binds unique CSRF tokens to each Admin session", async () => {
+    const { portal } = createHarness();
+
+    const firstLogin = await login(portal);
+    const firstCookie = cookiePair(firstLogin.res);
+    const firstState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: firstCookie },
+    });
+    const firstCsrf = parsePayload(firstState.res).csrfToken;
+
+    const secondLogin = await login(portal);
+    const secondCookie = cookiePair(secondLogin.res);
+    const secondState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: secondCookie },
+    });
+    const secondCsrf = parsePayload(secondState.res).csrfToken;
+
+    expect(firstCsrf).not.toBe(secondCsrf);
+
+    const crossSession = await invoke(portal, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: {
+        cookie: secondCookie,
+        origin: "https://analytics.example.test",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ csrfToken: firstCsrf }).toString(),
+    });
+    expect(crossSession.res.statusCode).toBe(403);
+    expect(parsePayload(crossSession.res).error).toBe("ADMIN_CSRF_REJECTED");
+
+    const secondStillLive = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: secondCookie },
+    });
+    expect(secondStillLive.res.statusCode).toBe(200);
+    expect(parsePayload(secondStillLive.res).csrfToken).toBe(secondCsrf);
+  });
+
+  it("E-PORTAL-09 audits Admin login rate-limit rejections without credentials", async () => {
+    const adminAuditRecorder = vi.fn();
+    const rateLimiter = {
+      consume: () => ({ allowed: false, resetAt: 6_000 }),
+    };
+    const { portal } = createHarness({
+      rateLimiter,
+      adminAuditRecorder,
+      nowImpl: () => 1_000,
+    });
+
+    const { res } = await login(portal, "real-admin-secret");
+    expect(res.statusCode).toBe(429);
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "admin_login",
+        outcome: "rejected",
+        metadata: expect.objectContaining({ reason: "rate_limited" }),
+      }),
+    );
+    expect(JSON.stringify(adminAuditRecorder.mock.calls)).not.toContain(
+      "real-admin-secret",
+    );
+  });
+
+  it("E-PORTAL-06 fails closed if a successful login cannot be audited", async () => {
+    const { portal } = createHarness({
+      adminAuditRecorder: vi.fn(() => {
+        const error = new Error("ADMIN_STORAGE_UNAVAILABLE");
+        error.code = "ADMIN_STORAGE_UNAVAILABLE";
+        error.statusCode = 503;
+        throw error;
+      }),
+    });
+
+    const loginAttempt = await login(portal);
+    expect(loginAttempt.res.statusCode).toBe(503);
+    expect(loginAttempt.res.headers["Set-Cookie"]).toBeUndefined();
+    expect(parsePayload(loginAttempt.res).error).toBe("ADMIN_STORAGE_UNAVAILABLE");
+  });
+
 });

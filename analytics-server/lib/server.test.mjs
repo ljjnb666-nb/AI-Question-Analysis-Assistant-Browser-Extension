@@ -69,6 +69,7 @@ function createHandler(options = {}) {
     adminToken: "real-admin-secret",
     isMailerConfigured: () => false,
     loadDbImpl: () => ({ devices: [], users: [], analytics_events: [], email_verification_codes: [] }),
+    adminAuditRecorderImpl: vi.fn(),
     sendVerificationCodeEmail: vi.fn(),
     ...options,
   });
@@ -586,14 +587,27 @@ describe("analytics handler", () => {
     expect(session.res.statusCode).toBe(200);
   });
 
-  it("revokes the admin session on logout and clears the admin-path cookie", async () => {
-    const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
+  it("revokes the admin session on CSRF-protected logout and clears the admin-path cookie", async () => {
+    const handler = createHandler({
+      createAdminSessionToken: () => "short-session-credential",
+      createAdminCsrfToken: () => "short-csrf-credential",
+    });
     const signedIn = await login(handler);
     const cookie = sessionCookie(signedIn.res);
+    const state = await invoke(handler, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    const csrfToken = parsePayload(state.res).csrfToken;
+
     const loggedOut = await invoke(handler, {
       method: "POST",
       url: "/admin/logout",
-      headers: { cookie },
+      headers: {
+        cookie,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ csrfToken }).toString(),
     });
     expect(loggedOut.res.statusCode).toBe(303);
     expect(loggedOut.res.headers.Location).toBe("/admin/login");
@@ -603,6 +617,127 @@ describe("analytics handler", () => {
     const session = await invoke(handler, { url: "/admin/api/session", headers: { cookie } });
     expect(session.res.statusCode).toBe(401);
     expect(parsePayload(session.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
+  });
+
+  it("E-RESTART-01 invalidates process-local Admin sessions after handler restart", async () => {
+    const first = createHandler({
+      createAdminSessionToken: () => "restart-session-credential",
+      createAdminCsrfToken: () => "restart-csrf-credential",
+    });
+    const signedIn = await login(first);
+    const cookie = sessionCookie(signedIn.res);
+
+    const beforeRestart = await invoke(first, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    expect(beforeRestart.res.statusCode).toBe(200);
+
+    const restarted = createHandler({
+      createAdminSessionToken: () => "new-process-session",
+      createAdminCsrfToken: () => "new-process-csrf",
+    });
+    const afterRestart = await invoke(restarted, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    expect(afterRestart.res.statusCode).toBe(401);
+    expect(parsePayload(afterRestart.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
+  });
+
+  it("E-AUDIT-INTEGRATION-01 persists Audit across restart while auth and pseudonym keys stay independent", async () => {
+    const dbFile = path.join(
+      os.tmpdir(),
+      `quiz-solver-admin-audit-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`,
+    );
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    const auditTagKey = "dedicated-audit-tag-key-at-least-32-bytes";
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+
+    try {
+      const first = createAnalyticsHandler({
+        adminToken: "short-admin-one",
+        adminAuditTagKey: auditTagKey,
+        isMailerConfigured: () => false,
+        sendVerificationCodeEmail: vi.fn(),
+        createAdminSessionToken: () => "first-process-session",
+        createAdminCsrfToken: () => "first-process-csrf",
+        nowImpl: () => Date.parse("2026-10-07T12:00:00.000Z"),
+      });
+      const firstLogin = await login(first, "short-admin-one");
+      const oldCookie = sessionCookie(firstLogin.res);
+
+      const firstAudit = await invoke(first, {
+        url: "/admin/api/audit",
+        headers: { cookie: oldCookie },
+      });
+      expect(firstAudit.res.statusCode).toBe(200);
+      const firstEvents = parsePayload(firstAudit.res).data;
+      expect(firstEvents).toEqual([
+        expect.objectContaining({
+          event: "admin_login",
+          outcome: "success",
+        }),
+      ]);
+      const firstIpHash = firstEvents[0].ipHash;
+      expect(firstIpHash).toMatch(/^ip_[0-9a-f]{16}$/);
+      for (const forbidden of [
+        "short-admin-one",
+        auditTagKey,
+        "first-process-session",
+      ]) {
+        expect(firstAudit.res.payload).not.toContain(forbidden);
+      }
+
+      resetDbConnectionForTests();
+
+      const restarted = createAnalyticsHandler({
+        // Rotate the authentication secret but retain the *independent* Audit
+        // tag key. Pseudonym stability must not depend on the login secret.
+        adminToken: "short-admin-two",
+        adminAuditTagKey: auditTagKey,
+        isMailerConfigured: () => false,
+        sendVerificationCodeEmail: vi.fn(),
+        createAdminSessionToken: () => "second-process-session",
+        createAdminCsrfToken: () => "second-process-csrf",
+        nowImpl: () => Date.parse("2026-10-07T12:01:00.000Z"),
+      });
+
+      const oldSessionAfterRestart = await invoke(restarted, {
+        url: "/admin/api/session",
+        headers: { cookie: oldCookie },
+      });
+      expect(oldSessionAfterRestart.res.statusCode).toBe(401);
+
+      const secondLogin = await login(restarted, "short-admin-two");
+      const newCookie = sessionCookie(secondLogin.res);
+      const persistedAudit = await invoke(restarted, {
+        url: "/admin/api/audit",
+        headers: { cookie: newCookie },
+      });
+      expect(persistedAudit.res.statusCode).toBe(200);
+      const events = parsePayload(persistedAudit.res).data;
+      expect(events).toHaveLength(2);
+      expect(events.map((entry) => entry.event)).toEqual([
+        "admin_login",
+        "admin_login",
+      ]);
+      expect(events[0].createdAt).toBe("2026-10-07T12:01:00.000Z");
+      expect(events[1].createdAt).toBe("2026-10-07T12:00:00.000Z");
+      expect(events[0].ipHash).toBe(firstIpHash);
+      expect(events[1].ipHash).toBe(firstIpHash);
+      expect(persistedAudit.res.payload).not.toContain("short-admin-two");
+      expect(persistedAudit.res.payload).not.toContain(auditTagKey);
+    } finally {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    }
   });
 
   it("returns the stable Admin API not-found contract for unknown namespace routes", async () => {

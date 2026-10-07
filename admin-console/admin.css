@@ -1953,3 +1953,99 @@ a {
   }
 }
 
+
+
+/* Phase 11E — Admin audit timeline */
+.admin-audit-toolbar-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.admin-audit-toolbar-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.admin-audit-table td {
+  vertical-align: top;
+}
+
+.admin-audit-outcome {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--surface-subtle);
+}
+
+.admin-audit-outcome-success {
+  color: var(--success);
+  background: var(--success-subtle);
+}
+
+.admin-audit-outcome-failure,
+.admin-audit-outcome-rejected {
+  color: var(--danger);
+  background: var(--danger-subtle);
+}
+
+.admin-audit-tag {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 12px;
+}
+
+.admin-audit-detail {
+  max-width: 340px;
+  overflow-wrap: anywhere;
+}
+
+.admin-mobile-audit-list {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-mobile-audit-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--surface);
+}
+
+.admin-mobile-audit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+@media (max-width: 640px) {
+  .admin-audit-toolbar-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-audit-toolbar-card .admin-users-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .admin-audit-toolbar-card .admin-refresh-btn,
+  .admin-mobile-audit-card .admin-load-more-retry-btn {
+    min-height: 44px;
+  }
+}
