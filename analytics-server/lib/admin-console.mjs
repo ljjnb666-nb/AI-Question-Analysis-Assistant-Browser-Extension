@@ -58,7 +58,11 @@ function adminSecurityHeaders() {
   return {
     "Content-Security-Policy": ADMIN_CSP,
     "X-Content-Type-Options": "nosniff",
-    // Native Admin login/logout use same-origin form POSTs and enforce the\n    // browser Origin header. `no-referrer` makes Chromium serialize Origin as\n    // `null` for such form submissions, so use the strictest origin-only policy\n    // that preserves a verifiable Origin on same-security-level requests.\n    "Referrer-Policy": "strict-origin",
+    // Native Admin login/logout use same-origin form POSTs and enforce the
+    // browser Origin header. `no-referrer` makes Chromium serialize Origin as
+    // `null` for such form submissions, so use the strictest origin-only policy
+    // that preserves a verifiable Origin on same-security-level requests.
+    "Referrer-Policy": "strict-origin",
     "X-Frame-Options": "DENY",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
