@@ -222,18 +222,26 @@ function querySqliteUsers(database, query, now) {
   }
 
   const sql = `
+    WITH page_users AS (
+      SELECT
+        u.userId AS userId,
+        u.email AS email,
+        u.createdAt AS createdAt
+      FROM users u
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY u.createdAt DESC, u.userId DESC
+      LIMIT ?
+    )
     SELECT
-      u.userId AS userId,
-      u.email AS email,
-      u.createdAt AS createdAt,
+      p.userId AS userId,
+      p.email AS email,
+      p.createdAt AS createdAt,
       COUNT(d.deviceId) AS linkedDeviceCount,
       MAX(d.lastSeenAt) AS latestDeviceSeenAt
-    FROM users u
-    LEFT JOIN devices d ON d.userId = u.userId
-    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-    GROUP BY u.userId, u.email, u.createdAt
-    ORDER BY u.createdAt DESC, u.userId DESC
-    LIMIT ?
+    FROM page_users p
+    LEFT JOIN devices d ON d.userId = p.userId
+    GROUP BY p.userId, p.email, p.createdAt
+    ORDER BY p.createdAt DESC, p.userId DESC
   `;
 
   const rows = database.prepare(sql).all(...params, query.limit + 1);
