@@ -474,6 +474,81 @@ describe("analytics handler", () => {
     expect(parsePayload(bearerOnly.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
   });
 
+  it("D1-SERVER-01 wires real Users/System read models without exposing raw storage", async () => {
+    const dbFile = path.join(
+      os.tmpdir(),
+      `quiz-solver-admin-management-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`,
+    );
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+
+    try {
+      createUserInStorage("owner@example.com", "secret-123", "dev-owner");
+      const handler = createHandler({
+        nowImpl: () => new Date("2026-10-07T12:00:00.000Z").getTime(),
+        uptimeImpl: () => 88.9,
+        isMailerConfigured: () => true,
+        createAdminSessionToken: () => "management-session",
+      });
+      const signedIn = await login(handler);
+      const cookie = sessionCookie(signedIn.res);
+
+      const users = await invoke(handler, {
+        url: "/admin/api/users?limit=1&q=OWNER",
+        headers: { cookie },
+      });
+      expect(users.res.statusCode).toBe(200);
+      const usersPayload = parsePayload(users.res);
+      expect(usersPayload).toMatchObject({
+        ok: true,
+        page: { limit: 1, nextCursor: null },
+        query: { q: "owner" },
+      });
+      expect(usersPayload.data).toHaveLength(1);
+      expect(usersPayload.data[0]).toMatchObject({
+        email: "owner@example.com",
+        linkedDeviceCount: 1,
+      });
+      for (const forbiddenKey of [
+        "passwordHash",
+        "passwordSalt",
+        "authToken",
+        "authTokenHash",
+        "authTokenSalt",
+        "authTokenExpiresAt",
+        "deviceIds",
+        "deviceId",
+      ]) {
+        expect(JSON.stringify(usersPayload)).not.toContain(forbiddenKey);
+      }
+
+      const system = await invoke(handler, {
+        url: "/admin/api/system",
+        headers: { cookie },
+      });
+      expect(system.res.statusCode).toBe(200);
+      expect(parsePayload(system.res)).toEqual({
+        ok: true,
+        generatedAt: "2026-10-07T12:00:00.000Z",
+        service: { status: "ok", uptimeSeconds: 88 },
+        storage: { driver: "sqlite" },
+        email: { configured: true },
+        deployment: { authority: "single_process" },
+        analytics: { retentionDays: 90, privacyEpoch: 1 },
+      });
+      expect(system.res.payload).not.toContain(dbFile);
+    } finally {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    }
+  });
+
   it("rejects admin asset traversal outside the isolated artifact root", async () => {
     const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
     const signedIn = await login(handler);
