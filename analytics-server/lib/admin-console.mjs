@@ -20,6 +20,8 @@ export const ADMIN_SYSTEM_READ_LIMIT = 60;
 export const ADMIN_SYSTEM_READ_WINDOW_MS = 5 * 60 * 1000;
 export const ADMIN_AUDIT_READ_LIMIT = 120;
 export const ADMIN_AUDIT_READ_WINDOW_MS = 5 * 60 * 1000;
+export const ADMIN_SECURITY_AUDIT_WRITE_LIMIT = 120;
+export const ADMIN_SECURITY_AUDIT_WRITE_WINDOW_MS = 5 * 60 * 1000;
 
 const DEFAULT_ADMIN_DIST_DIR = fileURLToPath(new URL("../../dist-admin/", import.meta.url));
 const ADMIN_APP_PATHS = new Set([
@@ -363,6 +365,34 @@ function consumeAdminAuditReadRateLimit(rateLimiter, ip, nowImpl) {
   );
 }
 
+function allowAdminSecurityAuditWrite(rateLimiter, ip) {
+  const result = rateLimiter.consume(
+    `admin-security-audit:ip:${ip}`,
+    ADMIN_SECURITY_AUDIT_WRITE_LIMIT,
+    ADMIN_SECURITY_AUDIT_WRITE_WINDOW_MS,
+  );
+  return Boolean(result.allowed);
+}
+
+const KNOWN_ADMIN_API_AUDIT_PATHS = new Set([
+  "/admin/api/session",
+  "/admin/api/overview",
+  "/admin/api/analytics/timeseries",
+  "/admin/api/analytics/providers",
+  "/admin/api/analytics/errors",
+  "/admin/api/analytics/versions",
+  "/admin/api/analytics/latency",
+  "/admin/api/users",
+  "/admin/api/system",
+  "/admin/api/audit",
+]);
+
+function auditPathForAdminApi(pathname) {
+  return KNOWN_ADMIN_API_AUDIT_PATHS.has(pathname)
+    ? pathname
+    : "/admin/api/unknown";
+}
+
 function requireAdminApiSession(req, adminSessions) {
   const session = getAdminSession(req, adminSessions);
   if (!session) throw new AdminPortalError(401, "ADMIN_SESSION_REQUIRED");
@@ -542,6 +572,7 @@ export function createAdminPortal({
   adminUsersReadRateLimiter,
   adminSystemReadRateLimiter,
   adminAuditReadRateLimiter,
+  adminSecurityAuditRateLimiter,
   adminReadModels,
   adminManagementReadModels,
   adminAuditReadModel,
@@ -568,6 +599,9 @@ export function createAdminPortal({
   }
   if (!adminAuditReadRateLimiter || typeof adminAuditReadRateLimiter.consume !== "function") {
     throw new TypeError("adminAuditReadRateLimiter is required");
+  }
+  if (!adminSecurityAuditRateLimiter || typeof adminSecurityAuditRateLimiter.consume !== "function") {
+    throw new TypeError("adminSecurityAuditRateLimiter is required");
   }
   if (typeof adminAuditRecorder !== "function") {
     throw new TypeError("adminAuditRecorder is required");
@@ -670,6 +704,29 @@ export function createAdminPortal({
           return true;
         }
 
+        if (pathname.startsWith("/admin/api/") && method !== "GET") {
+          const mutationSessionToken = getAdminCookieValue(req);
+          const mutationSession = mutationSessionToken
+            ? adminSessions.get(mutationSessionToken)
+            : null;
+          if (
+            mutationSession &&
+            allowAdminSecurityAuditWrite(adminSecurityAuditRateLimiter, ip)
+          ) {
+            recordAudit({
+              event: ADMIN_AUDIT_EVENTS.MUTATION_REJECTED,
+              outcome: "rejected",
+              ip,
+              sessionToken: mutationSessionToken,
+              metadata: {
+                method,
+                path: auditPathForAdminApi(pathname),
+                reason: "unsupported_mutation",
+              },
+            });
+          }
+        }
+
         if (pathname === "/admin/api/session") {
           if (method !== "GET") {
             sendAdminJson(res, 405, { ok: false, error: { code: "ADMIN_METHOD_NOT_ALLOWED" } });
@@ -745,19 +802,6 @@ export function createAdminPortal({
         }
 
         if (pathname.startsWith("/admin/api/")) {
-          if (method !== "GET") {
-            recordAudit({
-              event: ADMIN_AUDIT_EVENTS.MUTATION_REJECTED,
-              outcome: "rejected",
-              ip,
-              sessionToken: getAdminCookieValue(req),
-              metadata: {
-                method,
-                path: "/admin/api/unknown",
-                reason: "unsupported_mutation",
-              },
-            });
-          }
           sendAdminJson(res, 404, { ok: false, error: { code: "ADMIN_RESOURCE_NOT_FOUND" } });
           return true;
         }
@@ -810,27 +854,29 @@ export function createAdminPortal({
           )
         ) {
           try {
-            recordAudit({
-              event:
-                code === "ADMIN_ORIGIN_REJECTED"
-                  ? ADMIN_AUDIT_EVENTS.ORIGIN_REJECTED
-                  : code === "ADMIN_RATE_LIMITED"
-                    ? ADMIN_AUDIT_EVENTS.LOGIN
-                    : ADMIN_AUDIT_EVENTS.CSRF_REJECTED,
-              outcome: "rejected",
-              ip,
-              sessionToken: getAdminCookieValue(req),
-              metadata: {
-                method,
-                path: pathname,
-                reason:
+            if (allowAdminSecurityAuditWrite(adminSecurityAuditRateLimiter, ip)) {
+              recordAudit({
+                event:
                   code === "ADMIN_ORIGIN_REJECTED"
-                    ? "origin_mismatch"
+                    ? ADMIN_AUDIT_EVENTS.ORIGIN_REJECTED
                     : code === "ADMIN_RATE_LIMITED"
-                      ? "rate_limited"
-                      : code.toLowerCase(),
-              },
-            });
+                      ? ADMIN_AUDIT_EVENTS.LOGIN
+                      : ADMIN_AUDIT_EVENTS.CSRF_REJECTED,
+                outcome: "rejected",
+                ip,
+                sessionToken: getAdminCookieValue(req),
+                metadata: {
+                  method,
+                  path: pathname,
+                  reason:
+                    code === "ADMIN_ORIGIN_REJECTED"
+                      ? "origin_mismatch"
+                      : code === "ADMIN_RATE_LIMITED"
+                        ? "rate_limited"
+                        : code.toLowerCase(),
+                },
+              });
+            }
           } catch (auditError) {
             effectiveError = auditError;
             code = stableAdminErrorCode(auditError);
