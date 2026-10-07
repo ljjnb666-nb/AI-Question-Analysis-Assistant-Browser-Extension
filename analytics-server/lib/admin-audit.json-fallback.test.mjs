@@ -14,7 +14,10 @@ const {
   normalizeAdminAuditQuery,
 } = await import("./admin-audit.mjs");
 const {
+  ADMIN_AUDIT_RETENTION_MS,
   getStorageBackendInfo,
+  loadDb,
+  pruneAdminAuditEventsInStorage,
   resetDbConnectionForTests,
 } = await import("./store.mjs");
 
@@ -84,4 +87,25 @@ describe("Phase 11E Admin Audit JSON compatibility", () => {
     expect(second.data.map((item) => item.auditId)).toEqual(["adm_003"]);
     expect(second.page.nextCursor).toBeNull();
   });
+
+  it("E-AUDIT-J02 housekeeping physically removes expired JSON rows without a new Audit write", () => {
+    const current = Date.parse("2026-10-07T12:00:00.000Z");
+    const old = current - ADMIN_AUDIT_RETENTION_MS - 1;
+    const record = createAdminAuditRecorder({
+      now: () => old,
+      generateIdImpl: () => "adm_json_expired",
+    });
+
+    record({
+      event: ADMIN_AUDIT_EVENTS.LOGIN,
+      outcome: "failure",
+      ip: "expired-json-source",
+    });
+    expect(loadDb().admin_audit_events.map((entry) => entry.auditId)).toEqual([
+      "adm_json_expired",
+    ]);
+
+    expect(pruneAdminAuditEventsInStorage(current)).toBeGreaterThan(0);
+    expect(loadDb().admin_audit_events).toEqual([]);
+;
 });
