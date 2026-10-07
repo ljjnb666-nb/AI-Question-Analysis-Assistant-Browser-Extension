@@ -32,6 +32,8 @@ Phase 12B must not turn known limitations into claimed support. Cross-origin ifr
 - **RC_SERVER_IMAGE_IS_BUILT_FROM_THE_SAME_SHA** — the production analytics/auth/Admin container is built only after exact-SHA checkout and its content-addressed Docker image ID is recorded in the RC manifest.
 - **RC_BASE_IMAGE_IS_IMMUTABLE** — the production Node base image is pinned by exact version and `sha256` digest.
 - **RC_PRODUCTION_CONTAINER_MUST_BOOT** — the built server image must start in `NODE_ENV=production`, answer `/healthz`, and serve the hardened Admin login surface.
+- **RC_SERVER_ARCHIVE_RESTORES_EXACT_IMAGE** — after export, CI removes the tagged image, reloads the compressed archive, and requires the restored Docker image ID to equal the manifest-bound image ID.
+- **RC_PROMOTION_USES_RETAINED_ARTIFACTS_NOT_REBUILDS** — a later release/promotion step must consume the retained RC artifacts identified by the manifest. A rebuild of the same source SHA is a new candidate assembly unless its artifact identities are independently proven equal.
 - **RC_TREE_DIGESTS_ARE_CONTENT_DERIVED** — extension and Admin identity use deterministic SHA-256 tree digests over sorted relative paths, sizes, and bytes; timestamps are not identity.
 - **NO_AUTOMATIC_SUBMISSION** — Phase 12 does not change the product rule that answer submission remains user-controlled.
 
@@ -50,7 +52,7 @@ The generated manifest contains:
 - immutable base-image reference
 - production Compose default image identity
 
-The generated file is CI evidence and is not source-controlled. CI always uploads it as `quiz-solver-rc-manifest-<sourceSha>`. On pull-request and `main` runs, CI also retains the exact compressed server image as `quiz-solver-analytics-image-<sourceSha>` so the server candidate referenced by the manifest is retrievable rather than runner-local only.
+The generated file is CI evidence and is not source-controlled. CI always uploads it as `quiz-solver-rc-manifest-<sourceSha>`. On pull-request and `main` runs, CI also retains the exact compressed server image as `quiz-solver-analytics-image-<sourceSha>` so the server candidate referenced by the manifest is retrievable rather than runner-local only. CI proves the archive is usable by deleting the local tag, loading the archive back into Docker, and requiring the restored image ID to match. Promotion must reuse this retained candidate rather than silently rebuilding the same source SHA.
 
 ## Non-goals of 12A
 
