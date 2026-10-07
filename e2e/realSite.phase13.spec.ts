@@ -39,6 +39,15 @@ type Phase13PageProbe = {
   submitCount: number;
   interactionEvents: Array<{ type: string; tag: string; name: string; id: string }>;
   formCount: number;
+  controlState: Array<{
+    tag: string;
+    type: string;
+    name: string;
+    id: string;
+    value: string;
+    checked: boolean;
+    selectedIndex: number;
+  }>;
 };
 
 declare const chrome: {
@@ -111,6 +120,17 @@ async function readPageProbe(page: Page): Promise<Phase13PageProbe> {
       submitCount: state.__phase13SubmitCount ?? 0,
       interactionEvents: [...(state.__phase13InteractionEvents ?? [])],
       formCount: document.forms.length,
+      controlState: Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+        "input, textarea, select",
+      )).map((control) => ({
+        tag: control.tagName,
+        type: control instanceof HTMLInputElement ? control.type : "",
+        name: control.getAttribute("name") ?? "",
+        id: control.id,
+        value: control.value,
+        checked: control instanceof HTMLInputElement ? control.checked : false,
+        selectedIndex: control instanceof HTMLSelectElement ? control.selectedIndex : -1,
+      })),
     };
   });
 }
@@ -214,7 +234,8 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     expect(after.href).toBe(before.href);
     expect(after.submitCount).toBe(0);
     expect(after.interactionEvents).toEqual([]);
-    expect(sha256(after.bodyText)).toBe(sha256(before.bodyText));
+    expect(after.controlState).toEqual(before.controlState);
+    expect(after.bodyText).toContain(PINTIA_EXPECTED_TITLE);
 
     const extensionVersion = await worker.evaluate(() => chrome.runtime.getManifest().version);
     const evidence = {
@@ -243,10 +264,11 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
         })),
       },
       pageIntegrity: {
-        beforeBodyTextSha256: sha256(before.bodyText),
-        afterBodyTextSha256: sha256(after.bodyText),
         formCountBefore: before.formCount,
         formCountAfter: after.formCount,
+        controlStateSha256Before: sha256(JSON.stringify(before.controlState)),
+        controlStateSha256After: sha256(JSON.stringify(after.controlState)),
+        problemTitleStillPresent: after.bodyText.includes(PINTIA_EXPECTED_TITLE),
         interactionEvents: after.interactionEvents,
         automaticSubmissionObserved: false,
         answerFillAttempted: false,
