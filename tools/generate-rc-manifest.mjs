@@ -91,17 +91,35 @@ export function digestTree(directory) {
   };
 }
 
-function readPinnedBaseImage(dockerfilePath) {
+function readPinnedToolchain(dockerfilePath, packageManager) {
   const dockerfile = readFileSync(dockerfilePath, "utf8");
-  const match = dockerfile.match(/^ARG BASE_IMAGE=(\S+)$/m);
-  if (!match) fail("Dockerfile.analytics must declare ARG BASE_IMAGE");
-  const reference = match[1];
-  if (!/^node:\d+\.\d+\.\d+-bookworm-slim@sha256:[a-f0-9]{64}$/.test(reference)) {
+  const baseMatch = dockerfile.match(/^ARG BASE_IMAGE=(\S+)$/m);
+  if (!baseMatch) fail("Dockerfile.analytics must declare ARG BASE_IMAGE");
+  const baseImage = baseMatch[1];
+  const nodeMatch = baseImage.match(
+    /^node:(\d+\.\d+\.\d+)-bookworm-slim@sha256:[a-f0-9]{64}$/,
+  );
+  if (!nodeMatch) {
     fail("analytics base image must pin an exact Node version and sha256 digest");
   }
-  return reference;
-}
 
+  const managerMatch = String(packageManager || "").match(/^npm@(\d+\.\d+\.\d+)$/);
+  if (!managerMatch) fail("packageManager must pin an exact npm version");
+  const npmVersion = managerMatch[1];
+
+  const dockerNpmPins = [
+    ...dockerfile.matchAll(/npm install --global npm@(\d+\.\d+\.\d+)/g),
+  ].map((match) => match[1]);
+  if (dockerNpmPins.length < 2 || dockerNpmPins.some((version) => version !== npmVersion)) {
+    fail("Dockerfile.analytics npm pins must match packageManager in all build stages");
+  }
+
+  return {
+    baseImage,
+    nodeVersion: nodeMatch[1],
+    packageManager: `npm@${npmVersion}`,
+  };
+}
 function readComposeDefaultImage(composePath, version) {
   const compose = readFileSync(composePath, "utf8");
   const match = compose.match(/^\s*image:\s*\$\{QUIZ_SOLVER_ANALYTICS_IMAGE:-([^}]+)\}\s*$/m);
@@ -155,7 +173,10 @@ export function createRcManifest({
 
   const extensionTree = digestTree(distDir);
   const adminTree = digestTree(adminDir);
-  const baseImage = readPinnedBaseImage(path.resolve(dockerfilePath));
+  const toolchain = readPinnedToolchain(
+    path.resolve(dockerfilePath),
+    packageJson.packageManager,
+  );
   const composeDefaultImage = readComposeDefaultImage(path.resolve(composePath), version);
 
   return {
@@ -172,9 +193,13 @@ export function createRcManifest({
       treeSha256: adminTree.sha256,
       fileCount: adminTree.fileCount,
     },
+    toolchain: {
+      node: toolchain.nodeVersion,
+      packageManager: toolchain.packageManager,
+    },
     analyticsServer: {
       imageId: normalizedImageId,
-      baseImage,
+      baseImage: toolchain.baseImage,
       composeDefaultImage,
     },
   };
