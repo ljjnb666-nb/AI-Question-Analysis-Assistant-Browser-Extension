@@ -4,6 +4,10 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { normalizeAdminAnalyticsDays } from "./admin-read-model.mjs";
 import { normalizeAdminUsersQuery } from "./admin-management-read-model.mjs";
+import {
+  ADMIN_AUDIT_EVENTS,
+  normalizeAdminAuditQuery,
+} from "./admin-audit.mjs";
 
 export const ADMIN_SESSION_COOKIE = "analytics_admin_session";
 export const ADMIN_LOGIN_LIMIT = 10;
@@ -14,6 +18,8 @@ export const ADMIN_USERS_READ_LIMIT = 120;
 export const ADMIN_USERS_READ_WINDOW_MS = 5 * 60 * 1000;
 export const ADMIN_SYSTEM_READ_LIMIT = 60;
 export const ADMIN_SYSTEM_READ_WINDOW_MS = 5 * 60 * 1000;
+export const ADMIN_AUDIT_READ_LIMIT = 120;
+export const ADMIN_AUDIT_READ_WINDOW_MS = 5 * 60 * 1000;
 
 const DEFAULT_ADMIN_DIST_DIR = fileURLToPath(new URL("../../dist-admin/", import.meta.url));
 const ADMIN_APP_PATHS = new Set([
@@ -46,13 +52,23 @@ class AdminPortalError extends Error {
   }
 }
 
+function adminSecurityHeaders() {
+  return {
+    "Content-Security-Policy": ADMIN_CSP,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  };
+}
+
 function adminHeaders(contentType, cacheControl = "no-store") {
   return {
     "Content-Type": contentType,
     "Cache-Control": cacheControl,
-    "Content-Security-Policy": ADMIN_CSP,
-    "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    ...adminSecurityHeaders(),
   };
 }
 
@@ -70,7 +86,7 @@ function redirectAdmin(res, location, cookie) {
   const headers = {
     Location: location,
     "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-    "Referrer-Policy": "no-referrer",
+    ...adminSecurityHeaders(),
   };
   if (cookie) headers["Set-Cookie"] = cookie;
   res.writeHead(303, headers);
@@ -189,16 +205,30 @@ async function readRequestText(req, maxBytes = 64 * 1024) {
   });
 }
 
-async function readAdminLoginBody(req) {
+async function readAdminFormBody(req, errorCode) {
   const contentType = String(req.headers["content-type"] || "")
     .split(";", 1)[0]
     .trim()
     .toLowerCase();
   if (contentType !== "application/x-www-form-urlencoded") {
-    throw new AdminPortalError(415, "ADMIN_LOGIN_REQUIRES_FORM");
+    throw new AdminPortalError(415, errorCode);
   }
-  const raw = await readRequestText(req);
-  return new URLSearchParams(raw).get("adminToken") || "";
+  return new URLSearchParams(await readRequestText(req));
+}
+
+async function readAdminLoginBody(req) {
+  return (await readAdminFormBody(req, "ADMIN_LOGIN_REQUIRES_FORM")).get("adminToken") || "";
+}
+
+async function readAdminLogoutCsrf(req) {
+  return (await readAdminFormBody(req, "ADMIN_CSRF_REQUIRED")).get("csrfToken") || "";
+}
+
+export function requireAdminCsrfToken(actual, expected) {
+  if (!actual || !expected || !adminTokensMatch(actual, expected)) {
+    throw new AdminPortalError(403, "ADMIN_CSRF_REJECTED");
+  }
+  return true;
 }
 
 function getBearerToken(req) {
@@ -322,6 +352,17 @@ function consumeAdminSystemReadRateLimit(rateLimiter, ip, nowImpl) {
   );
 }
 
+function consumeAdminAuditReadRateLimit(rateLimiter, ip, nowImpl) {
+  consumeBoundedAdminReadRateLimit(
+    rateLimiter,
+    "admin-audit-read",
+    ADMIN_AUDIT_READ_LIMIT,
+    ADMIN_AUDIT_READ_WINDOW_MS,
+    ip,
+    nowImpl,
+  );
+}
+
 function requireAdminApiSession(req, adminSessions) {
   const session = getAdminSession(req, adminSessions);
   if (!session) throw new AdminPortalError(401, "ADMIN_SESSION_REQUIRED");
@@ -432,6 +473,47 @@ async function handleAdminManagementReadApi({
   return true;
 }
 
+async function handleAdminAuditReadApi({
+  pathname,
+  method,
+  req,
+  res,
+  url,
+  ip,
+  adminToken,
+  adminSessions,
+  adminAuditReadRateLimiter,
+  adminAuditReadModel,
+  nowImpl,
+}) {
+  if (pathname !== "/admin/api/audit") return false;
+  if (method !== "GET") {
+    sendAdminJson(res, 405, { ok: false, error: { code: "ADMIN_METHOD_NOT_ALLOWED" } });
+    return true;
+  }
+
+  requireConfiguredAdminToken(adminToken);
+  requireAdminApiSession(req, adminSessions);
+  consumeAdminAuditReadRateLimit(adminAuditReadRateLimiter, ip, nowImpl);
+
+  const allowedQueryKeys = new Set(["limit", "cursor"]);
+  if ([...url.searchParams.keys()].some((key) => !allowedQueryKeys.has(key))) {
+    throw new AdminPortalError(400, "INVALID_ADMIN_QUERY");
+  }
+
+  const query = normalizeAdminAuditQuery({
+    limit: url.searchParams.get("limit"),
+    cursor: url.searchParams.get("cursor"),
+  });
+  const handler = adminAuditReadModel?.list;
+  if (typeof handler !== "function") {
+    throw new AdminPortalError(503, "ADMIN_STORAGE_UNAVAILABLE");
+  }
+  const payload = await handler(query);
+  sendAdminJson(res, 200, { ok: true, ...payload });
+  return true;
+}
+
 function stableAdminErrorCode(error) {
   const allowed = new Set([
     "ADMIN_AUTH_NOT_CONFIGURED",
@@ -440,6 +522,8 @@ function stableAdminErrorCode(error) {
     "ADMIN_RESOURCE_NOT_FOUND",
     "ADMIN_REQUEST_TOO_LARGE",
     "ADMIN_LOGIN_REQUIRES_FORM",
+    "ADMIN_CSRF_REQUIRED",
+    "ADMIN_CSRF_REJECTED",
     "ADMIN_PUBLIC_ORIGIN_INVALID",
     "ADMIN_ORIGIN_REJECTED",
     "INVALID_ADMIN_QUERY",
@@ -457,8 +541,11 @@ export function createAdminPortal({
   adminReadRateLimiter,
   adminUsersReadRateLimiter,
   adminSystemReadRateLimiter,
+  adminAuditReadRateLimiter,
   adminReadModels,
   adminManagementReadModels,
+  adminAuditReadModel,
+  adminAuditRecorder,
   nowImpl = () => Date.now(),
   publicBaseUrl,
   adminDistDir = DEFAULT_ADMIN_DIST_DIR,
@@ -478,6 +565,16 @@ export function createAdminPortal({
   }
   if (!adminSystemReadRateLimiter || typeof adminSystemReadRateLimiter.consume !== "function") {
     throw new TypeError("adminSystemReadRateLimiter is required");
+  }
+  if (!adminAuditReadRateLimiter || typeof adminAuditReadRateLimiter.consume !== "function") {
+    throw new TypeError("adminAuditReadRateLimiter is required");
+  }
+  if (typeof adminAuditRecorder !== "function") {
+    throw new TypeError("adminAuditRecorder is required");
+  }
+
+  function recordAudit(entry) {
+    return adminAuditRecorder(entry);
   }
 
   return {
@@ -516,6 +613,12 @@ export function createAdminPortal({
             consumeAdminLoginRateLimit(adminLoginRateLimiter, ip, nowImpl);
             const submittedToken = await readAdminLoginBody(req);
             if (!submittedToken || !adminTokensMatch(submittedToken, normalizedAdminToken)) {
+              recordAudit({
+                event: ADMIN_AUDIT_EVENTS.LOGIN,
+                outcome: "failure",
+                ip,
+                metadata: { reason: "invalid_credentials" },
+              });
               sendAdminHtml(
                 res,
                 401,
@@ -524,6 +627,17 @@ export function createAdminPortal({
               return true;
             }
             const session = adminSessions.issue();
+            try {
+              recordAudit({
+                event: ADMIN_AUDIT_EVENTS.LOGIN,
+                outcome: "success",
+                ip,
+                sessionToken: session.token,
+              });
+            } catch (error) {
+              adminSessions.delete(session.token);
+              throw error;
+            }
             const secure = isProduction() || publicBaseUrl.startsWith("https://");
             redirectAdmin(res, "/admin", buildSessionCookie(session.token, adminSessionTtlMs, secure));
             return true;
@@ -539,7 +653,18 @@ export function createAdminPortal({
           }
           ensureAdminMutationOrigin(req, publicBaseUrl);
           const sessionToken = getAdminCookieValue(req);
-          if (sessionToken) adminSessions.delete(sessionToken);
+          const session = sessionToken ? adminSessions.get(sessionToken) : null;
+          if (session) {
+            const csrfToken = await readAdminLogoutCsrf(req);
+            requireAdminCsrfToken(csrfToken, session.csrfToken);
+            recordAudit({
+              event: ADMIN_AUDIT_EVENTS.LOGOUT,
+              outcome: "success",
+              ip,
+              sessionToken,
+            });
+            adminSessions.delete(sessionToken);
+          }
           const secure = isProduction() || publicBaseUrl.startsWith("https://");
           redirectAdmin(res, "/admin/login", buildClearCookie(secure));
           return true;
@@ -559,6 +684,7 @@ export function createAdminPortal({
           sendAdminJson(res, 200, {
             ok: true,
             expiresAt: new Date(session.expiresAt).toISOString(),
+            csrfToken: session.csrfToken,
           });
           return true;
         }
@@ -600,7 +726,34 @@ export function createAdminPortal({
           return true;
         }
 
+        if (
+          await handleAdminAuditReadApi({
+            pathname,
+            method,
+            req,
+            res,
+            url,
+            ip,
+            adminToken,
+            adminSessions,
+            adminAuditReadRateLimiter,
+            adminAuditReadModel,
+            nowImpl,
+          })
+        ) {
+          return true;
+        }
+
         if (pathname.startsWith("/admin/api/")) {
+          if (method !== "GET") {
+            recordAudit({
+              event: ADMIN_AUDIT_EVENTS.MUTATION_REJECTED,
+              outcome: "rejected",
+              ip,
+              sessionToken: getAdminCookieValue(req),
+              metadata: { method, path: pathname, reason: "unsupported_mutation" },
+            });
+          }
           sendAdminJson(res, 404, { ok: false, error: { code: "ADMIN_RESOURCE_NOT_FOUND" } });
           return true;
         }
@@ -648,6 +801,23 @@ export function createAdminPortal({
               ? externalStatusCode
               : 500;
         const code = stableAdminErrorCode(error);
+        if (code === "ADMIN_ORIGIN_REJECTED") {
+          recordAudit({
+            event: ADMIN_AUDIT_EVENTS.ORIGIN_REJECTED,
+            outcome: "rejected",
+            ip,
+            sessionToken: getAdminCookieValue(req),
+            metadata: { method, path: pathname, reason: "origin_mismatch" },
+          });
+        } else if (code === "ADMIN_CSRF_REJECTED" || code === "ADMIN_CSRF_REQUIRED") {
+          recordAudit({
+            event: ADMIN_AUDIT_EVENTS.CSRF_REJECTED,
+            outcome: "rejected",
+            ip,
+            sessionToken: getAdminCookieValue(req),
+            metadata: { method, path: pathname, reason: code.toLowerCase() },
+          });
+        }
         const headers = error?.retryAfter ? { "Retry-After": String(error.retryAfter) } : null;
         const publicError =
           code === "ADMIN_RATE_LIMITED" && error?.retryAfter
