@@ -24,6 +24,10 @@ import {
 } from "./admin-console.mjs";
 import { createAdminAnalyticsReadModels } from "./admin-read-model.mjs";
 import { createAdminManagementReadModels } from "./admin-management-read-model.mjs";
+import {
+  createAdminAuditReadModel,
+  createAdminAuditRecorder,
+} from "./admin-audit.mjs";
 
 const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
 const EXTENSION_ORIGIN_PREFIX = "chrome-extension://";
@@ -136,8 +140,11 @@ export function createAnalyticsHandler(options = {}) {
     adminSessionTtlMs = ADMIN_SESSION_TTL_MS,
     adminSessionMaxCount = ADMIN_SESSION_MAX_COUNT,
     createAdminSessionToken,
+    createAdminCsrfToken,
     adminReadModelsImpl,
     adminManagementReadModelsImpl,
+    adminAuditReadModelImpl,
+    adminAuditRecorderImpl,
     uptimeImpl = () => process.uptime(),
     recordAnalyticsEventImpl = recordAnalyticsEventInStorage,
     registerUserImpl = registerUserWithVerificationCodeInStorage,
@@ -155,6 +162,7 @@ export function createAnalyticsHandler(options = {}) {
 
   const adminSessions = createAdminSessionStore({
     createToken: createAdminSessionToken,
+    createCsrfToken: createAdminCsrfToken,
     maxSessions: adminSessionMaxCount,
     now: nowImpl,
     ttlMs: adminSessionTtlMs,
@@ -172,6 +180,7 @@ export function createAnalyticsHandler(options = {}) {
     adminRead: createNamespaceLimiter(),
     adminUsersRead: createNamespaceLimiter(),
     adminSystemRead: createNamespaceLimiter(),
+    adminAuditRead: createNamespaceLimiter(),
     sendCodeIp: createNamespaceLimiter(),
     sendCodeEmail: createNamespaceLimiter(),
     registerIp: createNamespaceLimiter(),
@@ -191,6 +200,10 @@ export function createAnalyticsHandler(options = {}) {
       uptime: uptimeImpl,
       isMailerConfigured,
     });
+  const adminAuditReadModel =
+    adminAuditReadModelImpl || createAdminAuditReadModel({ now: nowImpl });
+  const adminAuditRecorder =
+    adminAuditRecorderImpl || createAdminAuditRecorder({ now: nowImpl });
   const adminPortal = createAdminPortal({
     adminToken,
     adminSessions,
@@ -199,8 +212,11 @@ export function createAnalyticsHandler(options = {}) {
     adminReadRateLimiter: rateLimiters.adminRead,
     adminUsersReadRateLimiter: rateLimiters.adminUsersRead,
     adminSystemReadRateLimiter: rateLimiters.adminSystemRead,
+    adminAuditReadRateLimiter: rateLimiters.adminAuditRead,
     adminReadModels,
     adminManagementReadModels,
+    adminAuditReadModel,
+    adminAuditRecorder,
     nowImpl,
     publicBaseUrl,
   });
