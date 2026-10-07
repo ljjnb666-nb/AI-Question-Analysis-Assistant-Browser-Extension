@@ -13,6 +13,8 @@ import {
 } from "./admin-audit.mjs";
 import {
   ADMIN_AUDIT_RETENTION_MS,
+  loadDb,
+  pruneAdminAuditEventsInStorage,
   resetDbConnectionForTests,
 } from "./store.mjs";
 
@@ -165,6 +167,27 @@ describe("Phase 11E Admin Audit authority", () => {
 
     const response = createAdminAuditReadModel({ now: () => current }).list();
     expect(response.data.map((item) => item.auditId)).toEqual(["adm_2"]);
+  });
+
+  it("E-AUDIT-06 housekeeping physically removes expired rows without requiring a new Audit write", () => {
+    const current = Date.parse("2026-10-07T12:00:00.000Z");
+    const old = current - ADMIN_AUDIT_RETENTION_MS - 1;
+    const record = createAdminAuditRecorder({
+      now: () => old,
+      generateIdImpl: () => "adm_expired_only",
+    });
+
+    record({
+      event: ADMIN_AUDIT_EVENTS.LOGIN,
+      outcome: "failure",
+      ip: "expired-source",
+    });
+    expect(loadDb().admin_audit_events.map((entry) => entry.auditId)).toEqual([
+      "adm_expired_only",
+    ]);
+
+    expect(pruneAdminAuditEventsInStorage(current)).toBeGreaterThan(0);
+    expect(loadDb().admin_audit_events).toEqual([]);
   });
 
   it("E-AUDIT-05 never leaks raw storage failures", () => {
