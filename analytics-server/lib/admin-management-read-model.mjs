@@ -301,7 +301,12 @@ function queryJsonUsers(db, query, now) {
 
   filtered.sort(compareUsers);
   const pageUsers = filtered.slice(0, query.limit + 1);
-  const pageIds = new Set(pageUsers.map((user) => user.userId));
+  // The +1 lookahead row is only pagination evidence. Do not inspect its
+  // device graph until it becomes visible on the next page; SQLite likewise
+  // validates DTO aggregates only for rows that are actually returned.
+  const pageIds = new Set(
+    pageUsers.slice(0, query.limit).map((user) => user.userId),
+  );
   const devicesByUser = new Map();
   const seenDeviceIds = new Map();
   const devices = Array.isArray(db?.devices) ? db.devices : [];
