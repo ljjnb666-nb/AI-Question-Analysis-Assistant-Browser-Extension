@@ -28,7 +28,7 @@ interface SidebarProps {
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
   closeButtonRef?: React.RefObject<HTMLButtonElement>;
-  csrfToken: string;
+  csrfToken?: string;
 }
 
 export function Sidebar({
@@ -36,7 +36,7 @@ export function Sidebar({
   isMobileOpen = false,
   onCloseMobile,
   closeButtonRef,
-  csrfToken,
+  csrfToken = "",
 }: SidebarProps): React.JSX.Element {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
     if (!isMobileOpen) return;
