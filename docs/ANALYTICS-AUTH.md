@@ -72,7 +72,7 @@ Successful Admin login and live-session logout are fail-closed with respect to A
 
 Admin browser sessions and their CSRF tokens remain process-local and bounded. A backend process restart invalidates existing Admin sessions and requires re-login. Persistent Audit records survive that restart. This distinction is intentional: Audit persistence must not turn session state into distributed or durable authentication authority.
 
-All Admin HTML, JSON, asset, redirect, and failure responses use the Admin security header policy, including CSP, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, same-origin opener/resource policies, and a restrictive permissions policy. No account-management mutation (ban/delete/role/password/device revoke/etc.) is introduced by this phase.
+All Browser Admin Portal responses under `/admin` and `/admin/api/*`—including HTML, JSON, assets, redirects, and failures—use the Admin security header policy, including CSP, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, same-origin opener/resource policies, and a restrictive permissions policy. The legacy machine-compatible `/admin/data` route remains outside this Browser Admin Portal contract so its historical cross-origin/API compatibility is not silently changed. No account-management mutation (ban/delete/role/password/device revoke/etc.) is introduced by this phase.
 
 ## Storage
 
