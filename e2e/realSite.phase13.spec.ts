@@ -137,7 +137,7 @@ async function readPageProbe(page: Page): Promise<Phase13PageProbe> {
 
 test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection on a real public site", async () => {
   test.slow();
-  test.setTimeout(120_000);
+  test.setTimeout(150_000);
 
   const context = await launchExtensionContext();
   const evidenceDir = path.resolve("test-results", "phase13-evidence");
@@ -150,27 +150,31 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
 
     let response = null;
     let lastError: unknown = null;
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
         response = await page.goto(PINTIA_PUBLIC_PROBLEM_URL, {
-          waitUntil: "domcontentloaded",
-          timeout: 60_000,
+          waitUntil: "commit",
+          timeout: 30_000,
         });
         if (response && response.status() < 500) break;
       } catch (error) {
         lastError = error;
       }
-      if (attempt < 2) await page.waitForTimeout(2_000);
+      if (attempt < 3) await page.waitForTimeout(1_500);
     }
     if (!response) {
-      throw new Error(`Phase 13A live Pintia navigation failed: ${String(lastError ?? "no response")}`);
+      throw new Error(`Phase 13A live Pintia navigation failed before main-document commit: ${String(lastError ?? "no response")}`);
     }
 
     expect(response.status(), "live Pintia main document must be reachable").toBeGreaterThanOrEqual(200);
     expect(response.status(), "live Pintia main document must not be a server error").toBeLessThan(500);
     await expect.poll(
-      async () => (await page.locator("body").innerText()).includes(PINTIA_EXPECTED_TITLE),
-      { timeout: 30_000, intervals: [500, 1_000, 2_000] },
+      async () => {
+        const body = page.locator("body");
+        if (await body.count() === 0) return false;
+        return (await body.innerText()).includes(PINTIA_EXPECTED_TITLE);
+      },
+      { timeout: 45_000, intervals: [500, 1_000, 2_000, 4_000] },
     ).toBe(true);
 
     const finalUrl = new URL(page.url());
