@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { URL } from "node:url";
 import { buildAnalyticsSummary, buildTimeSeries } from "./metrics.mjs";
 import {
@@ -146,6 +145,7 @@ export function createAnalyticsHandler(options = {}) {
     adminManagementReadModelsImpl,
     adminAuditReadModelImpl,
     adminAuditRecorderImpl,
+    adminAuditTagKey = process.env.ANALYTICS_ADMIN_AUDIT_TAG_KEY,
     uptimeImpl = () => process.uptime(),
     recordAnalyticsEventImpl = recordAnalyticsEventInStorage,
     registerUserImpl = registerUserWithVerificationCodeInStorage,
@@ -204,15 +204,13 @@ export function createAnalyticsHandler(options = {}) {
     });
   const adminAuditReadModel =
     adminAuditReadModelImpl || createAdminAuditReadModel({ now: nowImpl });
-  const normalizedAdminTokenForAudit =
-    typeof adminToken === "string" ? adminToken.trim() : "";
+  const normalizedAuditTagKey =
+    typeof adminAuditTagKey === "string" ? adminAuditTagKey.trim() : adminAuditTagKey;
   const adminAuditRecorder =
     adminAuditRecorderImpl ||
     createAdminAuditRecorder({
       now: nowImpl,
-      tagKey: normalizedAdminTokenForAudit
-        ? createHash("sha256").update(normalizedAdminTokenForAudit, "utf8").digest()
-        : undefined,
+      ...(normalizedAuditTagKey ? { tagKey: normalizedAuditTagKey } : {}),
     });
   const adminPortal = createAdminPortal({
     adminToken,
