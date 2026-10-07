@@ -83,6 +83,7 @@ function createHarness({
   adminUsersReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
   adminSystemReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
   adminAuditReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
+  adminSecurityAuditRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
   adminReadModels = {
     overview: vi.fn((days) => ({ generatedAt: "2026-10-07T00:00:00.000Z", analyticsScope: "opt_in_only", window: { days } })),
     timeseries: vi.fn((days) => ({ kind: "timeseries", analyticsScope: "opt_in_only", window: { days }, data: [] })),
@@ -134,6 +135,7 @@ function createHarness({
     adminUsersReadRateLimiter,
     adminSystemReadRateLimiter,
     adminAuditReadRateLimiter,
+    adminSecurityAuditRateLimiter,
     adminReadModels,
     adminManagementReadModels,
     adminAuditReadModel,
@@ -927,6 +929,96 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     });
     expect(system.res.statusCode).toBe(200);
     expect(adminManagementReadModels.system).toHaveBeenCalledTimes(1);
+  });
+
+  it("E-PORTAL-10 bounds rejection-audit writes and ignores anonymous mutation spam", async () => {
+    const adminAuditRecorder = vi.fn();
+    const adminSecurityAuditRateLimiter = {
+      consume: vi.fn(() => ({ allowed: false, resetAt: 6_000 })),
+    };
+    const { portal } = createHarness({
+      adminAuditRecorder,
+      adminSecurityAuditRateLimiter,
+      nowImpl: () => 1_000,
+    });
+
+    const anonymousMutation = await invoke(portal, {
+      method: "POST",
+      url: "/admin/api/unknown-secret-looking-path",
+    });
+    expect(anonymousMutation.res.statusCode).toBe(404);
+    expect(adminAuditRecorder).not.toHaveBeenCalled();
+
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    adminAuditRecorder.mockClear();
+
+    const authenticatedMutation = await invoke(portal, {
+      method: "POST",
+      url: "/admin/api/users",
+      headers: { cookie },
+    });
+    expect(authenticatedMutation.res.statusCode).toBe(405);
+    expect(adminSecurityAuditRateLimiter.consume).toHaveBeenCalled();
+    expect(adminAuditRecorder).not.toHaveBeenCalled();
+
+    const crossOriginLogout = await invoke(portal, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: {
+        cookie,
+        origin: "https://evil.example",
+      },
+    });
+    expect(crossOriginLogout.res.statusCode).toBe(403);
+    expect(parsePayload(crossOriginLogout.res).error).toBe("ADMIN_ORIGIN_REJECTED");
+    expect(adminAuditRecorder).not.toHaveBeenCalled();
+  });
+
+  it("E-PORTAL-11 records authenticated mutation attempts with fixed path vocabulary", async () => {
+    const adminAuditRecorder = vi.fn();
+    const { portal } = createHarness({ adminAuditRecorder });
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+    adminAuditRecorder.mockClear();
+
+    const known = await invoke(portal, {
+      method: "POST",
+      url: "/admin/api/users",
+      headers: { cookie },
+    });
+    expect(known.res.statusCode).toBe(405);
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "admin_mutation_rejected",
+        outcome: "rejected",
+        metadata: {
+          method: "POST",
+          path: "/admin/api/users",
+          reason: "unsupported_mutation",
+        },
+      }),
+    );
+
+    adminAuditRecorder.mockClear();
+    const unknown = await invoke(portal, {
+      method: "POST",
+      url: "/admin/api/attackerSecret123",
+      headers: { cookie },
+    });
+    expect(unknown.res.statusCode).toBe(404);
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          method: "POST",
+          path: "/admin/api/unknown",
+          reason: "unsupported_mutation",
+        },
+      }),
+    );
+    expect(JSON.stringify(adminAuditRecorder.mock.calls)).not.toContain(
+      "attackerSecret123",
+    );
   });
 
   it("E-PORTAL-08 binds unique CSRF tokens to each Admin session", async () => {
