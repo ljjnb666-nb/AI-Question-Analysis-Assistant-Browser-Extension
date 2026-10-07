@@ -751,7 +751,11 @@ export function createAdminPortal({
               outcome: "rejected",
               ip,
               sessionToken: getAdminCookieValue(req),
-              metadata: { method, path: pathname, reason: "unsupported_mutation" },
+              metadata: {
+                method,
+                path: "/admin/api/unknown",
+                reason: "unsupported_mutation",
+              },
             });
           }
           sendAdminJson(res, 404, { ok: false, error: { code: "ADMIN_RESOURCE_NOT_FOUND" } });
