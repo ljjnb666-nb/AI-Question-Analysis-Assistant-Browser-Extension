@@ -28,7 +28,7 @@ function makeFixture() {
   const dockerfilePath = path.join(root, "Dockerfile.analytics");
   const composePath = path.join(root, "docker-compose.analytics.prod.yml");
 
-  writeFileSync(packageJsonPath, JSON.stringify({ version: "0.2.0" }), "utf8");
+  writeFileSync(packageJsonPath, JSON.stringify({ version: "0.2.0", packageManager: "npm@11.6.2" }), "utf8");
   writeFileSync(
     sourceManifestPath,
     JSON.stringify({ manifest_version: 3, version: "0.2.0" }),
@@ -36,7 +36,7 @@ function makeFixture() {
   );
   writeFileSync(
     dockerfilePath,
-    "ARG BASE_IMAGE=node:24.21.0-bookworm-slim@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nFROM ${BASE_IMAGE}\n",
+    "ARG BASE_IMAGE=node:24.21.0-bookworm-slim@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nFROM ${BASE_IMAGE}\nRUN npm install --global npm@11.6.2\nFROM ${BASE_IMAGE}\nRUN npm install --global npm@11.6.2\n",
     "utf8",
   );
   writeFileSync(
@@ -77,6 +77,10 @@ test("RC12A-01 binds source SHA, both artifact trees, version, and server image 
     assert.equal(manifest.schemaVersion, 1);
     assert.equal(manifest.sourceSha, "a".repeat(40));
     assert.equal(manifest.version, "0.2.0");
+    assert.deepEqual(manifest.toolchain, {
+      node: "24.21.0",
+      packageManager: "npm@11.6.2",
+    });
     assert.equal(manifest.extension.manifestVersion, 3);
     assert.equal(manifest.extension.version, "0.2.0");
     assert.match(manifest.extension.treeSha256, /^[a-f0-9]{64}$/);
@@ -148,7 +152,7 @@ test("RC12A-04 rejects floating base images and stale production compose version
 
     writeFileSync(
       fixture.dockerfilePath,
-      "ARG BASE_IMAGE=node:24.21.0-bookworm-slim@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+      "ARG BASE_IMAGE=node:24.21.0-bookworm-slim@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nRUN npm install --global npm@11.6.2\nRUN npm install --global npm@11.6.2\n",
       "utf8",
     );
     writeFileSync(
@@ -159,6 +163,24 @@ test("RC12A-04 rejects floating base images and stale production compose version
     assert.throws(
       () => createRcManifest(createOptions(fixture)),
       /does not match package version 0\.2\.0/,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+
+test("RC12A-05 rejects npm toolchain drift between package authority and container stages", () => {
+  const fixture = makeFixture();
+  try {
+    writeFileSync(
+      fixture.dockerfilePath,
+      "ARG BASE_IMAGE=node:24.21.0-bookworm-slim@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nRUN npm install --global npm@11.19.0\nRUN npm install --global npm@11.19.0\n",
+      "utf8",
+    );
+    assert.throws(
+      () => createRcManifest(createOptions(fixture)),
+      /npm pins must match packageManager/,
     );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
