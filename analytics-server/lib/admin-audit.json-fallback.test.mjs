@@ -107,5 +107,5 @@ describe("Phase 11E Admin Audit JSON compatibility", () => {
 
     expect(pruneAdminAuditEventsInStorage(current)).toBeGreaterThan(0);
     expect(loadDb().admin_audit_events).toEqual([]);
-;
+  });
 });
