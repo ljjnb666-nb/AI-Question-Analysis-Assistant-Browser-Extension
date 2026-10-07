@@ -27,6 +27,7 @@ function makeFixture() {
   const sourceManifestPath = path.join(root, "src-manifest.json");
   const dockerfilePath = path.join(root, "Dockerfile.analytics");
   const composePath = path.join(root, "docker-compose.analytics.prod.yml");
+  const analyticsArchivePath = path.join(root, "quiz-solver-analytics-image.tar.gz");
 
   writeFileSync(packageJsonPath, JSON.stringify({ version: "0.2.0", packageManager: "npm@11.6.2" }), "utf8");
   writeFileSync(
@@ -44,6 +45,7 @@ function makeFixture() {
     "services:\n  analytics-server:\n    image: ${QUIZ_SOLVER_ANALYTICS_IMAGE:-quiz-solver-analytics:0.2.0}\n",
     "utf8",
   );
+  writeFileSync(analyticsArchivePath, "synthetic docker archive", "utf8");
 
   return {
     root,
@@ -53,6 +55,7 @@ function makeFixture() {
     sourceManifestPath,
     dockerfilePath,
     composePath,
+    analyticsArchivePath,
   };
 }
 
@@ -60,6 +63,7 @@ function createOptions(fixture, overrides = {}) {
   return {
     sourceSha: "a".repeat(40),
     analyticsImageId: `sha256:${"b".repeat(64)}`,
+    analyticsArchivePath: fixture.analyticsArchivePath,
     distDir: fixture.distDir,
     adminDir: fixture.adminDir,
     packageJsonPath: fixture.packageJsonPath,
@@ -88,6 +92,15 @@ test("RC12A-01 binds source SHA, both artifact trees, version, and server image 
     assert.match(manifest.admin.treeSha256, /^[a-f0-9]{64}$/);
     assert.equal(manifest.admin.fileCount, 2);
     assert.equal(manifest.analyticsServer.imageId, `sha256:${"b".repeat(64)}`);
+    assert.equal(
+      manifest.analyticsServer.archive.fileName,
+      "quiz-solver-analytics-image.tar.gz",
+    );
+    assert.equal(
+      manifest.analyticsServer.archive.sizeBytes,
+      Buffer.byteLength("synthetic docker archive"),
+    );
+    assert.match(manifest.analyticsServer.archive.sha256, /^[a-f0-9]{64}$/);
     assert.match(
       manifest.analyticsServer.baseImage,
       /^node:24\.21\.0-bookworm-slim@sha256:[a-f0-9]{64}$/,
@@ -181,6 +194,26 @@ test("RC12A-05 rejects npm toolchain drift between package authority and contain
     assert.throws(
       () => createRcManifest(createOptions(fixture)),
       /npm pins must match packageManager/,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+
+test("RC12A-06 rejects a missing or empty retrievable server image archive", () => {
+  const fixture = makeFixture();
+  try {
+    rmSync(fixture.analyticsArchivePath);
+    assert.throws(
+      () => createRcManifest(createOptions(fixture)),
+      /analytics server image archive is missing/,
+    );
+
+    writeFileSync(fixture.analyticsArchivePath, "", "utf8");
+    assert.throws(
+      () => createRcManifest(createOptions(fixture)),
+      /analytics server image archive is empty/,
     );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
