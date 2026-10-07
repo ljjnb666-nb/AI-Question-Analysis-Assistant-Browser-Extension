@@ -392,7 +392,7 @@ jobs:
         with:
           name: phase13-live-site-evidence-${{ steps.source.outputs.sha }}
           path: |
-            test-results/phase13-evidence/
+            test-results/
             playwright-report/
           if-no-files-found: ignore
           retention-days: 30
