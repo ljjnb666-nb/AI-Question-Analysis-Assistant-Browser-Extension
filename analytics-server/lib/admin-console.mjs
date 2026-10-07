@@ -401,6 +401,10 @@ async function handleAdminManagementReadApi({
 
   if (pathname === "/admin/api/users") {
     consumeAdminUsersReadRateLimit(adminUsersReadRateLimiter, ip, nowImpl);
+    const allowedQueryKeys = new Set(["limit", "cursor", "q"]);
+    if ([...url.searchParams.keys()].some((key) => !allowedQueryKeys.has(key))) {
+      throw new AdminPortalError(400, "INVALID_ADMIN_QUERY");
+    }
     const query = normalizeAdminUsersQuery({
       limit: url.searchParams.get("limit"),
       cursor: url.searchParams.get("cursor"),
