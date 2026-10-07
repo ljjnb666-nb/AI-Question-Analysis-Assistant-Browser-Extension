@@ -871,6 +871,131 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     expect(unknown.res.headers["X-Frame-Options"]).toBe("DENY");
   });
 
+  it("E-PORTAL-07 isolates Audit read rate limits from other Admin reads", async () => {
+    const adminAuditReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: false, resetAt: 6_000 })),
+    };
+    const adminReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: true, resetAt: 6_000 })),
+    };
+    const adminUsersReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: true, resetAt: 6_000 })),
+    };
+    const adminSystemReadRateLimiter = {
+      consume: vi.fn(() => ({ allowed: true, resetAt: 6_000 })),
+    };
+    const {
+      portal,
+      adminReadModels,
+      adminManagementReadModels,
+      adminAuditReadModel,
+    } = createHarness({
+      adminAuditReadRateLimiter,
+      adminReadRateLimiter,
+      adminUsersReadRateLimiter,
+      adminSystemReadRateLimiter,
+      nowImpl: () => 1_000,
+    });
+    const signedIn = await login(portal);
+    const cookie = cookiePair(signedIn.res);
+
+    const audit = await invoke(portal, {
+      url: "/admin/api/audit",
+      headers: { cookie },
+    });
+    expect(audit.res.statusCode).toBe(429);
+    expect(parsePayload(audit.res).error.code).toBe("ADMIN_RATE_LIMITED");
+    expect(adminAuditReadModel.list).not.toHaveBeenCalled();
+
+    const overview = await invoke(portal, {
+      url: "/admin/api/overview",
+      headers: { cookie },
+    });
+    expect(overview.res.statusCode).toBe(200);
+    expect(adminReadModels.overview).toHaveBeenCalledTimes(1);
+
+    const users = await invoke(portal, {
+      url: "/admin/api/users",
+      headers: { cookie },
+    });
+    expect(users.res.statusCode).toBe(200);
+    expect(adminManagementReadModels.users).toHaveBeenCalledTimes(1);
+
+    const system = await invoke(portal, {
+      url: "/admin/api/system",
+      headers: { cookie },
+    });
+    expect(system.res.statusCode).toBe(200);
+    expect(adminManagementReadModels.system).toHaveBeenCalledTimes(1);
+  });
+
+  it("E-PORTAL-08 binds unique CSRF tokens to each Admin session", async () => {
+    const { portal } = createHarness();
+
+    const firstLogin = await login(portal);
+    const firstCookie = cookiePair(firstLogin.res);
+    const firstState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: firstCookie },
+    });
+    const firstCsrf = parsePayload(firstState.res).csrfToken;
+
+    const secondLogin = await login(portal);
+    const secondCookie = cookiePair(secondLogin.res);
+    const secondState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: secondCookie },
+    });
+    const secondCsrf = parsePayload(secondState.res).csrfToken;
+
+    expect(firstCsrf).not.toBe(secondCsrf);
+
+    const crossSession = await invoke(portal, {
+      method: "POST",
+      url: "/admin/logout",
+      headers: {
+        cookie: secondCookie,
+        origin: "https://analytics.example.test",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ csrfToken: firstCsrf }).toString(),
+    });
+    expect(crossSession.res.statusCode).toBe(403);
+    expect(parsePayload(crossSession.res).error).toBe("ADMIN_CSRF_REJECTED");
+
+    const secondStillLive = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie: secondCookie },
+    });
+    expect(secondStillLive.res.statusCode).toBe(200);
+    expect(parsePayload(secondStillLive.res).csrfToken).toBe(secondCsrf);
+  });
+
+  it("E-PORTAL-09 audits Admin login rate-limit rejections without credentials", async () => {
+    const adminAuditRecorder = vi.fn();
+    const rateLimiter = {
+      consume: () => ({ allowed: false, resetAt: 6_000 }),
+    };
+    const { portal } = createHarness({
+      rateLimiter,
+      adminAuditRecorder,
+      nowImpl: () => 1_000,
+    });
+
+    const { res } = await login(portal, "real-admin-secret");
+    expect(res.statusCode).toBe(429);
+    expect(adminAuditRecorder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "admin_login",
+        outcome: "rejected",
+        metadata: expect.objectContaining({ reason: "rate_limited" }),
+      }),
+    );
+    expect(JSON.stringify(adminAuditRecorder.mock.calls)).not.toContain(
+      "real-admin-secret",
+    );
+  });
+
   it("E-PORTAL-06 fails closed if a successful login cannot be audited", async () => {
     const { portal } = createHarness({
       adminAuditRecorder: vi.fn(() => {
