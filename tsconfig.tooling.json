@@ -6,7 +6,8 @@
       "DOM"
     ],
     "types": [
-      "node"
+      "node",
+      "chrome"
     ]
   },
   "include": [
