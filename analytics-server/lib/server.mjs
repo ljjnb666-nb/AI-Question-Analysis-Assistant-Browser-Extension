@@ -23,6 +23,7 @@ import {
   requireConfiguredAdminToken,
 } from "./admin-console.mjs";
 import { createAdminAnalyticsReadModels } from "./admin-read-model.mjs";
+import { createAdminManagementReadModels } from "./admin-management-read-model.mjs";
 
 const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
 const EXTENSION_ORIGIN_PREFIX = "chrome-extension://";
@@ -136,6 +137,8 @@ export function createAnalyticsHandler(options = {}) {
     adminSessionMaxCount = ADMIN_SESSION_MAX_COUNT,
     createAdminSessionToken,
     adminReadModelsImpl,
+    adminManagementReadModelsImpl,
+    uptimeImpl = () => process.uptime(),
     recordAnalyticsEventImpl = recordAnalyticsEventInStorage,
     registerUserImpl = registerUserWithVerificationCodeInStorage,
     revokeUserSessionImpl = revokeUserSessionInStorage,
@@ -167,6 +170,8 @@ export function createAnalyticsHandler(options = {}) {
   const rateLimiters = {
     adminLogin: createNamespaceLimiter(),
     adminRead: createNamespaceLimiter(),
+    adminUsersRead: createNamespaceLimiter(),
+    adminSystemRead: createNamespaceLimiter(),
     sendCodeIp: createNamespaceLimiter(),
     sendCodeEmail: createNamespaceLimiter(),
     registerIp: createNamespaceLimiter(),
@@ -179,13 +184,23 @@ export function createAnalyticsHandler(options = {}) {
   };
 
   const adminReadModels = adminReadModelsImpl || createAdminAnalyticsReadModels({ now: nowImpl });
+  const adminManagementReadModels =
+    adminManagementReadModelsImpl ||
+    createAdminManagementReadModels({
+      now: nowImpl,
+      uptime: uptimeImpl,
+      isMailerConfigured,
+    });
   const adminPortal = createAdminPortal({
     adminToken,
     adminSessions,
     adminSessionTtlMs,
     adminLoginRateLimiter: rateLimiters.adminLogin,
     adminReadRateLimiter: rateLimiters.adminRead,
+    adminUsersReadRateLimiter: rateLimiters.adminUsersRead,
+    adminSystemReadRateLimiter: rateLimiters.adminSystemRead,
     adminReadModels,
+    adminManagementReadModels,
     nowImpl,
     publicBaseUrl,
   });

@@ -46,12 +46,16 @@ set PUBLIC_BASE_URL=https://analytics.082515.online
 - `GET /admin/api/analytics/errors?days=14`: observed terminal parse errors grouped by allowlisted error category
 - `GET /admin/api/analytics/versions?days=14`: latest observed extension version per opt-in device inside the requested window, not raw event frequency
 - `GET /admin/api/analytics/latency?days=14`: observed parse-outcome duration samples and daily averages
+- `GET /admin/api/users?limit=50&cursor=...&q=...`: cookie-only, read-only user directory. Returns only `userId`, `email`, `createdAt`, `linkedDeviceCount`, and `latestDeviceSeenAt`. Device ownership/counts come from `devices.userId`, not denormalized `users.deviceIdsJson`. Pagination is deterministic `createdAt DESC, userId DESC` with an opaque cursor; `limit` is 1–100 (default 50), and optional `q` is a bounded, case-insensitive literal substring search over email/userId.
+- `GET /admin/api/system`: cookie-only, read-only sanitized current-process snapshot. Exposes only generated time, current process uptime, storage driver, mailer-configured boolean, single-process authority semantics, analytics retention days, and privacy epoch. It never exposes filesystem paths, environment values, SMTP details, CPU/RAM/disk metrics, historical uptime, or fabricated health/SLA data.
 - `GET /admin`, `/admin/analytics`, `/admin/users`, `/admin/system`, `/admin/audit`: independent Admin Console application routes
 - `POST /admin/logout`: invalidates the current browser admin session
 
 The dashboard submits the admin token in the login request body. Admin tokens in query parameters are never accepted. Browser sessions expire after 8 hours, are limited to 64 active sessions, and use an `HttpOnly`, `SameSite=Strict` cookie scoped to `/admin` (`Secure` in production). Admin login allows 10 attempts per IP in a 15-minute window. If `ANALYTICS_ADMIN_TOKEN` is blank or missing, protected routes fail closed with `503 ADMIN_AUTH_NOT_CONFIGURED` and do not load analytics data.
 
 The Admin analytics read APIs accept only integer `days` values from 1 through 90 (default 14), matching the analytics retention window. They are session-cookie only, use a separate bounded read-rate namespace, return aggregate allowlisted DTOs, and do not serialize raw database rows. Missing denominators are represented as `null` ratios rather than fabricated zero-percent results.
+
+The Admin Users/System read APIs are also browser-session-cookie only and do not accept the long-lived Admin bearer. They use limiter namespaces separate from login and analytics reads. The Users path never calls the broad raw `loadDb()` reader; SQLite selects only allowlisted user fields plus device aggregates, and the JSON compatibility path constructs the same DTO explicitly. Password hashes/salts, account auth tokens/hashes/salts/expiries, verification-code records, denormalized device-id arrays, and raw device ids are never part of these responses. The System path is a current-process snapshot only: `email.configured` means configuration is present, not that SMTP delivery was probed successfully; `service.status = "ok"` means the protected request was handled successfully by the current process, not an SLA or all-subsystem-health claim.
 
 ## Storage
 

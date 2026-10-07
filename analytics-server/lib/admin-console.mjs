@@ -3,12 +3,17 @@ import { extname, resolve, sep } from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { normalizeAdminAnalyticsDays } from "./admin-read-model.mjs";
+import { normalizeAdminUsersQuery } from "./admin-management-read-model.mjs";
 
 export const ADMIN_SESSION_COOKIE = "analytics_admin_session";
 export const ADMIN_LOGIN_LIMIT = 10;
 export const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 export const ADMIN_READ_LIMIT = 120;
 export const ADMIN_READ_WINDOW_MS = 5 * 60 * 1000;
+export const ADMIN_USERS_READ_LIMIT = 120;
+export const ADMIN_USERS_READ_WINDOW_MS = 5 * 60 * 1000;
+export const ADMIN_SYSTEM_READ_LIMIT = 60;
+export const ADMIN_SYSTEM_READ_WINDOW_MS = 5 * 60 * 1000;
 
 const DEFAULT_ADMIN_DIST_DIR = fileURLToPath(new URL("../../dist-admin/", import.meta.url));
 const ADMIN_APP_PATHS = new Set([
@@ -267,14 +272,54 @@ function consumeAdminLoginRateLimit(rateLimiter, ip, nowImpl) {
   }
 }
 
-function consumeAdminReadRateLimit(rateLimiter, ip, nowImpl) {
-  const result = rateLimiter.consume(`admin-read:ip:${ip}`, ADMIN_READ_LIMIT, ADMIN_READ_WINDOW_MS);
+function consumeBoundedAdminReadRateLimit(
+  rateLimiter,
+  key,
+  limit,
+  windowMs,
+  ip,
+  nowImpl,
+) {
+  const result = rateLimiter.consume(`${key}:ip:${ip}`, limit, windowMs);
   if (!result.allowed) {
     const retryAfter = Math.max(1, Math.ceil((result.resetAt - nowImpl()) / 1000));
     const error = new AdminPortalError(429, "ADMIN_RATE_LIMITED");
     error.retryAfter = retryAfter;
     throw error;
   }
+}
+
+function consumeAdminReadRateLimit(rateLimiter, ip, nowImpl) {
+  consumeBoundedAdminReadRateLimit(
+    rateLimiter,
+    "admin-read",
+    ADMIN_READ_LIMIT,
+    ADMIN_READ_WINDOW_MS,
+    ip,
+    nowImpl,
+  );
+}
+
+function consumeAdminUsersReadRateLimit(rateLimiter, ip, nowImpl) {
+  consumeBoundedAdminReadRateLimit(
+    rateLimiter,
+    "admin-users-read",
+    ADMIN_USERS_READ_LIMIT,
+    ADMIN_USERS_READ_WINDOW_MS,
+    ip,
+    nowImpl,
+  );
+}
+
+function consumeAdminSystemReadRateLimit(rateLimiter, ip, nowImpl) {
+  consumeBoundedAdminReadRateLimit(
+    rateLimiter,
+    "admin-system-read",
+    ADMIN_SYSTEM_READ_LIMIT,
+    ADMIN_SYSTEM_READ_WINDOW_MS,
+    ip,
+    nowImpl,
+  );
 }
 
 function requireAdminApiSession(req, adminSessions) {
@@ -329,6 +374,64 @@ async function handleAdminReadApi({
   return true;
 }
 
+async function handleAdminManagementReadApi({
+  pathname,
+  method,
+  req,
+  res,
+  url,
+  ip,
+  adminToken,
+  adminSessions,
+  adminUsersReadRateLimiter,
+  adminSystemReadRateLimiter,
+  adminManagementReadModels,
+  nowImpl,
+}) {
+  if (pathname !== "/admin/api/users" && pathname !== "/admin/api/system") {
+    return false;
+  }
+  if (method !== "GET") {
+    sendAdminJson(res, 405, { ok: false, error: { code: "ADMIN_METHOD_NOT_ALLOWED" } });
+    return true;
+  }
+
+  requireConfiguredAdminToken(adminToken);
+  requireAdminApiSession(req, adminSessions);
+
+  if (pathname === "/admin/api/users") {
+    consumeAdminUsersReadRateLimit(adminUsersReadRateLimiter, ip, nowImpl);
+    const allowedQueryKeys = new Set(["limit", "cursor", "q"]);
+    if ([...url.searchParams.keys()].some((key) => !allowedQueryKeys.has(key))) {
+      throw new AdminPortalError(400, "INVALID_ADMIN_QUERY");
+    }
+    const query = normalizeAdminUsersQuery({
+      limit: url.searchParams.get("limit"),
+      cursor: url.searchParams.get("cursor"),
+      q: url.searchParams.get("q"),
+    });
+    const handler = adminManagementReadModels?.users;
+    if (typeof handler !== "function") {
+      throw new AdminPortalError(503, "ADMIN_STORAGE_UNAVAILABLE");
+    }
+    const payload = await handler(query);
+    sendAdminJson(res, 200, { ok: true, ...payload });
+    return true;
+  }
+
+  consumeAdminSystemReadRateLimit(adminSystemReadRateLimiter, ip, nowImpl);
+  if ([...url.searchParams.keys()].length > 0) {
+    throw new AdminPortalError(400, "INVALID_ADMIN_QUERY");
+  }
+  const handler = adminManagementReadModels?.system;
+  if (typeof handler !== "function") {
+    throw new AdminPortalError(503, "ADMIN_STORAGE_UNAVAILABLE");
+  }
+  const payload = await handler();
+  sendAdminJson(res, 200, { ok: true, ...payload });
+  return true;
+}
+
 function stableAdminErrorCode(error) {
   const allowed = new Set([
     "ADMIN_AUTH_NOT_CONFIGURED",
@@ -352,7 +455,10 @@ export function createAdminPortal({
   adminSessionTtlMs,
   adminLoginRateLimiter,
   adminReadRateLimiter,
+  adminUsersReadRateLimiter,
+  adminSystemReadRateLimiter,
   adminReadModels,
+  adminManagementReadModels,
   nowImpl = () => Date.now(),
   publicBaseUrl,
   adminDistDir = DEFAULT_ADMIN_DIST_DIR,
@@ -366,6 +472,12 @@ export function createAdminPortal({
   }
   if (!adminReadRateLimiter || typeof adminReadRateLimiter.consume !== "function") {
     throw new TypeError("adminReadRateLimiter is required");
+  }
+  if (!adminUsersReadRateLimiter || typeof adminUsersReadRateLimiter.consume !== "function") {
+    throw new TypeError("adminUsersReadRateLimiter is required");
+  }
+  if (!adminSystemReadRateLimiter || typeof adminSystemReadRateLimiter.consume !== "function") {
+    throw new TypeError("adminSystemReadRateLimiter is required");
   }
 
   return {
@@ -463,6 +575,25 @@ export function createAdminPortal({
             adminSessions,
             adminReadRateLimiter,
             adminReadModels,
+            nowImpl,
+          })
+        ) {
+          return true;
+        }
+
+        if (
+          await handleAdminManagementReadApi({
+            pathname,
+            method,
+            req,
+            res,
+            url,
+            ip,
+            adminToken,
+            adminSessions,
+            adminUsersReadRateLimiter,
+            adminSystemReadRateLimiter,
+            adminManagementReadModels,
             nowImpl,
           })
         ) {
