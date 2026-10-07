@@ -36,6 +36,21 @@ The manifest grants `http://*/*` and `https://*/*` host permissions. The bootstr
 
 The corpus is executed by `src/content/detector/compatibilityCorpus.test.ts`. Contract and fixture data live in `src/content/detector/testFixtures/compatibilityFixtures.ts`. Known limitations are recorded as expected outcomes; they are tested behavior, not detector test failures. A future compatibility fix must add or update a deterministic fixture before changing the production detector.
 
+
+## Live-site acceptance authority
+
+The matrix above is the deterministic **offline** compatibility corpus. Phase 13 adds a separate live-site authority layer; passing an offline row does not by itself claim that the current external platform page was exercised.
+
+| Live surface | Authority | Current evidence | Mutation/fill claim |
+| --- | --- | --- | --- |
+| Pintia public programming problem | LIVE_PUBLIC_READONLY_PASS | Real Chrome loads the public Pintia problem, the production content runtime completes viewport detection, finds one `short_answer` candidate with stable identity evidence, and records a Phase 13 evidence artifact | Read-only detection only; no solve, answer fill, advance, or submit is attempted |
+| Pintia judge / single-choice question list | OFFLINE_REAL_PLATFORM_DERIVED_ONLY | COMPAT-08 and Phase 9B deterministic regressions | Offline fill contract only; no current live-page claim |
+| Zhihuishu / Polymas coursework/exam surfaces | AUTH_REQUIRED_NOT_RUN / NO_STABLE_PUBLIC_TARGET | Site-specialized sanitized fixtures remain regression evidence | No live authenticated claim; no CI login bypass |
+| Cross-origin iframe DOM | KNOWN_ARCHITECTURE_LIMITATION | Architecture documentation and controlled tests | No live support claim |
+| Closed shadow roots | UNSUPPORTED_BY_BROWSER_SECURITY | Browser DOM boundary | No support claim |
+
+The live Pintia gate additionally proves that page-owned form-control state is unchanged and that no page `click`, `input`, `change`, or `submit` event is produced by the read-only acceptance path. Its retained evidence stores preview length/hash and identity-presence flags rather than copying the full third-party problem statement. See [PHASE13-REAL-SITE-ACCEPTANCE.md](./PHASE13-REAL-SITE-ACCEPTANCE.md).
+
 ## Phase 9B compatibility finding (historical record; merged and closed)
 
 This section is the historical record of the Phase 9A/9B defect cycle. The repair is part of the authoritative main branch, was independently reviewed and merged, and Issue #13 is closed. The compatibility corpus above treats COMPAT-08 as SUPPORTED.
