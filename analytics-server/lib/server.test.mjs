@@ -645,25 +645,27 @@ describe("analytics handler", () => {
     expect(parsePayload(afterRestart.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
   });
 
-  it("E-AUDIT-INTEGRATION-01 persists Audit across process restart while sessions fail closed", async () => {
+  it("E-AUDIT-INTEGRATION-01 persists Audit across restart while auth and pseudonym keys stay independent", async () => {
     const dbFile = path.join(
       os.tmpdir(),
       `quiz-solver-admin-audit-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`,
     );
     const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    const auditTagKey = "dedicated-audit-tag-key-at-least-32-bytes";
     resetDbConnectionForTests();
     process.env.ANALYTICS_DB_FILE = dbFile;
 
     try {
       const first = createAnalyticsHandler({
-        adminToken: "short-admin",
+        adminToken: "short-admin-one",
+        adminAuditTagKey: auditTagKey,
         isMailerConfigured: () => false,
         sendVerificationCodeEmail: vi.fn(),
         createAdminSessionToken: () => "first-process-session",
         createAdminCsrfToken: () => "first-process-csrf",
         nowImpl: () => Date.parse("2026-10-07T12:00:00.000Z"),
       });
-      const firstLogin = await login(first, "short-admin");
+      const firstLogin = await login(first, "short-admin-one");
       const oldCookie = sessionCookie(firstLogin.res);
 
       const firstAudit = await invoke(first, {
@@ -680,13 +682,21 @@ describe("analytics handler", () => {
       ]);
       const firstIpHash = firstEvents[0].ipHash;
       expect(firstIpHash).toMatch(/^ip_[0-9a-f]{16}$/);
-      expect(firstAudit.res.payload).not.toContain("short-admin");
-      expect(firstAudit.res.payload).not.toContain("first-process-session");
+      for (const forbidden of [
+        "short-admin-one",
+        auditTagKey,
+        "first-process-session",
+      ]) {
+        expect(firstAudit.res.payload).not.toContain(forbidden);
+      }
 
       resetDbConnectionForTests();
 
       const restarted = createAnalyticsHandler({
-        adminToken: "short-admin",
+        // Rotate the authentication secret but retain the *independent* Audit
+        // tag key. Pseudonym stability must not depend on the login secret.
+        adminToken: "short-admin-two",
+        adminAuditTagKey: auditTagKey,
         isMailerConfigured: () => false,
         sendVerificationCodeEmail: vi.fn(),
         createAdminSessionToken: () => "second-process-session",
@@ -700,7 +710,7 @@ describe("analytics handler", () => {
       });
       expect(oldSessionAfterRestart.res.statusCode).toBe(401);
 
-      const secondLogin = await login(restarted, "short-admin");
+      const secondLogin = await login(restarted, "short-admin-two");
       const newCookie = sessionCookie(secondLogin.res);
       const persistedAudit = await invoke(restarted, {
         url: "/admin/api/audit",
@@ -717,6 +727,8 @@ describe("analytics handler", () => {
       expect(events[1].createdAt).toBe("2026-10-07T12:00:00.000Z");
       expect(events[0].ipHash).toBe(firstIpHash);
       expect(events[1].ipHash).toBe(firstIpHash);
+      expect(persistedAudit.res.payload).not.toContain("short-admin-two");
+      expect(persistedAudit.res.payload).not.toContain(auditTagKey);
     } finally {
       resetDbConnectionForTests();
       if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
