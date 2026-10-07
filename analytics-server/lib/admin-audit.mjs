@@ -12,6 +12,14 @@ const MAX_EVENT_LENGTH = 64;
 const MAX_OUTCOME_LENGTH = 32;
 const MAX_METADATA_VALUE_LENGTH = 120;
 const ALLOWED_METADATA_KEYS = new Set(["method", "path", "reason"]);
+const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+const ALLOWED_REASONS = new Set([
+  "invalid_credentials",
+  "origin_mismatch",
+  "admin_csrf_rejected",
+  "admin_csrf_required",
+  "unsupported_mutation",
+]);
 
 export const ADMIN_AUDIT_EVENTS = Object.freeze({
   LOGIN: "admin_login",
@@ -120,7 +128,28 @@ function sanitizeMetadata(metadata) {
     })) {
       continue;
     }
-    safe[key] = value;
+
+    if (key === "method") {
+      if (!ALLOWED_METHODS.has(value)) continue;
+      safe.method = value;
+      continue;
+    }
+    if (key === "path") {
+      if (
+        !value.startsWith("/admin") ||
+        value.includes("?") ||
+        value.includes("#") ||
+        !/^\/[A-Za-z0-9._~/-]+$/.test(value)
+      ) {
+        continue;
+      }
+      safe.path = value;
+      continue;
+    }
+    if (key === "reason") {
+      if (!ALLOWED_REASONS.has(value)) continue;
+      safe.reason = value;
+    }
   }
   return Object.keys(safe).length > 0 ? safe : null;
 }
@@ -137,6 +166,15 @@ function toDto(entry) {
   }
   const createdAt = Number(entry.createdAt);
   if (!Number.isSafeInteger(createdAt) || createdAt < 0) throw new AdminAuditError();
+  if (entry.ipHash != null && !/^ip_[0-9a-f]{16}$/.test(String(entry.ipHash))) {
+    throw new AdminAuditError();
+  }
+  if (
+    entry.sessionTag != null &&
+    !/^session_[0-9a-f]{16}$/.test(String(entry.sessionTag))
+  ) {
+    throw new AdminAuditError();
+  }
 
   return {
     auditId: entry.auditId,
@@ -174,8 +212,13 @@ export function createAdminAuditRecorder({
       throw new AdminAuditError("ADMIN_INTERNAL_ERROR", 500);
     }
 
+    const auditId = String(generateIdImpl());
+    if (!boundedString(auditId, 128)) {
+      throw new AdminAuditError("ADMIN_INTERNAL_ERROR", 500);
+    }
+
     const entry = {
-      auditId: String(generateIdImpl()),
+      auditId,
       event,
       outcome,
       createdAt,
