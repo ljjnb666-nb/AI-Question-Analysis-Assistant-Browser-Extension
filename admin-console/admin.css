@@ -1962,9 +1962,9 @@ a {
   justify-content: space-between;
   gap: 16px;
   padding: 14px 16px;
-  border: 1px solid var(--admin-border);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--admin-surface);
+  background: var(--surface);
 }
 
 .admin-audit-toolbar-title {
@@ -1986,18 +1986,18 @@ a {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
-  background: var(--admin-muted-bg);
+  background: var(--surface-subtle);
 }
 
 .admin-audit-outcome-success {
-  color: var(--admin-success-text);
-  background: var(--admin-success-bg);
+  color: var(--success);
+  background: var(--success-subtle);
 }
 
 .admin-audit-outcome-failure,
 .admin-audit-outcome-rejected {
-  color: var(--admin-danger-text);
-  background: var(--admin-danger-bg);
+  color: var(--danger);
+  background: var(--danger-subtle);
 }
 
 .admin-audit-tag {
@@ -2017,10 +2017,10 @@ a {
 }
 
 .admin-mobile-audit-card {
-  border: 1px solid var(--admin-border);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px;
-  background: var(--admin-surface);
+  background: var(--surface);
 }
 
 .admin-mobile-audit-header {
@@ -2030,7 +2030,7 @@ a {
   gap: 12px;
   padding-bottom: 10px;
   margin-bottom: 8px;
-  border-bottom: 1px solid var(--admin-border);
+  border-bottom: 1px solid var(--border);
 }
 
 @media (max-width: 640px) {
