@@ -58,7 +58,12 @@ function validBoundedString(value, maxLength) {
   return typeof value === "string" &&
     value.length > 0 &&
     value.length <= maxLength &&
-    value.trim() === value;
+    value.trim() === value &&
+    !hasAsciiControlCharacters(value);
+}
+
+function compareBinaryStrings(left, right) {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
 }
 
 function normalizeTimestamp(value) {
@@ -162,7 +167,13 @@ function toUserItem(row) {
 
   const createdAt = normalizeTimestamp(row.createdAt);
   const linkedDeviceCount = Number(row.linkedDeviceCount);
-  if (!Number.isSafeInteger(linkedDeviceCount) || linkedDeviceCount < 0) {
+  const invalidDeviceCount = Number(row.invalidDeviceCount ?? 0);
+  if (
+    !Number.isSafeInteger(linkedDeviceCount) ||
+    linkedDeviceCount < 0 ||
+    !Number.isSafeInteger(invalidDeviceCount) ||
+    invalidDeviceCount !== 0
+  ) {
     throw new AdminManagementReadModelError();
   }
 
@@ -245,7 +256,15 @@ function querySqliteUsers(database, query, now) {
       p.email AS email,
       p.createdAt AS createdAt,
       COUNT(d.deviceId) AS linkedDeviceCount,
-      MAX(d.lastSeenAt) AS latestDeviceSeenAt
+      MAX(d.lastSeenAt) AS latestDeviceSeenAt,
+      SUM(
+        CASE
+          WHEN d.deviceId IS NOT NULL
+            AND (length(d.deviceId) < 1 OR length(d.deviceId) > 256)
+          THEN 1
+          ELSE 0
+        END
+      ) AS invalidDeviceCount
     FROM page_users p
     LEFT JOIN devices d ON d.userId = p.userId
     GROUP BY p.userId, p.email, p.createdAt
@@ -260,7 +279,7 @@ function compareUsers(left, right) {
   const leftCreatedAt = normalizeTimestamp(left.createdAt);
   const rightCreatedAt = normalizeTimestamp(right.createdAt);
   if (leftCreatedAt !== rightCreatedAt) return rightCreatedAt - leftCreatedAt;
-  return left.userId < right.userId ? 1 : left.userId > right.userId ? -1 : 0;
+  return -compareBinaryStrings(left.userId, right.userId);
 }
 
 function matchesCursor(user, cursor) {
@@ -268,7 +287,7 @@ function matchesCursor(user, cursor) {
   const createdAt = normalizeTimestamp(user.createdAt);
   if (createdAt < cursor.createdAt) return true;
   if (createdAt > cursor.createdAt) return false;
-  return user.userId < cursor.userId;
+  return compareBinaryStrings(user.userId, cursor.userId) < 0;
 }
 
 function queryJsonUsers(db, query, now) {
