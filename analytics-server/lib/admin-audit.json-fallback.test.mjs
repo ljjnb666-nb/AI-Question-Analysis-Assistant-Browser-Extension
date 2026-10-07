@@ -108,4 +108,58 @@ describe("Phase 11E Admin Audit JSON compatibility", () => {
     expect(pruneAdminAuditEventsInStorage(current)).toBeGreaterThan(0);
     expect(loadDb().admin_audit_events).toEqual([]);
   });
+
+  it("E-AUDIT-J02 reads audit rows without migrating or rewriting unrelated JSON state", () => {
+    const file = path.join(tempDir, "analytics-db.json");
+    const legacy = {
+      analyticsPrivacyEpoch: 0,
+      users: [],
+      devices: [
+        {
+          deviceId: "legacy-device",
+          userId: null,
+          installedAt: null,
+          createdAt: 1,
+          lastSeenAt: 1,
+        },
+      ],
+      analytics_events: [
+        {
+          eventId: "old-event",
+          event: "parse_success",
+          ts: 1,
+          eventDate: "1970-01-01",
+          host: null,
+          duration: null,
+          extensionVersion: null,
+          deviceId: "legacy-device",
+          userId: null,
+          data: null,
+          receivedAt: 1,
+        },
+      ],
+      email_verification_codes: [],
+      admin_audit_events: [
+        {
+          auditId: "adm_read_only",
+          event: "admin_login",
+          outcome: "success",
+          createdAt: Date.parse("2026-10-07T12:00:00.000Z"),
+          ipHash: null,
+          sessionTag: null,
+          metadata: null,
+        },
+      ],
+    };
+    fs.writeFileSync(file, JSON.stringify(legacy, null, 2), "utf8");
+    const before = fs.readFileSync(file, "utf8");
+
+    const response = createAdminAuditReadModel({
+      now: () => Date.parse("2026-10-07T12:01:00.000Z"),
+    }).list();
+
+    expect(response.data.map((item) => item.auditId)).toEqual(["adm_read_only"]);
+    expect(fs.readFileSync(file, "utf8")).toBe(before);
+  });
+
 });
