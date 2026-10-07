@@ -82,6 +82,7 @@ function createHarness({
   adminReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
   adminUsersReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
   adminSystemReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
+  adminAuditReadRateLimiter = { consume: () => ({ allowed: true, resetAt: 999_999 }) },
   adminReadModels = {
     overview: vi.fn((days) => ({ generatedAt: "2026-10-07T00:00:00.000Z", analyticsScope: "opt_in_only", window: { days } })),
     timeseries: vi.fn((days) => ({ kind: "timeseries", analyticsScope: "opt_in_only", window: { days }, data: [] })),
@@ -106,11 +107,20 @@ function createHarness({
       analytics: { retentionDays: 90, privacyEpoch: 1 },
     })),
   },
+  adminAuditReadModel = {
+    list: vi.fn((query) => ({
+      generatedAt: "2026-10-07T00:00:00.000Z",
+      data: [],
+      page: { limit: query.limit, nextCursor: null },
+    })),
+  },
+  adminAuditRecorder = vi.fn(),
   isProduction = () => false,
 } = {}) {
   let sequence = 0;
   const adminSessions = createAdminSessionStore({
     createToken: () => `session-${++sequence}`,
+    createCsrfToken: () => `csrf-${sequence}`,
     maxSessions: 64,
     now: nowImpl,
     ttlMs,
@@ -123,8 +133,11 @@ function createHarness({
     adminReadRateLimiter,
     adminUsersReadRateLimiter,
     adminSystemReadRateLimiter,
+    adminAuditReadRateLimiter,
     adminReadModels,
     adminManagementReadModels,
+    adminAuditReadModel,
+    adminAuditRecorder,
     nowImpl,
     publicBaseUrl,
     adminDistDir,
@@ -136,6 +149,8 @@ function createHarness({
     adminDistDir,
     adminReadModels,
     adminManagementReadModels,
+    adminAuditReadModel,
+    adminAuditRecorder,
   };
 }
 
@@ -669,10 +684,21 @@ describe("Phase 11B1-R1 admin portal authority", () => {
     const signedIn = await login(portal);
     const cookie = cookiePair(signedIn.res);
 
+    const sessionState = await invoke(portal, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    const csrfToken = parsePayload(sessionState.res).csrfToken;
+
     const logout = await invoke(portal, {
       method: "POST",
       url: "/admin/logout",
-      headers: { cookie, origin: "https://analytics.example.test" },
+      headers: {
+        cookie,
+        origin: "https://analytics.example.test",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ csrfToken }).toString(),
     });
     expect(logout.res.statusCode).toBe(303);
     expect(logout.res.headers.Location).toBe("/admin/login");
