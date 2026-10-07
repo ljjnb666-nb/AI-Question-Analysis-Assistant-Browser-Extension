@@ -17,6 +17,7 @@ Status entries describe merged, frozen behavior. This document deliberately does
 | REL-RATE-01 | Rate limiter resource bounding (per-process, bounded per namespace) | COMPLETE |
 | REL-KEY-01 | Local credential storage versioning (`qse:v1` envelope, legacy semantics) | COMPLETE |
 | REL-DOC-01 | Documentation finalization | FINAL GATE — complete only when this document is on main, exact merge-SHA CI passes, and Issue #18 contains the final completion record |
+| RC-BROWSER-01 | Phase 12B real-browser `activeTab` action/grant lifecycle acceptance | IN REVIEW — complete after exact merge-SHA CI and `browser_acceptance` evidence pass on main |
 
 REL-DOC-01 is the final documentation gate. Before that gate is satisfied, REL-DOC-01 is in review. After Issue #18 is closed with the final completion record — which records the merge SHA and the passing post-merge CI run on that exact SHA — the gate is satisfied and REL-DOC-01 is complete. Issue #18 remains OPEN until then.
 
@@ -29,6 +30,7 @@ These invariants are frozen release behavior. Release hardening work must not we
 - **ADMIN_SECURITY_FAILS_CLOSED_IN_PRODUCTION** — the analytics admin surface fails closed when the admin token is not configured.
 - **RELEASE_CI_BUILDS_THE_EXACT_COMMIT** — every CI job checks out and asserts the exact event/PR-head SHA before building or testing.
 - **RELEASE_CI_RUNS_REAL_EXTENSION_SMOKE_TESTS** — CI runs real extension Playwright E2E against the built artifact, not mocks alone.
+- **REAL_BROWSER_ACTIVE_TAB_AUTHORITY_IS_GATED** — CI uses a real OS-level extension action invocation to prove positive screenshot authority, tab/origin lifecycle scoping, and fail-closed denial without a valid grant.
 - **PERMISSIONS_HAVE_DOCUMENTED_RUNTIME_JUSTIFICATION** — every retained permission and host authority is documented with its runtime justification in [PERMISSIONS.md](./PERMISSIONS.md) and is verified against source and built manifests.
 - **RELEASE_HARDENING_MUST_NOT_WEAKEN_PHASE_8_AUTHORITY** — the Phase 8 fill authority (fresh semantic mapping, validated answer plans, authoritative readback) is the floor; hardening may only tighten it.
 - **NO_AUTOMATIC_SUBMISSION** — the extension parses and fills answers but never submits them; submission stays user-controlled.
@@ -44,7 +46,6 @@ These known safe limitations and unverified browser boundaries are explicitly re
 2. **Pointerdown-driven custom widgets** — a widget that commits a choice on `pointerdown` can produce a partial mutation whose effect cannot be proven; automation stops safely instead of claiming success (COMPAT-15).
 3. **Cross-origin iframes** — the current content runtime injects into the top frame only; there is no coordinated per-frame runtime yet, so questions living in a separate cross-origin frame are not handled (KNOWN_ARCHITECTURE_LIMITATION).
 4. **Closed shadow roots** — page-owned closed shadow roots are not exposed to extension DOM traversal and are unsupported by browser security design (UNSUPPORTED_BY_BROWSER_SECURITY).
-5. **`activeTab` real toolbar screenshot success/lifecycle** — automated CI proves only fail-closed behavior (`AUTOMATED_ACTIVE_TAB_UNAVAILABLE_FAILS_CLOSED`). Real user-activation success acceptance (`REAL_USER_ACTIVATION_SCREENSHOT_SUCCESS`) and the grant-lifecycle scenarios remain NOT RUN (see [PERMISSIONS.md](./PERMISSIONS.md)).
 
 ## Release gates
 
@@ -54,7 +55,8 @@ Required CI jobs:
 
 - `check` — lint + typecheck + unit tests (`npm run check`)
 - `build_artifact` — production build, artifact verifier and permission verifier tests, `npm run verify:artifact`, upload of the verified artifact
-- `e2e` — downloads the same verified artifact produced by `build_artifact`, re-verifies it, and runs real extension Playwright E2E (`test:e2e:dist`) against it
+- `e2e` — downloads the same verified artifact produced by `build_artifact`, re-verifies it, and runs the baseline real extension Playwright E2E (`test:e2e:dist`) against it
+- `browser_acceptance` — downloads that same verified extension artifact and runs the Phase 12B OS-level action/`activeTab` lifecycle gate (`test:e2e:phase12b:dist`); `rc_bundle` waits for this job
 
 **Post-merge.** CI on the exact merge SHA must pass before a release stage freeze. The merge-SHA run is the authoritative green signal for the frozen state.
 
@@ -66,5 +68,4 @@ The following are explicitly **not** release-hardening blockers and are **not** 
 - Expanded site compatibility
 - Cross-origin frame architecture (per-frame runtime, frame identity, message authority)
 - Pointerdown-driven widget compatibility redesign
-- Manual `activeTab` lifecycle evidence (real-toolbar success and grant-lifecycle scenarios)
 - Other future performance/refactor work
