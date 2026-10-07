@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  ADMIN_AUDIT_RETENTION_MS,
   generateId,
   readAdminAuditEventsInStorage,
   recordAdminAuditEventInStorage,
@@ -251,6 +252,7 @@ export function createAdminAuditReadModel({
           limit: query.limit + 1,
           cursorCreatedAt: query.cursor?.createdAt ?? null,
           cursorAuditId: query.cursor?.auditId ?? null,
+          cutoffCreatedAt: current - ADMIN_AUDIT_RETENTION_MS,
         });
       } catch (error) {
         if (error instanceof AdminAuditError) throw error;
