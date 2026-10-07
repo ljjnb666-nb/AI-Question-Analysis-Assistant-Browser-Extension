@@ -587,14 +587,27 @@ describe("analytics handler", () => {
     expect(session.res.statusCode).toBe(200);
   });
 
-  it("revokes the admin session on logout and clears the admin-path cookie", async () => {
-    const handler = createHandler({ createAdminSessionToken: () => "short-session-credential" });
+  it("revokes the admin session on CSRF-protected logout and clears the admin-path cookie", async () => {
+    const handler = createHandler({
+      createAdminSessionToken: () => "short-session-credential",
+      createAdminCsrfToken: () => "short-csrf-credential",
+    });
     const signedIn = await login(handler);
     const cookie = sessionCookie(signedIn.res);
+    const state = await invoke(handler, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    const csrfToken = parsePayload(state.res).csrfToken;
+
     const loggedOut = await invoke(handler, {
       method: "POST",
       url: "/admin/logout",
-      headers: { cookie },
+      headers: {
+        cookie,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ csrfToken }).toString(),
     });
     expect(loggedOut.res.statusCode).toBe(303);
     expect(loggedOut.res.headers.Location).toBe("/admin/login");
@@ -604,6 +617,32 @@ describe("analytics handler", () => {
     const session = await invoke(handler, { url: "/admin/api/session", headers: { cookie } });
     expect(session.res.statusCode).toBe(401);
     expect(parsePayload(session.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
+  });
+
+  it("E-RESTART-01 invalidates process-local Admin sessions after handler restart", async () => {
+    const first = createHandler({
+      createAdminSessionToken: () => "restart-session-credential",
+      createAdminCsrfToken: () => "restart-csrf-credential",
+    });
+    const signedIn = await login(first);
+    const cookie = sessionCookie(signedIn.res);
+
+    const beforeRestart = await invoke(first, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    expect(beforeRestart.res.statusCode).toBe(200);
+
+    const restarted = createHandler({
+      createAdminSessionToken: () => "new-process-session",
+      createAdminCsrfToken: () => "new-process-csrf",
+    });
+    const afterRestart = await invoke(restarted, {
+      url: "/admin/api/session",
+      headers: { cookie },
+    });
+    expect(afterRestart.res.statusCode).toBe(401);
+    expect(parsePayload(afterRestart.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
   });
 
   it("returns the stable Admin API not-found contract for unknown namespace routes", async () => {
