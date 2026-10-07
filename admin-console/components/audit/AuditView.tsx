@@ -53,11 +53,28 @@ function errorMessage(error: unknown): string {
   }
 }
 
+function reasonLabel(reason: string | undefined): string | undefined {
+  switch (reason) {
+    case "invalid_credentials":
+      return "凭据无效";
+    case "origin_mismatch":
+      return "来源不匹配";
+    case "admin_csrf_rejected":
+      return "CSRF 校验失败";
+    case "admin_csrf_required":
+      return "缺少 CSRF 凭据";
+    case "unsupported_mutation":
+      return "未支持的管理变更";
+    default:
+      return undefined;
+  }
+}
+
 function detailText(item: AdminAuditItem): string {
   const parts = [
     item.metadata?.method,
     item.metadata?.path,
-    item.metadata?.reason,
+    reasonLabel(item.metadata?.reason),
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(" · ") : "—";
 }
