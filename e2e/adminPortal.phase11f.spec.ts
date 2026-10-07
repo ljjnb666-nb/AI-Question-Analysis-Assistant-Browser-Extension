@@ -71,11 +71,13 @@ async function login(page: Page): Promise<void> {
     ),
     page.getByRole("button", { name: "登录" }).click(),
   ]);
-  const loginBody = await loginResponse.text();
-  expect(
-    loginResponse.status(),
-    `Admin login POST failed with ${loginResponse.status()}: ${loginBody}. Server output: ${serverOutput.slice(-2000)}`,
-  ).toBe(303);
+  const loginStatus = loginResponse.status();
+  if (loginStatus !== 303) {
+    const loginBody = await loginResponse.text();
+    throw new Error(
+      `Admin login POST failed with ${loginStatus}: ${loginBody}. Server output: ${serverOutput.slice(-2000)}`,
+    );
+  }
 
   await page.waitForURL(`${baseUrl}/admin`, { waitUntil: "domcontentloaded" });
 
