@@ -1,20 +1,17 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Sidebar } from "./Sidebar";
 import { PageHeader } from "./PageHeader";
-import {
-  MetricPlaceholderCard,
-  EmptyStateNotice,
-  PlaceholderSection,
-  TablePlaceholder,
-} from "./EmptyState";
+import { EmptyStateNotice } from "./EmptyState";
 import { OverviewView } from "./analytics/OverviewView";
 import { AnalyticsView } from "./analytics/AnalyticsView";
 import { UsersView } from "./users/UsersView";
 import { SystemView } from "./system/SystemView";
+import { AuditView } from "./audit/AuditView";
 
 interface AdminShellProps {
   currentPath: string;
   expiresAt: string | null;
+  csrfToken: string;
 }
 
 interface PageMeta {
@@ -48,6 +45,7 @@ const PAGE_REGISTRY: Record<string, PageMeta> = {
 export function AdminShell({
   currentPath,
   expiresAt,
+  csrfToken,
 }: AdminShellProps): React.JSX.Element {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -105,39 +103,7 @@ export function AdminShell({
         return <SystemView />;
 
       case "/admin/audit":
-        return (
-          <>
-            <EmptyStateNotice
-              title="审计记录尚未接入"
-              description="管理后台的安全与操作审计流水将在审计模块接入后展示。"
-            />
-            <section className="admin-grid-metrics" aria-label="审计指标占位">
-              <MetricPlaceholderCard
-                label="安全审计事件"
-                statusText="等待审计接入"
-              />
-              <MetricPlaceholderCard
-                label="敏感操作记录"
-                statusText="等待审计接入"
-              />
-            </section>
-            <PlaceholderSection
-              title="安全与操作审计流水"
-              subtitle="展示会话变更、登录记录及管理配置审计"
-            >
-              <TablePlaceholder
-                headers={[
-                  "记录时间",
-                  "操作类型",
-                  "操作主体",
-                  "目标对象",
-                  "操作结果",
-                ]}
-                emptyMessage="暂无审计记录 · 等待接入"
-              />
-            </PlaceholderSection>
-          </>
-        );
+        return <AuditView />;
 
       default:
         return (
@@ -156,6 +122,7 @@ export function AdminShell({
         isMobileOpen={isMobileOpen}
         onCloseMobile={closeMobile}
         closeButtonRef={closeButtonRef}
+        csrfToken={csrfToken}
       />
       <div className="admin-main-wrapper">
         <PageHeader
