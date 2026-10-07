@@ -1,4 +1,6 @@
 import React from "react";
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { AdminApp, normalizePath } from "./main";
@@ -1524,7 +1526,7 @@ describe("Admin Console UI & Analytics UI Tests", () => {
       expect(formatUptimeDuration(187200)).toBe("2 天 4 小时");
       expect(formatUptimeDuration(86400)).toBe("1 天");
       expect(formatUptimeDuration(0)).toBe("0 秒");
-      expect(formatUptimeDuration(-10)).toBe("0 秒");
+      expect(formatUptimeDuration(-10)).toBe("—");
     });
 
     it("maps management error codes to Chinese localized messages", () => {
@@ -1545,6 +1547,18 @@ describe("Admin Console UI & Analytics UI Tests", () => {
       expect(formatAdminDateTime(null, "暂无观测")).toBe("暂无观测");
       expect(formatAdminDateTime(undefined, "—")).toBe("—");
       expect(formatAdminDateTime("invalid-date", "暂无观测")).toBe("暂无观测");
+    });
+
+    it("formats uptime duration safely and handles invalid / negative values", () => {
+      expect(formatUptimeDuration(-10)).toBe("—");
+      expect(formatUptimeDuration(Number.NaN)).toBe("—");
+      expect(formatUptimeDuration(Infinity)).toBe("—");
+      expect(formatUptimeDuration(-0.5)).toBe("—");
+      expect(formatUptimeDuration(0)).toBe("0 秒");
+      expect(formatUptimeDuration(45)).toBe("45 秒");
+      expect(formatUptimeDuration(125)).toBe("2 分 5 秒");
+      expect(formatUptimeDuration(3665)).toBe("1 小时 1 分");
+      expect(formatUptimeDuration(90000)).toBe("1 天 1 小时");
     });
   });
 
@@ -2189,6 +2203,243 @@ describe("Admin Console UI & Analytics UI Tests", () => {
       expect(bodyText).not.toContain("邮件发送成功");
       expect(bodyText).not.toContain("分布式");
       expect(bodyText).not.toContain("集群");
+    });
+  });
+
+  describe("Phase 11D2-R1 Regression Tests", () => {
+    it("D2-R1-USERS-01: aborted load-more cannot poison next first-page pagination state (search supersede)", async () => {
+      let loadMoreSignal: AbortSignal | null | undefined;
+      let loadMoreFetchCount = 0;
+
+      vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+        const url = String(input);
+        const signal = (init as RequestInit)?.signal;
+
+        if (url.includes("cursor=opaque-next-cursor-token-123")) {
+          loadMoreFetchCount++;
+          loadMoreSignal = signal;
+          return new Promise<Response>(() => {});
+        }
+
+        if (url.includes("cursor=cursor_bob_page_2")) {
+          loadMoreFetchCount++;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ...MOCK_USERS,
+              data: [{ ...MOCK_USERS.data[1], userId: "user_bob_page_2", email: "bob2@example.com" }],
+              query: { q: "bob" },
+              page: { limit: 50, nextCursor: null },
+            }),
+          } as Response);
+        }
+
+        if (url.includes("q=bob")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ...MOCK_USERS,
+              data: [MOCK_USERS.data[1]],
+              query: { q: "bob" },
+              page: { limit: 50, nextCursor: "cursor_bob_page_2" },
+            }),
+          } as Response);
+        }
+
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => MOCK_USERS,
+        } as Response);
+      });
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      const initialLoadMoreBtn = screen.getByRole("button", { name: "加载更多" });
+      expect(initialLoadMoreBtn).toBeDefined();
+
+      // 1. Click 加载更多, putting it into loading state
+      act(() => {
+        fireEvent.click(initialLoadMoreBtn);
+      });
+
+      expect(screen.getByText("正在加载更多…")).toBeDefined();
+      expect(loadMoreFetchCount).toBe(1);
+
+      // 2. While load-more is pending, submit a new search for "bob"
+      const form = screen.getByRole("search");
+      const input = screen.getByPlaceholderText("搜索邮箱或用户 ID");
+      fireEvent.change(input, { target: { value: "bob" } });
+      act(() => {
+        fireEvent.submit(form);
+      });
+
+      // 3. Verify old cursor request gets aborted
+      expect(loadMoreSignal?.aborted).toBe(true);
+
+      // 4. Verify new first-page request resolves and button is cleanly enabled (not stuck on "正在加载更多…")
+      await waitFor(() => {
+        expect(screen.getAllByText("bob@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      const bobLoadMoreBtn = screen.getByRole("button", { name: "加载更多" });
+      expect(bobLoadMoreBtn).toBeDefined();
+      expect((bobLoadMoreBtn as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.queryByText("正在加载更多…")).toBeNull();
+
+      // 5. A new load-more click issues exactly one request with the new cursor
+      act(() => {
+        fireEvent.click(bobLoadMoreBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText("bob2@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+      expect(loadMoreFetchCount).toBe(2);
+    });
+
+    it("D2-R1-USERS-01b: clear search while load-more pending supersedes and cleans up pagination transient state", async () => {
+      let loadMoreSignal: AbortSignal | null | undefined;
+
+      vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+        const url = String(input);
+        const signal = (init as RequestInit)?.signal;
+
+        if (url.includes("cursor=opaque-next-cursor-token-123")) {
+          loadMoreSignal = signal;
+          return new Promise<Response>(() => {});
+        }
+
+        if (url.includes("q=alice")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ...MOCK_USERS,
+              data: [MOCK_USERS.data[0]],
+              query: { q: "alice" },
+              page: { limit: 50, nextCursor: "opaque-next-cursor-token-123" },
+            }),
+          } as Response);
+        }
+
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => MOCK_USERS,
+        } as Response);
+      });
+
+      render(<AdminShell currentPath="/admin/users" expiresAt={null} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+
+      // Search alice
+      const form = screen.getByRole("search");
+      const input = screen.getByPlaceholderText("搜索邮箱或用户 ID");
+      fireEvent.change(input, { target: { value: "alice" } });
+      act(() => {
+        fireEvent.submit(form);
+      });
+
+      // Wait for alice search results to resolve
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "加载更多" })).toBeDefined();
+        expect(screen.getByRole("button", { name: "清除搜索输入" })).toBeDefined();
+      });
+
+      // Trigger load more
+      act(() => {
+        fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
+      });
+      expect(screen.getByText("正在加载更多…")).toBeDefined();
+
+      // Clear search while load-more is pending
+      const clearBtn = screen.getByRole("button", { name: "清除搜索输入" });
+      act(() => {
+        fireEvent.click(clearBtn);
+      });
+
+      // Old cursor request gets aborted immediately
+      expect(loadMoreSignal?.aborted).toBe(true);
+
+      // Verify first page is restored and load more button is healthy
+      await waitFor(() => {
+        expect(screen.getAllByText("bob@example.com").length).toBeGreaterThanOrEqual(1);
+      });
+      const restoredBtn = screen.getByRole("button", { name: "加载更多" });
+      expect((restoredBtn as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.queryByText("正在加载更多…")).toBeNull();
+    });
+
+    it("D2-R1-SYSTEM-01: failed refresh never presents stale snapshot as current data and shows explicit stale notice", async () => {
+      let callCount = 0;
+      vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => MOCK_SYSTEM_SQLITE,
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          json: async () => ({ ok: false, error: { code: "ADMIN_STORAGE_UNAVAILABLE" } }),
+        } as Response);
+      });
+
+      render(<AdminShell currentPath="/admin/system" expiresAt={null} />);
+
+      // Initial successful load
+      await waitFor(() => {
+        expect(screen.getByText("当前服务")).toBeDefined();
+        expect(screen.getByText("SQLite")).toBeDefined();
+      });
+
+      // Refresh fails
+      const refreshBtn = screen.getByRole("button", { name: "刷新系统状态" });
+      act(() => {
+        fireEvent.click(refreshBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/刷新失败: 系统状态暂时不可用/)).toBeDefined();
+      });
+
+      // Stale notice and disclosure must be visible
+      expect(screen.getByText(/以下为上次成功获取的数据/)).toBeDefined();
+      expect(screen.getAllByText(/数据生成时间:/).length).toBeGreaterThanOrEqual(1);
+
+      // Previous snapshot data is retained rather than disappearing
+      expect(screen.getByText("当前服务")).toBeDefined();
+      expect(screen.getByText("SQLite")).toBeDefined();
+
+      // Retry button inside the stale notice
+      expect(screen.getByRole("button", { name: "重试刷新系统状态" })).toBeDefined();
+    });
+
+    it("D2-R1-A11Y-01: mobile new controls meet touch-target CSS contract (>= 44px)", () => {
+      const cssPath = path.resolve(__dirname, "admin.css");
+      const cssContent = fs.readFileSync(cssPath, "utf-8");
+
+      expect(cssContent).toContain("@media (max-width: 640px)");
+      expect(cssContent).toMatch(/\.admin-search-input\s*\{[^}]*min-height:\s*44px/);
+      expect(cssContent).toMatch(/\.admin-search-clear-btn\s*\{[^}]*min-height:\s*44px/);
+      expect(cssContent).toMatch(/\.admin-search-clear-btn\s*\{[^}]*min-width:\s*44px/);
+      expect(cssContent).toMatch(/\.admin-search-submit-btn[\s\S]*?min-height:\s*44px/);
+      expect(cssContent).toMatch(/\.admin-load-more-btn[\s\S]*?min-height:\s*44px/);
+      expect(cssContent).toMatch(/\.admin-refresh-btn[\s\S]*?min-height:\s*44px/);
+      expect(cssContent).toMatch(/\.admin-stale-retry-btn[\s\S]*?min-height:\s*44px/);
     });
   });
 });

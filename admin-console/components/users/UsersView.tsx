@@ -33,7 +33,7 @@ export function UsersView(): React.JSX.Element {
 
   // First page loader
   const loadFirstPage = useCallback((searchQuery: string) => {
-    // Abort previous in-flight first-page request
+    // Abort previous in-flight first-page request and load-more request
     abortControllerRef.current?.abort();
     loadMoreAbortControllerRef.current?.abort();
     isLoadingMoreRef.current = false;
@@ -43,6 +43,7 @@ export function UsersView(): React.JSX.Element {
     const signal = controller.signal;
 
     setLoading(true);
+    setLoadingMore(false);
     setError(null);
     setLoadMoreError(null);
 

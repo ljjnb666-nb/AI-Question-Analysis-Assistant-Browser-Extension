@@ -87,7 +87,7 @@ export function SystemView(): React.JSX.Element {
         </div>
       </div>
 
-      {/* 1. Loading State */}
+      {/* 1. Loading State (initial load without data) */}
       {loading && !data && (
         <div className="admin-section-state-box" aria-busy="true">
           <div className="admin-spinner" aria-hidden="true" />
@@ -95,8 +95,8 @@ export function SystemView(): React.JSX.Element {
         </div>
       )}
 
-      {/* 2. Error State */}
-      {!loading && error && (
+      {/* 2. Initial Error State (initial load without data) */}
+      {!loading && error && !data && (
         <div
           className="admin-section-state-box admin-section-state-error"
           role="alert"
@@ -116,9 +116,38 @@ export function SystemView(): React.JSX.Element {
         </div>
       )}
 
-      {/* 3. Loaded System View */}
+      {/* 3. Loaded System View (with stale disclosure notice if refresh failed) */}
       {data && (
         <div className="admin-system-content">
+          {error && (
+            <div className="admin-stale-notice" role="alert">
+              <div className="admin-stale-notice-icon" aria-hidden="true">
+                <AlertCircleIcon size={16} />
+              </div>
+              <div className="admin-stale-notice-content">
+                <strong className="admin-stale-notice-title">
+                  刷新失败: {error}
+                </strong>
+                <span className="admin-stale-notice-desc">
+                  以下为上次成功获取的数据（数据生成时间: {formatAdminDateTime(data.generatedAt)}）。
+                </span>
+              </div>
+              <button
+                type="button"
+                className="admin-stale-retry-btn"
+                onClick={loadSystemData}
+                disabled={loading}
+                aria-label="重试刷新系统状态"
+              >
+                <RefreshIcon
+                  size={14}
+                  className={loading ? "admin-spin-icon" : ""}
+                />
+                <span>重试刷新</span>
+              </button>
+            </div>
+          )}
+
           {/* Section 1: 运行状态 */}
           <section className="admin-section-card" aria-label="运行状态">
             <div className="admin-section-header">

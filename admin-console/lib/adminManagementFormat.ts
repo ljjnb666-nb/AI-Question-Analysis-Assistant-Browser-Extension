@@ -18,7 +18,14 @@ export function formatAdminDateTime(
 }
 
 export function formatUptimeDuration(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "0 秒";
+  if (
+    typeof seconds !== "number" ||
+    Number.isNaN(seconds) ||
+    !Number.isFinite(seconds) ||
+    seconds < 0
+  ) {
+    return "—";
+  }
   const sec = Math.floor(seconds);
 
   if (sec < 60) {
