@@ -574,6 +574,13 @@ export function recordAdminAuditEventInStorage(entry) {
   });
 }
 
+function readAdminAuditJsonRowsReadOnly() {
+  const file = getJsonDataFile();
+  if (!existsSync(file)) return [];
+  const parsed = JSON.parse(readFileSync(file, "utf8"));
+  return Array.isArray(parsed?.admin_audit_events) ? parsed.admin_audit_events : [];
+}
+
 export function readAdminAuditEventsInStorage({
   limit,
   cursorCreatedAt = null,
@@ -581,8 +588,8 @@ export function readAdminAuditEventsInStorage({
   cutoffCreatedAt = 0,
 } = {}) {
   if (!SQLITE_SUPPORTED) {
-    const db = loadDbFromJsonFile();
-    return (Array.isArray(db.admin_audit_events) ? db.admin_audit_events : [])
+    const auditRows = readAdminAuditJsonRowsReadOnly();
+    return auditRows
       .filter((entry) => {
         const createdAt = Number(entry.createdAt);
         if (!Number.isFinite(createdAt) || createdAt < cutoffCreatedAt) return false;
