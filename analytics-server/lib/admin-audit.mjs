@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import {
   ADMIN_AUDIT_RETENTION_MS,
   generateId,
@@ -110,10 +110,13 @@ export function normalizeAdminAuditQuery({ limit, cursor } = {}) {
   };
 }
 
-function hashTag(prefix, value) {
+function hashTag(prefix, value, tagKey) {
   const normalized = String(value || "").trim();
   if (!normalized) return null;
-  const digest = createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+  const digest = createHmac("sha256", tagKey)
+    .update(normalized)
+    .digest("hex")
+    .slice(0, 16);
   return `${prefix}_${digest}`;
 }
 
@@ -193,7 +196,16 @@ export function createAdminAuditRecorder({
   now = () => Date.now(),
   recordImpl = recordAdminAuditEventInStorage,
   generateIdImpl = () => generateId("adm"),
+  tagKey = randomBytes(32),
 } = {}) {
+  const normalizedTagKey =
+    Buffer.isBuffer(tagKey) || tagKey instanceof Uint8Array
+      ? tagKey
+      : Buffer.from(String(tagKey || ""), "utf8");
+  if (normalizedTagKey.length < 16) {
+    throw new TypeError("admin audit tagKey must contain at least 16 bytes");
+  }
+
   return function recordAdminAudit({
     event,
     outcome,
@@ -224,8 +236,8 @@ export function createAdminAuditRecorder({
       event,
       outcome,
       createdAt,
-      ipHash: hashTag("ip", ip),
-      sessionTag: hashTag("session", sessionToken),
+      ipHash: hashTag("ip", ip, normalizedTagKey),
+      sessionTag: hashTag("session", sessionToken, normalizedTagKey),
       metadata: sanitizeMetadata(metadata),
     };
 
