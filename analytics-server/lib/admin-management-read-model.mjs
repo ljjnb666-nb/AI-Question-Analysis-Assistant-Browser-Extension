@@ -11,7 +11,6 @@ const MAX_QUERY_LENGTH = 120;
 const MAX_CURSOR_LENGTH = 1024;
 const MAX_USER_ID_LENGTH = 256;
 const MAX_EMAIL_LENGTH = 320;
-const MAX_DEVICE_ID_LENGTH = 256;
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const USER_SEARCH_FUNCTION = "admin_management_contains";
 const userSearchRegisteredDatabases = new WeakSet();
@@ -167,13 +166,7 @@ function toUserItem(row) {
 
   const createdAt = normalizeTimestamp(row.createdAt);
   const linkedDeviceCount = Number(row.linkedDeviceCount);
-  const invalidDeviceCount = Number(row.invalidDeviceCount ?? 0);
-  if (
-    !Number.isSafeInteger(linkedDeviceCount) ||
-    linkedDeviceCount < 0 ||
-    !Number.isSafeInteger(invalidDeviceCount) ||
-    invalidDeviceCount !== 0
-  ) {
+  if (!Number.isSafeInteger(linkedDeviceCount) || linkedDeviceCount < 0) {
     throw new AdminManagementReadModelError();
   }
 
@@ -256,15 +249,7 @@ function querySqliteUsers(database, query, now) {
       p.email AS email,
       p.createdAt AS createdAt,
       COUNT(d.deviceId) AS linkedDeviceCount,
-      MAX(d.lastSeenAt) AS latestDeviceSeenAt,
-      SUM(
-        CASE
-          WHEN d.deviceId IS NOT NULL
-            AND (length(d.deviceId) < 1 OR length(d.deviceId) > 256)
-          THEN 1
-          ELSE 0
-        END
-      ) AS invalidDeviceCount
+      MAX(d.lastSeenAt) AS latestDeviceSeenAt
     FROM page_users p
     LEFT JOIN devices d ON d.userId = p.userId
     GROUP BY p.userId, p.email, p.createdAt
@@ -323,7 +308,7 @@ function queryJsonUsers(db, query, now) {
 
   for (const device of devices) {
     if (!pageIds.has(device?.userId)) continue;
-    if (!validBoundedString(device?.deviceId, MAX_DEVICE_ID_LENGTH)) {
+    if (typeof device?.deviceId !== "string" || !device.deviceId) {
       throw new AdminManagementReadModelError();
     }
     const lastSeenAt = normalizeTimestamp(device.lastSeenAt);
