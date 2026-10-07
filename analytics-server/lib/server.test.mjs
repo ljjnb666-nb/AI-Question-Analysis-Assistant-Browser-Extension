@@ -645,6 +645,84 @@ describe("analytics handler", () => {
     expect(parsePayload(afterRestart.res).error.code).toBe("ADMIN_SESSION_REQUIRED");
   });
 
+  it("E-AUDIT-INTEGRATION-01 persists Audit across process restart while sessions fail closed", async () => {
+    const dbFile = path.join(
+      os.tmpdir(),
+      `quiz-solver-admin-audit-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`,
+    );
+    const previousDbFile = process.env.ANALYTICS_DB_FILE;
+    resetDbConnectionForTests();
+    process.env.ANALYTICS_DB_FILE = dbFile;
+
+    try {
+      const first = createAnalyticsHandler({
+        adminToken: "real-admin-secret",
+        isMailerConfigured: () => false,
+        sendVerificationCodeEmail: vi.fn(),
+        createAdminSessionToken: () => "first-process-session",
+        createAdminCsrfToken: () => "first-process-csrf",
+        nowImpl: () => Date.parse("2026-10-07T12:00:00.000Z"),
+      });
+      const firstLogin = await login(first);
+      const oldCookie = sessionCookie(firstLogin.res);
+
+      const firstAudit = await invoke(first, {
+        url: "/admin/api/audit",
+        headers: { cookie: oldCookie },
+      });
+      expect(firstAudit.res.statusCode).toBe(200);
+      expect(parsePayload(firstAudit.res).data).toEqual([
+        expect.objectContaining({
+          event: "admin_login",
+          outcome: "success",
+        }),
+      ]);
+      expect(firstAudit.res.payload).not.toContain("real-admin-secret");
+      expect(firstAudit.res.payload).not.toContain("first-process-session");
+
+      resetDbConnectionForTests();
+
+      const restarted = createAnalyticsHandler({
+        adminToken: "real-admin-secret",
+        isMailerConfigured: () => false,
+        sendVerificationCodeEmail: vi.fn(),
+        createAdminSessionToken: () => "second-process-session",
+        createAdminCsrfToken: () => "second-process-csrf",
+        nowImpl: () => Date.parse("2026-10-07T12:01:00.000Z"),
+      });
+
+      const oldSessionAfterRestart = await invoke(restarted, {
+        url: "/admin/api/session",
+        headers: { cookie: oldCookie },
+      });
+      expect(oldSessionAfterRestart.res.statusCode).toBe(401);
+
+      const secondLogin = await login(restarted);
+      const newCookie = sessionCookie(secondLogin.res);
+      const persistedAudit = await invoke(restarted, {
+        url: "/admin/api/audit",
+        headers: { cookie: newCookie },
+      });
+      expect(persistedAudit.res.statusCode).toBe(200);
+      const events = parsePayload(persistedAudit.res).data;
+      expect(events).toHaveLength(2);
+      expect(events.map((entry) => entry.event)).toEqual([
+        "admin_login",
+        "admin_login",
+      ]);
+      expect(events[0].createdAt).toBe("2026-10-07T12:01:00.000Z");
+      expect(events[1].createdAt).toBe("2026-10-07T12:00:00.000Z");
+    } finally {
+      resetDbConnectionForTests();
+      if (previousDbFile === undefined) delete process.env.ANALYTICS_DB_FILE;
+      else process.env.ANALYTICS_DB_FILE = previousDbFile;
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const file = `${dbFile}${suffix}`;
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    }
+  });
+
   it("returns the stable Admin API not-found contract for unknown namespace routes", async () => {
     const handler = createHandler();
     const { res } = await invoke(handler, { url: "/admin/api/not-a-route" });
