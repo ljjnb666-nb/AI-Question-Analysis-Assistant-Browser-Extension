@@ -19,6 +19,7 @@ const DEFAULT_PACKAGE_JSON = path.join(REPO_ROOT, "package.json");
 const DEFAULT_SOURCE_MANIFEST = path.join(REPO_ROOT, "src", "manifest.json");
 const DEFAULT_DOCKERFILE = path.join(REPO_ROOT, "Dockerfile.analytics");
 const DEFAULT_COMPOSE = path.join(REPO_ROOT, "docker-compose.analytics.prod.yml");
+const DEFAULT_ANALYTICS_ARCHIVE = path.join(REPO_ROOT, "quiz-solver-analytics-image.tar.gz");
 const DEFAULT_OUTPUT = path.join(REPO_ROOT, "rc-manifest.json");
 
 function fail(message) {
@@ -35,6 +36,20 @@ function readJson(filePath, label) {
 
 function normalizeRelative(filePath) {
   return filePath.split(path.sep).join("/");
+}
+
+function digestFile(filePath, label) {
+  const resolved = path.resolve(filePath);
+  if (!existsSync(resolved) || !statSync(resolved).isFile()) {
+    fail(`${label} is missing`);
+  }
+  const bytes = readFileSync(resolved);
+  if (bytes.length === 0) fail(`${label} is empty`);
+  return {
+    fileName: path.basename(resolved),
+    sizeBytes: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
 }
 
 export function digestTree(directory) {
@@ -136,6 +151,7 @@ function readComposeDefaultImage(composePath, version) {
 export function createRcManifest({
   sourceSha,
   analyticsImageId,
+  analyticsArchivePath = DEFAULT_ANALYTICS_ARCHIVE,
   distDir = DEFAULT_DIST_DIR,
   adminDir = DEFAULT_ADMIN_DIR,
   packageJsonPath = DEFAULT_PACKAGE_JSON,
@@ -173,6 +189,10 @@ export function createRcManifest({
 
   const extensionTree = digestTree(distDir);
   const adminTree = digestTree(adminDir);
+  const analyticsArchive = digestFile(
+    analyticsArchivePath,
+    "analytics server image archive",
+  );
   const toolchain = readPinnedToolchain(
     path.resolve(dockerfilePath),
     packageJson.packageManager,
@@ -199,6 +219,7 @@ export function createRcManifest({
     },
     analyticsServer: {
       imageId: normalizedImageId,
+      archive: analyticsArchive,
       baseImage: toolchain.baseImage,
       composeDefaultImage,
     },
@@ -215,8 +236,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const sourceSha = process.env.RC_SOURCE_SHA || process.env.GITHUB_SHA;
     const analyticsImageId = process.env.RC_ANALYTICS_IMAGE_ID;
+    const analyticsArchivePath =
+      process.env.RC_ANALYTICS_ARCHIVE_PATH || DEFAULT_ANALYTICS_ARCHIVE;
     const outputPath = process.env.RC_MANIFEST_PATH || DEFAULT_OUTPUT;
-    const manifest = writeRcManifest({ sourceSha, analyticsImageId }, outputPath);
+    const manifest = writeRcManifest(
+      { sourceSha, analyticsImageId, analyticsArchivePath },
+      outputPath,
+    );
     console.log(
       `[rc-manifest] v${manifest.version} source=${manifest.sourceSha} extension=${manifest.extension.treeSha256} admin=${manifest.admin.treeSha256} server=${manifest.analyticsServer.imageId}`,
     );
