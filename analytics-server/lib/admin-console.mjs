@@ -793,35 +793,47 @@ export function createAdminPortal({
 
         return false;
       } catch (error) {
-        const externalStatusCode = Number(error?.statusCode);
+        let effectiveError = error;
+        let code = stableAdminErrorCode(effectiveError);
+        if (
+          code === "ADMIN_ORIGIN_REJECTED" ||
+          code === "ADMIN_CSRF_REJECTED" ||
+          code === "ADMIN_CSRF_REQUIRED"
+        ) {
+          try {
+            recordAudit({
+              event:
+                code === "ADMIN_ORIGIN_REJECTED"
+                  ? ADMIN_AUDIT_EVENTS.ORIGIN_REJECTED
+                  : ADMIN_AUDIT_EVENTS.CSRF_REJECTED,
+              outcome: "rejected",
+              ip,
+              sessionToken: getAdminCookieValue(req),
+              metadata: {
+                method,
+                path: pathname,
+                reason:
+                  code === "ADMIN_ORIGIN_REJECTED"
+                    ? "origin_mismatch"
+                    : code.toLowerCase(),
+              },
+            });
+          } catch (auditError) {
+            effectiveError = auditError;
+            code = stableAdminErrorCode(auditError);
+          }
+        }
+        const externalStatusCode = Number(effectiveError?.statusCode);
         const statusCode =
-          error instanceof AdminPortalError
-            ? error.statusCode
+          effectiveError instanceof AdminPortalError
+            ? effectiveError.statusCode
             : Number.isInteger(externalStatusCode) && externalStatusCode >= 400 && externalStatusCode <= 599
               ? externalStatusCode
               : 500;
-        const code = stableAdminErrorCode(error);
-        if (code === "ADMIN_ORIGIN_REJECTED") {
-          recordAudit({
-            event: ADMIN_AUDIT_EVENTS.ORIGIN_REJECTED,
-            outcome: "rejected",
-            ip,
-            sessionToken: getAdminCookieValue(req),
-            metadata: { method, path: pathname, reason: "origin_mismatch" },
-          });
-        } else if (code === "ADMIN_CSRF_REJECTED" || code === "ADMIN_CSRF_REQUIRED") {
-          recordAudit({
-            event: ADMIN_AUDIT_EVENTS.CSRF_REJECTED,
-            outcome: "rejected",
-            ip,
-            sessionToken: getAdminCookieValue(req),
-            metadata: { method, path: pathname, reason: code.toLowerCase() },
-          });
-        }
-        const headers = error?.retryAfter ? { "Retry-After": String(error.retryAfter) } : null;
+        const headers = effectiveError?.retryAfter ? { "Retry-After": String(effectiveError.retryAfter) } : null;
         const publicError =
-          code === "ADMIN_RATE_LIMITED" && error?.retryAfter
-            ? `rate limit exceeded; retry after ${error.retryAfter}s`
+          code === "ADMIN_RATE_LIMITED" && effectiveError?.retryAfter
+            ? `rate limit exceeded; retry after ${effectiveError.retryAfter}s`
             : code;
         const payload = pathname.startsWith("/admin/api/")
           ? { ok: false, error: { code } }
