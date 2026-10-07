@@ -439,13 +439,21 @@ jobs:
           grep -qi '^referrer-policy: strict-origin' /tmp/rc-admin-headers.txt
           grep -q 'Quiz Solver 管理后台' /tmp/rc-admin-login.html
 
-      - name: Export exact production analytics image
+      - name: Export and restore exact production analytics image
         env:
           IMAGE_TAG: ${{ steps.image.outputs.image_tag }}
+          EXPECTED_IMAGE_ID: ${{ steps.image.outputs.image_id }}
         run: |
+          docker rm -f quiz-solver-rc-analytics >/dev/null 2>&1 || true
           docker save "${IMAGE_TAG}" | gzip -n -9 > quiz-solver-analytics-image.tar.gz
           test -s quiz-solver-analytics-image.tar.gz
           sha256sum quiz-solver-analytics-image.tar.gz
+
+          docker image rm "${IMAGE_TAG}"
+          gunzip -c quiz-solver-analytics-image.tar.gz | docker load
+          restored_image_id="$(docker image inspect --format '{{.Id}}' "${IMAGE_TAG}")"
+          echo "RESTORED_ANALYTICS_IMAGE_ID=${restored_image_id}"
+          test "${restored_image_id}" = "${EXPECTED_IMAGE_ID}"
 
       - name: Generate RC identity manifest
         env:
