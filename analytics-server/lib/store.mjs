@@ -233,8 +233,10 @@ function maybeMigrateLegacyJson(database) {
   const hasDevices = Number(database.prepare("SELECT COUNT(*) AS count FROM devices").get().count || 0) > 0;
   const hasCodes =
     Number(database.prepare("SELECT COUNT(*) AS count FROM email_verification_codes").get().count || 0) > 0;
+  const hasAdminAudit =
+    Number(database.prepare("SELECT COUNT(*) AS count FROM admin_audit_events").get().count || 0) > 0;
 
-  if (hasUsers || hasEvents || hasDevices || hasCodes) return;
+  if (hasUsers || hasEvents || hasDevices || hasCodes || hasAdminAudit) return;
   if (!existsSync(getJsonDataFile())) return;
 
   const parsed = JSON.parse(readFileSync(getJsonDataFile(), "utf8"));
