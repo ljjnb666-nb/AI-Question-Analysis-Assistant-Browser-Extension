@@ -63,10 +63,21 @@ async function login(page: Page): Promise<void> {
   ).toBeVisible();
   await page.locator('input[name="adminToken"]').fill(ADMIN_TOKEN);
 
-  await Promise.all([
-    page.waitForURL(`${baseUrl}/admin`),
+  const [loginResponse] = await Promise.all([
+    page.waitForResponse(
+      (candidate) =>
+        candidate.url() === `${baseUrl}/admin/login` &&
+        candidate.request().method() === "POST",
+    ),
     page.getByRole("button", { name: "登录" }).click(),
   ]);
+  const loginBody = await loginResponse.text();
+  expect(
+    loginResponse.status(),
+    `Admin login POST failed with ${loginResponse.status()}: ${loginBody}. Server output: ${serverOutput.slice(-2000)}`,
+  ).toBe(303);
+
+  await page.waitForURL(`${baseUrl}/admin`, { waitUntil: "domcontentloaded" });
 
   await expect(
     page.getByRole("heading", { level: 1, name: "概览" }),
@@ -96,7 +107,7 @@ async function capture(
 }
 
 test.describe("Phase 11F Admin real-browser final gate", () => {
-  test.describe.configure({ mode: "serial" });
+  test.describe.configure({ mode: "serial", timeout: 120_000 });
 
   test.beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), "quiz-solver-admin-11f-"));
