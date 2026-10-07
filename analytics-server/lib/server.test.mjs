@@ -360,7 +360,16 @@ describe("analytics handler", () => {
   it("fails closed when admin configuration is missing across protected admin and metrics routes", async () => {
     const loadDbImpl = vi.fn();
     const handler = createHandler({ adminToken: "", loadDbImpl });
-    for (const url of ["/admin/login", "/admin", "/admin/api/session", "/admin/data", "/analytics/summary", "/analytics/timeseries"]) {
+    for (const url of [
+      "/admin/login",
+      "/admin",
+      "/admin/api/session",
+      "/admin/api/users",
+      "/admin/api/system",
+      "/admin/data",
+      "/analytics/summary",
+      "/analytics/timeseries",
+    ]) {
       const { res } = await invoke(handler, { url });
       expect(res.statusCode, url).toBe(503);
       const payload = parsePayload(res);
