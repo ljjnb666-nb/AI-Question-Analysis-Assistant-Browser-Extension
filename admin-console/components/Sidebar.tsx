@@ -28,6 +28,7 @@ interface SidebarProps {
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
   closeButtonRef?: React.RefObject<HTMLButtonElement>;
+  csrfToken: string;
 }
 
 export function Sidebar({
@@ -35,6 +36,7 @@ export function Sidebar({
   isMobileOpen = false,
   onCloseMobile,
   closeButtonRef,
+  csrfToken,
 }: SidebarProps): React.JSX.Element {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
     if (!isMobileOpen) return;
@@ -125,6 +127,7 @@ export function Sidebar({
             action="/admin/logout"
             className="admin-logout-form"
           >
+            <input type="hidden" name="csrfToken" value={csrfToken} />
             <button type="submit" className="admin-logout-btn">
               <LogoutIcon size={18} className="admin-logout-icon" />
               <span>退出登录</span>
