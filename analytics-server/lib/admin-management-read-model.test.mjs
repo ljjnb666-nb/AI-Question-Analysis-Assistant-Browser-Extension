@@ -352,4 +352,35 @@ describe("Phase 11D1 Admin management read models", () => {
       }).system(),
     ).toThrow(AdminManagementReadModelError);
   });
+  it("D1-RM-08 fails closed when a linked device identifier exceeds the DTO read bound", () => {
+    const now = ms("2026-10-07T12:00:00.000Z");
+    saveDb(
+      baseDb({
+        users: [
+          user({
+            userId: "usr-1",
+            email: "owner@example.test",
+            createdAt: "2026-10-07T10:00:00.000Z",
+          }),
+        ],
+        devices: [
+          device({
+            deviceId: "d".repeat(257),
+            userId: "usr-1",
+            lastSeenAt: "2026-10-07T11:00:00.000Z",
+          }),
+        ],
+      }),
+    );
+
+    const read = createAdminManagementReadModels({
+      now: () => now,
+      uptime: () => 1,
+      isMailerConfigured: () => false,
+    });
+    expect(() => read.users(normalizeAdminUsersQuery())).toThrow(
+      AdminManagementReadModelError,
+    );
+  });
+
 });
