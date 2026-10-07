@@ -492,18 +492,25 @@ export function saveDb(db) {
 }
 
 function pruneAdminAuditSqlite(database, now = Date.now()) {
-  database
-    .prepare("DELETE FROM admin_audit_events WHERE createdAt < ?")
-    .run(now - ADMIN_AUDIT_RETENTION_MS);
-  database.exec(`
-    DELETE FROM admin_audit_events
-    WHERE auditId IN (
-      SELECT auditId
-      FROM admin_audit_events
-      ORDER BY createdAt DESC, auditId DESC
-      LIMIT -1 OFFSET ${ADMIN_AUDIT_MAX_EVENTS}
-    )
-  `);
+  const retentionChanges = Number(
+    database
+      .prepare("DELETE FROM admin_audit_events WHERE createdAt < ?")
+      .run(now - ADMIN_AUDIT_RETENTION_MS).changes || 0,
+  );
+  const capChanges = Number(
+    database
+      .prepare(`
+        DELETE FROM admin_audit_events
+        WHERE auditId IN (
+          SELECT auditId
+          FROM admin_audit_events
+          ORDER BY createdAt DESC, auditId DESC
+          LIMIT -1 OFFSET ${ADMIN_AUDIT_MAX_EVENTS}
+        )
+      `)
+      .run().changes || 0,
+  );
+  return retentionChanges + capChanges;
 }
 
 function pruneAdminAuditJson(db, now = Date.now()) {
@@ -521,6 +528,22 @@ function pruneAdminAuditJson(db, now = Date.now()) {
   const changed = rows.length !== (Array.isArray(db.admin_audit_events) ? db.admin_audit_events.length : 0);
   db.admin_audit_events = rows;
   return changed;
+}
+
+export function pruneAdminAuditEventsInStorage(now = Date.now()) {
+  const current = Number(now);
+  if (!Number.isSafeInteger(current) || current < 0) {
+    throw new RangeError("admin audit prune time must be a non-negative safe integer");
+  }
+
+  if (!SQLITE_SUPPORTED) {
+    const db = loadDbFromJsonFile();
+    const changed = pruneAdminAuditJson(db, current);
+    if (changed) saveDbToJsonFile(db);
+    return changed ? 1 : 0;
+  }
+
+  return runInTransaction((database) => pruneAdminAuditSqlite(database, current));
 }
 
 export function recordAdminAuditEventInStorage(entry) {
