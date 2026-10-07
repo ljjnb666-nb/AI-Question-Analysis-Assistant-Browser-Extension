@@ -48,7 +48,7 @@ describe("Phase 11E Admin Audit authority", () => {
       metadata: {
         method: "POST",
         path: "/admin/login",
-        reason: "authenticated",
+        reason: "invalid_credentials",
         adminToken: "long-lived-admin-secret",
         csrfToken: "csrf-secret",
         email: "private@example.test",
