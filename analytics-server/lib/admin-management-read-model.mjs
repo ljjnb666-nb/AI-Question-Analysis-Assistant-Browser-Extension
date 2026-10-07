@@ -248,7 +248,7 @@ function querySqliteUsers(database, query, now) {
       p.userId AS userId,
       p.email AS email,
       p.createdAt AS createdAt,
-      COUNT(d.deviceId) AS linkedDeviceCount,
+      COUNT(d.userId) AS linkedDeviceCount,
       MAX(d.lastSeenAt) AS latestDeviceSeenAt
     FROM page_users p
     LEFT JOIN devices d ON d.userId = p.userId
