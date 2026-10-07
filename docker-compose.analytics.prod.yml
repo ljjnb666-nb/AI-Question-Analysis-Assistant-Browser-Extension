@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.analytics
-    image: quiz-solver-analytics:phase11
+    image: ${QUIZ_SOLVER_ANALYTICS_IMAGE:-quiz-solver-analytics:0.2.0}
     container_name: quiz-solver-analytics-prod
     entrypoint: []
     command: ["node", "analytics-server/index.mjs"]

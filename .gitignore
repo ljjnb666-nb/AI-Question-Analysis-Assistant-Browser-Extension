@@ -15,3 +15,5 @@ output/
 test-results/
 .env.analytics.local
 .mimosa/
+rc-manifest.json
+quiz-solver-analytics-image.tar.gz

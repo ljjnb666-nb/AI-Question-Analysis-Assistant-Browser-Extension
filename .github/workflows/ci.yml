@@ -42,7 +42,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.21.0
           cache: npm
 
       - name: Use lockfile-compatible npm
@@ -89,7 +89,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.21.0
           cache: npm
 
       - name: Use lockfile-compatible npm
@@ -150,7 +150,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.21.0
           cache: npm
 
       - name: Use lockfile-compatible npm
@@ -214,7 +214,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.21.0
           cache: npm
 
       - name: Use lockfile-compatible npm
@@ -287,7 +287,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.21.0
           cache: npm
 
       - name: Use lockfile-compatible npm
@@ -321,3 +321,168 @@ jobs:
             playwright-report/
           if-no-files-found: ignore
           retention-days: 10
+
+  rc_bundle:
+    runs-on: ubuntu-latest
+    needs:
+      - e2e
+      - admin_e2e
+    env:
+      CI: "true"
+    steps:
+      - name: Checkout exact source commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Assert checked-out source SHA
+        id: source
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          expected_sha="${GITHUB_SHA}"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            expected_sha="${PR_HEAD_SHA}"
+          fi
+          actual_sha="$(git rev-parse HEAD)"
+          echo "EXPECTED_SHA=${expected_sha}"
+          echo "ACTUAL_SHA=${actual_sha}"
+          echo "EXPECTED_SHA=${expected_sha}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "ACTUAL_SHA=${actual_sha}" >> "${GITHUB_STEP_SUMMARY}"
+          if [[ -z "${expected_sha}" || "${actual_sha}" != "${expected_sha}" ]]; then
+            exit 1
+          fi
+          echo "sha=${expected_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      - name: Use lockfile-compatible npm
+        run: npm install --global npm@11.6.2
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download verified extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: quiz-solver-extension-${{ steps.source.outputs.sha }}
+          path: dist/
+
+      - name: Download verified Admin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: quiz-solver-admin-${{ steps.source.outputs.sha }}
+          path: dist-admin/
+
+      - name: Re-verify candidate artifacts
+        run: |
+          npm run verify:artifact
+          npm run verify:admin
+          npm run test:rc-manifest
+
+      - name: Build exact production analytics image
+        id: image
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          image_tag="quiz-solver-analytics:rc-${SOURCE_SHA}"
+          docker build --pull --file Dockerfile.analytics --tag "${image_tag}" .
+          image_id="$(docker image inspect --format '{{.Id}}' "${image_tag}")"
+          echo "ANALYTICS_IMAGE_TAG=${image_tag}"
+          echo "ANALYTICS_IMAGE_ID=${image_id}"
+          echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
+          echo "image_id=${image_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Smoke production analytics container
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.image_tag }}
+        run: |
+          admin_secret="$(openssl rand -hex 32)"
+          audit_secret="$(openssl rand -hex 32)"
+          docker run -d --rm \
+            --name quiz-solver-rc-analytics \
+            -p 127.0.0.1:18787:8787 \
+            -e NODE_ENV=production \
+            -e ANALYTICS_HOST=0.0.0.0 \
+            -e ANALYTICS_PORT=8787 \
+            -e PUBLIC_BASE_URL=http://127.0.0.1:18787 \
+            -e "ANALYTICS_ADMIN_TOKEN=${admin_secret}" \
+            -e "ANALYTICS_ADMIN_AUDIT_TAG_KEY=${audit_secret}" \
+            "${IMAGE_TAG}"
+
+          ready=0
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:18787/healthz >/tmp/rc-health.json; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [[ "${ready}" != "1" ]]; then
+            docker logs quiz-solver-rc-analytics || true
+            exit 1
+          fi
+
+          cat /tmp/rc-health.json
+          curl --fail --silent --show-error \
+            -D /tmp/rc-admin-headers.txt \
+            -o /tmp/rc-admin-login.html \
+            http://127.0.0.1:18787/admin/login
+          grep -qi '^content-security-policy:' /tmp/rc-admin-headers.txt
+          grep -qi '^referrer-policy: strict-origin' /tmp/rc-admin-headers.txt
+          grep -q 'Quiz Solver 管理后台' /tmp/rc-admin-login.html
+
+      - name: Export and restore exact production analytics image
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.image_tag }}
+          EXPECTED_IMAGE_ID: ${{ steps.image.outputs.image_id }}
+        run: |
+          docker rm -f quiz-solver-rc-analytics >/dev/null 2>&1 || true
+          docker save "${IMAGE_TAG}" | gzip -n -9 > quiz-solver-analytics-image.tar.gz
+          test -s quiz-solver-analytics-image.tar.gz
+          sha256sum quiz-solver-analytics-image.tar.gz
+
+          docker image rm "${IMAGE_TAG}"
+          gunzip -c quiz-solver-analytics-image.tar.gz | docker load
+          restored_image_id="$(docker image inspect --format '{{.Id}}' "${IMAGE_TAG}")"
+          echo "RESTORED_ANALYTICS_IMAGE_ID=${restored_image_id}"
+          test "${restored_image_id}" = "${EXPECTED_IMAGE_ID}"
+
+      - name: Generate RC identity manifest
+        env:
+          RC_SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          RC_ANALYTICS_IMAGE_ID: ${{ steps.image.outputs.image_id }}
+          RC_ANALYTICS_ARCHIVE_PATH: quiz-solver-analytics-image.tar.gz
+        run: |
+          npm run rc:manifest
+          node -e 'const fs=require("fs");const m=JSON.parse(fs.readFileSync("rc-manifest.json","utf8"));if(m.sourceSha!==process.env.RC_SOURCE_SHA)process.exit(1);console.log(JSON.stringify(m,null,2))'
+          echo '### Phase 12A RC identity' >> "${GITHUB_STEP_SUMMARY}"
+          cat rc-manifest.json >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload RC identity manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: quiz-solver-rc-manifest-${{ steps.source.outputs.sha }}
+          path: rc-manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload retrievable RC analytics image
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: quiz-solver-analytics-image-${{ steps.source.outputs.sha }}
+          path: quiz-solver-analytics-image.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Stop RC analytics container
+        if: always()
+        run: docker rm -f quiz-solver-rc-analytics >/dev/null 2>&1 || true

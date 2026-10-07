@@ -12,8 +12,8 @@
     "test:permissions": "node --test tools/verify-extension-permissions.node-test.mjs",
     "analytics:server": "node analytics-server/index.mjs",
     "build:raw": "vite build",
-    "lint": "eslint src admin-console analytics-server e2e playwright.config.ts tools/build-extension.mjs tools/verify-admin-artifact.mjs tools/verify-admin-artifact.node-test.mjs vite.admin.config.ts vite.contentRuntime.config.ts eslint.config.mjs",
-    "lint:fix": "eslint src admin-console analytics-server e2e playwright.config.ts tools/build-extension.mjs tools/verify-admin-artifact.mjs tools/verify-admin-artifact.node-test.mjs vite.admin.config.ts vite.contentRuntime.config.ts eslint.config.mjs --fix",
+    "lint": "eslint src admin-console analytics-server e2e playwright.config.ts tools/build-extension.mjs tools/verify-admin-artifact.mjs tools/verify-admin-artifact.node-test.mjs tools/generate-rc-manifest.mjs tools/generate-rc-manifest.node-test.mjs vite.admin.config.ts vite.contentRuntime.config.ts eslint.config.mjs",
+    "lint:fix": "eslint src admin-console analytics-server e2e playwright.config.ts tools/build-extension.mjs tools/verify-admin-artifact.mjs tools/verify-admin-artifact.node-test.mjs tools/generate-rc-manifest.mjs tools/generate-rc-manifest.node-test.mjs vite.admin.config.ts vite.contentRuntime.config.ts eslint.config.mjs --fix",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "check": "npm run lint && npm run typecheck && npm run test:run",
@@ -28,7 +28,9 @@
     "test:e2e:admin:dist": "playwright test --grep \"@admin\"",
     "build:admin": "vite build -c vite.admin.config.ts",
     "verify:admin": "node tools/verify-admin-artifact.mjs",
-    "test:artifact:admin": "node --test tools/verify-admin-artifact.node-test.mjs"
+    "test:artifact:admin": "node --test tools/verify-admin-artifact.node-test.mjs",
+    "test:rc-manifest": "node --test tools/generate-rc-manifest.node-test.mjs",
+    "rc:manifest": "node tools/generate-rc-manifest.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -61,5 +63,6 @@
     "nodemailer": "^6.10.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
-  }
+  },
+  "packageManager": "npm@11.6.2"
 }
