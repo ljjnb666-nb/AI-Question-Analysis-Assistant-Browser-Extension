@@ -100,4 +100,6 @@ Security notes:
 - The extension generates a local `deviceId` automatically.
 - Usage analytics is optional and **off by default**; events are sent only after the user explicitly turns the setting on and saves it. Before consent, no analytics events are uploaded.
 - Core events are uploaded with `deviceId`, the consent protocol version, event name, timestamp, extension version, and a small allowlist of event-specific fields. They do not include the page hostname, question or answer content, screenshots or images, API key, auth token, password, verification code, email address, or client-supplied account identity. See [../PRIVACY.md](../PRIVACY.md) for the full data-flow contract.
-- The default analytics backend URL is `https://analytics.082515.online`.\n\n`strict-origin` is intentional: Admin login/logout are native same-origin form POSTs whose mutation guard requires a non-opaque `Origin`. The policy exposes only the origin (never the Admin path/query) on same-security-level requests while preserving the fail-closed exact-origin check; `Origin: null` remains rejected.
+- The default analytics backend URL is `https://analytics.082515.online`.
+
+`strict-origin` is intentional: Admin login/logout are native same-origin form POSTs whose mutation guard requires a non-opaque `Origin`. The policy exposes only the origin (never the Admin path/query) on same-security-level requests while preserving the fail-closed exact-origin check; `Origin: null` remains rejected.
