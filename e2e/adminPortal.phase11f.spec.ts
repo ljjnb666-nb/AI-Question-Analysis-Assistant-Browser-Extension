@@ -207,7 +207,16 @@ test.describe("Phase 11F Admin real-browser final gate", () => {
         );
 
         if (route.path === "/admin/audit") {
-          await expect(page.getByText("管理员登录").first()).toBeVisible();
+          const loginLabels = page.getByText("管理员登录", { exact: true });
+          const labelCount = await loginLabels.count();
+          let visibleLabels = 0;
+          for (let index = 0; index < labelCount; index += 1) {
+            if (await loginLabels.nth(index).isVisible()) visibleLabels += 1;
+          }
+          expect(
+            visibleLabels,
+            `Audit login event must be visible at ${viewport.width}px`,
+          ).toBeGreaterThan(0);
         }
 
         await capture(
