@@ -42,7 +42,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.21.0
           cache: npm
 
       - name: Use lockfile-compatible npm
@@ -89,7 +89,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.21.0
           cache: npm
 
       - name: Use lockfile-compatible npm
@@ -150,7 +150,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.21.0
           cache: npm
 
       - name: Use lockfile-compatible npm
@@ -214,7 +214,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.21.0
           cache: npm
 
       - name: Use lockfile-compatible npm
@@ -287,7 +287,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.21.0
           cache: npm
 
       - name: Use lockfile-compatible npm
@@ -359,7 +359,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.21.0
           cache: npm
 
       - name: Use lockfile-compatible npm
