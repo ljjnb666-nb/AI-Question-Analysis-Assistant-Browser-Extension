@@ -14,6 +14,21 @@ const MAX_OUTCOME_LENGTH = 32;
 const MAX_METADATA_VALUE_LENGTH = 120;
 const ALLOWED_METADATA_KEYS = new Set(["method", "path", "reason"]);
 const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+const ALLOWED_PATHS = new Set([
+  "/admin/login",
+  "/admin/logout",
+  "/admin/api/session",
+  "/admin/api/overview",
+  "/admin/api/analytics/timeseries",
+  "/admin/api/analytics/providers",
+  "/admin/api/analytics/errors",
+  "/admin/api/analytics/versions",
+  "/admin/api/analytics/latency",
+  "/admin/api/users",
+  "/admin/api/system",
+  "/admin/api/audit",
+  "/admin/api/unknown",
+]);
 const ALLOWED_REASONS = new Set([
   "invalid_credentials",
   "origin_mismatch",
@@ -140,14 +155,7 @@ function sanitizeMetadata(metadata) {
       continue;
     }
     if (key === "path") {
-      if (
-        !value.startsWith("/admin") ||
-        value.includes("?") ||
-        value.includes("#") ||
-        !/^\/[A-Za-z0-9._~/-]+$/.test(value)
-      ) {
-        continue;
-      }
+      if (!ALLOWED_PATHS.has(value)) continue;
       safe.path = value;
       continue;
     }
