@@ -798,14 +798,21 @@ export function createAdminPortal({
         if (
           code === "ADMIN_ORIGIN_REJECTED" ||
           code === "ADMIN_CSRF_REJECTED" ||
-          code === "ADMIN_CSRF_REQUIRED"
+          code === "ADMIN_CSRF_REQUIRED" ||
+          (
+            code === "ADMIN_RATE_LIMITED" &&
+            pathname === "/admin/login" &&
+            method === "POST"
+          )
         ) {
           try {
             recordAudit({
               event:
                 code === "ADMIN_ORIGIN_REJECTED"
                   ? ADMIN_AUDIT_EVENTS.ORIGIN_REJECTED
-                  : ADMIN_AUDIT_EVENTS.CSRF_REJECTED,
+                  : code === "ADMIN_RATE_LIMITED"
+                    ? ADMIN_AUDIT_EVENTS.LOGIN
+                    : ADMIN_AUDIT_EVENTS.CSRF_REJECTED,
               outcome: "rejected",
               ip,
               sessionToken: getAdminCookieValue(req),
@@ -815,7 +822,9 @@ export function createAdminPortal({
                 reason:
                   code === "ADMIN_ORIGIN_REJECTED"
                     ? "origin_mismatch"
-                    : code.toLowerCase(),
+                    : code === "ADMIN_RATE_LIMITED"
+                      ? "rate_limited"
+                      : code.toLowerCase(),
               },
             });
           } catch (auditError) {
