@@ -390,7 +390,7 @@ describe("analytics handler", () => {
     expect(res.headers["Content-Security-Policy"]).toContain("default-src 'self'");
     expect(res.headers["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
     expect(res.headers["X-Content-Type-Options"]).toBe("nosniff");
-    expect(res.headers["Referrer-Policy"]).toBe("no-referrer");
+    expect(res.headers["Referrer-Policy"]).toBe("strict-origin");
     expect(loadDbImpl).not.toHaveBeenCalled();
   });
 
