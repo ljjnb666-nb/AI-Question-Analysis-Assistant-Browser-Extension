@@ -53,6 +53,33 @@ describe("Phase14B-02C-C runtime STOP/CANCEL generation authority", () => {
     expect(a.canStop("autoSolve", oldId)).toBe(false);
   });
 
+  it("P14B02C_E1_01 a cancelled Auto Solve lease cannot resume after delayed work", () => {
+    const a = createProtectedWorkRunAuthority();
+    const lease = a.begin("autoSolve", oldId)!;
+    expect(a.isCurrent("autoSolve", lease)).toBe(true);
+    expect(a.revoke("autoSolve", newId)).toBe(false);
+    expect(a.isCurrent("autoSolve", lease)).toBe(true);
+    expect(a.revoke("autoSolve", oldId)).toBe(true);
+    expect(a.isCurrent("autoSolve", lease)).toBe(false);
+    expect(a.revoke("autoSolve", oldId)).toBe(false);
+    expect(a.begin("autoSolve", newId)).toBeNull();
+    a.finish("autoSolve", lease);
+    const current = a.begin("autoSolve", newId)!;
+    expect(a.isCurrent("autoSolve", lease)).toBe(false);
+    expect(a.isCurrent("autoSolve", current)).toBe(true);
+  });
+
+  it("P14B02C_E1_02 route reset and old finally preserve newer owner", () => {
+    const a = createProtectedWorkRunAuthority();
+    const old = a.begin("autoSolve")!;
+    expect(a.revoke("autoSolve")).toBe(true);
+    a.reset();
+    const current = a.begin("autoSolve")!;
+    a.finish("autoSolve", old);
+    expect(a.isCurrent("autoSolve", old)).toBe(false);
+    expect(a.isCurrent("autoSolve", current)).toBe(true);
+  });
+
   it("P14B02C_STOP_09 old legacy finally after route reset cannot clear new legacy run", () => {
     const a = createProtectedWorkRunAuthority();
     const old = a.begin("autoSolve")!;
