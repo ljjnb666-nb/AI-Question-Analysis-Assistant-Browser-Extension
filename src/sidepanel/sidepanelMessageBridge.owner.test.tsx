@@ -422,6 +422,15 @@ describe("Phase14B-02C-D stale PROGRESS/DONE UI projection fence", () => {
     expect(await readProtectedWorkOwners()).toEqual({ autoSolve: [], fullPage: [] });
     expect(ui.setIsAutoSolving).toHaveBeenCalledTimes(oldAutoCalls);
     expect(ui.setIsFullPageScan).toHaveBeenCalledTimes(oldFullCalls);
+    // Untagged DONE replay after tagged completion must not re-show stale
+    // feedback or overwrite a finished scan's candidates.
+    const currentFeedbackCalls = ui.setFillFeedback.mock.calls.length;
+    const currentCandidateCalls = ui.setCandidates.mock.calls.length;
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", ok: false }, 7);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_DONE", candidates: [] }, 7);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(ui.setFillFeedback).toHaveBeenCalledTimes(currentFeedbackCalls);
+    expect(ui.setCandidates).toHaveBeenCalledTimes(currentCandidateCalls);
     ui.dispose();
   });
 
