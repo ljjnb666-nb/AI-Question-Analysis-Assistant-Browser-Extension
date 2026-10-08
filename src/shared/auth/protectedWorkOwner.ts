@@ -179,7 +179,7 @@ export async function terminateRecordedProtectedWork(
   for (const { kind, tabId } of captured) byKind[kind].add(tabId);
   for (const kind of ["autoSolve", "fullPage"] as const) {
     const tabId = localPending?.[kind];
-    if (Number.isSafeInteger(tabId) && (tabId ?? 0) > 0) byKind[kind].add(tabId!);
+    if (typeof tabId === "number" && Number.isSafeInteger(tabId) && tabId > 0) byKind[kind].add(tabId);
   }
   const jobs: Promise<unknown>[] = [];
   for (const tabId of [...byKind.autoSolve].sort((a, b) => a - b)) {
