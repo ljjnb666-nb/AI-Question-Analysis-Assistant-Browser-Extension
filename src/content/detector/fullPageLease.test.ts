@@ -11,7 +11,7 @@ vi.mock("./domDetector", () => ({ detectCandidatesInViewport: vi.fn(() => []) })
 describe("Phase14B-02C-E2 Full Page scroll lease and cancellation", () => {
   let top = 820;
   let left = 23;
-  let scrollTo: ReturnType<typeof vi.fn>;
+  let scrollTo: unknown;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -23,12 +23,10 @@ describe("Phase14B-02C-E2 Full Page scroll lease and cancellation", () => {
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 700 });
     Object.defineProperty(document.body, "scrollHeight", { configurable: true, value: 2500 });
     Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, value: 2500 });
-    scrollTo = vi.fn((options: ScrollToOptions) => {
+    scrollTo = vi.spyOn(window, "scrollTo").mockImplementation((...args: unknown[]) => {
+      const options = args[0] as ScrollToOptions;
       top = options.top ?? top;
       left = options.left ?? left;
-    });
-    vi.spyOn(window, "scrollTo").mockImplementation((...args: unknown[]) => {
-      scrollTo(args[0] as ScrollToOptions);
     });
   });
 
