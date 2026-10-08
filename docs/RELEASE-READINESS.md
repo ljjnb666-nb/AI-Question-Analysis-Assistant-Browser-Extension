@@ -18,7 +18,8 @@ Status entries describe merged, frozen behavior. This document deliberately does
 | REL-KEY-01 | Local credential storage versioning (`qse:v1` envelope, legacy semantics) | COMPLETE |
 | REL-DOC-01 | Release-hardening documentation finalization | COMPLETE — Issue #18 is closed/completed; later RC phases have their own exact-SHA evidence gates |
 | RC-BROWSER-01 | Phase 12B real-browser `activeTab` action/grant lifecycle acceptance | COMPLETE — merged and exact merge-SHA `browser_acceptance` / RC CI passed |
-| RC-SITE-01 | Phase 13A public real-site read-only acceptance | IN REVIEW — branch evidence is green; complete only after exact merge-SHA main `real_site_acceptance` + `rc_bundle` pass |
+| RC-SITE-01 | Phase 13A public real-site read-only acceptance | COMPLETE — PR #55 merged, main merge SHA `81e81c4659d060cbad6f52a5c89dbe1e21a81358`; exact-SHA CI `37721303375` passed 8/8 |
+| RC-SITE-02 | Phase 13B local authorized-session read-only harness | AUTH_REQUIRED_NOT_RUN — automated harness contracts are not a real authenticated website result; requires a legitimate user-authorized local session |
 
 REL-DOC-01 is the completed historical release-hardening documentation gate. Phase 12 and later release-candidate gates do not reopen Issue #18; each phase freezes only after its own exact merge-SHA post-merge CI and retained evidence pass.
 
@@ -56,7 +57,7 @@ These known safe limitations and unverified browser boundaries are explicitly re
 
 Required CI jobs:
 
-- `check` — lint + typecheck + unit tests (`npm run check`)
+- `check` — lint + typecheck + unit tests + Phase 13B local-harness negative/privacy contracts (`npm run check`); these tests never fabricate an authenticated session
 - `build_artifact` — production build, artifact verifier and permission verifier tests, `npm run verify:artifact`, upload of the verified artifact
 - `e2e` — downloads the same verified artifact produced by `build_artifact`, re-verifies it, and runs the baseline real extension Playwright E2E (`test:e2e:dist`) against it
 - `browser_acceptance` — downloads that same verified extension artifact and runs the Phase 12B OS-level action/`activeTab` lifecycle gate (`test:e2e:phase12b:dist`)

@@ -12,11 +12,11 @@
     "test:permissions": "node --test tools/verify-extension-permissions.node-test.mjs",
     "analytics:server": "node analytics-server/index.mjs",
     "build:raw": "vite build",
-    "lint": "eslint src admin-console analytics-server e2e playwright.config.ts tools/build-extension.mjs tools/verify-admin-artifact.mjs tools/verify-admin-artifact.node-test.mjs tools/generate-rc-manifest.mjs tools/generate-rc-manifest.node-test.mjs vite.admin.config.ts vite.contentRuntime.config.ts eslint.config.mjs",
+    "lint": "eslint src admin-console analytics-server e2e playwright.config.ts tools/build-extension.mjs tools/verify-admin-artifact.mjs tools/verify-admin-artifact.node-test.mjs tools/generate-rc-manifest.mjs tools/generate-rc-manifest.node-test.mjs tools/phase13b-authority.mjs tools/phase13b-authority.node-test.mjs vite.admin.config.ts vite.contentRuntime.config.ts eslint.config.mjs",
     "lint:fix": "eslint src admin-console analytics-server e2e playwright.config.ts tools/build-extension.mjs tools/verify-admin-artifact.mjs tools/verify-admin-artifact.node-test.mjs tools/generate-rc-manifest.mjs tools/generate-rc-manifest.node-test.mjs vite.admin.config.ts vite.contentRuntime.config.ts eslint.config.mjs --fix",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
-    "check": "npm run lint && npm run typecheck && npm run test:run",
+    "check": "npm run lint && npm run typecheck && npm run test:run && npm run test:phase13b:contracts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tooling.json",
     "test": "node --disable-warning=ExperimentalWarning ./node_modules/vitest/vitest.mjs",
     "test:ui": "node --disable-warning=ExperimentalWarning ./node_modules/vitest/vitest.mjs --ui",
@@ -32,7 +32,9 @@
     "test:rc-manifest": "node --test tools/generate-rc-manifest.node-test.mjs",
     "rc:manifest": "node tools/generate-rc-manifest.mjs",
     "test:e2e:phase12b:dist": "playwright test --grep \"@phase12b\"",
-    "test:e2e:phase13:dist": "playwright test --grep \"@phase13\""
+    "test:e2e:phase13:dist": "playwright test --grep \"@phase13\"",
+    "test:phase13b:contracts": "node --check tools/phase13b-auth-readonly.mjs && node --test tools/phase13b-authority.node-test.mjs",
+    "accept:phase13b:local": "node tools/phase13b-auth-readonly.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
