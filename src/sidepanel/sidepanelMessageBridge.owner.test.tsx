@@ -406,4 +406,23 @@ describe("Phase14B-02C-D stale PROGRESS/DONE UI projection fence", () => {
     expect(ui.setFillFeedback).not.toHaveBeenCalled();
     ui.dispose();
   });
+
+  it("P14B02C_UI_D07 after tagged DONE, late legacy PROGRESS cannot resurrect old owner or scan buttons", async () => {
+    const ui = newHandlers(true);
+    const a = await markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    const f = await markProtectedWorkOwnerWithGeneration("fullPage", 7);
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: a, ok: true }, 7);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_DONE", generationId: f, candidates: [] }, 7);
+    await vi.waitFor(async () => expect(await readProtectedWorkOwners()).toEqual({ autoSolve: [], fullPage: [] }));
+    const oldAutoCalls = ui.setIsAutoSolving.mock.calls.length;
+    const oldFullCalls = ui.setIsFullPageScan.mock.calls.length;
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", running: true, solved: 88 }, 7);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_PROGRESS", progress: 88, found: 88 }, 7);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(await readProtectedWorkOwners()).toEqual({ autoSolve: [], fullPage: [] });
+    expect(ui.setIsAutoSolving).toHaveBeenCalledTimes(oldAutoCalls);
+    expect(ui.setIsFullPageScan).toHaveBeenCalledTimes(oldFullCalls);
+    ui.dispose();
+  });
+
 });
