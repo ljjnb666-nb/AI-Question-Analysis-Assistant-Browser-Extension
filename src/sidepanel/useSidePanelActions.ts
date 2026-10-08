@@ -452,7 +452,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       await options.markProtectedWork("autoSolve", true, activeTab.id);
     }
     const rollbackOwner = () => generationId
-      ? options.clearProtectedWorkGeneration!("autoSolve", activeTab.id!)
+      ? options.clearProtectedWorkGeneration!("autoSolve", activeTab.id!, generationId)
       : options.markProtectedWork("autoSolve", false, activeTab.id!);
     if (!canDispatchToTab(activeTab)) {
       await rollbackOwner();
