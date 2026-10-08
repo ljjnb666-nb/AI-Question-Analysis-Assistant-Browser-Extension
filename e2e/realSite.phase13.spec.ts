@@ -168,14 +168,45 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
 
     expect(response.status(), "live Pintia main document must be reachable").toBeGreaterThanOrEqual(200);
     expect(response.status(), "live Pintia main document must not be a server error").toBeLessThan(500);
-    await expect.poll(
-      async () => {
-        const body = page.locator("body");
-        if (await body.count() === 0) return false;
-        return (await body.innerText()).includes(PINTIA_EXPECTED_TITLE);
-      },
-      { timeout: 45_000, intervals: [500, 1_000, 2_000, 4_000] },
-    ).toBe(true);
+    try {
+      await expect.poll(
+        async () => {
+          const body = page.locator("body");
+          if (await body.count() === 0) return false;
+          return (await body.innerText()).includes(PINTIA_EXPECTED_TITLE);
+        },
+        { timeout: 45_000, intervals: [500, 1_000, 2_000, 4_000] },
+      ).toBe(true);
+    } catch {
+      // The live upstream is not an owned fixture. Preserve a compact diagnostic,
+      // but never turn an unreachable/challenged/changed page into a green result.
+      const diagnostic = await page.evaluate(() => ({
+        finalHostname: location.hostname,
+        finalPathname: location.pathname,
+        documentTitleSha256Input: document.title,
+        bodyTextLength: document.body?.innerText?.length ?? 0,
+        hasBody: Boolean(document.body),
+      })).catch(() => null);
+      await writeFile(
+        path.join(evidenceDir, "live-target-unavailable.json"),
+        `${JSON.stringify({
+          schemaVersion: 1,
+          outcome: "LIVE_TARGET_CONTENT_UNAVAILABLE",
+          siteId: "pintia-public-problem",
+          httpStatus: response.status(),
+          finalHostname: diagnostic?.finalHostname ?? null,
+          finalPathname: diagnostic?.finalPathname ?? null,
+          documentTitleSha256: sha256(diagnostic?.documentTitleSha256Input ?? ""),
+          bodyTextLength: diagnostic?.bodyTextLength ?? null,
+          hasBody: diagnostic?.hasBody ?? false,
+          detectionStarted: false,
+          answerFillAttempted: false,
+          automaticSubmissionObserved: false,
+        }, null, 2)}\n`,
+        "utf8",
+      );
+      throw new Error("LIVE_TARGET_CONTENT_UNAVAILABLE: public Pintia title not visible; detection was not started");
+    }
 
     const finalUrl = new URL(page.url());
     expect(finalUrl.hostname).toBe("pintia.cn");
