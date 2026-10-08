@@ -12,7 +12,7 @@ import type { ProtectedWorkKind } from "@/shared/auth/protectedWorkOwner";
  */
 export function createProtectedWorkRunAuthority() {
   let nextLease = 0;
-  const active = new Map<ProtectedWorkKind, { generationId?: string; lease: number }>();
+  const active = new Map<ProtectedWorkKind, { generationId?: string; lease: number; revoked: boolean }>();
 
   return {
     begin(kind: ProtectedWorkKind, generationId?: string): number | null {
@@ -20,12 +20,25 @@ export function createProtectedWorkRunAuthority() {
       // Unique local execution lease even for repeated legacy (untagged)
       // runs after a SPA reset. Old finally handlers cannot clear new runs.
       const lease = ++nextLease;
-      active.set(kind, { generationId, lease });
+      active.set(kind, { generationId, lease, revoked: false });
       return lease;
     },
     canStop(kind: ProtectedWorkKind, generationId?: string): boolean {
       const current = active.get(kind);
       return current !== undefined && current.generationId === generationId;
+    },
+    isOwner(kind: ProtectedWorkKind, lease: number): boolean {
+      return active.get(kind)?.lease === lease;
+    },
+    isCurrent(kind: ProtectedWorkKind, lease: number): boolean {
+      const current = active.get(kind);
+      return current !== undefined && current.lease === lease && !current.revoked;
+    },
+    revoke(kind: ProtectedWorkKind, generationId?: string): boolean {
+      const current = active.get(kind);
+      if (!current || current.generationId !== generationId || current.revoked) return false;
+      current.revoked = true;
+      return true;
     },
     finish(kind: ProtectedWorkKind, lease: number): void {
       if (active.get(kind)?.lease === lease) active.delete(kind);
