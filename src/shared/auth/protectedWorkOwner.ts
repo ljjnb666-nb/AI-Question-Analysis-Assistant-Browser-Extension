@@ -148,6 +148,37 @@ export async function clearProtectedWorkOwner(
   if (keys.length) await area.remove(keys);
 }
 
+/**
+ * Manually stop/cancel ONE protected-work kind. Capture immutable generation
+ * keys before sending, and remove ONLY those keys after the async transport.
+ * An independent same-tab START during STOP cannot be erased by cleanup.
+ *
+ * NOTE: transport is still tab-scoped. A late STOP reaching a newer running
+ * generation requires separate run-ID enforcement at the content runtime.
+ */
+export async function terminateRecordedProtectedWorkKind(
+  kind: ProtectedWorkKind,
+  send: (tabId: number, message: { type: "STOP_AUTO_SOLVE_ALL" } | { type: "FULL_PAGE_DETECT_CANCELLED" }) => Promise<unknown>,
+  localPendingTabId?: number,
+): Promise<number> {
+  const area = sessionArea();
+  const captured = area
+    ? activeOwnerRecords(await area.get(null)).filter((record) => record.kind === kind)
+    : [];
+  const tabs = new Set(captured.map(({ tabId }) => tabId));
+  if (localPendingTabId !== undefined && Number.isSafeInteger(localPendingTabId) && localPendingTabId > 0) {
+    tabs.add(localPendingTabId);
+  }
+  const message = kind === "autoSolve"
+    ? { type: "STOP_AUTO_SOLVE_ALL" as const }
+    : { type: "FULL_PAGE_DETECT_CANCELLED" as const };
+  await Promise.all([...tabs].sort((a, b) => a - b).map(
+    (tabId) => send(tabId, message).catch(() => undefined),
+  ));
+  if (captured.length) await area?.remove(captured.map(({ key }) => key));
+  return tabs.size;
+}
+
 /** Test-only: purge all namespaced owner keys. Never used by termination. */
 export async function resetProtectedWorkOwnersForTests(): Promise<void> {
   const area = sessionArea();
