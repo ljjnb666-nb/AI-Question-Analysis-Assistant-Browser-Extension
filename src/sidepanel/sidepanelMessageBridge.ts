@@ -49,7 +49,9 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
       if (origin?.tabId != null) {
         if (msg.type === "FULL_PAGE_DETECT_PROGRESS") void reconcileProtectedWorkOwnerFromRuntime("fullPage", origin.tabId);
         if (msg.type === "FULL_PAGE_DETECT_DONE") void clearProtectedWorkOwnerFromRuntimeDone("fullPage", origin.tabId, msg.generationId);
-        if (msg.type === "AUTO_SOLVE_PROGRESS" && msg.running) void reconcileProtectedWorkOwnerFromRuntime("autoSolve", origin.tabId);
+        if (msg.type === "AUTO_SOLVE_PROGRESS" && msg.running && msg.generationId === undefined) {
+          void reconcileProtectedWorkOwnerFromRuntime("autoSolve", origin.tabId);
+        }
         if (msg.type === "AUTO_SOLVE_DONE") void clearProtectedWorkOwnerFromRuntimeDone("autoSolve", origin.tabId, msg.generationId);
       }
       // Completion is feedback only. Owner reconciliation above stays global;
@@ -98,7 +100,9 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
     if (msg.type === "AUTO_SOLVE_PROGRESS") {
       const running = Boolean(msg.running);
       // Reconciliation for the auto-solve owner, same contract as above.
-      if (running && origin?.tabId != null) {
+      if (running && origin?.tabId != null && msg.generationId === undefined) {
+        // Tagged progress must not invent a *legacy* owner after DONE or
+        // auth-loss cleanup. Its persisted START token is the sole authority.
         void reconcileProtectedWorkOwnerFromRuntime("autoSolve", origin.tabId);
       }
       handlers.setIsAutoSolving(running);
