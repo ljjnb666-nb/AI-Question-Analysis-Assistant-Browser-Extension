@@ -73,7 +73,7 @@ async function send(worker: Worker, tabId: number, message: ScanMessage, frameId
 
 async function scrollState(page: Page): Promise<{ calls: number; top: number; submits: number }> {
   return page.evaluate(() => {
-    const w = window as ProbeWindow;
+    const w = window as unknown as ProbeWindow;
     return { calls: w.__scanScrollCalls, top: window.scrollY, submits: w.__scanSubmits };
   });
 }
@@ -149,7 +149,7 @@ test("@phase14b-e3b REAL_CHROMIUM isolates two tabs, nested frame and reinjectio
       .toEqual({ ok: true });
 
     const frameSubmits = await tabA.frameLocator("#question-frame").locator("#never-submit").evaluate(form =>
-      (form.ownerDocument.defaultView as ProbeWindow).__scanSubmits);
+      (form.ownerDocument.defaultView as unknown as ProbeWindow).__scanSubmits);
     expect(frameSubmits).toBe(0);
     expect((await scrollState(tabA)).submits).toBe(0);
     expect((await scrollState(tabB)).submits).toBe(0);
