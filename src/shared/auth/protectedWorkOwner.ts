@@ -203,6 +203,51 @@ export async function clearProtectedWorkOwnerFromRuntimeDone(
 }
 
 /**
+ * UI projection authority is independent of DONE owner cleanup. A tagged
+ * runtime update must correspond to an active exact owner; when multiple
+ * distinct tagged owners are live on the same tab, rendering is ambiguous and
+ * must fail closed. Legacy untagged updates must not override a tagged run.
+ *
+ * For backward compatibility, untagged legacy PROGRESS without a prior owner
+ * may still be projected and reconciled (older content-script protocol).
+ */
+export async function isProtectedWorkRuntimeUiMessageCurrent(
+  kind: ProtectedWorkKind,
+  tabId: number,
+  generationId?: unknown,
+): Promise<boolean> {
+  if (!Number.isSafeInteger(tabId) || tabId <= 0) return false;
+  if (generationId !== undefined && !isProtectedWorkGenerationId(generationId)) return false;
+  const area = sessionArea();
+  if (!area) return generationId === undefined;
+  const captured = ownerRecordsFor(await area.get(null), kind, tabId);
+  const tagged = captured.filter((o) => o.generationId !== undefined);
+  if (generationId === undefined) return tagged.length === 0;
+  return tagged.length === 1 && tagged[0]?.generationId === generationId;
+}
+
+/**
+ * Completion feedback is rendered after the exact DONE owner was removed.
+ * Revalidate after asynchronous localization: any newer/different tagged
+ * owner suppresses stale success feedback, even if the DONE was initially
+ * valid. The original DONE's own key may already have been removed.
+ */
+export async function hasConflictingProtectedWorkUiOwner(
+  kind: ProtectedWorkKind,
+  tabId: number,
+  generationId?: unknown,
+): Promise<boolean> {
+  if (!Number.isSafeInteger(tabId) || tabId <= 0) return true;
+  if (generationId !== undefined && !isProtectedWorkGenerationId(generationId)) return true;
+  const area = sessionArea();
+  if (!area) return generationId !== undefined;
+  const current = ownerRecordsFor(await area.get(null), kind, tabId);
+  return current.some((o) => generationId === undefined
+    ? o.generationId !== undefined
+    : o.generationId !== generationId);
+}
+
+/**
  * Runtime progress reconciliation: mark only when no active generation for
  * this kind + tab currently exists. A racing START may create an extra
  * generation; read and termination remain deduplicated by tab.
