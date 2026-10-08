@@ -51,8 +51,16 @@ async function main() {
   if (!/^[a-f0-9]{40}$/.test(sourceSha)) throw new Error("SOURCE_SHA_UNAVAILABLE");
 
   // Build exactly the currently checked-out, clean source. No remote AI provider is used.
-  execFileSync("npm", ["run", "build"], { cwd: root, stdio: ["ignore", "ignore", "pipe"] });
-  execFileSync("npm", ["run", "verify:artifact"], { cwd: root, stdio: ["ignore", "ignore", "pipe"] });
+  const runNpm = script => {
+    // Windows npm is a .cmd shim; Node 24 must invoke it through cmd.exe.
+    const executable = process.platform === "win32" ? "cmd.exe" : "npm";
+    const args = process.platform === "win32"
+      ? ["/d", "/s", "/c", `npm run ${script}`]
+      : ["run", script];
+    execFileSync(executable, args, { cwd: root, stdio: ["ignore", "ignore", "pipe"] });
+  };
+  runNpm("build");
+  runNpm("verify:artifact");
   const extensionTreeSha256 = digestTree(distDir).sha256;
   const manifest = JSON.parse(await fs.readFile(path.join(distDir, "manifest.json"), "utf8"));
   const profileDir = await fs.mkdtemp(path.join(os.tmpdir(), "quiz-solver-13b-"));
