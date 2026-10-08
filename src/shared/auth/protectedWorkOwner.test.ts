@@ -602,3 +602,65 @@ describe("Phase14B-02B-02B incoming DONE authority: tagged versus legacy", () =>
     expect(await context.clearProtectedWorkOwnerFromRuntimeDone("fullPage", 12, tagged)).toBe(false);
   });
 });
+
+describe("Phase14B-02C-C STOP/CANCEL exact wire snapshot", () => {
+  it("P14B02C_STOP_05 queued old STOP only carries the old UUID while new same-tab START survives", async () => {
+    const first = await freshClient();
+    const second = await freshClient();
+    const oldId = await first.markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    let release!: () => void;
+    let entered!: () => void;
+    const parked = new Promise<void>(r => { release = r; });
+    const observed = new Promise<void>(r => { entered = r; });
+    const msgs: Array<{ tabId: number; type: string; generationId?: string }> = [];
+    const pending = first.terminateRecordedProtectedWorkKind("autoSolve", async (tabId, msg) => {
+      msgs.push({ tabId, ...msg });
+      entered();
+      await parked;
+    });
+    await observed;
+    const newId = await second.markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    release();
+    expect(await pending).toBe(1);
+    expect(msgs).toEqual([{ tabId: 7, type: "STOP_AUTO_SOLVE_ALL", generationId: oldId }]);
+    expect((await second.readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
+    expect(await second.clearProtectedWorkOwnerGeneration("autoSolve", 7, newId!)).toBe(true);
+  });
+
+  it("P14B02C_STOP_06 multiple tagged Full Page generations on one tab each get exact CANCEL", async () => {
+    const c = await freshClient();
+    const older = await c.markProtectedWorkOwnerWithGeneration("fullPage", 9);
+    const newer = await c.markProtectedWorkOwnerWithGeneration("fullPage", 9);
+    const seen: Array<string | undefined> = [];
+    const count = await c.terminateRecordedProtectedWorkKind("fullPage", async (_, msg) => {
+      seen.push(msg.generationId);
+    });
+    expect(count).toBe(1);
+    expect(seen.sort()).toEqual([older, newer].sort());
+    expect((await c.readProtectedWorkOwners()).fullPage).toEqual([]);
+  });
+
+  it("P14B02C_STOP_07 auth-loss fanout retains tagged run IDs for both kinds", async () => {
+    const c = await freshClient();
+    const a = await c.markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    const b = await c.markProtectedWorkOwnerWithGeneration("fullPage", 8);
+    const seen: Array<{ tabId: number; type: string; generationId?: string }> = [];
+    await c.terminateRecordedProtectedWork(async (tabId, msg) => { seen.push({ tabId, ...msg }); });
+    expect(seen).toEqual([
+      { tabId: 7, type: "STOP_AUTO_SOLVE_ALL", generationId: a },
+      { tabId: 8, type: "FULL_PAGE_DETECT_CANCELLED", generationId: b },
+    ]);
+    expect(await c.readProtectedWorkOwners()).toEqual({ autoSolve: [], fullPage: [] });
+  });
+
+  it("P14B02C_STOP_08 legacy records still use one untagged STOP per tab", async () => {
+    const c = await freshClient();
+    await c.markProtectedWorkOwner("autoSolve", 7);
+    await c.markProtectedWorkOwner("autoSolve", 7);
+    const seen: Array<string | undefined> = [];
+    expect(await c.terminateRecordedProtectedWorkKind("autoSolve", async (_, msg) => {
+      seen.push(msg.generationId);
+    })).toBe(1);
+    expect(seen).toEqual([undefined]);
+  });
+});

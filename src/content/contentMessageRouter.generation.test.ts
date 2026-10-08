@@ -63,3 +63,27 @@ describe("Phase14B-02C-B Full Page START generation contract", () => {
     expect(respond).toHaveBeenCalledWith({ ok: true });
   });
 });
+
+describe("Phase14B-02C-C STOP/CANCEL router equality fence", () => {
+  const id = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+  for (const kind of [
+    { type: "STOP_AUTO_SOLVE_ALL", callback: "stopAutoSolveAll" },
+    { type: "FULL_PAGE_DETECT_CANCELLED", callback: "cancelFullPageScan" },
+  ] as const) {
+    it(`P14B02C_STOP_ROUTER ${kind.type}: forwards valid ID, rejects stale and invalid`, () => {
+      const allowed = vi.fn(() => true);
+      const deny = vi.fn(() => false);
+      const emit = (generationId: unknown, f: ReturnType<typeof vi.fn>) => {
+        const response = vi.fn();
+        handleContentMessage({ type: kind.type, generationId } as Parameters<typeof handleContentMessage>[0],
+          response, { [kind.callback]: f } as unknown as Parameters<typeof handleContentMessage>[2]);
+        return response;
+      };
+      expect(emit(id, allowed)).toHaveBeenCalledWith({ ok: true });
+      expect(allowed).toHaveBeenCalledWith(id);
+      expect(emit(id, deny)).toHaveBeenCalledWith({ ok: false, error: "STALE_WORK_GENERATION" });
+      expect(emit(null, allowed)).toHaveBeenCalledWith({ ok: false, error: "INVALID_WORK_GENERATION" });
+      expect(allowed).toHaveBeenCalledTimes(1);
+    });
+  }
+});

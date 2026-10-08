@@ -50,6 +50,7 @@ import { initAnalytics } from "@/shared/utils/analytics";
 import { createContentMainBridges } from "./contentMainBridges";
 import { createContentRuntimeState } from "./contentRuntimeState";
 import { createContentMainWorkflows } from "./contentMainWorkflows";
+import { createProtectedWorkRunAuthority } from "./protectedWorkRunAuthority";
 import { beginContentRuntimeGeneration } from "./contentRuntimeLifecycle";
 import { startContentRouteLifecycleWatch } from "./revision/contentRouteLifecycle";
 import { controlRegistry } from "./answer/controlRegistry";
@@ -82,6 +83,7 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
 
   const floatingMgr = new FloatingWindowManager();
   const runtimeState = createContentRuntimeState();
+  const runAuthority = createProtectedWorkRunAuthority();
   const workspace = createCandidateWorkspaceRuntime({ url: () => location.href, send: safeRuntimeSendMessage });
   const cancelWorkspaceScan = () => {
     cancelFullPageScan();
@@ -207,6 +209,7 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
 
   const stopContentRouteLifecycleWatch = startContentRouteLifecycleWatch(() => {
     if (!lifecycle.isCurrent()) return;
+    runAuthority.reset();
     runtimeState.setAutoSolveStopRequested(true);
     abortCurrentSolveAttempt();
     controlRegistry.clear();
@@ -227,7 +230,11 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
   workflows.refreshLayoutResizeObservation();
 
   const messageHandlerOptions = {
-    cancelFullPageScan: cancelWorkspaceScan,
+    cancelFullPageScan: (generationId?: string) => {
+      if (!runAuthority.canStop("fullPage", generationId)) return false;
+      cancelWorkspaceScan();
+      return true;
+    },
     getWorkspaceSnapshot: workspace.snapshot,
     notifySelectionChanged: () => {
       const candidates = workspace.updateSelection(runtimeState.candidateStatusMap);
@@ -253,7 +260,19 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     getActiveHighlightBlocks: runtimeState.getActiveHighlightBlocks,
     getHighlightLayer: runtimeState.getHighlightLayer,
     handleAutoDetect,
-    handleFullPageDetect,
+    handleFullPageDetect: (generationId?: string) => {
+      const lease = runAuthority.begin("fullPage", generationId);
+      if (lease === null) return false;
+      try {
+        void Promise.resolve(handleFullPageDetect(generationId))
+          .catch((error) => console.warn("[QS] Full Page run failed:", error))
+          .finally(() => runAuthority.finish("fullPage", lease));
+      } catch (error) {
+        runAuthority.finish("fullPage", lease);
+        throw error;
+      }
+      return true;
+    },
     notifySidePanel,
     refreshLayoutResizeObservation: workflows.refreshLayoutResizeObservation,
     resetDetectionArtifacts: () => {
@@ -262,12 +281,24 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
       workspace.resetDetection();
     },
     startAutoSolveAll: (generationId) => {
-      void workflows.handleAutoSolveAll(generationId);
+      const lease = runAuthority.begin("autoSolve", generationId);
+      if (lease === null) return false;
+      try {
+        void workflows.handleAutoSolveAll(generationId)
+          .catch((error) => console.warn("[QS] Auto Solve run failed:", error))
+          .finally(() => runAuthority.finish("autoSolve", lease));
+      } catch (error) {
+        runAuthority.finish("autoSolve", lease);
+        throw error;
+      }
+      return true;
     },
     startManualCapture,
-    stopAutoSolveAll: () => {
+    stopAutoSolveAll: (generationId?: string) => {
+      if (!runAuthority.canStop("autoSolve", generationId)) return false;
       runtimeState.setAutoSolveStopRequested(true);
       abortCurrentSolveAttempt();
+      return true;
     },
     stopSpaWatch: runtimeState.stopSpaWatch,
     verifyParsedAnswerInPage,
@@ -293,6 +324,7 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
 
       cleanup(() => chrome.runtime.onMessage.removeListener(listener));
       cleanup(stopContentRouteLifecycleWatch);
+      cleanup(runAuthority.reset);
       cleanup(() => runtimeState.setAutoSolveStopRequested(true));
       cleanup(abortCurrentSolveAttempt);
       cleanup(disposeAnswerFillerRuntimeState);
