@@ -7,7 +7,7 @@ import { useAuthSession } from "@/shared/auth/useAuthSession";
 import {
   clearProtectedWorkOwner,
   markProtectedWorkOwner,
-  readProtectedWorkOwners,
+  terminateRecordedProtectedWork,
 } from "@/shared/auth/protectedWorkOwner";
 import type { UILang } from "./displayUtils";
 import { isRiskyCandidate } from "./batchParseHeuristics";
@@ -195,47 +195,17 @@ export const SidePanelApp: React.FC = () => {
         });
         protectedWorkRef.current.autoSolve = { active: false };
         protectedWorkRef.current.fullPage = { active: false };
-        void (async () => {
-          try {
-            // INV-15 + INV-16: union this surface's zero-lag sync registry
-            // with the cross-surface owner SET — several tabs may run the
-            // same kind, and every recorded owner is terminated, each exactly
-            // once, at its recorded tab (never a re-guessed best tab).
-            const owners = await readProtectedWorkOwners();
-            const autoSolveTabs = new Set<number>();
-            if (syncPlan.stopAutoSolve && syncPlan.autoSolveTabId != null) {
-              autoSolveTabs.add(syncPlan.autoSolveTabId);
-            }
-            for (const entry of owners.autoSolve) autoSolveTabs.add(entry.tabId);
-            const fullPageTabs = new Set<number>();
-            if (syncPlan.cancelFullPage && syncPlan.fullPageTabId != null) {
-              fullPageTabs.add(syncPlan.fullPageTabId);
-            }
-            for (const entry of owners.fullPage) fullPageTabs.add(entry.tabId);
-
-            const jobs: Promise<unknown>[] = [];
-            for (const tabId of autoSolveTabs) {
-              jobs.push(
-                sendTabMessageWithBootstrap(tabId, { type: "STOP_AUTO_SOLVE_ALL" }).catch(() => undefined),
-              );
-            }
-            for (const tabId of fullPageTabs) {
-              jobs.push(
-                sendTabMessageWithBootstrap(tabId, { type: "FULL_PAGE_DETECT_CANCELLED" }).catch(() => undefined),
-              );
-            }
-            await Promise.all(jobs);
-            // Clear exactly the owners this termination captured.
-            const clearJobs: Promise<void>[] = [];
-            for (const tabId of autoSolveTabs) clearJobs.push(clearProtectedWorkOwner("autoSolve", tabId));
-            for (const tabId of fullPageTabs) clearJobs.push(clearProtectedWorkOwner("fullPage", tabId));
-            await Promise.all(clearJobs);
-          } catch {
-            // Best-effort termination; the registry entries for the tabs we
-            // reached are cleared above regardless of individual send
-            // failures.
-          }
-        })();
+        // Reuse the same immutable-key snapshot fence as Popup. The
+        // Side Panel's zero-lag local tabs join STOP fanout, but do NOT make
+        // later generations eligible for cleanup once STOP has awaited.
+        // This eliminates the duplicate read/send/clear-by-tab ABA path.
+        void terminateRecordedProtectedWork(
+          (tabId, message) => sendTabMessageWithBootstrap(tabId, message),
+          {
+            autoSolve: syncPlan.stopAutoSolve ? syncPlan.autoSolveTabId : undefined,
+            fullPage: syncPlan.cancelFullPage ? syncPlan.fullPageTabId : undefined,
+          },
+        ).catch(() => undefined);
         setIsAutoSolving(false);
         setAutoSolveProgress(null);
         setIsFullPageScan(false);
