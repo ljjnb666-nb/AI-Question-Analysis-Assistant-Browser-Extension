@@ -144,8 +144,8 @@ export const SidePanelApp: React.FC = () => {
   // cross-surface store is what makes the owner visible beyond this
   // component (never user config, transient by design).
   const protectedWorkRef = useRef<{
-    autoSolve: { active: boolean; tabId?: number };
-    fullPage: { active: boolean; tabId?: number };
+    autoSolve: { active: boolean; tabId?: number; generationId?: string };
+    fullPage: { active: boolean; tabId?: number; generationId?: string };
   }>({ autoSolve: { active: false }, fullPage: { active: false } });
 
   const markProtectedWork = useCallback(
@@ -175,18 +175,32 @@ export const SidePanelApp: React.FC = () => {
     const intent = { active: true, tabId };
     protectedWorkRef.current[kind] = intent;
     const generationId = await markProtectedWorkOwnerWithGeneration(kind, tabId);
-    // An auth-loss watchdog may have cleared this intent during the await.
-    // Never re-arm a revoked intent with a late owner commit.
-    if (protectedWorkRef.current[kind] === intent && generationId) {
-      protectedWorkRef.current[kind] = { active: true, tabId };
+    // A newer same-tab START or the auth-loss watchdog can revoke the intent
+    // during storage I/O. In either case, the old START must not be dispatched.
+    if (protectedWorkRef.current[kind] !== intent) {
+      if (generationId) await clearProtectedWorkOwnerGeneration(kind, tabId, generationId);
+      return null;
     }
+    if (!generationId) {
+      protectedWorkRef.current[kind] = { active: false };
+      return null;
+    }
+    protectedWorkRef.current[kind] = { active: true, tabId, generationId };
     return generationId;
   }, []);
+
+  const isProtectedWorkGenerationCurrent = useCallback(
+    (kind: "autoSolve" | "fullPage", tabId: number, generationId: string) => {
+      const current = protectedWorkRef.current[kind];
+      return current.active && current.tabId === tabId && current.generationId === generationId;
+    }, [],
+  );
 
   const clearProtectedWorkGeneration = useCallback(async (
     kind: "autoSolve" | "fullPage", tabId: number, generationId: string,
   ) => {
-    if (protectedWorkRef.current[kind].tabId === tabId) {
+    if (protectedWorkRef.current[kind].tabId === tabId
+      && protectedWorkRef.current[kind].generationId === generationId) {
       protectedWorkRef.current[kind] = { active: false };
     }
     await clearProtectedWorkOwnerGeneration(kind, tabId, generationId);
@@ -339,6 +353,7 @@ export const SidePanelApp: React.FC = () => {
     markProtectedWork,
     markProtectedWorkGeneration,
     clearProtectedWorkGeneration,
+    isProtectedWorkGenerationCurrent,
     clearProtectedWorkIntent,
     protectedWork: protectedWorkRef,
     setCandidates,

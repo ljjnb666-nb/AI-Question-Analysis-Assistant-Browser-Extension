@@ -71,6 +71,8 @@ type UseSidePanelActionsOptions = {
   markProtectedWorkGeneration?: (kind: "autoSolve" | "fullPage", tabId: number) => Promise<string | null>;
   /** Roll back ONLY the START generation created by this request. */
   clearProtectedWorkGeneration?: (kind: "autoSolve" | "fullPage", tabId: number, generationId: string) => Promise<void>;
+  /** Ref authority on the current START to reject a superseded pending dispatch. */
+  isProtectedWorkGenerationCurrent?: (kind: "autoSolve" | "fullPage", tabId: number, generationId: string) => boolean;
   /** Reset the component-owned synchronous local intent, without broad storage cleanup. */
   clearProtectedWorkIntent?: (kind: "autoSolve" | "fullPage") => void;
   protectedWork?: {
@@ -443,8 +445,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     if (generationAware) {
       generationId = (await options.markProtectedWorkGeneration!("autoSolve", activeTab.id)) ?? undefined;
       if (!generationId) {
-        // A missing session store must not silently downgrade a new START.
-        options.clearProtectedWorkIntent?.("autoSolve");
+        // A missing session store or superseded mark must never START.
         return;
       }
     } else {
@@ -454,7 +455,9 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     const rollbackOwner = () => generationId
       ? options.clearProtectedWorkGeneration!("autoSolve", activeTab.id!, generationId)
       : options.markProtectedWork("autoSolve", false, activeTab.id!);
-    if (!canDispatchToTab(activeTab)) {
+    const currentGeneration = () => !generationId
+      || options.isProtectedWorkGenerationCurrent?.("autoSolve", activeTab.id!, generationId) !== false;
+    if (!canDispatchToTab(activeTab) || !currentGeneration()) {
       await rollbackOwner();
       return;
     }
@@ -463,7 +466,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       generationId ? { type: "START_AUTO_SOLVE_ALL", generationId } : { type: "START_AUTO_SOLVE_ALL" },
       () => canDispatchToTab(activeTab),
     );
-    if (response.ok === false || !canDispatchToTab(activeTab)) {
+    if (response.ok === false || !canDispatchToTab(activeTab) || !currentGeneration()) {
       await rollbackOwner();
       return;
     }
