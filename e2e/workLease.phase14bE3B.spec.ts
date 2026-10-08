@@ -21,7 +21,7 @@ type ProbeWindow = Window & { __scanScrollCalls: number; __scanSubmits: number }
 function pageHtml(label: string, nested: boolean): string {
   return '<!doctype html><html><head><meta charset="utf-8"><title>E3B ' + label +
     '</title></head><body style="margin:0">' +
-    '<form id="never-submit"><input name="answer"><button type="submit">Submit</button></form>' +
+    '<form id="never-submit" action="/__trap_submit"><input name="answer"><button type="submit">Submit</button></form>' +
     '<section class="question-item" style="width:630px;min-height:170px">' +
     '<h2>' + label + '. Which value equals two plus two?</h2>' +
     '<button>A. 3</button><button>B. 4</button><button>C. 5</button></section>' +
@@ -33,16 +33,25 @@ function pageHtml(label: string, nested: boolean): string {
     'event.preventDefault();window.__scanSubmits++});</script></body></html>';
 }
 
-async function serveProbe(): Promise<{ origin: string; close: () => Promise<void> }> {
+async function serveProbe(): Promise<{ origin: string; submitCount: () => number; close: () => Promise<void> }> {
+  let submitCount = 0;
   const server = http.createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+    if (pathname === "/__trap_submit") {
+      // Detect native form.submit(): it bypasses DOM submit-event listeners.
+      // The server count survives any form navigation or page reload.
+      submitCount += 1;
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+      res.end("submission detected");
+      return;
+    }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
     res.end(pageHtml(pathname === "/nested" ? "frame" : pathname === "/a" ? "A" : "B", pathname === "/nested"));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw Error("E3B probe server port not bound");
-  return { origin: "http://127.0.0.1:" + address.port,
+  return { origin: "http://127.0.0.1:" + address.port, submitCount: () => submitCount,
     close: () => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) };
 }
 
@@ -153,6 +162,9 @@ test("@phase14b-e3b REAL_CHROMIUM isolates two tabs, nested frame and reinjectio
     expect(frameSubmits).toBe(0);
     expect((await scrollState(tabA)).submits).toBe(0);
     expect((await scrollState(tabB)).submits).toBe(0);
+    // A DOM event listener alone misses native form.submit() calls.
+    // Real HTTP submission must also remain absent across all frames.
+    expect(server.submitCount()).toBe(0);
   } finally {
     await closeExtensionContext(context);
     await server.close();
