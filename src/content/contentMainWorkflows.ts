@@ -275,7 +275,11 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
     });
   }
 
-  async function handleAutoSolveAll(generationId?: string, isExecutionCurrent: () => boolean = () => true) {
+  async function handleAutoSolveAll(
+    generationId?: string,
+    isExecutionCurrent: () => boolean = () => true,
+    isExecutionOwner: () => boolean = () => true,
+  ) {
     // Capture per-START identity, never read a mutable global token after an
     // await. Superseded route completions keep their ORIGINAL generation.
     const withGeneration = <T extends object>(payload: T) => generationId
@@ -290,7 +294,9 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
     // provenance gate keeps real-page mutation at zero.
     const autoSolveSettings = await loadSettings();
     if (!isRunCurrent()) return;
-    if (!(await getAIConnectionReadiness()).ready) {
+    const readiness = await getAIConnectionReadiness();
+    if (!isRunCurrent()) return;
+    if (!readiness.ready) {
       options.sendAutoSolveDone(withGeneration({
         ok: false,
         solved: 0,
@@ -305,7 +311,10 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         isRunning: options.runtimeState.getAutoSolveRunning,
         setRunning: (running) => {
           if (isRunCurrent()) options.runtimeState.setAutoSolveRunning(running);
-          else if (!running && options.isRuntimeCurrent()) options.setSupersededAutoSolveStopped?.();
+          else if (!running && options.isRuntimeCurrent() && isExecutionOwner()) {
+            // A revoked run may release its own UI state, never its successor\'s.
+            options.setSupersededAutoSolveStopped?.();
+          }
         },
         isStopRequested: () => !isRunCurrent() || options.runtimeState.getAutoSolveStopRequested(),
         requestStop: (stop) => { if (isRunCurrent()) options.runtimeState.setAutoSolveStopRequested(stop); },
