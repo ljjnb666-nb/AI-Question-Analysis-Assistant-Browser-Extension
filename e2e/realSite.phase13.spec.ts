@@ -5,7 +5,7 @@ import type { BrowserContext, Page, Worker } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
 import { visitLiveTargetUntilReady } from "@/shared/utils/liveSiteReadiness";
-import { createLiveSiteDiagnostics } from "./helpers/liveSiteDiagnostics";
+import { createLiveSiteDiagnostics, isPintiaPartyHost } from "./helpers/liveSiteDiagnostics";
 
 // Third-party page text must never enter uploaded failure traces, screenshots, or video.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -159,7 +159,7 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
         try { return new URL(response.url()).hostname; }
         catch { return ""; }
       })();
-      resources.recordHttpFailure(response.request().resourceType(), response.status(), hostname === "pintia.cn");
+      resources.recordHttpFailure(response.request().resourceType(), response.status(), isPintiaPartyHost(hostname));
     });
     page.on("requestfailed", (request) => {
       resources.recordRequestFailure(request.resourceType(), request.failure()?.errorText);
