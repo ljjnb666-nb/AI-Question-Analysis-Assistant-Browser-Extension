@@ -297,6 +297,44 @@ describe("Phase14B-02C-E1 in-flight Auto Solve side-effect authority", () => {
     expect(harness.nextButton).not.toHaveBeenCalled();
   });
 
+  it("P14B02C_E1_06 a replaced run's finally cannot reset the new owner's running state", async () => {
+    const harness = setupDelayedFill();
+    const clearLegacyState = vi.fn();
+    Object.assign(harness.options, { setSupersededAutoSolveStopped: clearLegacyState });
+    let current = true;
+    let ownsSlot = true;
+    const run = createContentMainWorkflows(harness.options).handleAutoSolveAll(
+      "18aabcde-0ee2-4e98-8e12-48fdce879012",
+      () => current,
+      () => ownsSlot,
+    );
+    await harness.entered;
+    current = false;
+    ownsSlot = false;
+    harness.releaseFill();
+    await run;
+    expect(clearLegacyState).not.toHaveBeenCalled();
+  });
+
+  it("P14B02C_E1_07 cancelled but still-owned run releases only its own UI state", async () => {
+    const harness = setupDelayedFill();
+    const clearLegacyState = vi.fn();
+    Object.assign(harness.options, { setSupersededAutoSolveStopped: clearLegacyState });
+    let current = true;
+    const run = createContentMainWorkflows(harness.options).handleAutoSolveAll(
+      "18aabcde-0ee2-4e98-8e12-48fdce879012",
+      () => current,
+      () => true,
+    );
+    await harness.entered;
+    current = false;
+    harness.releaseFill();
+    await run;
+    expect(clearLegacyState).toHaveBeenCalledOnce();
+    expect(harness.mutatePage).not.toHaveBeenCalled();
+    expect(harness.nextButton).not.toHaveBeenCalled();
+  });
+
   it("P14B02C_E1_05 current lease still permits verified fill and next-question navigation", async () => {
     const harness = setupDelayedFill();
     const run = createContentMainWorkflows(harness.options).handleAutoSolveAll();
