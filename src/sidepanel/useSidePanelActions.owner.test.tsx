@@ -309,3 +309,67 @@ describe("Phase14B-02B manual STOP/CANCEL dispatch bridge", () => {
     expect(clearProtectedWorkOwner).not.toHaveBeenCalled();
   });
 });
+
+describe("Phase14B-02C SidePanel generation-aware START and rollback", () => {
+  const generationId = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+
+  it("P14B02C_UI_01 dispatch carries the UUID returned by the committed owner", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    const markProtectedWorkGeneration = vi.fn(async () => generationId);
+    const clearProtectedWorkGeneration = vi.fn(async () => undefined);
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({ markProtectedWorkGeneration, clearProtectedWorkGeneration }),
+    });
+    await result.current.handleStartAutoSolve();
+    expect(markProtectedWorkGeneration).toHaveBeenCalledWith("autoSolve", 7);
+    expect(sendProtectedTabMessageWithBootstrap).toHaveBeenCalledWith(
+      7, { type: "START_AUTO_SOLVE_ALL", generationId }, expect.any(Function),
+    );
+    expect(clearProtectedWorkGeneration).not.toHaveBeenCalled();
+  });
+
+  it("P14B02C_UI_02 denied START rolls back only that exact generation", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    vi.mocked(sendProtectedTabMessageWithBootstrap).mockResolvedValueOnce({ ok: false, error: "DENIED" });
+    const markProtectedWorkGeneration = vi.fn(async () => generationId);
+    const clearProtectedWorkGeneration = vi.fn(async () => undefined);
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({ markProtectedWorkGeneration, clearProtectedWorkGeneration }),
+    });
+    await result.current.handleStartAutoSolve();
+    expect(clearProtectedWorkGeneration).toHaveBeenCalledTimes(1);
+    expect(clearProtectedWorkGeneration).toHaveBeenCalledWith("autoSolve", 7, generationId);
+  });
+
+  it("P14B02C_UI_03 unavailable owner store sends no START", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    const markProtectedWorkGeneration = vi.fn(async () => null);
+    const clearProtectedWorkGeneration = vi.fn(async () => undefined);
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({ markProtectedWorkGeneration, clearProtectedWorkGeneration }),
+    });
+    await result.current.handleStartAutoSolve();
+    expect(sendProtectedTabMessageWithBootstrap).not.toHaveBeenCalled();
+  });
+});
+
+describe("Phase14B-02C current-generation dispatch lease", () => {
+  it("P14B02C_UI_04 a same-tab superseded START cannot dispatch and only rolls back its own token", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    const generationId = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    const markProtectedWorkGeneration = vi.fn(async () => generationId);
+    const clearProtectedWorkGeneration = vi.fn(async () => undefined);
+    const isProtectedWorkGenerationCurrent = vi.fn(() => false);
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({
+        markProtectedWorkGeneration,
+        clearProtectedWorkGeneration,
+        isProtectedWorkGenerationCurrent,
+      }),
+    });
+    await result.current.handleStartAutoSolve();
+    expect(sendProtectedTabMessageWithBootstrap).not.toHaveBeenCalled();
+    expect(clearProtectedWorkGeneration).toHaveBeenCalledWith("autoSolve", 7, generationId);
+    expect(isProtectedWorkGenerationCurrent).toHaveBeenCalledWith("autoSolve", 7, generationId);
+  });
+});

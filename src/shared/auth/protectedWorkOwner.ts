@@ -27,6 +27,12 @@ export type ProtectedWorkOwners = {
 
 const KEY_PREFIX = "protectedWorkOwner:";
 
+/** Shared wire-format check: malformed run IDs must never reach a start. */
+export function isProtectedWorkGenerationId(value: unknown): value is string {
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+}
+
 type StoredOwner = {
   key: string;
   kind: ProtectedWorkKind;

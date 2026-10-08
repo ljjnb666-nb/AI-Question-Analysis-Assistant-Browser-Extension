@@ -7,6 +7,8 @@ import { useAuthSession } from "@/shared/auth/useAuthSession";
 import {
   clearProtectedWorkOwner,
   markProtectedWorkOwner,
+  markProtectedWorkOwnerWithGeneration,
+  clearProtectedWorkOwnerGeneration,
   terminateRecordedProtectedWork,
 } from "@/shared/auth/protectedWorkOwner";
 import type { UILang } from "./displayUtils";
@@ -142,8 +144,8 @@ export const SidePanelApp: React.FC = () => {
   // cross-surface store is what makes the owner visible beyond this
   // component (never user config, transient by design).
   const protectedWorkRef = useRef<{
-    autoSolve: { active: boolean; tabId?: number };
-    fullPage: { active: boolean; tabId?: number };
+    autoSolve: { active: boolean; tabId?: number; generationId?: string };
+    fullPage: { active: boolean; tabId?: number; generationId?: string };
   }>({ autoSolve: { active: false }, fullPage: { active: false } });
 
   const markProtectedWork = useCallback(
@@ -167,6 +169,41 @@ export const SidePanelApp: React.FC = () => {
   // hook only asks for intent to be cleared before asynchronous STOP.
   const clearProtectedWorkIntent = useCallback((kind: "autoSolve" | "fullPage") => {
     protectedWorkRef.current[kind] = { active: false };
+  }, []);
+
+  const markProtectedWorkGeneration = useCallback(async (kind: "autoSolve" | "fullPage", tabId: number) => {
+    const intent = { active: true, tabId };
+    protectedWorkRef.current[kind] = intent;
+    const generationId = await markProtectedWorkOwnerWithGeneration(kind, tabId);
+    // A newer same-tab START or the auth-loss watchdog can revoke the intent
+    // during storage I/O. In either case, the old START must not be dispatched.
+    if (protectedWorkRef.current[kind] !== intent) {
+      if (generationId) await clearProtectedWorkOwnerGeneration(kind, tabId, generationId);
+      return null;
+    }
+    if (!generationId) {
+      protectedWorkRef.current[kind] = { active: false };
+      return null;
+    }
+    protectedWorkRef.current[kind] = { active: true, tabId, generationId };
+    return generationId;
+  }, []);
+
+  const isProtectedWorkGenerationCurrent = useCallback(
+    (kind: "autoSolve" | "fullPage", tabId: number, generationId: string) => {
+      const current = protectedWorkRef.current[kind];
+      return current.active && current.tabId === tabId && current.generationId === generationId;
+    }, [],
+  );
+
+  const clearProtectedWorkGeneration = useCallback(async (
+    kind: "autoSolve" | "fullPage", tabId: number, generationId: string,
+  ) => {
+    if (protectedWorkRef.current[kind].tabId === tabId
+      && protectedWorkRef.current[kind].generationId === generationId) {
+      protectedWorkRef.current[kind] = { active: false };
+    }
+    await clearProtectedWorkOwnerGeneration(kind, tabId, generationId);
   }, []);
 
   useEffect(() => {
@@ -314,6 +351,9 @@ export const SidePanelApp: React.FC = () => {
     isWorkspaceReadyNow: () => workspaceAccessRef.current.status === "ready",
     getWorkspaceOrigin: () => workspaceAccessRef.current.origin,
     markProtectedWork,
+    markProtectedWorkGeneration,
+    clearProtectedWorkGeneration,
+    isProtectedWorkGenerationCurrent,
     clearProtectedWorkIntent,
     protectedWork: protectedWorkRef,
     setCandidates,

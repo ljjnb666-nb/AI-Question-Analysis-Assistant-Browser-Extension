@@ -261,8 +261,8 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
       runtimeState.resetDetectionArtifacts();
       workspace.resetDetection();
     },
-    startAutoSolveAll: () => {
-      void workflows.handleAutoSolveAll();
+    startAutoSolveAll: (generationId) => {
+      void workflows.handleAutoSolveAll(generationId);
     },
     startManualCapture,
     stopAutoSolveAll: () => {

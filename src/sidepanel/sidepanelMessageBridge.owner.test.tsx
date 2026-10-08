@@ -229,3 +229,48 @@ describe("Phase14B-02B tagged runtime DONE replay fence", () => {
     await vi.waitFor(async () => expect((await readProtectedWorkOwners()).fullPage).toEqual([]));
   });
 });
+
+describe("Phase14B-02C tagged runtime progress cannot resurrect an owner", () => {
+  it("P14B02C_PROGRESS_01 a late tagged progress after DONE creates no legacy owner", async () => {
+    registerSidePanelRuntimeListeners({
+      renderWorkspace: false,
+      loadLanguage: async () => "en" as const,
+      setUiLang: vi.fn(),
+      setCandidates: vi.fn(),
+      setIsDetecting: vi.fn(),
+      setIsFullPageScan: vi.fn(),
+      setScanProgress: vi.fn(),
+      setExpandedIds: vi.fn(),
+      setIsAutoSolving: vi.fn(),
+      setAutoSolveProgress: vi.fn(),
+      setFillFeedback: vi.fn(),
+    });
+    const token = await markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: token, ok: true }, 7);
+    await vi.waitFor(async () => {
+      expect((await readProtectedWorkOwners()).autoSolve).toEqual([]);
+    });
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", generationId: token, running: true }, 7);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await readProtectedWorkOwners()).autoSolve).toEqual([]);
+  });
+
+  it("P14B02C_PROGRESS_02 malformed tagged running progress never falls back to legacy reconciliation", async () => {
+    registerSidePanelRuntimeListeners({
+      renderWorkspace: true,
+      loadLanguage: async () => "en" as const,
+      setUiLang: vi.fn(),
+      setCandidates: vi.fn(),
+      setIsDetecting: vi.fn(),
+      setIsFullPageScan: vi.fn(),
+      setScanProgress: vi.fn(),
+      setExpandedIds: vi.fn(),
+      setIsAutoSolving: vi.fn(),
+      setAutoSolveProgress: vi.fn(),
+      setFillFeedback: vi.fn(),
+    });
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", generationId: null, running: true }, 7);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await readProtectedWorkOwners()).autoSolve).toEqual([]);
+  });
+});

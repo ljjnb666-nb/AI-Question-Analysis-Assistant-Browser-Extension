@@ -171,6 +171,7 @@ type CreateContentMainWorkflowsOptions = {
     filled: number;
     total: number;
     message: string;
+    generationId?: string;
   }) => void;
   sendAutoSolveProgress: (payload: {
     running: boolean;
@@ -182,6 +183,7 @@ type CreateContentMainWorkflowsOptions = {
     currentQuestionId?: string;
     currentPreview?: string;
     currentBlock?: QuestionBlock;
+    generationId?: string;
   }) => void;
   setScrollPosition: (scrollRoot: ScanScrollRoot, top: number, left: number) => void;
   shouldForceSecondVisionReview: (block: QuestionBlock, result: ParseResult) => boolean;
@@ -273,7 +275,12 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
     });
   }
 
-  async function handleAutoSolveAll() {
+  async function handleAutoSolveAll(generationId?: string) {
+    // Capture per-START identity, never read a mutable global token after an
+    // await. Superseded route completions keep their ORIGINAL generation.
+    const withGeneration = <T extends object>(payload: T) => generationId
+      ? { ...payload, generationId }
+      : payload;
     const startedAtUrl = location.href;
     const routeEpoch = options.workspaceRouteEpoch?.();
     const isRunCurrent = () => options.isRuntimeCurrent() && location.href === startedAtUrl && options.workspaceRouteEpoch?.() === routeEpoch;
@@ -283,13 +290,13 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
     const autoSolveSettings = await loadSettings();
     if (!isRunCurrent()) return;
     if (!(await getAIConnectionReadiness()).ready) {
-      options.sendAutoSolveDone({
+      options.sendAutoSolveDone(withGeneration({
         ok: false,
         solved: 0,
         filled: 0,
         total: 0,
         message: getProviderNotConfiguredMessage(autoSolveSettings.language),
-      });
+      }));
       return;
     }
     await runAutoSolveAll(
@@ -359,12 +366,12 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         resolveQuestionBlockFromBBox: options.resolveQuestionBlockFromBBox,
         resolveScrollRoot: options.resolveFullPageScrollRoot,
         sendAutoSolveDone: (payload) => {
-          if (isRunCurrent()) options.sendAutoSolveDone(payload);
-          else if (options.isRuntimeCurrent()) options.sendSupersededAutoSolveDone?.(payload);
+          if (isRunCurrent()) options.sendAutoSolveDone(withGeneration(payload));
+          else if (options.isRuntimeCurrent()) options.sendSupersededAutoSolveDone?.(withGeneration(payload));
         },
         sendAutoSolveProgress: (payload) => {
-          if (isRunCurrent()) options.sendAutoSolveProgress(payload);
-          else if (options.isRuntimeCurrent()) options.sendSupersededAutoSolveProgress?.(payload);
+          if (isRunCurrent()) options.sendAutoSolveProgress(withGeneration(payload));
+          else if (options.isRuntimeCurrent()) options.sendSupersededAutoSolveProgress?.(withGeneration(payload));
         },
         setScrollPosition: options.setScrollPosition,
         shouldPersistAutoSolveParseResult: options.shouldPersistAutoSolveParseResult,

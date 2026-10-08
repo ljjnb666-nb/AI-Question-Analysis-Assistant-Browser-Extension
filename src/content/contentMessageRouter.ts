@@ -1,5 +1,6 @@
 import type { BoundingBox, ExtMessage, ParseResult, QuestionBlock, UpdateCandidateSelectionMsg } from "@/shared/types";
 import { getUnfillableResultCode, isParseResultFillAuthoritative } from "@/shared/ai/parseResultAuthority";
+import { isProtectedWorkGenerationId } from "@/shared/auth/protectedWorkOwner";
 
 type MessageResponse = (response: unknown) => void;
 
@@ -13,7 +14,7 @@ type ContentMessageRouterDeps = {
   flashCandidate: (blockId: string) => void;
   handleAutoDetect: () => void;
   handleFullPageDetect: () => void;
-  startAutoSolveAll: () => void;
+  startAutoSolveAll: (generationId?: string) => void;
   startManualCapture: (forceVisionMode: boolean) => void;
   stopAutoSolveAll: () => void;
   updateCandidateSelection: (message: UpdateCandidateSelectionMsg) => void;
@@ -154,7 +155,13 @@ export function handleContentMessage(
       return true;
 
     case "START_AUTO_SOLVE_ALL":
-      deps.startAutoSolveAll();
+      // Legacy senders may omit the token, but an explicitly present,
+      // malformed token must not silently downgrade to an untagged run.
+      if (message.generationId !== undefined && !isProtectedWorkGenerationId(message.generationId)) {
+        sendResponse({ ok: false, error: "INVALID_WORK_GENERATION" });
+        return false;
+      }
+      deps.startAutoSolveAll(message.generationId);
       sendResponse({ ok: true });
       return false;
 
