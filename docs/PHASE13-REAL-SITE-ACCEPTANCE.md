@@ -59,6 +59,44 @@ A login-gated platform may be promoted only from a **legitimate user-authorized 
 
 A valid authenticated acceptance record should identify only the platform/surface, extension/source identity, sanitized structural outcomes, state hashes/counts, and the explicit no-submit result. Until such a session is supplied and exercised, those rows remain `AUTH_REQUIRED_NOT_RUN`.
 
+## Phase 13B local authorized-session harness (separate from CI)
+
+A **local, opt-in and interactive** checker is available for legitimate account holders; this does not grant CI an authenticated identity. The helper is designed for Windows 11 / Chrome with the repository checked out cleanly.
+
+From PowerShell, in the repository directory:
+
+```powershell
+npm ci
+npm run accept:phase13b:local -- --site zhihuishu --url "https://online.zhihuishu.com/" --consent-readonly
+```
+
+For Pintia use `--site pintia` and a user-authorized `https://pintia.cn/` URL. Polymas uses `--site polymas`; its actual platform host is **user-attested, not independently certified** and must be checked before supplying the URL.
+
+The helper enforces a clean Git HEAD, builds and verifies the extension locally, launches a **new temporary Chrome user-data directory**, and opens the supplied site. The account holder signs in **manually** in that same tab (including normal challenges, if required) and navigates to the appropriate question page. Only when they type `AUTHORIZED` in the terminal does the helper begin read-only detection.
+
+Important boundaries:
+
+- Use **your own legitimately authorized account** and a page on which you have permission to run a browser extension. Respect site rules and institutional requirements.
+- Do not send your passwords, tokens, cookies, screenshots of personal records, or the authenticated browser profile to the project or to GitHub.
+- The utility never captures login text, exports cookies, records a browser trace, screenshots, or video, or persists the temporary Chrome profile after a normal exit.
+- Its only production message is `START_AUTO_DETECT`, followed by read-only `GET_CANDIDATE_WORKSPACE_SNAPSHOT`; it does not ask AI for answers or call any fill/submit route.
+- After the user's confirmation it blocks observed page POST/PUT/PATCH/DELETE requests, monitors click/input/change/submit events, and checks that route/origin, page controls and forms remain unchanged. It fails closed when the detection does not complete or the expected tab is not authoritative. Other browser contexts and service-worker-initiated network writes are not a blanket guarantee.
+- Page-owned input values are HMAC-digested inside Chrome with a fresh ephemeral key; the key and raw values are not saved.
+- Only structural counts, classification, source SHA, extension tree digest, and explicit test limitations appear in the local JSON. The full URL, questions, credentials, candidate IDs, student identifiers, and HMAC key are excluded.
+- The JSON is stored under the gitignored `test-results/phase13b-local/`, mode `0600` where the filesystem supports it. Do not upload it unreviewed.
+- On failure the terminal prints a fixed diagnostic code only. An unexpected shutdown can leave temporary Chrome data behind; clean up orphaned `quiz-solver-13b-*` temp directories only after confirming they are not in use.
+
+Result interpretation:
+
+| Evidence | Authority |
+| --- | --- |
+| Contract tests green in CI | `AUTH_HARNESS_CONTRACT_PASS` — the harness's negative and privacy contracts passed; **not** live auth acceptance |
+| Local checker returns `LOCAL_READONLY_PASS` with deliberate user authorization | `LOCAL_USER_ATTESTED_AUTH_READONLY` — one local, user-attested site/surface; **not** independently verified login status |
+| No local human session/evidence | `AUTH_REQUIRED_NOT_RUN` — no real authenticated compatibility claim |
+| Local checker fails | `LOCAL_READONLY_FAIL` — do not promote that platform or surface |
+
+**Completion boundary:** Phase 13B cannot be promoted to universal or independently authenticated compatibility by CI alone. A legitimate site/session acceptance record must be examined separately, without publishing user records or raw content. Answer filling remains NOT TESTED even when this read-only harness passes.
+
 ## Frozen Phase 13 invariants
 
 - **LIVE_SITE_CLAIMS_REQUIRE_LIVE_BROWSER_EVIDENCE** — offline fixtures cannot be promoted into live-platform claims.
