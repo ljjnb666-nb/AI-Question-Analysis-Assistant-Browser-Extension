@@ -32,3 +32,34 @@ describe("Phase14B-02C START generation protocol guard", () => {
     expect(r.respond).toHaveBeenCalledWith({ ok: true });
   });
 });
+
+describe("Phase14B-02C-B Full Page START generation contract", () => {
+  it("P14B02C_FULLPAGE_01 forwards a valid tagged START", () => {
+    const generationId = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    const handleFullPageDetect = vi.fn();
+    const respond = vi.fn();
+    handleContentMessage({ type: "START_FULL_PAGE_DETECT", generationId }, respond, {
+      handleFullPageDetect,
+    } as unknown as Parameters<typeof handleContentMessage>[2]);
+    expect(handleFullPageDetect).toHaveBeenCalledWith(generationId);
+    expect(respond).toHaveBeenCalledWith({ ok: true });
+  });
+  it("P14B02C_FULLPAGE_02 rejects malformed tagged START without dispatch", () => {
+    const handleFullPageDetect = vi.fn();
+    const respond = vi.fn();
+    handleContentMessage({ type: "START_FULL_PAGE_DETECT", generationId: null } as unknown as Parameters<typeof handleContentMessage>[0], respond, {
+      handleFullPageDetect,
+    } as unknown as Parameters<typeof handleContentMessage>[2]);
+    expect(handleFullPageDetect).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith({ ok: false, error: "INVALID_WORK_GENERATION" });
+  });
+  it("P14B02C_FULLPAGE_03 retains untagged legacy START", () => {
+    const handleFullPageDetect = vi.fn();
+    const respond = vi.fn();
+    handleContentMessage({ type: "START_FULL_PAGE_DETECT" }, respond, {
+      handleFullPageDetect,
+    } as unknown as Parameters<typeof handleContentMessage>[2]);
+    expect(handleFullPageDetect).toHaveBeenCalledWith(undefined);
+    expect(respond).toHaveBeenCalledWith({ ok: true });
+  });
+});

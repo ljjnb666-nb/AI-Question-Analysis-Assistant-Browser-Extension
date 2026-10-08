@@ -373,3 +373,44 @@ describe("Phase14B-02C current-generation dispatch lease", () => {
     expect(isProtectedWorkGenerationCurrent).toHaveBeenCalledWith("autoSolve", 7, generationId);
   });
 });
+
+describe("Phase14B-02C-B SidePanel Full Page generation-aware START", () => {
+  const generationId = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+  it("P14B02C_FULLPAGE_07 dispatches only after owner generation commit", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    const markProtectedWorkGeneration = vi.fn(async () => generationId);
+    const clearProtectedWorkGeneration = vi.fn(async () => undefined);
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({ markProtectedWorkGeneration, clearProtectedWorkGeneration }),
+    });
+    await result.current.handleFullPageDetect();
+    expect(markProtectedWorkGeneration).toHaveBeenCalledWith("fullPage", 7);
+    expect(sendProtectedTabMessageWithBootstrap).toHaveBeenCalledWith(
+      7, { type: "START_FULL_PAGE_DETECT", generationId }, expect.any(Function),
+    );
+  });
+  it("P14B02C_FULLPAGE_08 failed dispatch rolls back only its own owner token", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    vi.mocked(sendProtectedTabMessageWithBootstrap).mockResolvedValueOnce({ ok: false, error: "DENIED" });
+    const clearProtectedWorkGeneration = vi.fn(async () => undefined);
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({
+        markProtectedWorkGeneration: vi.fn(async () => generationId),
+        clearProtectedWorkGeneration,
+      }),
+    });
+    await result.current.handleFullPageDetect();
+    expect(clearProtectedWorkGeneration).toHaveBeenCalledWith("fullPage", 7, generationId);
+  });
+  it("P14B02C_FULLPAGE_09 missing owner storage refuses START", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({
+        markProtectedWorkGeneration: vi.fn(async () => null),
+        clearProtectedWorkGeneration: vi.fn(async () => undefined),
+      }),
+    });
+    await result.current.handleFullPageDetect();
+    expect(sendProtectedTabMessageWithBootstrap).not.toHaveBeenCalled();
+  });
+});

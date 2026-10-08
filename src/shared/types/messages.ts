@@ -160,10 +160,14 @@ export interface LogEventMsg extends BaseMessage {
 
 export interface StartFullPageDetectMsg extends BaseMessage {
   type: "START_FULL_PAGE_DETECT";
+  /** Persisted owner run identity; absent for legacy callers. */
+  generationId?: string;
 }
 
 export interface FullPageDetectProgressMsg extends BaseMessage {
   type: "FULL_PAGE_DETECT_PROGRESS";
+  /** Immutable run identity of corresponding START. */
+  generationId?: string;
   progress: number;
   found: number;
   totalScrollSteps: number;

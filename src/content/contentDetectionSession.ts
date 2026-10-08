@@ -52,7 +52,30 @@ export function notifyDetectedCandidates(
   });
 }
 
-export async function runFullPageDetectSession(deps: DetectSessionDeps): Promise<void> {
+/**
+ * Bind only Full Page PROGRESS/DONE to the immutable START identity. Other
+ * runtime notifications and legacy untagged calls preserve their contracts.
+ * Each invocation owns its closure, never a mutable last-run global.
+ */
+export function bindFullPageGeneration(
+  emit: (message: unknown) => void,
+  generationId?: string,
+): (message: unknown) => void {
+  return (message: unknown) => {
+    if (generationId && message && typeof message === "object" && !Array.isArray(message)) {
+      const m = message as { type?: unknown };
+      if (m.type === "FULL_PAGE_DETECT_PROGRESS" || m.type === "FULL_PAGE_DETECT_DONE") {
+        emit({ ...message, generationId });
+        return;
+      }
+    }
+    emit(message);
+  };
+}
+
+export async function runFullPageDetectSession(
+  deps: DetectSessionDeps, generationId?: string,
+): Promise<void> {
   const isRuntimeCurrent = deps.isRuntimeCurrent ?? (() => true);
   if (!isRuntimeCurrent()) return;
   const result = await handleFullPageDetectCore({
@@ -65,7 +88,7 @@ export async function runFullPageDetectSession(deps: DetectSessionDeps): Promise
     stopSpaWatch: deps.stopSpaWatch,
     candidateStatusMap: deps.candidateStatusMap,
     refreshLayoutResizeObservation: deps.refreshLayoutResizeObservation,
-    safeRuntimeSendMessage: deps.safeRuntimeSendMessage,
+    safeRuntimeSendMessage: bindFullPageGeneration(deps.safeRuntimeSendMessage, generationId),
     detectCandidatesFullPage: deps.detectCandidatesFullPage,
     refineFullPageCandidatesViaManualPipeline: deps.refineFullPageCandidatesViaManualPipeline,
     resolveFullPageScrollRoot: deps.resolveFullPageScrollRoot,

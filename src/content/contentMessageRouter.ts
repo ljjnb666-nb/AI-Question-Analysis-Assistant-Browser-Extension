@@ -13,7 +13,7 @@ type ContentMessageRouterDeps = {
   fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options: { mode: "manual"; expectedUrl?: string }) => Promise<unknown>;
   flashCandidate: (blockId: string) => void;
   handleAutoDetect: () => void;
-  handleFullPageDetect: () => void;
+  handleFullPageDetect: (generationId?: string) => void;
   startAutoSolveAll: (generationId?: string) => void;
   startManualCapture: (forceVisionMode: boolean) => void;
   stopAutoSolveAll: () => void;
@@ -64,7 +64,11 @@ export function handleContentMessage(
       return false;
 
     case "START_FULL_PAGE_DETECT":
-      deps.handleFullPageDetect();
+      if (message.generationId !== undefined && !isProtectedWorkGenerationId(message.generationId)) {
+        sendResponse({ ok: false, error: "INVALID_WORK_GENERATION" });
+        return false;
+      }
+      deps.handleFullPageDetect(message.generationId);
       sendResponse({ ok: true });
       return false;
 

@@ -241,6 +241,9 @@ describe("PopupApp protected work ownership", () => {
       timeout: 10_000,
     });
     expect(sentTabTargets).toEqual([{ tabId: 5, type: "START_FULL_PAGE_DETECT" }]);
+    expect(sentStartGenerations[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f-]+$/);
+    const ownerKey = `protectedWorkOwner:fullPage:5:${sentStartGenerations[0]}`;
+    expect(sessionStore.get(ownerKey)).toMatchObject({ active: true, tabId: 5, completionProtocol: "generation" });
     const owners = await readProtectedWorkOwners();
     expect(owners.fullPage).toEqual([{ tabId: 5 }]);
   });
