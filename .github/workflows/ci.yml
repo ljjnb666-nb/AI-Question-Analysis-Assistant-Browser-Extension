@@ -325,6 +325,55 @@ jobs:
           retention-days: 30
 
 
+
+  popup_soak:
+    runs-on: ubuntu-latest
+    needs:
+      - check
+    timeout-minutes: 12
+    env:
+      CI: "true"
+    steps:
+      - name: Checkout exact source commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Assert checked-out source SHA
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          expected_sha="${GITHUB_SHA}"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            expected_sha="${PR_HEAD_SHA}"
+          fi
+          actual_sha="$(git rev-parse HEAD)"
+          echo "EXPECTED_SHA=${expected_sha}"
+          echo "ACTUAL_SHA=${actual_sha}"
+          echo "EXPECTED_SHA=${expected_sha}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "ACTUAL_SHA=${actual_sha}" >> "${GITHUB_STEP_SUMMARY}"
+          if [[ -z "${expected_sha}" || "${actual_sha}" != "${expected_sha}" ]]; then
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      - name: Use lockfile-compatible npm
+        run: npm install --global npm@11.6.2
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Soak all 50 Popup UI tests across 20 clean processes without retries
+        run: npm run test:soak:popup
+
+
   real_site_acceptance:
     runs-on: ubuntu-latest
     needs:
@@ -475,6 +524,7 @@ jobs:
       - admin_e2e
       - browser_acceptance
       - real_site_acceptance
+      - popup_soak
     env:
       CI: "true"
     steps:
