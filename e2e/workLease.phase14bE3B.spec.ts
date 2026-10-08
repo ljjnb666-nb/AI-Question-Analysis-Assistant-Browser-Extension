@@ -137,9 +137,17 @@ test("@phase14b-e3b REAL_CHROMIUM isolates two tabs, nested frame and reinjectio
     expect(await send(worker, idB, { type: "FULL_PAGE_DETECT_CANCELLED", generationId: oldA }, 0))
       .toEqual({ ok: false, error: "STALE_WORK_GENERATION" });
 
+    const callsBeforeUserScroll = (await scrollState(tabA)).calls;
     await tabA.evaluate(() => window.scrollTo({ top: 418, behavior: "instant" }));
+    // Scroll events are dispatched asynchronously even after window.scrollTo
+    // synchronously sets scrollY. The initial snapshot must include the user
+    // event itself; otherwise a delayed user event appears to be stale work.
+    await expect.poll(async () => (await scrollState(tabA)).calls, { timeout: 3000 })
+      .toBeGreaterThan(callsBeforeUserScroll);
     const afterUserScroll = await scrollState(tabA);
+    expect(afterUserScroll.top).toBe(418);
     await tabA.waitForTimeout(750);
+    // Keep the strict no-new-scroll-events contract after the user event.
     expect(await scrollState(tabA)).toEqual(afterUserScroll);
 
     // Reinjection must not make a revoked generation valid again.
