@@ -33,6 +33,7 @@ export function parsePhase13bArgs(argv, isTTY) {
     reject("INVALID_TARGET_URL");
   }
   if (url.protocol !== "https:" || url.username || url.password || url.port) reject("HTTPS_TARGET_REQUIRED");
+  if (url.pathname !== "/" || url.search || url.hash) reject("ORIGIN_ONLY_REQUIRED");
   if (url.hostname === "localhost" || /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname)) {
     reject("PUBLIC_HTTPS_DOMAIN_REQUIRED");
   }
