@@ -4,6 +4,7 @@ import path from "node:path";
 import type { BrowserContext, Page, Worker } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
+import { visitLiveTargetUntilReady } from "@/shared/utils/liveSiteReadiness";
 
 // Third-party page text must never enter uploaded failure traces, screenshots, or video.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -151,36 +152,27 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     const page = await context.newPage();
     await page.setViewportSize({ width: 1440, height: 960 });
 
-    let response = null;
-    let lastError: unknown = null;
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      try {
-        response = await page.goto(PINTIA_PUBLIC_PROBLEM_URL, {
-          waitUntil: "commit",
-          timeout: 30_000,
-        });
-        if (response && response.status() < 500) break;
-      } catch (error) {
-        lastError = error;
-      }
-      if (attempt < 3) await page.waitForTimeout(1_500);
-    }
-    if (!response) {
-      throw new Error(`Phase 13A live Pintia navigation failed before main-document commit: ${String(lastError ?? "no response")}`);
-    }
-
-    expect(response.status(), "live Pintia main document must be reachable").toBeGreaterThanOrEqual(200);
-    expect(response.status(), "live Pintia main document must not be a server error").toBeLessThan(500);
-    try {
-      await expect.poll(
-        async () => {
-          const body = page.locator("body");
-          if (await body.count() === 0) return false;
-          return (await body.innerText()).includes(PINTIA_EXPECTED_TITLE);
-        },
-        { timeout: 45_000, intervals: [500, 1_000, 2_000, 4_000] },
-      ).toBe(true);
-    } catch {
+    // A successful HTTP 200 can still be an empty, challenged, or
+    // unhydrated SPA shell. Retry the *content-ready* page visit, not just
+    // failed document navigation. No synthetic fallback is ever accepted.
+    const visit = await visitLiveTargetUntilReady(
+      () => page.goto(PINTIA_PUBLIC_PROBLEM_URL, {
+        waitUntil: "commit",
+        timeout: 25_000,
+      }),
+      async () => {
+        await expect.poll(
+          async () => {
+            const body = page.locator("body");
+            if (await body.count() === 0) return false;
+            return (await body.innerText()).includes(PINTIA_EXPECTED_TITLE);
+          },
+          { timeout: 17_000, intervals: [500, 1_000, 2_000, 4_000] },
+        ).toBe(true);
+      },
+      { maxAttempts: 3, betweenAttempts: () => page.waitForTimeout(1_000) },
+    );
+    if (!visit.ready || !visit.response) {
       // The live upstream is not an owned fixture. Preserve a compact diagnostic,
       // but never turn an unreachable/challenged/changed page into a green result.
       const diagnostic = await page.evaluate(() => ({
@@ -196,7 +188,9 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
           schemaVersion: 1,
           outcome: "LIVE_TARGET_CONTENT_UNAVAILABLE",
           siteId: "pintia-public-problem",
-          httpStatus: response.status(),
+          httpStatus: visit.response?.status() ?? null,
+          visitCount: visit.attemptsUsed,
+          visitStatusCodes: visit.statusCodes,
           finalHostname: diagnostic?.finalHostname ?? null,
           finalPathname: diagnostic?.finalPathname ?? null,
           documentTitleSha256: sha256(diagnostic?.documentTitleSha256Input ?? ""),
@@ -208,8 +202,11 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
         }, null, 2)}\n`,
         "utf8",
       );
-      throw new Error("LIVE_TARGET_CONTENT_UNAVAILABLE: public Pintia title not visible; detection was not started");
+      throw new Error("LIVE_TARGET_CONTENT_UNAVAILABLE: public Pintia title not visible after bounded content-ready revisits; detection was not started");
     }
+    const response = visit.response;
+    expect(response.status(), "live Pintia main document must be a successful public response").toBeGreaterThanOrEqual(200);
+    expect(response.status(), "live Pintia main document must not be a redirect or error").toBeLessThan(400);
 
     const finalUrl = new URL(page.url());
     expect(finalUrl.hostname).toBe("pintia.cn");
