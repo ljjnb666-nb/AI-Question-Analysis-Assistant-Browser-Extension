@@ -231,6 +231,55 @@ describe("cross-context protected-work owner registry", () => {
     expect(owners.autoSolve).toEqual([{ tabId: 8 }]);
   });
 
+  it("PHASE14B_01 same-kind same-tab new generation must survive older STOP cleanup", async () => {
+    const oldContext = await freshClient();
+    const newContext = await freshClient();
+    await oldContext.markProtectedWorkOwner("autoSolve", 7);
+
+    // STOP is already in flight for the old generation when a new
+    // authorized session starts autoSolve in the SAME tab.
+    let unblockStop!: () => void;
+    const stopBlocked = new Promise<void>((resolve) => { unblockStop = resolve; });
+    let stopObserved!: () => void;
+    const stopEntered = new Promise<void>((resolve) => { stopObserved = resolve; });
+    const sent: string[] = [];
+    const terminating = oldContext.terminateRecordedProtectedWork(async (tabId, message) => {
+      sent.push(`${tabId}:${message.type}`);
+      stopObserved();
+      await stopBlocked;
+      return {};
+    });
+    await stopEntered;
+    await newContext.markProtectedWorkOwner("autoSolve", 7);
+    unblockStop();
+    await terminating;
+    expect(sent).toEqual(["7:STOP_AUTO_SOLVE_ALL"]);
+    expect((await newContext.readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
+  });
+
+  it("PHASE14B_02 same-tab full-page new generation must survive old cancel cleanup", async () => {
+    const oldContext = await freshClient();
+    const newContext = await freshClient();
+    await oldContext.markProtectedWorkOwner("fullPage", 11);
+
+    let unblockStop!: () => void;
+    const parked = new Promise<void>((resolve) => { unblockStop = resolve; });
+    let observed!: () => void;
+    const entered = new Promise<void>((resolve) => { observed = resolve; });
+    const stopping = oldContext.terminateRecordedProtectedWork(async (tabId, message) => {
+      expect(tabId).toBe(11);
+      expect(message.type).toBe("FULL_PAGE_DETECT_CANCELLED");
+      observed();
+      await parked;
+      return {};
+    });
+    await entered;
+    await newContext.markProtectedWorkOwner("fullPage", 11);
+    unblockStop();
+    await stopping;
+    expect((await newContext.readProtectedWorkOwners()).fullPage).toEqual([{ tabId: 11 }]);
+  });
+
   it("AUTH_UI_59_MANUAL_STOP_ALL_RECORDED_OWNERS stop terminates every recorded owner and clears them", async () => {
     const clientA = await freshClient();
     const clientB = await freshClient();
