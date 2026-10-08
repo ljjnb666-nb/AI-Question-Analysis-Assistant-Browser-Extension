@@ -13,8 +13,8 @@ type ContentMessageRouterDeps = {
   fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options: { mode: "manual"; expectedUrl?: string }) => Promise<unknown>;
   flashCandidate: (blockId: string) => void;
   handleAutoDetect: () => void;
-  handleFullPageDetect: (generationId?: string) => void;
-  startAutoSolveAll: (generationId?: string) => void;
+  handleFullPageDetect: (generationId?: string) => boolean | void;
+  startAutoSolveAll: (generationId?: string) => boolean | void;
   startManualCapture: (forceVisionMode: boolean) => void;
   stopAutoSolveAll: (generationId?: string) => boolean | void;
   updateCandidateSelection: (message: UpdateCandidateSelectionMsg) => void;
@@ -68,7 +68,10 @@ export function handleContentMessage(
         sendResponse({ ok: false, error: "INVALID_WORK_GENERATION" });
         return false;
       }
-      deps.handleFullPageDetect(message.generationId);
+      if (deps.handleFullPageDetect(message.generationId) === false) {
+        sendResponse({ ok: false, error: "WORK_ALREADY_RUNNING" });
+        return false;
+      }
       sendResponse({ ok: true });
       return false;
 
@@ -172,7 +175,10 @@ export function handleContentMessage(
         sendResponse({ ok: false, error: "INVALID_WORK_GENERATION" });
         return false;
       }
-      deps.startAutoSolveAll(message.generationId);
+      if (deps.startAutoSolveAll(message.generationId) === false) {
+        sendResponse({ ok: false, error: "WORK_ALREADY_RUNNING" });
+        return false;
+      }
       sendResponse({ ok: true });
       return false;
 
