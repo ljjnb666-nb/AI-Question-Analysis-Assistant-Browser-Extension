@@ -31,6 +31,8 @@ let hasActiveTab = true;
 // Simulates the user switching tabs: what getBestActionTab considers "best"
 // changes AFTER a protected workflow already runs on its original tab.
 let currentBestTabId = 7;
+let holdStopDispatch: Promise<void> | null = null;
+let signalStopDispatch: (() => void) | null = null;
 
 // Ephemeral session store for the cross-surface protected-work owner
 // registry (chrome.storage.session in production).
@@ -68,6 +70,10 @@ vi.mock("./tabActions", () => ({
   getBestActionTab: vi.fn(async () => (hasActiveTab ? ({ id: currentBestTabId } as chrome.tabs.Tab) : null)),
   sendTabMessageWithBootstrap: vi.fn(async (tabId: number, message: { type: string }) => {
     (sentMessages[message.type] ??= []).push({ tabId, type: message.type });
+    if (message.type === "STOP_AUTO_SOLVE_ALL" && holdStopDispatch) {
+      signalStopDispatch?.();
+      await holdStopDispatch;
+    }
     return {};
   }),
   sendProtectedTabMessageWithBootstrap: vi.fn(async (tabId: number, message: { type: string }) => {
@@ -158,7 +164,7 @@ const sessionStub = {
   applyLoggedOut: vi.fn(),
 };
 
-import { markProtectedWorkOwner } from "@/shared/auth/protectedWorkOwner";
+import { markProtectedWorkOwner, readProtectedWorkOwners } from "@/shared/auth/protectedWorkOwner";
 import { SidePanelApp } from "./SidePanelApp";
 
 beforeEach(() => {
@@ -166,6 +172,8 @@ beforeEach(() => {
   sessionStore.clear();
   hasActiveTab = true;
   currentBestTabId = 7;
+  holdStopDispatch = null;
+  signalStopDispatch = null;
   sessionState.status = "authenticated";
   sessionState.sessionRejected = false;
   sessionListeners.clear();
@@ -207,6 +215,30 @@ function waitForGone(query: () => HTMLElement | null): Promise<void> {
 }
 
 describe("SidePanelApp auth-loss watchdog", () => {
+  it("PHASE14B_02A_SIDE_PANEL_WATCHDOG preserves a same-tab new owner while an old auth-loss STOP is in flight", async () => {
+    // Existing Popup-origin run is visible in the cross-surface registry.
+    await markProtectedWorkOwner("autoSolve", 7);
+    render(<SidePanelApp />);
+    await findButton("Auto Solve");
+
+    let entered!: () => void;
+    const stopEntered = new Promise<void>((resolve) => { entered = resolve; });
+    let release!: () => void;
+    holdStopDispatch = new Promise<void>((resolve) => { release = resolve; });
+    signalStopDispatch = entered;
+    const removal = vi.spyOn(chrome.storage.session, "remove");
+
+    await transitionSessionStatus("server_unavailable");
+    await stopEntered;
+    expect(sentMessages.STOP_AUTO_SOLVE_ALL).toEqual([{ tabId: 7, type: "STOP_AUTO_SOLVE_ALL" }]);
+    // A new owner with the SAME kind/tab is committed from another surface
+    // after the STOP began but before its transport promise resolves.
+    await markProtectedWorkOwner("autoSolve", 7);
+    release();
+    await waitFor(() => expect(removal).toHaveBeenCalled(), { timeout: UI_TIMEOUT });
+    expect((await readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
+  });
+
   it("AUTH_UI_24_AUTH_LOSS_STOPS_RUNNING_WORK auth loss sends STOP_AUTO_SOLVE_ALL and clears the running state", { timeout: 20_000 }, async () => {
     render(<SidePanelApp />);
 
