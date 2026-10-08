@@ -144,7 +144,7 @@ export async function clearProtectedWorkOwner(
   // Also discard malformed/inactive matching legacy keys on explicit cleanup.
   const legacyKey = legacyKeyFor(kind, tabId);
   const all = await area.get(legacyKey);
-  if (Object.hasOwn(all, legacyKey) && !keys.includes(legacyKey)) keys.push(legacyKey);
+  if (Object.prototype.hasOwnProperty.call(all, legacyKey) && !keys.includes(legacyKey)) keys.push(legacyKey);
   if (keys.length) await area.remove(keys);
 }
 
