@@ -40,6 +40,11 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
   // localization. Per-kind ordering prevents a late PROGRESS from overriding
   // DONE while allowing Auto Solve and Full Page to proceed independently.
   const queue = new Map<ProtectedWorkKind, Promise<void>>();
+  // A tagged DONE conclusively closes the previous protocol generation for
+  // this panel session. A later untagged PROGRESS must not resurrect a ghost
+  // legacy owner after the tagged run's exact key was cleaned up.
+  const completedTagged = new Set<string>();
+  const workKey = (kind: ProtectedWorkKind, tabId: number) => `${kind}:${tabId}`;
   let feedbackSequence = 0;
   void handlers.loadLanguage().then((lang) => { if (!disposed) handlers.setUiLang(lang); });
 
@@ -81,6 +86,8 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
       const done = msg.type === "FULL_PAGE_DETECT_DONE";
       queueByKind("fullPage", async () => {
         if (disposed) return;
+        if (!done && msg.generationId === undefined && origin
+          && completedTagged.has(workKey("fullPage", origin.tabId))) return;
         const allowed = origin !== undefined
           && await isProtectedWorkRuntimeUiMessageCurrent("fullPage", origin.tabId, msg.generationId);
         // Legacy recovery remains untagged only; tagged updates cannot
@@ -91,6 +98,9 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
         }
         if (done && origin) {
           await clearProtectedWorkOwnerFromRuntimeDone("fullPage", origin.tabId, msg.generationId);
+          if (allowed && msg.generationId !== undefined) {
+            completedTagged.add(workKey("fullPage", origin.tabId));
+          }
         }
         if (!workspaceRendered || !allowed || !matchesOrigin()) return;
         if (!done) {
@@ -113,6 +123,8 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
       const feedbackToken = done ? ++feedbackSequence : feedbackSequence;
       queueByKind("autoSolve", async () => {
         if (disposed) return;
+        if (!done && msg.generationId === undefined && origin
+          && completedTagged.has(workKey("autoSolve", origin.tabId))) return;
         const allowed = origin !== undefined
           && await isProtectedWorkRuntimeUiMessageCurrent("autoSolve", origin.tabId, msg.generationId);
         if (!done && msg.running && msg.generationId === undefined && origin
@@ -121,6 +133,9 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
         }
         if (done && origin) {
           await clearProtectedWorkOwnerFromRuntimeDone("autoSolve", origin.tabId, msg.generationId);
+          if (allowed && msg.generationId !== undefined) {
+            completedTagged.add(workKey("autoSolve", origin.tabId));
+          }
         }
         if (!allowed || !matchesOrigin()) return;
         if (!done) {
