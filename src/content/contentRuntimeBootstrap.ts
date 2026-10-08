@@ -150,7 +150,8 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     extractTextFromBBox,
     fillParsedAnswerInPage: (block, result, fillOptions) => fillParsedAnswerInPage(block, result, {
       ...fillOptions,
-      isRuntimeCurrent: lifecycle.isCurrent,
+      // Preserve the caller's per-run lease through the transaction's fresh reads.
+      isRuntimeCurrent: () => lifecycle.isCurrent() && (fillOptions?.isRuntimeCurrent?.() ?? true),
     }),
     findBestDetectedCandidateForBBox,
     findMatchingFullPageCandidate,
@@ -284,7 +285,7 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
       const lease = runAuthority.begin("autoSolve", generationId);
       if (lease === null) return false;
       try {
-        void workflows.handleAutoSolveAll(generationId)
+        void workflows.handleAutoSolveAll(generationId, () => runAuthority.isCurrent("autoSolve", lease))
           .catch((error) => console.warn("[QS] Auto Solve run failed:", error))
           .finally(() => runAuthority.finish("autoSolve", lease));
       } catch (error) {
@@ -295,7 +296,9 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     },
     startManualCapture,
     stopAutoSolveAll: (generationId?: string) => {
-      if (!runAuthority.canStop("autoSolve", generationId)) return false;
+      // Keep the START slot occupied until the old async workflow settles.
+      // All subsequent mutation gates observe the permanently revoked lease.
+      if (!runAuthority.revoke("autoSolve", generationId)) return false;
       runtimeState.setAutoSolveStopRequested(true);
       abortCurrentSolveAttempt();
       return true;
