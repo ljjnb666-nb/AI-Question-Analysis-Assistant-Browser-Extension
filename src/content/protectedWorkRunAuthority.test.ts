@@ -61,6 +61,7 @@ describe("Phase14B-02C-C runtime STOP/CANCEL generation authority", () => {
     expect(a.isCurrent("autoSolve", lease)).toBe(true);
     expect(a.revoke("autoSolve", oldId)).toBe(true);
     expect(a.isCurrent("autoSolve", lease)).toBe(false);
+    expect(a.isOwner("autoSolve", lease)).toBe(true);
     expect(a.revoke("autoSolve", oldId)).toBe(false);
     expect(a.begin("autoSolve", newId)).toBeNull();
     a.finish("autoSolve", lease);
@@ -77,6 +78,7 @@ describe("Phase14B-02C-C runtime STOP/CANCEL generation authority", () => {
     const current = a.begin("autoSolve")!;
     a.finish("autoSolve", old);
     expect(a.isCurrent("autoSolve", old)).toBe(false);
+    expect(a.isOwner("autoSolve", old)).toBe(false);
     expect(a.isCurrent("autoSolve", current)).toBe(true);
   });
 
