@@ -80,11 +80,50 @@ does not promise that a STOP message is run-token-scoped.
 and exact main merge-SHA CI pass. Do not claim comprehensive Phase 14
 completion from this change.
 
+## 14B-02A: Side Panel auth-loss snapshot-fenced termination
+
+The Side Panel previously duplicated Popup's auth-loss path: read the
+cross-surface registry, union local pending Tab IDs, send STOP/CANCEL, and
+then call `clearProtectedWorkOwner(kind, tabId)` after the awaited
+transport. This last call takes a **new storage snapshot**, which can
+include a later same-tab generation not present when STOP began. Thus
+14B-01's immutable-generation fix was bypassed by the Side Panel.
+
+### Scoped repair
+
+- Reuse `terminateRecordedProtectedWork()` as the **single** auth-loss
+  STOP/CANCEL and immutable-key snapshot-cleanup authority across the two
+  surfaces.
+- Extend that helper with optional local pending intent tab IDs, to preserve
+  the Side Panel's immediate pre-storage-commit STOP behavior. Pending tabs
+  join STOP fanout, but do **not** broaden the snapshot's deletion keys.
+- Keep one STOP per unique tab and kind, preserving multi-tab and
+  cross-surface owners. No request for AI solve/fill/submit is introduced.
+- Limit callback types to the two supported termination message variants
+  rather than a generic `{ type: string }` bag.
+- Add deterministic unit checks for the pending-only tab case, same-tab
+  post-snapshot generation survival, and deduplicated STOP fanout.
+- Add a real `SidePanelApp` hook/render-level regression in which auth loss
+  parks STOP delivery, another surface records a newer generation on the same
+  tab, and completion leaves the new owner visible.
+
+### Boundaries
+
+This protects **auth-loss snapshot cleanup**, not run-scoped content-script
+cancellation. The STOP/CANCEL messages are still tab-scoped, so a STOP
+received after a newer run starts may interrupt that runtime work. Ordinary
+DONE and manual stop call sites still need run-generation authority. This
+must stay open as **Phase 14B-02B**; no success claim about those paths
+may be derived from this PR.
+
+Real authenticated-site tests and new long-run Chromium endurance remain
+deferred; the existing CI release gates are retained unchanged.
+
 ## Remaining non-browser work order
 
 | Scope | Next contract | New real-browser endurance tests |
 | --- | --- | --- |
-| 14B-02 | Run-scoped DONE/cancel authority, generation tokens through callers | Deferred |
+| 14B-02B | Run-scoped DONE/manual cancel authority, message-generation protocol and caller propagation | Deferred |
 | 14C | Fault injection for retries, timeouts, out-of-order responses, reentrant cancellation | Deferred |
 | 14D | Privacy/security review of logs, tenant/session separation, bounded stores | Deferred |
 | 14E | CI + immutable release artifact verification and non-browser release checklist | Deferred |
