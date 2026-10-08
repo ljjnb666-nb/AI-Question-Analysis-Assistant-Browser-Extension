@@ -212,3 +212,98 @@ describe("Phase14B-02C Auto Solve START to PROGRESS/DONE generation propagation"
     expect(done).not.toHaveProperty("generationId");
   });
 });
+
+describe("Phase14B-02C-E1 in-flight Auto Solve side-effect authority", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSettings = { ...DEFAULT_SETTINGS, providerId: "ollama", apiKey: "" };
+  });
+
+  const candidate = {
+    id: "lease-question",
+    bbox: { x: 0, y: 0, width: 360, height: 120 },
+    previewText: "1. Select B. A. First B. Second",
+    questionTypeGuess: "single_choice",
+    hasImage: false,
+    confidence: 1,
+    source: "auto_dom",
+  } as QuestionBlock;
+  const history = {
+    result: {
+      blockId: candidate.id,
+      questionType: "single_choice",
+      answer: "B",
+      confidence: 1,
+      routeUsed: "text",
+    },
+  };
+
+  function setupDelayedFill() {
+    const options = createWorkflowsOptions();
+    let releaseFill!: () => void;
+    let enteredFill!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredFill = resolve; });
+    const pending = new Promise<void>((resolve) => { releaseFill = resolve; });
+    const mutatePage = vi.fn();
+    const nextButton = vi.fn(() => true);
+    const fill = vi.fn(async (
+      _block: QuestionBlock,
+      _result: unknown,
+      fillOptions?: { isRuntimeCurrent?: () => boolean },
+    ) => {
+      enteredFill();
+      await pending;
+      if (fillOptions?.isRuntimeCurrent?.()) mutatePage();
+      return { ok: true, filledCount: 1, message: "FILLED_VERIFIED" };
+    });
+    Object.assign(options, {
+      detectTotalQuestionCount: () => 1,
+      pickLiveAutoSolveBlock: () => candidate,
+      findReusableHistoryEntry: () => history,
+      clickNextQuestionButton: nextButton,
+      shouldStopAutoSolveAtTail: () => true,
+      fillParsedAnswerInPage: fill,
+    });
+    return { options, entered, releaseFill: () => releaseFill(), mutatePage, nextButton, fill };
+  }
+
+  it("P14B02C_E1_03 STOP during awaited fill blocks DOM mutation and next-question click", async () => {
+    const harness = setupDelayedFill();
+    let leaseCurrent = true;
+    const run = createContentMainWorkflows(harness.options).handleAutoSolveAll(
+      "18aabcde-0ee2-4e98-8e12-48fdce879012", () => leaseCurrent,
+    );
+    await harness.entered;
+    const guard = harness.fill.mock.calls[0]?.[2]?.isRuntimeCurrent;
+    expect(guard?.()).toBe(true);
+    leaseCurrent = false;
+    expect(guard?.()).toBe(false);
+    harness.releaseFill();
+    await run;
+    expect(harness.mutatePage).not.toHaveBeenCalled();
+    expect(harness.nextButton).not.toHaveBeenCalled();
+  });
+
+  it("P14B02C_E1_04 route epoch change during awaited fill blocks subsequent mutation and navigation", async () => {
+    const harness = setupDelayedFill();
+    let epoch = 1;
+    Object.assign(harness.options, { workspaceRouteEpoch: () => epoch });
+    const run = createContentMainWorkflows(harness.options).handleAutoSolveAll();
+    await harness.entered;
+    epoch = 2;
+    harness.releaseFill();
+    await run;
+    expect(harness.mutatePage).not.toHaveBeenCalled();
+    expect(harness.nextButton).not.toHaveBeenCalled();
+  });
+
+  it("P14B02C_E1_05 current lease still permits verified fill and next-question navigation", async () => {
+    const harness = setupDelayedFill();
+    const run = createContentMainWorkflows(harness.options).handleAutoSolveAll();
+    await harness.entered;
+    harness.releaseFill();
+    await run;
+    expect(harness.mutatePage).toHaveBeenCalledOnce();
+    expect(harness.nextButton).toHaveBeenCalledOnce();
+  });
+});
