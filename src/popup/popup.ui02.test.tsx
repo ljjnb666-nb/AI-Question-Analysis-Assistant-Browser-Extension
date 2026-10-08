@@ -350,11 +350,23 @@ describe("UI-02 Popup Commercial View Integration", () => {
 
   it("UI02-C04: Solve & Fill dispatches START_AUTO_SOLVE_ALL", async () => {
     render(<PopupApp />);
-    const btn = await screen.findByRole("button", { name: /解析并填答/ });
+    // The primary button exists before the async session/provider/page gates
+    // converge. Clicking that transitional button tests the fail-closed path,
+    // not the authorized Solve & Fill dispatch path.
     await act(async () => {
-      fireEvent.click(btn);
+      await awaitSettingsMessagingIdle();
+    });
+    await waitFor(() => {
+      const btn = screen.getByRole("button", { name: /解析并填答/ });
+      expect(btn).toBeEnabled();
+      expect(screen.getByText("已就绪")).toBeInTheDocument();
+      expect(screen.getByText("当前页面可识别")).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /解析并填答/ }));
     });
     await waitFor(() => expect(sentRuntimeMessages).toContain("START_AUTO_SOLVE_ALL"));
+    expect(sentTabTargets).toContainEqual({ tabId: 5, type: "START_AUTO_SOLVE_ALL" });
   });
 
   it("UI02-C05: zero solve dispatch when provider unconfigured", async () => {
