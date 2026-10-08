@@ -275,7 +275,7 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
     });
   }
 
-  async function handleAutoSolveAll(generationId?: string) {
+  async function handleAutoSolveAll(generationId?: string, isExecutionCurrent: () => boolean = () => true) {
     // Capture per-START identity, never read a mutable global token after an
     // await. Superseded route completions keep their ORIGINAL generation.
     const withGeneration = <T extends object>(payload: T) => generationId
@@ -283,7 +283,8 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
       : payload;
     const startedAtUrl = location.href;
     const routeEpoch = options.workspaceRouteEpoch?.();
-    const isRunCurrent = () => options.isRuntimeCurrent() && location.href === startedAtUrl && options.workspaceRouteEpoch?.() === routeEpoch;
+    const isRunCurrent = () => options.isRuntimeCurrent() && isExecutionCurrent()
+      && location.href === startedAtUrl && options.workspaceRouteEpoch?.() === routeEpoch;
     // UI-00A entry guard (layer 1): refuse to start the workflow without a
     // usable provider. Even if this guard is bypassed, the fill core's
     // provenance gate keeps real-page mutation at zero.
@@ -310,9 +311,11 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         requestStop: (stop) => { if (isRunCurrent()) options.runtimeState.setAutoSolveStopRequested(stop); },
       },
       {
+        isRunCurrent,
         activeCandidates: options.runtimeState.getActiveCandidates(),
         activeDetectMode: options.runtimeState.getActiveDetectMode(),
-        clickNextQuestionButton: options.clickNextQuestionButton,
+        // Recheck the exact START lease immediately before navigating the page.
+        clickNextQuestionButton: () => isRunCurrent() && options.clickNextQuestionButton(),
         detectCandidatesFullPage: options.detectCandidatesFullPage,
         detectCandidatesAcrossRoots: options.detectCandidatesAcrossRoots,
         detectCandidatesInViewport: options.detectCandidatesInViewport,
@@ -321,10 +324,12 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         extractQuestionImageUrlFromBBox: options.extractQuestionImageUrlFromBBox,
         extractRichQuestionPreviewFromElement: options.extractRichQuestionPreviewFromElement,
         extractTextFromBBox: options.extractTextFromBBox,
-        fillParsedAnswerInPage: (block, result, fillOptions) => options.fillParsedAnswerInPage(block, result, {
-          ...fillOptions,
-          isRuntimeCurrent: options.isRuntimeCurrent,
-        }),
+        fillParsedAnswerInPage: (block, result, fillOptions) => isRunCurrent()
+          ? options.fillParsedAnswerInPage(block, result, {
+            ...fillOptions,
+            isRuntimeCurrent: isRunCurrent,
+          })
+          : Promise.resolve({ ok: false, filledCount: 0, message: "STALE_WORK_GENERATION" }),
         findBestDetectedCandidateForBBox: options.findBestDetectedCandidateForBBox,
         findMatchingFullPageCandidate: options.findMatchingFullPageCandidate,
         findNextQuestionButton: options.findNextQuestionButton,
@@ -343,7 +348,7 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         parseBlockForAutoSolve: options.parseBlockForAutoSolve,
         parseBlockForAutoSolveQuickReview: options.parseBlockForAutoSolveQuickReview,
         parseBlockForAutoSolveReview: options.parseBlockForAutoSolveReview,
-        isCurrentAutoSolveResult: options.isCurrentAutoSolveResult,
+        isCurrentAutoSolveResult: (block, result) => isRunCurrent() && options.isCurrentAutoSolveResult(block, result),
         pauseMs: options.pauseMs,
         pickBestAutoSolvePreviewText: options.pickBestAutoSolvePreviewText,
         pickLiveAutoSolveBlock: options.pickLiveAutoSolveBlock,
@@ -362,7 +367,9 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
             shouldPreferViewportPreview: options.shouldPreferViewportPreview,
           }),
         reportLocationHostname: () => location.hostname,
-        resolveQuestionAdvance: options.waitForQuestionAdvance,
+        resolveQuestionAdvance: (fingerprint, order, timeout) => isRunCurrent()
+          ? options.waitForQuestionAdvance(fingerprint, order, timeout)
+          : Promise.resolve(false),
         resolveQuestionBlockFromBBox: options.resolveQuestionBlockFromBBox,
         resolveScrollRoot: options.resolveFullPageScrollRoot,
         sendAutoSolveDone: (payload) => {
@@ -373,7 +380,9 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
           if (isRunCurrent()) options.sendAutoSolveProgress(withGeneration(payload));
           else if (options.isRuntimeCurrent()) options.sendSupersededAutoSolveProgress?.(withGeneration(payload));
         },
-        setScrollPosition: options.setScrollPosition,
+        setScrollPosition: (root, top, left) => {
+          if (isRunCurrent()) options.setScrollPosition(root, top, left);
+        },
         shouldPersistAutoSolveParseResult: options.shouldPersistAutoSolveParseResult,
         shouldPreferViewportPreview: options.shouldPreferViewportPreview,
         shouldRetryUnstableChoiceParse: options.shouldRetryUnstableChoiceParse,
