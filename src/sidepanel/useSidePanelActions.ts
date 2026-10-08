@@ -67,6 +67,8 @@ type UseSidePanelActionsOptions = {
    * every failed path clean up with the same exact (kind, tabId).
    */
   markProtectedWork: (kind: "autoSolve" | "fullPage", active: boolean, tabId: number) => Promise<void>;
+  /** Reset the component-owned synchronous local intent, without broad storage cleanup. */
+  clearProtectedWorkIntent?: (kind: "autoSolve" | "fullPage") => void;
   protectedWork?: {
     current: {
       autoSolve: { active: boolean; tabId?: number };
@@ -213,7 +215,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     // Reset local intent before awaiting a network/worker STOP. Never clear
     // all owner generations after the await: a newer same-tab START may exist.
     const localTabId = options.protectedWork?.current.fullPage.tabId;
-    if (options.protectedWork) options.protectedWork.current.fullPage = { active: false };
+    options.clearProtectedWorkIntent?.("fullPage");
     const dispatched = await terminateRecordedProtectedWorkKind(
       "fullPage",
       (tabId, message) => sendTabMessageWithBootstrap(tabId, message),
@@ -462,7 +464,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   // owner record exists at all.
   const handleStopAutoSolve = useCallback(async () => {
     const localTabId = options.protectedWork?.current.autoSolve.tabId;
-    if (options.protectedWork) options.protectedWork.current.autoSolve = { active: false };
+    options.clearProtectedWorkIntent?.("autoSolve");
     const dispatched = await terminateRecordedProtectedWorkKind(
       "autoSolve",
       (tabId, message) => sendTabMessageWithBootstrap(tabId, message),

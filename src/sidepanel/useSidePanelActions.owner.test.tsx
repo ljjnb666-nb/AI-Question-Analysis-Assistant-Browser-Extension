@@ -282,7 +282,11 @@ describe("Phase14B-02B manual STOP/CANCEL dispatch bridge", () => {
       autoSolve: { active: true, tabId: 7 },
       fullPage: { active: false, tabId: undefined as number | undefined },
     } };
-    const { result } = renderHook(() => useSidePanelActions(makeOptions({ protectedWork })));
+    const clearProtectedWorkIntent = vi.fn((kind: "autoSolve" | "fullPage") => {
+      if (kind === "autoSolve") protectedWork.current.autoSolve.active = false;
+      else protectedWork.current.fullPage.active = false;
+    });
+    const { result } = renderHook(() => useSidePanelActions(makeOptions({ protectedWork, clearProtectedWorkIntent })));
     await result.current.handleStopAutoSolve();
     expect(terminateRecordedProtectedWorkKind).toHaveBeenCalledWith("autoSolve", expect.any(Function), 7);
     expect(protectedWork.current.autoSolve.active).toBe(false);
@@ -294,7 +298,11 @@ describe("Phase14B-02B manual STOP/CANCEL dispatch bridge", () => {
       autoSolve: { active: false, tabId: undefined as number | undefined },
       fullPage: { active: true, tabId: 7 },
     } };
-    const { result } = renderHook(() => useSidePanelActions(makeOptions({ protectedWork })));
+    const clearProtectedWorkIntent = vi.fn((kind: "autoSolve" | "fullPage") => {
+      if (kind === "autoSolve") protectedWork.current.autoSolve.active = false;
+      else protectedWork.current.fullPage.active = false;
+    });
+    const { result } = renderHook(() => useSidePanelActions(makeOptions({ protectedWork, clearProtectedWorkIntent })));
     await result.current.handleCancelFullPage();
     expect(terminateRecordedProtectedWorkKind).toHaveBeenCalledWith("fullPage", expect.any(Function), 7);
     expect(protectedWork.current.fullPage.active).toBe(false);
