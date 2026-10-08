@@ -90,8 +90,9 @@ async function main() {
 
     const secret = newEphemeralKey();
     const before = await controlState(page, secret);
-    await page.evaluate(() => {
-      const state = { events: [] };
+    const monitorNonce = randomUUID();
+    await page.evaluate(nonce => {
+      const state = { events: [], nonce };
       Object.defineProperty(window, "__phase13bEvents", { value: state, configurable: true });
       for (const type of ["click", "input", "change", "submit"]) {
         document.addEventListener(type, event => {
@@ -99,7 +100,7 @@ async function main() {
           state.events.push(type);
         }, true);
       }
-    });
+    }, monitorNonce);
 
     let blockedWrites = 0;
     await page.route("**/*", async route => {
@@ -138,7 +139,10 @@ async function main() {
     }
 
     const after = await controlState(page, secret);
-    const events = await page.evaluate(() => window.__phase13bEvents?.events ?? []);
+    const monitor = await page.evaluate(nonce => ({
+      alive: window.__phase13bEvents?.nonce === nonce,
+      events: window.__phase13bEvents?.events ?? [],
+    }), monitorNonce);
     const observation = {
       site,
       sourceSha,
@@ -150,7 +154,8 @@ async function main() {
       urlBefore,
       urlAfter: page.url(),
       snapshot,
-      events,
+      monitorAlive: monitor.alive,
+      events: monitor.events,
       blockedWrites,
       formCountBefore: before.formCount,
       formCountAfter: after.formCount,
