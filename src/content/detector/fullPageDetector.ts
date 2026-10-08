@@ -17,102 +17,135 @@ const OVERLAP_RATIO_THRESHOLD = 0.4;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-let running = false;
-let cancelled = false;
 export type ScanScrollRoot = Window | HTMLElement;
+
+/**
+ * Every scan owns a distinct scroll lease. Cancel releases the active slot
+ * immediately; an older paused scan cannot restore/scroll a newer scan.
+ */
+type ActiveFullPageScan = { cancelled: boolean; eligible: () => boolean };
+let activeScan: ActiveFullPageScan | null = null;
 
 function isWindowScrollRoot(scrollRoot: ScanScrollRoot): scrollRoot is Window {
   return scrollRoot === window;
 }
 
 export function isFullPageScanRunning(): boolean {
-  return running;
+  // A route/Runtime lease can expire without a matching explicit CANCEL.
+  if (activeScan && !activeScan.eligible()) {
+    activeScan.cancelled = true;
+    activeScan = null;
+  }
+  return activeScan !== null;
 }
 
 export function cancelFullPageScan(): void {
-  cancelled = true;
+  if (!activeScan) return;
+  activeScan.cancelled = true;
+  activeScan = null;
 }
 
-// ─── Progress callback type ───────────────────────────────────────────────────
-
 export interface ScanProgress {
-  progress: number;      // 0–100
+  progress: number;
   found: number;
   currentStep: number;
   totalScrollSteps: number;
 }
 
-// ─── Main entry ───────────────────────────────────────────────────────────────
-
+/**
+ * isExecutionCurrent is captured from the exact Full Page START (or Auto
+ * Solve run) and composed with the starting URL and attached scroll root.
+ * Both scroll mutation and scroll restoration are denied on cancellation.
+ */
 export async function detectCandidatesFullPage(
   onProgress: (p: ScanProgress) => void,
+  isExecutionCurrent: () => boolean = () => true,
 ): Promise<QuestionBlock[]> {
-  if (running) return [];
-  running = true;
-  cancelled = false;
+  if (isFullPageScanRunning()) return [];
 
-  const scrollRoot = resolveFullPageScrollRoot();
-  const originalScrollTop = getScrollTop(scrollRoot);
-  const originalScrollLeft = getScrollLeft(scrollRoot);
+  const startedAtUrl = location.href;
+  let scrollRoot: ScanScrollRoot | null = null;
+  const scan: ActiveFullPageScan = {
+    cancelled: false,
+    eligible: () => {
+      if (location.href !== startedAtUrl) return false;
+      if (scrollRoot && !isWindowScrollRoot(scrollRoot) && !scrollRoot.isConnected) return false;
+      try {
+        return isExecutionCurrent();
+      } catch {
+        return false;
+      }
+    },
+  };
+  activeScan = scan;
+  const isCurrent = () => activeScan === scan && !scan.cancelled && scan.eligible();
   const allBlocks: QuestionBlock[] = [];
+  let originalTop = 0;
+  let originalLeft = 0;
 
-  // Scroll to top first
-  setScrollPosition(scrollRoot, 0, originalScrollLeft);
-  await pause(SCROLL_PAUSE_MS);
+  try {
+    if (!isCurrent()) return [];
+    const root = resolveFullPageScrollRoot();
+    scrollRoot = root;
+    if (!isCurrent()) return [];
 
-  let step = 0;
+    originalTop = getScrollTop(root);
+    originalLeft = getScrollLeft(root);
 
-  while (!cancelled) {
-    const metrics = getScrollMetrics(scrollRoot);
-    const totalSteps = Math.min(
-      Math.ceil(Math.max(0, metrics.scrollHeight - metrics.clientHeight) / SCROLL_STEP_PX) + 1,
-      MAX_SCROLL_STEPS,
-    );
+    if (!isCurrent()) return [];
+    setScrollPosition(root, 0, originalLeft);
+    await pause(SCROLL_PAUSE_MS);
 
-    // Detect at current scroll position
-    const viewport_blocks = detectCandidatesInViewport();
+    let step = 0;
+    while (isCurrent()) {
+      const metrics = getScrollMetrics(root);
+      const totalSteps = Math.min(
+        Math.ceil(Math.max(0, metrics.scrollHeight - metrics.clientHeight) / SCROLL_STEP_PX) + 1,
+        MAX_SCROLL_STEPS,
+      );
 
-    for (const block of viewport_blocks) {
-      // Convert viewport coords to page-absolute coords
-      const absoluteBlock = toAbsoluteCoords(block, scrollRoot);
-      const normalizedPreview = normalizePreviewText(absoluteBlock.previewText);
-      if (!isLikelyUsefulPreview(normalizedPreview, absoluteBlock.questionTypeGuess)) continue;
-      const normalizedBlock: QuestionBlock = {
-        ...absoluteBlock,
-        previewText: normalizedPreview.slice(0, 420),
-      };
-      upsertCandidate(allBlocks, normalizedBlock);
+      const viewportBlocks = detectCandidatesInViewport();
+      if (!isCurrent()) break;
+      for (const block of viewportBlocks) {
+        const absoluteBlock = toAbsoluteCoords(block, root);
+        const normalizedPreview = normalizePreviewText(absoluteBlock.previewText);
+        if (!isLikelyUsefulPreview(normalizedPreview, absoluteBlock.questionTypeGuess)) continue;
+        upsertCandidate(allBlocks, { ...absoluteBlock, previewText: normalizedPreview.slice(0, 420) });
+      }
+
+      step++;
+      if (!isCurrent()) break;
+      onProgress({
+        progress: Math.min(Math.round((step / totalSteps) * 100), 99),
+        found: allBlocks.length,
+        currentStep: step,
+        totalScrollSteps: totalSteps,
+      });
+      // User handlers may synchronously CANCEL or change the route.
+      if (!isCurrent()) break;
+      if (metrics.scrollTop + metrics.clientHeight >= metrics.scrollHeight - 10) break;
+      if (step >= MAX_SCROLL_STEPS) break;
+
+      if (!isCurrent()) break;
+      setScrollPosition(root, Math.min(metrics.scrollTop + SCROLL_STEP_PX, metrics.scrollHeight), metrics.scrollLeft);
+      await pause(SCROLL_PAUSE_MS);
     }
 
-    step++;
-    const progress = Math.min(Math.round((step / totalSteps) * 100), 99);
-    onProgress({ progress, found: allBlocks.length, currentStep: step, totalScrollSteps: totalSteps });
-
-    // Check if we've reached the bottom
-    const currentBottom = metrics.scrollTop + metrics.clientHeight;
-    if (currentBottom >= metrics.scrollHeight - 10) break;
-    if (step >= MAX_SCROLL_STEPS) break;
-
-    // Scroll down one step
-    setScrollPosition(scrollRoot, Math.min(metrics.scrollTop + SCROLL_STEP_PX, metrics.scrollHeight), metrics.scrollLeft);
-    await pause(SCROLL_PAUSE_MS);
+    if (!isCurrent()) return allBlocks;
+    const filtered = postProcessCandidates(allBlocks).sort((a, b) => a.bbox.y - b.bbox.y);
+    return filtered.map((block, index) => ({
+      ...block,
+      id: `fullpage-${Date.now()}-${index}`,
+    }));
+  } finally {
+    // Never restore scroll after STOP, SPA churn, reinjection, or replacement.
+    // A still-current normal scan owns its original scroll restoration.
+    try {
+      if (scrollRoot && isCurrent()) setScrollPosition(scrollRoot, originalTop, originalLeft);
+    } finally {
+      if (activeScan === scan) activeScan = null;
+    }
   }
-
-  // Restore original scroll position
-  setScrollPosition(scrollRoot, originalScrollTop, originalScrollLeft);
-
-  running = false;
-
-  if (cancelled) return allBlocks;
-
-  // Final post-process and sort by absolute Y position (top-to-bottom page order)
-  const filtered = postProcessCandidates(allBlocks).sort((a, b) => a.bbox.y - b.bbox.y);
-
-  // Re-number IDs sequentially
-  return filtered.map((b, i) => ({
-    ...b,
-    id: `fullpage-${Date.now()}-${i}`,
-  }));
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

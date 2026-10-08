@@ -66,7 +66,9 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
     deps.resetWorkspace?.();
   }
 
-  async function refineFullPageCandidatesViaManualPipeline(candidates: QuestionBlock[]): Promise<QuestionBlock[]> {
+  async function refineFullPageCandidatesViaManualPipeline(
+    candidates: QuestionBlock[], isExecutionCurrent: () => boolean = () => true,
+  ): Promise<QuestionBlock[]> {
     return refineFullPageCandidatesViaManualPipelineCore(
       candidates,
       createRefineFullPageDepsFactory({
@@ -87,7 +89,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
         projectViewportBboxToAbsolute: deps.projectViewportBboxToAbsolute,
         getAutoSolveTextFingerprint: deps.getAutoSolveTextFingerprint,
         autoSolveStopRequested: deps.setAutoSolveStopRequestedGetter,
-        isRuntimeCurrent,
+        isRuntimeCurrent: () => isRuntimeCurrent() && isExecutionCurrent(),
       }),
     );
   }
@@ -109,11 +111,14 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
     return deps.looksLikeGarbledFullPageTextCore(text, deps.normalizeQuestionText);
   }
 
-  async function handleFullPageDetect(generationId?: string) {
+  async function handleFullPageDetect(
+    generationId?: string, isExecutionCurrent: () => boolean = () => true,
+  ) {
     if (!isRuntimeCurrent()) return;
     const epoch = deps.workspaceRouteEpoch?.();
     const detectionGeneration = deps.workspaceDetectionGeneration?.();
-    const isDetectionCurrent = () => isRuntimeCurrent() && deps.workspaceRouteEpoch?.() === epoch
+    const isDetectionCurrent = () => isRuntimeCurrent() && isExecutionCurrent()
+      && deps.workspaceRouteEpoch?.() === epoch
       && deps.workspaceDetectionGeneration?.() === detectionGeneration;
     await runFullPageDetectSession(createDetectSessionDepsFactory({
       candidateStatusMap: deps.candidateStatusMap,
@@ -130,7 +135,8 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
       notifySidePanel,
       refreshFullPageHighlightsAfterLayoutChange: deps.refreshFullPageHighlightsAfterLayoutChange,
       refreshLayoutResizeObservation: deps.refreshLayoutResizeObservation,
-      refineFullPageCandidatesViaManualPipeline,
+      refineFullPageCandidatesViaManualPipeline: (candidates) =>
+        refineFullPageCandidatesViaManualPipeline(candidates, isDetectionCurrent),
       resolveFullPageScrollRoot: deps.resolveFullPageScrollRoot,
       safeRuntimeSendMessage: deps.safeRuntimeSendMessage,
       setActiveCandidates: deps.setActiveCandidates,

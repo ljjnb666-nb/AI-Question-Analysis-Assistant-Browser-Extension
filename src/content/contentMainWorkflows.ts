@@ -65,7 +65,7 @@ type CreateContentMainWorkflowsOptions = {
   ) => Promise<ParseResult>;
   screenshotWithRetry: () => Promise<string | null>;
   clickNextQuestionButton: () => boolean;
-  detectCandidatesFullPage: () => Promise<QuestionBlock[]>;
+  detectCandidatesFullPage: (isScanCurrent?: () => boolean) => Promise<QuestionBlock[]>;
   detectCandidatesAcrossRoots?: () => QuestionBlock[];
   detectCandidatesInViewport: () => QuestionBlock[];
   detectTotalQuestionCount: () => number;
@@ -129,7 +129,9 @@ type CreateContentMainWorkflowsOptions = {
     block: QuestionBlock,
     result: ParseResult,
   ) => Promise<boolean>;
-  refineFullPageCandidatesViaManualPipeline: (candidates: QuestionBlock[]) => Promise<QuestionBlock[]>;
+  refineFullPageCandidatesViaManualPipeline: (
+    candidates: QuestionBlock[], isScanCurrent?: () => boolean,
+  ) => Promise<QuestionBlock[]>;
   refineViewportCandidate: (
     candidate: QuestionBlock,
     root: ScanScrollRoot,
@@ -325,7 +327,7 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         activeDetectMode: options.runtimeState.getActiveDetectMode(),
         // Recheck the exact START lease immediately before navigating the page.
         clickNextQuestionButton: () => isRunCurrent() && options.clickNextQuestionButton(),
-        detectCandidatesFullPage: options.detectCandidatesFullPage,
+        detectCandidatesFullPage: () => options.detectCandidatesFullPage(isRunCurrent),
         detectCandidatesAcrossRoots: options.detectCandidatesAcrossRoots,
         detectCandidatesInViewport: options.detectCandidatesInViewport,
         detectTotalQuestionCount: options.detectTotalQuestionCount,
@@ -363,7 +365,8 @@ export function createContentMainWorkflows(options: CreateContentMainWorkflowsOp
         pickLiveAutoSolveBlock: options.pickLiveAutoSolveBlock,
         projectViewportBboxToAbsolute: options.projectViewportBboxToAbsolute,
         recordAutoSolveHistory: options.recordAutoSolveHistory,
-        refineFullPageCandidatesViaManualPipeline: options.refineFullPageCandidatesViaManualPipeline,
+        refineFullPageCandidatesViaManualPipeline: (candidates) =>
+          options.refineFullPageCandidatesViaManualPipeline(candidates, isRunCurrent),
         refineViewportCandidate: (candidate, root) =>
           options.refineViewportCandidate(candidate, root, {
             detectCandidatesInViewport: options.detectCandidatesInViewport,

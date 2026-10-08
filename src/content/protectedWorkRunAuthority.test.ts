@@ -93,4 +93,19 @@ describe("Phase14B-02C-C runtime STOP/CANCEL generation authority", () => {
     a.finish("autoSolve", current);
     expect(a.canStop("autoSolve")).toBe(false);
   });
+
+  it("P14B02C_E2_01 Full Page CANCEL invalidates the matching execution lease immediately", () => {
+    const a = createProtectedWorkRunAuthority();
+    const first = a.begin("fullPage", oldId)!;
+    expect(a.isCurrent("fullPage", first)).toBe(true);
+    expect(a.revoke("fullPage", newId)).toBe(false);
+    expect(a.isCurrent("fullPage", first)).toBe(true);
+    expect(a.revoke("fullPage", oldId)).toBe(true);
+    expect(a.isCurrent("fullPage", first)).toBe(false);
+    // The old async task still owns START until it actually exits.
+    expect(a.begin("fullPage", newId)).toBeNull();
+    a.finish("fullPage", first);
+    const next = a.begin("fullPage", newId)!;
+    expect(a.isCurrent("fullPage", next)).toBe(true);
+  });
 });
