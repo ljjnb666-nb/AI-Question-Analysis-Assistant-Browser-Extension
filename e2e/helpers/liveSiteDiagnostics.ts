@@ -13,6 +13,12 @@ type RequestFailure = { resourceKind: ResourceKind; failure: NetworkFailure; cou
 const resourceKinds = new Set<ResourceKind>(["document", "script", "xhr", "fetch", "stylesheet", "image", "font"]);
 const MAX_GROUPS = 24;
 
+/** Classify owned hostnames without accepting lookalikes such as pintia.cn.evil. */
+export function isPintiaPartyHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "pintia.cn" || normalized.endsWith(".pintia.cn");
+}
+
 function kind(input: string): ResourceKind {
   return resourceKinds.has(input as ResourceKind) ? input as ResourceKind : "other";
 }
