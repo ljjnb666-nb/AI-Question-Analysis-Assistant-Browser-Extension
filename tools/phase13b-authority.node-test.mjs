@@ -99,6 +99,9 @@ test("13B-CONTRACT-06 redacted evidence never contains URL, credentials, questio
   assert.equal(evidence.pageIntegrity.automaticSubmissionObserved, false);
   assert.equal(evidence.pageIntegrity.answerFillAttempted, false);
   assert.equal(evidence.candidates[0].previewLength, 24);
+  const malicious = baseObservation();
+  malicious.snapshot.candidates[0].block.questionTypeGuess = "PRIVATE_QUESTION_LEAK";
+  assert.equal(createRedactedEvidence(malicious, null).candidates[0].type, "unknown");
 });
 
 test("13B-CONTRACT-07 failing evidence cannot misrepresent itself as PASS", () => {
