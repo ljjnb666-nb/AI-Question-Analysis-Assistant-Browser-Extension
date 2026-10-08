@@ -175,7 +175,18 @@ async function main() {
 main().catch(error => {
   // Error messages from a live page, browser or transport can contain private content.
   // Only print known local error codes; never dump an upstream stack or URL.
-  const safeCode = /^[A-Z][A-Z0-9_]+$/.test(error?.message ?? "") ? error.message : "LOCAL_ACCEPTANCE_ERROR";
+  const allowedCodes = new Set([
+    "INTERACTIVE_TERMINAL_REQUIRED", "DUPLICATE_ARGUMENT", "UNKNOWN_ARGUMENT",
+    "MISSING_ARGUMENT_VALUE", "EXPLICIT_CONSENT_REQUIRED", "UNSUPPORTED_SITE_IDENTIFIER",
+    "TARGET_URL_REQUIRED", "INVALID_TARGET_URL", "HTTPS_TARGET_REQUIRED",
+    "PUBLIC_HTTPS_DOMAIN_REQUIRED", "SITE_ORIGIN_MISMATCH", "CLEAN_SOURCE_REQUIRED",
+    "SOURCE_SHA_UNAVAILABLE", "USER_AUTH_ATTESTATION_MISSING", "TARGET_ORIGIN_MISMATCH",
+    "ACTIVE_AUTHORIZED_TAB_UNAVAILABLE", "DETECTION_START_REJECTED",
+    "WORKSPACE_ORIGIN_MISMATCH", "DETECTION_NOT_COMPLETE", "NO_CANDIDATE_DETECTED",
+    "PAGE_INTERACTION_OBSERVED", "NETWORK_WRITE_ATTEMPTED", "PAGE_FORM_STRUCTURE_CHANGED",
+    "PAGE_CONTROL_STATE_CHANGED", "ORIGIN_CHANGED", "ROUTE_CHANGED",
+  ]);
+  const safeCode = allowedCodes.has(error?.message) ? error.message : "LOCAL_ACCEPTANCE_ERROR";
   process.stderr.write(`PHASE13B_FAIL: ${safeCode}\n`);
   process.exitCode = 1;
 });
