@@ -141,7 +141,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
       setUnwatchSPA: deps.setUnwatchSPA,
       stopSpaWatch: deps.stopSpaWatch,
       watchForPageChanges: deps.watchForPageChanges,
-    }));
+    }), generationId);
   }
 
   async function handleAutoDetect() {
@@ -172,7 +172,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
       setUnwatchSPA: deps.setUnwatchSPA,
       stopSpaWatch: deps.stopSpaWatch,
       watchForPageChanges: deps.watchForPageChanges,
-    }), generationId);
+    }));
   }
 
   function notifySidePanel(candidates: QuestionBlock[]) {
