@@ -88,7 +88,9 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
         if (disposed) return;
         if (!done && msg.generationId === undefined && origin
           && completedTagged.has(workKey("fullPage", origin.tabId))) return;
-        const allowed = origin !== undefined
+        const legacyTerminalReplay = msg.generationId === undefined && origin !== undefined
+          && completedTagged.has(workKey("fullPage", origin.tabId));
+        const allowed = !legacyTerminalReplay && origin !== undefined
           && await isProtectedWorkRuntimeUiMessageCurrent("fullPage", origin.tabId, msg.generationId);
         // Legacy recovery remains untagged only; tagged updates cannot
         // resurrect a legacy owner once their exact run has completed.
@@ -125,7 +127,9 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
         if (disposed) return;
         if (!done && msg.generationId === undefined && origin
           && completedTagged.has(workKey("autoSolve", origin.tabId))) return;
-        const allowed = origin !== undefined
+        const legacyTerminalReplay = msg.generationId === undefined && origin !== undefined
+          && completedTagged.has(workKey("autoSolve", origin.tabId));
+        const allowed = !legacyTerminalReplay && origin !== undefined
           && await isProtectedWorkRuntimeUiMessageCurrent("autoSolve", origin.tabId, msg.generationId);
         if (!done && msg.running && msg.generationId === undefined && origin
           && allowed) {
