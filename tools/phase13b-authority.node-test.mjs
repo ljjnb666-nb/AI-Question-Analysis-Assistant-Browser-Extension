@@ -47,6 +47,7 @@ test("13B-CONTRACT-01 requires a TTY, exact consent and supported site origin", 
   assert.throws(() => parsePhase13bArgs(args("pintia", "http://pintia.cn"), true), /HTTPS_TARGET_REQUIRED/);
   assert.throws(() => parsePhase13bArgs(args("pintia", "https://user:pass@pintia.cn"), true), /HTTPS_TARGET_REQUIRED/);
   assert.throws(() => parsePhase13bArgs(args("pintia", "https://127.0.0.1"), true), /PUBLIC_HTTPS_DOMAIN_REQUIRED/);
+  assert.throws(() => parsePhase13bArgs(args("pintia", "https://pintia.cn/problems/123?token=PRIVATE"), true), /ORIGIN_ONLY_REQUIRED/);
   assert.throws(() => parsePhase13bArgs([...args("pintia", "https://pintia.cn"), "--consent-readonly"], true), /DUPLICATE_ARGUMENT/);
   assert.equal(parsePhase13bArgs(args("pintia", "https://pintia.cn/"), true).site, "pintia");
 });
