@@ -37,10 +37,6 @@ function legacyKeyFor(kind: ProtectedWorkKind, tabId: number): string {
   return `${KEY_PREFIX}${kind}:${tabId}`;
 }
 
-function keyForNewGeneration(kind: ProtectedWorkKind, tabId: number): string {
-  return `${legacyKeyFor(kind, tabId)}:${globalThis.crypto.randomUUID()}`;
-}
-
 function parseOwnerKey(key: string): { kind: ProtectedWorkKind; tabId: number } | null {
   // Optional UUID suffix supports previous extension versions whose session
   // records still use the single-key-per-tab layout.
@@ -101,13 +97,53 @@ export async function readProtectedWorkOwners(): Promise<ProtectedWorkOwners> {
  * START writes only its own generation key. Different contexts never
  * overwrite the same key even when they mark the same kind + same tab.
  */
+/**
+ * Run-generation authority for new START call sites. The UUID is generated
+ * before persisting a NEW immutable key and is returned only after the write
+ * commits. This token is not a bearer credential; it binds later DONE cleanup
+ * to the exact owner generation, even if another context starts on the tab.
+ *
+ * Null means the session store was unavailable, not a successful owner mark.
+ */
+export async function markProtectedWorkOwnerWithGeneration(
+  kind: ProtectedWorkKind,
+  tabId: number,
+): Promise<string | null> {
+  const area = sessionArea();
+  if (!area || !Number.isSafeInteger(tabId) || tabId <= 0) return null;
+  const generationId = globalThis.crypto.randomUUID();
+  await area.set({ [`${legacyKeyFor(kind, tabId)}:${generationId}`]: { active: true, tabId } });
+  return generationId;
+}
+
+/** Backward-compatible mark for callers not yet wired to the run-ID protocol. */
 export async function markProtectedWorkOwner(
   kind: ProtectedWorkKind,
   tabId: number,
 ): Promise<void> {
+  await markProtectedWorkOwnerWithGeneration(kind, tabId);
+}
+
+/**
+ * Completion of a KNOWN generation. Never scans or removes all same-tab
+ * owners; an old DONE cannot erase a newer owner, even if remove is delayed.
+ * Legacy callers without a generationId continue using the separate
+ * clearProtectedWorkOwner API until their message contract is migrated.
+ */
+export async function clearProtectedWorkOwnerGeneration(
+  kind: ProtectedWorkKind,
+  tabId: number,
+  generationId: string,
+): Promise<boolean> {
   const area = sessionArea();
-  if (!area) return;
-  await area.set({ [keyForNewGeneration(kind, tabId)]: { active: true, tabId } });
+  if (!area || !Number.isSafeInteger(tabId) || tabId <= 0) return false;
+  const key = `${legacyKeyFor(kind, tabId)}:${generationId}`;
+  const parsed = parseOwnerKey(key);
+  if (!parsed || parsed.kind !== kind || parsed.tabId !== tabId) return false;
+  const entry = (await area.get(key))[key] as { active?: unknown; tabId?: unknown } | undefined;
+  if (entry?.active !== true || entry.tabId !== tabId) return false;
+  await area.remove(key);
+  return true;
 }
 
 /**
