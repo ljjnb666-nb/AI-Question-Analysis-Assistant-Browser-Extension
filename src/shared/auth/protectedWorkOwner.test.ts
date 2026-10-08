@@ -280,6 +280,55 @@ describe("cross-context protected-work owner registry", () => {
     expect((await newContext.readProtectedWorkOwners()).fullPage).toEqual([{ tabId: 11 }]);
   });
 
+  it("PHASE14B_02A local pending STOP joins global owners, deduplicates tabs and preserves newer same-tab owner", async () => {
+    const popup = await freshClient();
+    const panel = await freshClient();
+    await popup.markProtectedWorkOwner("autoSolve", 7);
+    await popup.markProtectedWorkOwner("fullPage", 9);
+
+    const sends: string[] = [];
+    let sendStarted!: () => void;
+    const entered = new Promise<void>((resolve) => { sendStarted = resolve; });
+    let releaseStop!: () => void;
+    const parked = new Promise<void>((resolve) => { releaseStop = resolve; });
+
+    const stop = panel.terminateRecordedProtectedWork(async (tabId, message) => {
+      sends.push(`${tabId}:${message.type}`);
+      if (tabId === 7) {
+        sendStarted();
+        await parked;
+      }
+    }, { autoSolve: 7, fullPage: 10 });
+    await entered;
+    // The next authorized generation writes the SAME kind+tab while the old
+    // Side Panel STOP is pending. It must not be deleted by stale cleanup.
+    await popup.markProtectedWorkOwner("autoSolve", 7);
+    releaseStop();
+    await stop;
+    expect(sends).toEqual([
+      "7:STOP_AUTO_SOLVE_ALL",
+      "9:FULL_PAGE_DETECT_CANCELLED",
+      "10:FULL_PAGE_DETECT_CANCELLED",
+    ]);
+    expect(await popup.readProtectedWorkOwners()).toEqual({
+      autoSolve: [{ tabId: 7 }],
+      fullPage: [],
+    });
+  });
+
+  it("PHASE14B_02A local pending tab STOP works without a persisted storage generation", async () => {
+    const panel = await freshClient();
+    const sends: string[] = [];
+    await panel.terminateRecordedProtectedWork(async (tabId, message) => {
+      sends.push(`${tabId}:${message.type}`);
+    }, { autoSolve: 8, fullPage: 12 });
+    expect(sends).toEqual([
+      "8:STOP_AUTO_SOLVE_ALL",
+      "12:FULL_PAGE_DETECT_CANCELLED",
+    ]);
+    expect(await panel.readProtectedWorkOwners()).toEqual({ autoSolve: [], fullPage: [] });
+  });
+
   it("PHASE14B_03 multiple same-tab generations emit only one STOP but remove all captured keys", async () => {
     const first = await freshClient();
     const second = await freshClient();
