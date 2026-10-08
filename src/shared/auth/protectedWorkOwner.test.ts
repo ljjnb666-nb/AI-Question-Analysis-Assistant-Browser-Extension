@@ -510,3 +510,70 @@ describe("Phase14B-02B manual termination owner-generation snapshot fence", () =
     })).toBe(0);
   });
 });
+
+describe("Phase 14B-02B run generation token authority API", () => {
+  it("P14B02B_GEN_01 a stale same-tab autoSolve DONE clears only its own UUID", async () => {
+    const oldContext = await freshClient();
+    const newContext = await freshClient();
+    const oldId = await oldContext.markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    const newId = await newContext.markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    expect(oldId).toMatch(/^[0-9a-f]{8}-/);
+    expect(newId).not.toBe(oldId);
+    expect(await oldContext.clearProtectedWorkOwnerGeneration("autoSolve", 7, oldId!)).toBe(true);
+    expect((await newContext.readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
+    // Replay is a no-op and cannot sweep the new generation.
+    expect(await oldContext.clearProtectedWorkOwnerGeneration("autoSolve", 7, oldId!)).toBe(false);
+    expect((await newContext.readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
+    expect(await newContext.clearProtectedWorkOwnerGeneration("autoSolve", 7, newId!)).toBe(true);
+    expect((await oldContext.readProtectedWorkOwners()).autoSolve).toEqual([]);
+  });
+
+  it("P14B02B_GEN_02 fullPage stale DONE, wrong kind/tab and invalid ID fail closed", async () => {
+    const first = await freshClient();
+    const other = await freshClient();
+    const oldId = await first.markProtectedWorkOwnerWithGeneration("fullPage", 9);
+    const newId = await other.markProtectedWorkOwnerWithGeneration("fullPage", 9);
+    const autoId = await other.markProtectedWorkOwnerWithGeneration("autoSolve", 9);
+    expect(await first.clearProtectedWorkOwnerGeneration("fullPage", 9, "invalid")).toBe(false);
+    expect(await first.clearProtectedWorkOwnerGeneration("fullPage", 10, oldId!)).toBe(false);
+    expect(await first.clearProtectedWorkOwnerGeneration("autoSolve", 9, oldId!)).toBe(false);
+    expect(await first.clearProtectedWorkOwnerGeneration("fullPage", 9, autoId!)).toBe(false);
+    expect(await first.clearProtectedWorkOwnerGeneration("fullPage", 9, oldId!)).toBe(true);
+    expect(await other.readProtectedWorkOwners()).toEqual({
+      autoSolve: [{ tabId: 9 }],
+      fullPage: [{ tabId: 9 }],
+    });
+    expect(await other.clearProtectedWorkOwnerGeneration("fullPage", 9, newId!)).toBe(true);
+  });
+
+  it("P14B02B_GEN_03 delayed DONE removal cannot race away a newly marked same-tab run", async () => {
+    const area = installSharedSessionStub();
+    const oldContext = await freshClient();
+    const newContext = await freshClient();
+    const oldId = await oldContext.markProtectedWorkOwnerWithGeneration("autoSolve", 15);
+    const remove = area.remove.bind(area);
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    const parked = new Promise<void>((resolve) => { release = resolve; });
+    area.remove = async (keys) => {
+      enter();
+      await parked;
+      await remove(keys);
+    };
+    const pending = oldContext.clearProtectedWorkOwnerGeneration("autoSolve", 15, oldId!);
+    await entered;
+    const newId = await newContext.markProtectedWorkOwnerWithGeneration("autoSolve", 15);
+    release();
+    expect(await pending).toBe(true);
+    expect((await newContext.readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 15 }]);
+    expect(await newContext.clearProtectedWorkOwnerGeneration("autoSolve", 15, newId!)).toBe(true);
+  });
+
+  it("P14B02B_GEN_04 no session storage fails closed without inventing ownership", async () => {
+    const client = await freshClient();
+    (globalThis as unknown as { chrome: unknown }).chrome = { storage: {} };
+    expect(await client.markProtectedWorkOwnerWithGeneration("autoSolve", 7)).toBeNull();
+    expect(await client.clearProtectedWorkOwnerGeneration("autoSolve", 7, crypto.randomUUID())).toBe(false);
+  });
+});
