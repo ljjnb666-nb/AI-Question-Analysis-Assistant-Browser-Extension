@@ -57,7 +57,7 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
     const matchesOrigin = () => {
       if (disposed) return false;
       const bound = handlers.getFeedbackOrigin?.();
-      return handlers.getFeedbackOrigin === undefined || (bound !== undefined
+      return (handlers.getFeedbackOrigin === undefined && workspaceRendered) || (bound !== undefined
         && origin !== undefined && bound.tabId === origin.tabId && bound.url === origin.url
         && (sender.frameId === undefined || sender.frameId === 0));
     };
@@ -86,7 +86,7 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
         // Legacy recovery remains untagged only; tagged updates cannot
         // resurrect a legacy owner once their exact run has completed.
         if (!done && msg.generationId === undefined && origin
-          && (allowed || !workspaceRendered)) {
+          && allowed) {
           await reconcileProtectedWorkOwnerFromRuntime("fullPage", origin.tabId);
         }
         if (done && origin) {
@@ -116,7 +116,7 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
         const allowed = origin !== undefined
           && await isProtectedWorkRuntimeUiMessageCurrent("autoSolve", origin.tabId, msg.generationId);
         if (!done && msg.running && msg.generationId === undefined && origin
-          && (allowed || !workspaceRendered)) {
+          && allowed) {
           await reconcileProtectedWorkOwnerFromRuntime("autoSolve", origin.tabId);
         }
         if (done && origin) {
