@@ -2,7 +2,7 @@ import type { CandidateOrigin, CandidateSnapshot, DetectedCandidate, QuestionBlo
 import { mapAutoSolveDoneFeedback } from "@/shared/ui/autoSolveStatus";
 import type { UserFeedback } from "@/shared/ui/userFeedback";
 import {
-  clearProtectedWorkOwner,
+  clearProtectedWorkOwnerFromRuntimeDone,
   reconcileProtectedWorkOwnerFromRuntime,
 } from "@/shared/auth/protectedWorkOwner";
 import type { AutoSolveProgressState, ScanProgressState } from "./sidepanelStateSync";
@@ -48,9 +48,9 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
     if (handlers.renderWorkspace === false) {
       if (origin?.tabId != null) {
         if (msg.type === "FULL_PAGE_DETECT_PROGRESS") void reconcileProtectedWorkOwnerFromRuntime("fullPage", origin.tabId);
-        if (msg.type === "FULL_PAGE_DETECT_DONE") void clearProtectedWorkOwner("fullPage", origin.tabId);
+        if (msg.type === "FULL_PAGE_DETECT_DONE") void clearProtectedWorkOwnerFromRuntimeDone("fullPage", origin.tabId, msg.generationId);
         if (msg.type === "AUTO_SOLVE_PROGRESS" && msg.running) void reconcileProtectedWorkOwnerFromRuntime("autoSolve", origin.tabId);
-        if (msg.type === "AUTO_SOLVE_DONE") void clearProtectedWorkOwner("autoSolve", origin.tabId);
+        if (msg.type === "AUTO_SOLVE_DONE") void clearProtectedWorkOwnerFromRuntimeDone("autoSolve", origin.tabId, msg.generationId);
       }
       // Completion is feedback only. Owner reconciliation above stays global;
       // candidates and progress remain exclusively snapshot-authoritative.
@@ -87,7 +87,7 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
       // Natural completion: clear the owner so a later auth loss never sends
       // a stale CANCEL at the finished tab.
       if (origin?.tabId != null) {
-        void clearProtectedWorkOwner("fullPage", origin.tabId);
+        void clearProtectedWorkOwnerFromRuntimeDone("fullPage", origin.tabId, msg.generationId);
       }
       handlers.setIsFullPageScan(false);
       handlers.setScanProgress(null);
@@ -106,7 +106,7 @@ export function registerSidePanelRuntimeListeners(handlers: SidePanelRuntimeHand
     }
     if (msg.type === "AUTO_SOLVE_DONE") {
       if (origin?.tabId != null) {
-        void clearProtectedWorkOwner("autoSolve", origin.tabId);
+        void clearProtectedWorkOwnerFromRuntimeDone("autoSolve", origin.tabId, msg.generationId);
       }
       handlers.setIsAutoSolving(false);
       handlers.setAutoSolveProgress(null);

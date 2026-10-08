@@ -172,6 +172,8 @@ export interface FullPageDetectProgressMsg extends BaseMessage {
 
 export interface FullPageDetectDoneMsg extends BaseMessage {
   type: "FULL_PAGE_DETECT_DONE";
+  /** Run generation for exact owner cleanup; omitted by legacy content scripts. */
+  generationId?: string;
   candidates: QuestionBlock[];
   totalFound: number;
 }
@@ -234,6 +236,8 @@ export interface AutoSolveProgressMsg extends BaseMessage {
 
 export interface AutoSolveDoneMsg extends BaseMessage {
   type: "AUTO_SOLVE_DONE";
+  /** Run generation for exact owner cleanup; omitted by legacy content scripts. */
+  generationId?: string;
   ok: boolean;
   stopped?: boolean;
   solved: number;

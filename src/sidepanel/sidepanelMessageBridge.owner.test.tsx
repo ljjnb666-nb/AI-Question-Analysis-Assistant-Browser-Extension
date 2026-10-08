@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  markProtectedWorkOwner,
+  markProtectedWorkOwnerWithGeneration,
   readProtectedWorkOwners,
   terminateRecordedProtectedWork,
 } from "@/shared/auth/protectedWorkOwner";
@@ -174,5 +176,56 @@ describe("runtime reconciliation of protected-work owners", () => {
     dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", running: false }, 7);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect((await readProtectedWorkOwners()).autoSolve).toEqual([]);
+  });
+});
+
+describe("Phase14B-02B tagged runtime DONE replay fence", () => {
+  const register = (renderWorkspace: boolean) => registerSidePanelRuntimeListeners({
+    renderWorkspace,
+    loadLanguage: async () => "en" as const,
+    setUiLang: vi.fn(),
+    setCandidates: vi.fn(),
+    setIsDetecting: vi.fn(),
+    setIsFullPageScan: vi.fn(),
+    setScanProgress: vi.fn(),
+    setExpandedIds: vi.fn(),
+    setIsAutoSolving: vi.fn(),
+    setAutoSolveProgress: vi.fn(),
+    setFillFeedback: vi.fn(),
+  });
+
+  it("P14B02B_WIRE_03 old autoSolve DONE cannot clear a newer tagged owner (snapshot mode)", async () => {
+    register(false);
+    const oldId = await markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    const newId = await markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    expect(oldId).not.toBe(newId);
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: oldId, ok: true }, 7);
+    await vi.waitFor(() => {
+      const keys = [...sessionStore.keys()].filter((key) => key.startsWith("protectedWorkOwner:autoSolve:7:"));
+      expect(keys).toHaveLength(1);
+      expect(keys[0]).toContain(newId!);
+    });
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: oldId, ok: true }, 7);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: newId, ok: true }, 7);
+    await vi.waitFor(async () => expect((await readProtectedWorkOwners()).autoSolve).toEqual([]));
+  });
+
+  it("P14B02B_WIRE_04 old untagged fullPage DONE cannot clear newer tagged owner (legacy UI mode)", async () => {
+    register(true);
+    await markProtectedWorkOwner("fullPage", 9);
+    const newId = await markProtectedWorkOwnerWithGeneration("fullPage", 9);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_DONE", candidates: [] }, 9);
+    await vi.waitFor(() => {
+      const keys = [...sessionStore.keys()].filter((key) => key.startsWith("protectedWorkOwner:fullPage:9:"));
+      expect(keys).toHaveLength(1);
+      expect(keys[0]).toContain(newId!);
+    });
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_DONE", generationId: null, candidates: [] }, 9);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await readProtectedWorkOwners()).fullPage).toEqual([{ tabId: 9 }]);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_DONE", generationId: newId, candidates: [] }, 9);
+    await vi.waitFor(async () => expect((await readProtectedWorkOwners()).fullPage).toEqual([]));
   });
 });

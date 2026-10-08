@@ -94,10 +94,6 @@ export async function readProtectedWorkOwners(): Promise<ProtectedWorkOwners> {
 }
 
 /**
- * START writes only its own generation key. Different contexts never
- * overwrite the same key even when they mark the same kind + same tab.
- */
-/**
  * Run-generation authority for new START call sites. The UUID is generated
  * before persisting a NEW immutable key and is returned only after the write
  * commits. This token is not a bearer credential; it binds later DONE cleanup
@@ -105,23 +101,37 @@ export async function readProtectedWorkOwners(): Promise<ProtectedWorkOwners> {
  *
  * Null means the session store was unavailable, not a successful owner mark.
  */
-export async function markProtectedWorkOwnerWithGeneration(
+async function storeProtectedWorkOwner(
   kind: ProtectedWorkKind,
   tabId: number,
+  completionProtocol: "legacy" | "generation",
 ): Promise<string | null> {
   const area = sessionArea();
   if (!area || !Number.isSafeInteger(tabId) || tabId <= 0) return null;
   const generationId = globalThis.crypto.randomUUID();
-  await area.set({ [`${legacyKeyFor(kind, tabId)}:${generationId}`]: { active: true, tabId } });
+  // Only an explicit token-returning START opts in to generation-aware DONE.
+  // Existing legacy STARTs cannot send this token and must remain distinct.
+  await area.set({
+    [`${legacyKeyFor(kind, tabId)}:${generationId}`]: {
+      active: true, tabId, ...(completionProtocol === "generation" ? { completionProtocol } : {}),
+    },
+  });
   return generationId;
 }
 
-/** Backward-compatible mark for callers not yet wired to the run-ID protocol. */
+export async function markProtectedWorkOwnerWithGeneration(
+  kind: ProtectedWorkKind,
+  tabId: number,
+): Promise<string | null> {
+  return storeProtectedWorkOwner(kind, tabId, "generation");
+}
+
+/** Backward-compatible START: untagged DONE may clear only legacy owners. */
 export async function markProtectedWorkOwner(
   kind: ProtectedWorkKind,
   tabId: number,
 ): Promise<void> {
-  await markProtectedWorkOwnerWithGeneration(kind, tabId);
+  await storeProtectedWorkOwner(kind, tabId, "legacy");
 }
 
 /**
@@ -143,6 +153,39 @@ export async function clearProtectedWorkOwnerGeneration(
   const entry = (await area.get(key))[key] as { active?: unknown; tabId?: unknown } | undefined;
   if (entry?.active !== true || entry.tabId !== tabId) return false;
   await area.remove(key);
+  return true;
+}
+
+/**
+ * DONE message cleanup while migrating the runtime wire protocol.
+ *
+ * Tagged DONE removes ONLY the specified generation; a malformed tag fails
+ * closed. Untagged legacy DONE removes ONLY legacy/unbound generations, so
+ * an old message can never erase a newly registered generation-aware owner.
+ * Both paths snapshot immutable keys before remove (no storage CAS required).
+ *
+ * UI result delivery and STOP execution authority are separate concerns.
+ */
+export async function clearProtectedWorkOwnerFromRuntimeDone(
+  kind: ProtectedWorkKind,
+  tabId: number,
+  generationId?: unknown,
+): Promise<boolean> {
+  if (generationId !== undefined) {
+    if (typeof generationId !== "string") return false;
+    return clearProtectedWorkOwnerGeneration(kind, tabId, generationId);
+  }
+  const area = sessionArea();
+  if (!area || !Number.isSafeInteger(tabId) || tabId <= 0) return false;
+  const snapshot = await area.get(null);
+  const keys = ownerRecordsFor(snapshot, kind, tabId)
+    .filter(({ key }) => {
+      const value = snapshot[key] as { completionProtocol?: unknown } | undefined;
+      return value?.completionProtocol !== "generation";
+    })
+    .map(({ key }) => key);
+  if (!keys.length) return false;
+  await area.remove(keys);
   return true;
 }
 

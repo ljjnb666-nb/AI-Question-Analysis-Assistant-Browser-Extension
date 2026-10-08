@@ -577,3 +577,28 @@ describe("Phase 14B-02B run generation token authority API", () => {
     expect(await client.clearProtectedWorkOwnerGeneration("autoSolve", 7, crypto.randomUUID())).toBe(false);
   });
 });
+
+describe("Phase14B-02B-02B incoming DONE authority: tagged versus legacy", () => {
+  it("P14B02B_WIRE_01 old untagged DONE only clears legacy owners, never the new tagged owner", async () => {
+    const context = await freshClient();
+    await context.markProtectedWorkOwner("autoSolve", 7);
+    const tagged = await context.markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    expect(tagged).toBeTruthy();
+    expect(await context.clearProtectedWorkOwnerFromRuntimeDone("autoSolve", 7)).toBe(true);
+    expect((await context.readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
+    expect(await context.clearProtectedWorkOwnerFromRuntimeDone("autoSolve", 7)).toBe(false);
+    expect(await context.clearProtectedWorkOwnerFromRuntimeDone("autoSolve", 7, tagged)).toBe(true);
+    expect((await context.readProtectedWorkOwners()).autoSolve).toEqual([]);
+  });
+
+  it("P14B02B_WIRE_02 invalid tagged DONE fails closed rather than falling back to tab-wide deletion", async () => {
+    const context = await freshClient();
+    const tagged = await context.markProtectedWorkOwnerWithGeneration("fullPage", 12);
+    expect(await context.clearProtectedWorkOwnerFromRuntimeDone("fullPage", 12, null)).toBe(false);
+    expect(await context.clearProtectedWorkOwnerFromRuntimeDone("fullPage", 12, "bad-id")).toBe(false);
+    expect(await context.clearProtectedWorkOwnerFromRuntimeDone("fullPage", 13, tagged)).toBe(false);
+    expect((await context.readProtectedWorkOwners()).fullPage).toEqual([{ tabId: 12 }]);
+    expect(await context.clearProtectedWorkOwnerFromRuntimeDone("fullPage", 12, tagged)).toBe(true);
+    expect(await context.clearProtectedWorkOwnerFromRuntimeDone("fullPage", 12, tagged)).toBe(false);
+  });
+});
