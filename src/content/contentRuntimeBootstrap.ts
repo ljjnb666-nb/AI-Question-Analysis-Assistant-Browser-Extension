@@ -143,7 +143,7 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     sendSupersededAutoSolveProgress: sendLegacyAutoSolveProgress,
     isRuntimeCurrent: lifecycle.isCurrent,
     clickNextQuestionButton,
-    detectCandidatesFullPage: async () => detectCandidatesFullPage(() => {}),
+    detectCandidatesFullPage: async (isScanCurrent) => detectCandidatesFullPage(() => {}, isScanCurrent),
     detectCandidatesAcrossRoots,
     detectCandidatesInViewport,
     detectTotalQuestionCount,
@@ -237,7 +237,7 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
 
   const messageHandlerOptions = {
     cancelFullPageScan: (generationId?: string) => {
-      if (!runAuthority.canStop("fullPage", generationId)) return false;
+      if (!runAuthority.revoke("fullPage", generationId)) return false;
       cancelWorkspaceScan();
       return true;
     },
@@ -270,7 +270,9 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
       const lease = runAuthority.begin("fullPage", generationId);
       if (lease === null) return false;
       try {
-        void Promise.resolve(handleFullPageDetect(generationId))
+        void Promise.resolve(handleFullPageDetect(
+          generationId, () => runAuthority.isCurrent("fullPage", lease),
+        ))
           .catch((error) => console.warn("[QS] Full Page run failed:", error))
           .finally(() => runAuthority.finish("fullPage", lease));
       } catch (error) {

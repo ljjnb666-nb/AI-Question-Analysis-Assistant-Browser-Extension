@@ -28,7 +28,10 @@ type FullPageDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], st
   candidateStatusMap: Map<string, CandidateStatus>;
   refreshLayoutResizeObservation: () => void;
   safeRuntimeSendMessage: (message: unknown) => void;
-  detectCandidatesFullPage: (onProgress: (progress: FullPageProgress) => void) => Promise<QuestionBlock[]>;
+  detectCandidatesFullPage: (
+    onProgress: (progress: FullPageProgress) => void,
+    isExecutionCurrent?: () => boolean,
+  ) => Promise<QuestionBlock[]>;
   refineFullPageCandidatesViaManualPipeline: (candidates: QuestionBlock[]) => Promise<QuestionBlock[]>;
   resolveFullPageScrollRoot: () => ScanScrollRoot;
   getFullPageLayoutKey: (scrollRoot: ScanScrollRoot) => string;
@@ -113,7 +116,7 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
         currentStep: p.currentStep,
         totalScrollSteps: p.totalScrollSteps,
       });
-    });
+    }, isCurrentRoute);
     if (!isCurrentRoute()) {
       deps.cancelFullPageScan();
       deps.clearRouteOwnedState?.();
