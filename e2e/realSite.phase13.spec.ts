@@ -5,6 +5,9 @@ import type { BrowserContext, Page, Worker } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
 
+// Third-party page text must never enter uploaded failure traces, screenshots, or video.
+test.use({ trace: "off", screenshot: "off", video: "off" });
+
 const PINTIA_PUBLIC_PROBLEM_URL =
   "https://pintia.cn/problem-sets/434/exam/problems/type/6?page=0&problemSetProblemId=6182";
 const PINTIA_EXPECTED_TITLE = "习题5.10 线性探测法的查找函数";
