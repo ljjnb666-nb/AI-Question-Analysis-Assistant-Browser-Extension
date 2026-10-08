@@ -5,6 +5,7 @@ import type { BrowserContext, Page, Worker } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
 import { visitLiveTargetUntilReady } from "@/shared/utils/liveSiteReadiness";
+import { createLiveSiteDiagnostics } from "./helpers/liveSiteDiagnostics";
 
 // Third-party page text must never enter uploaded failure traces, screenshots, or video.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -151,6 +152,42 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     const worker = await getExtensionWorker(context);
     const page = await context.newPage();
     await page.setViewportSize({ width: 1440, height: 960 });
+    const resources = createLiveSiteDiagnostics();
+    page.on("response", (response) => {
+      // Store first-party classification, status and resource type; never URLs.
+      const hostname = (() => {
+        try { return new URL(response.url()).hostname; }
+        catch { return ""; }
+      })();
+      resources.recordHttpFailure(response.request().resourceType(), response.status(), hostname === "pintia.cn");
+    });
+    page.on("requestfailed", (request) => {
+      resources.recordRequestFailure(request.resourceType(), request.failure()?.errorText);
+    });
+    page.on("pageerror", () => resources.recordPageError());
+    page.on("console", (message) => {
+      if (message.type() === "error") resources.recordConsoleError();
+    });
+
+    // Snapshot every bounded visit. Never persist third-party content.
+    const attemptSnapshots: Array<Record<string, string | number | boolean>> = [];
+    const recordAttempt = async () => {
+      const state = await page.evaluate(() => ({
+        finalHostname: location.hostname,
+        finalPathname: location.pathname,
+        documentTitle: document.title,
+        readyState: document.readyState,
+        bodyTextLength: document.body?.innerText?.length ?? 0,
+        scriptCount: document.scripts.length,
+        hasBody: Boolean(document.body),
+      })).catch(() => null);
+      if (!state) {
+        attemptSnapshots.push({ snapshotUnavailable: true });
+        return;
+      }
+      const { documentTitle, ...sanitized } = state;
+      attemptSnapshots.push({ ...sanitized, documentTitleSha256: sha256(documentTitle) });
+    };
 
     // A successful HTTP 200 can still be an empty, challenged, or
     // unhydrated SPA shell. Retry the *content-ready* page visit, not just
@@ -170,9 +207,13 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
           { timeout: 17_000, intervals: [500, 1_000, 2_000, 4_000] },
         ).toBe(true);
       },
-      { maxAttempts: 3, betweenAttempts: () => page.waitForTimeout(1_000) },
+      { maxAttempts: 3, betweenAttempts: async () => {
+        await recordAttempt();
+        await page.waitForTimeout(1_000);
+      } },
     );
     if (!visit.ready || !visit.response) {
+      await recordAttempt();
       // The live upstream is not an owned fixture. Preserve a compact diagnostic,
       // but never turn an unreachable/challenged/changed page into a green result.
       const diagnostic = await page.evaluate(() => ({
@@ -191,6 +232,8 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
           httpStatus: visit.response?.status() ?? null,
           visitCount: visit.attemptsUsed,
           visitStatusCodes: visit.statusCodes,
+          visitSnapshots: attemptSnapshots,
+          resourceTelemetry: resources.snapshot(),
           finalHostname: diagnostic?.finalHostname ?? null,
           finalPathname: diagnostic?.finalPathname ?? null,
           documentTitleSha256: sha256(diagnostic?.documentTitleSha256Input ?? ""),
