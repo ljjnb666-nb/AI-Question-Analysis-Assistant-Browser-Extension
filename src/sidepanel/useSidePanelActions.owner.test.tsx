@@ -352,3 +352,24 @@ describe("Phase14B-02C SidePanel generation-aware START and rollback", () => {
     expect(sendProtectedTabMessageWithBootstrap).not.toHaveBeenCalled();
   });
 });
+
+describe("Phase14B-02C current-generation dispatch lease", () => {
+  it("P14B02C_UI_04 a same-tab superseded START cannot dispatch and only rolls back its own token", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    const generationId = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    const markProtectedWorkGeneration = vi.fn(async () => generationId);
+    const clearProtectedWorkGeneration = vi.fn(async () => undefined);
+    const isProtectedWorkGenerationCurrent = vi.fn(() => false);
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({
+        markProtectedWorkGeneration,
+        clearProtectedWorkGeneration,
+        isProtectedWorkGenerationCurrent,
+      }),
+    });
+    await result.current.handleStartAutoSolve();
+    expect(sendProtectedTabMessageWithBootstrap).not.toHaveBeenCalled();
+    expect(clearProtectedWorkGeneration).toHaveBeenCalledWith("autoSolve", 7, generationId);
+    expect(isProtectedWorkGenerationCurrent).toHaveBeenCalledWith("autoSolve", 7, generationId);
+  });
+});
