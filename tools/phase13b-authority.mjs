@@ -85,7 +85,7 @@ export function createRedactedEvidence(observation, failureCode) {
     detectionPhase: observation.snapshot?.detection?.phase ?? "not_observed",
     candidateCount: candidates.length,
     candidates: candidates.slice(0, 100).map(entry => ({
-      type: String(entry.block?.questionTypeGuess ?? "unknown").slice(0, 32),
+      type: ["single_choice", "multiple_choice", "short_answer", "true_false", "fill_blank", "programming", "essay", "unknown"].includes(entry.block?.questionTypeGuess) ? entry.block.questionTypeGuess : "unknown",
       previewLength: Number(entry.block?.previewText?.length ?? 0),
       identityPresent: Boolean(entry.block?.identity?.stableId),
       fingerprintPresent: Boolean(entry.block?.identity?.contentFingerprint),
