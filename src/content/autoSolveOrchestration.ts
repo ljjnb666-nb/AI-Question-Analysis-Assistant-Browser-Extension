@@ -36,6 +36,8 @@ type AutoSolveController = {
 };
 
 type AutoSolveDeps = {
+  /** The immutable START authority must be rechecked after every asynchronous boundary. */
+  isRunCurrent?: () => boolean;
   activeCandidates: QuestionBlock[];
   activeDetectMode: "viewport" | "fullpage" | null;
   clickNextQuestionButton: () => boolean;
@@ -182,7 +184,9 @@ export async function runAutoSolveAll(controller: AutoSolveController, deps: Aut
   const advanceAfterSolvedQuestionDeps = {
     clickNextQuestionButton: deps.clickNextQuestionButton,
     jumpToNextCandidateInFullPage: (currentBlock: QuestionBlock) =>
-      jumpToNextCandidateInFullPage(currentBlock, orderedPlanState, orderedPlanDeps),
+      deps.isRunCurrent?.() === false
+        ? Promise.resolve(false)
+        : jumpToNextCandidateInFullPage(currentBlock, orderedPlanState, orderedPlanDeps),
     sendAutoSolveDone: deps.sendAutoSolveDone,
     shouldStopAutoSolveAtTail: deps.shouldStopAutoSolveAtTail,
     waitForQuestionAdvance: deps.resolveQuestionAdvance,
