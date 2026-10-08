@@ -67,6 +67,7 @@ From PowerShell, in the repository directory:
 
 ```powershell
 npm ci
+npx playwright install chromium
 npm run accept:phase13b:local -- --site zhihuishu --url "https://online.zhihuishu.com/" --consent-readonly
 ```
 
@@ -80,7 +81,7 @@ Important boundaries:
 - Do not send your passwords, tokens, cookies, screenshots of personal records, or the authenticated browser profile to the project or to GitHub.
 - The utility never captures login text, exports cookies, records a browser trace, screenshots, or video, or persists the temporary Chrome profile after a normal exit.
 - Its only production message is `START_AUTO_DETECT`, followed by read-only `GET_CANDIDATE_WORKSPACE_SNAPSHOT`; it does not ask AI for answers or call any fill/submit route.
-- After the user's confirmation it blocks observed page POST/PUT/PATCH/DELETE requests, monitors click/input/change/submit events, and checks that route/origin, page controls and forms remain unchanged. It fails closed when the detection does not complete or the expected tab is not authoritative. Other browser contexts and service-worker-initiated network writes are not a blanket guarantee.
+- After the user's confirmation it blocks observed page POST/PUT/PATCH/DELETE requests, monitors top-document click/input/change/submit events, and checks that route/origin, page controls and forms remain unchanged. The event monitor has a per-run nonce; a same-URL document reload cannot silently erase the monitor and pass. The checker fails closed when detection does not complete or the expected tab is not authoritative. Other tabs, cross-origin frames, closed shadows, and service-worker-initiated network writes are **not** independently covered.
 - Page-owned input values are HMAC-digested inside Chrome with a fresh ephemeral key; the key and raw values are not saved.
 - Only structural counts, classification, source SHA, extension tree digest, and explicit test limitations appear in the local JSON. The full URL, questions, credentials, candidate IDs, student identifiers, and HMAC key are excluded.
 - The JSON is stored under the gitignored `test-results/phase13b-local/`, mode `0600` where the filesystem supports it. Do not upload it unreviewed.
