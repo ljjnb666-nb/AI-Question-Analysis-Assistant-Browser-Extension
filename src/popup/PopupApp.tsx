@@ -12,9 +12,7 @@ import { logEvent } from "@/shared/utils/analytics";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { useAuthController } from "@/shared/auth/useAuthController";
 import {
-  clearProtectedWorkOwner,
   clearProtectedWorkOwnerGeneration,
-  markProtectedWorkOwner,
   markProtectedWorkOwnerWithGeneration,
   terminateRecordedProtectedWork,
   type ProtectedWorkKind,
@@ -265,10 +263,8 @@ export const PopupApp: React.FC = () => {
     let ownerGenerationId: string | undefined;
     const clearThisOwner = async () => {
       if (ownerTabId === undefined || !longRunningKind) return;
-      if (longRunningKind === "autoSolve") {
-        if (ownerGenerationId) await clearProtectedWorkOwnerGeneration(longRunningKind, ownerTabId, ownerGenerationId);
-      } else {
-        await clearProtectedWorkOwner(longRunningKind, ownerTabId);
+      if (ownerGenerationId) {
+        await clearProtectedWorkOwnerGeneration(longRunningKind, ownerTabId, ownerGenerationId);
       }
     };
 
@@ -297,12 +293,8 @@ export const PopupApp: React.FC = () => {
           return;
         }
         ownerTabId = tab.id;
-        if (longRunningKind === "autoSolve") {
-          ownerGenerationId = (await markProtectedWorkOwnerWithGeneration(longRunningKind, ownerTabId)) ?? undefined;
-          if (!ownerGenerationId) throw new Error("PROTECTED_OWNER_UNAVAILABLE");
-        } else {
-          await markProtectedWorkOwner(longRunningKind, ownerTabId);
-        }
+        ownerGenerationId = (await markProtectedWorkOwnerWithGeneration(longRunningKind, ownerTabId)) ?? undefined;
+        if (!ownerGenerationId) throw new Error("PROTECTED_OWNER_UNAVAILABLE");
 
         if (!isAuthenticatedNow()) {
           await clearThisOwner();
@@ -319,8 +311,8 @@ export const PopupApp: React.FC = () => {
         // await boundary inside the messaging chain).
         await sendToTabWithBootstrap(
           ownerTabId,
-          messageType === "START_AUTO_SOLVE_ALL" && ownerGenerationId
-            ? { type: "START_AUTO_SOLVE_ALL", generationId: ownerGenerationId }
+          ownerGenerationId
+            ? { type: messageType, generationId: ownerGenerationId }
             : { type: messageType },
           isAuthenticatedNow,
         );

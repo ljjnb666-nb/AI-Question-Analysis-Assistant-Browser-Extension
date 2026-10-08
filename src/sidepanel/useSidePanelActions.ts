@@ -195,23 +195,31 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     // (awaited) before the START so the auth-loss watchdog can always see
     // it, with the exact owner tab.
     if (!canDispatchToTab(activeTab)) return;
-    await options.markProtectedWork("fullPage", true, activeTab.id);
-    // The owner write awaited — re-confirm the authority before dispatching:
-    // a session lost during the owner commit must not start the workflow.
-    if (!canDispatchToTab(activeTab)) {
-      await options.markProtectedWork("fullPage", false, activeTab.id);
+    const generationAware = Boolean(options.markProtectedWorkGeneration && options.clearProtectedWorkGeneration);
+    let generationId: string | undefined;
+    if (generationAware) {
+      generationId = (await options.markProtectedWorkGeneration!("fullPage", activeTab.id)) ?? undefined;
+      // Storage absence or revoked pending intent is never a legacy fallback.
+      if (!generationId) return;
+    } else {
+      await options.markProtectedWork("fullPage", true, activeTab.id);
+    }
+    const rollbackOwner = () => generationId
+      ? options.clearProtectedWorkGeneration!("fullPage", activeTab.id!, generationId)
+      : options.markProtectedWork("fullPage", false, activeTab.id!);
+    const isCurrentGeneration = () => !generationId
+      || options.isProtectedWorkGenerationCurrent?.("fullPage", activeTab.id!, generationId) !== false;
+    if (!canDispatchToTab(activeTab) || !isCurrentGeneration()) {
+      await rollbackOwner();
       return;
     }
     const response = await sendProtectedTabMessageWithBootstrap(
       activeTab.id,
-      { type: "START_FULL_PAGE_DETECT" },
+      generationId ? { type: "START_FULL_PAGE_DETECT", generationId } : { type: "START_FULL_PAGE_DETECT" },
       () => canDispatchToTab(activeTab),
     );
-    // Running UI state only after a confirmed transport dispatch with the
-    // authority still holding; every failed path clears the exact owner
-    // record it created (AUTH-UI-INV-12/13).
-    if (response.ok === false || !canDispatchToTab(activeTab)) {
-      await options.markProtectedWork("fullPage", false, activeTab.id);
+    if (response.ok === false || !canDispatchToTab(activeTab) || !isCurrentGeneration()) {
+      await rollbackOwner();
       return;
     }
     if (!options.getWorkspaceOrigin) applyDetectState(startFullPageDetectState());

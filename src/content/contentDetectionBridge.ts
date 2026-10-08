@@ -109,7 +109,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
     return deps.looksLikeGarbledFullPageTextCore(text, deps.normalizeQuestionText);
   }
 
-  async function handleFullPageDetect() {
+  async function handleFullPageDetect(generationId?: string) {
     if (!isRuntimeCurrent()) return;
     const epoch = deps.workspaceRouteEpoch?.();
     const detectionGeneration = deps.workspaceDetectionGeneration?.();
@@ -141,7 +141,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
       setUnwatchSPA: deps.setUnwatchSPA,
       stopSpaWatch: deps.stopSpaWatch,
       watchForPageChanges: deps.watchForPageChanges,
-    }));
+    }), generationId);
   }
 
   async function handleAutoDetect() {
