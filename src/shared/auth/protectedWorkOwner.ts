@@ -164,7 +164,7 @@ export async function resetProtectedWorkOwnersForTests(): Promise<void> {
  * A failed STOP send remains best effort as in the existing contract.
  */
 export async function terminateRecordedProtectedWork(
-  send: (tabId: number, message: { type: string }) => Promise<unknown>,
+  send: (tabId: number, message: { type: "STOP_AUTO_SOLVE_ALL" } | { type: "FULL_PAGE_DETECT_CANCELLED" }) => Promise<unknown>,
   // Side Panel may have a synchronous START intent not yet persisted when
   // authority is revoked. Include those exact tabs in STOP fanout, but do
   // not broaden snapshot cleanup to keys that were not captured.
