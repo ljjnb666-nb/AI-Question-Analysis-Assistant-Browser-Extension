@@ -274,3 +274,164 @@ describe("Phase14B-02C tagged runtime progress cannot resurrect an owner", () =>
     expect((await readProtectedWorkOwners()).autoSolve).toEqual([]);
   });
 });
+
+describe("Phase14B-02C-D stale PROGRESS/DONE UI projection fence", () => {
+  const newHandlers = (renderWorkspace: boolean, bound = true) => {
+    const setIsAutoSolving = vi.fn();
+    const setAutoSolveProgress = vi.fn();
+    const setIsFullPageScan = vi.fn();
+    const setScanProgress = vi.fn();
+    const setCandidates = vi.fn();
+    const setExpandedIds = vi.fn();
+    const setFillFeedback = vi.fn();
+    const dispose = registerSidePanelRuntimeListeners({
+      renderWorkspace,
+      ...(bound ? { getFeedbackOrigin: () => ({ tabId: 7, url: tab(7).url }) } : {}),
+      loadLanguage: async () => "en" as const,
+      setUiLang: vi.fn(),
+      setCandidates, setIsDetecting: vi.fn(), setIsFullPageScan,
+      setScanProgress, setExpandedIds, setIsAutoSolving,
+      setAutoSolveProgress, setFillFeedback,
+    });
+    return { dispose, setIsAutoSolving, setAutoSolveProgress,
+      setIsFullPageScan, setScanProgress, setCandidates, setExpandedIds, setFillFeedback };
+  };
+
+  it("P14B02C_UI_D01 an old tagged Auto Solve DONE/PROGRESS cannot stop or overwrite the newer UI", async () => {
+    const ui = newHandlers(true);
+    const old = await markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    const next = await markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", generationId: old, running: false, solved: 99 }, 7);
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: old, ok: true }, 7);
+    await vi.waitFor(async () => {
+      const keys = [...sessionStore.keys()].filter(k => k.startsWith("protectedWorkOwner:autoSolve:7:"));
+      expect(keys).toHaveLength(1);
+      expect(keys[0]).toContain(next!);
+    });
+    expect(ui.setIsAutoSolving).not.toHaveBeenCalled();
+    expect(ui.setAutoSolveProgress).not.toHaveBeenCalled();
+    expect(ui.setFillFeedback).not.toHaveBeenCalled();
+
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", generationId: next, running: true, solved: 1 }, 7);
+    await vi.waitFor(() => expect(ui.setIsAutoSolving).toHaveBeenCalledWith(true));
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: next, ok: true, solved: 1, filled: 1, total: 1 }, 7);
+    await vi.waitFor(() => expect(ui.setIsAutoSolving).toHaveBeenCalledWith(false));
+    await vi.waitFor(() => expect(ui.setFillFeedback).toHaveBeenCalledTimes(1));
+    expect(ui.setAutoSolveProgress).toHaveBeenCalledWith(null);
+    ui.dispose();
+  });
+
+  it("P14B02C_UI_D02 stale Full Page DONE cannot reset candidates, progress, or scanning state", async () => {
+    const ui = newHandlers(true);
+    const old = await markProtectedWorkOwnerWithGeneration("fullPage", 7);
+    const next = await markProtectedWorkOwnerWithGeneration("fullPage", 7);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_PROGRESS", generationId: old, progress: 90 }, 7);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_DONE", generationId: old, candidates: [] }, 7);
+    await vi.waitFor(async () => {
+      expect((await readProtectedWorkOwners()).fullPage).toEqual([{ tabId: 7 }]);
+      expect([...sessionStore.keys()].filter(k => k.startsWith("protectedWorkOwner:fullPage:7:"))).toHaveLength(1);
+    });
+    expect(ui.setIsFullPageScan).not.toHaveBeenCalled();
+    expect(ui.setScanProgress).not.toHaveBeenCalled();
+    expect(ui.setCandidates).not.toHaveBeenCalled();
+    expect(ui.setExpandedIds).not.toHaveBeenCalled();
+
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_PROGRESS", generationId: next, progress: 5, found: 2 }, 7);
+    await vi.waitFor(() => expect(ui.setIsFullPageScan).toHaveBeenCalledWith(true));
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_DONE", generationId: next, candidates: [] }, 7);
+    await vi.waitFor(() => expect(ui.setIsFullPageScan).toHaveBeenCalledWith(false));
+    expect(ui.setCandidates).toHaveBeenCalledTimes(1);
+    expect(ui.setExpandedIds).toHaveBeenCalledWith({});
+    ui.dispose();
+  });
+
+  it("P14B02C_UI_D03 snapshot feedback ignores a stale same-tab DONE but accepts current token", async () => {
+    const ui = newHandlers(false);
+    const old = await markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    const next = await markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: old, ok: true }, 7);
+    await vi.waitFor(async () => {
+      expect([...sessionStore.keys()].filter(k => k.startsWith("protectedWorkOwner:autoSolve:7:"))).toHaveLength(1);
+    });
+    expect(ui.setFillFeedback).not.toHaveBeenCalled();
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: next, ok: true }, 7);
+    await vi.waitFor(() => expect(ui.setFillFeedback).toHaveBeenCalledTimes(1));
+    expect(ui.setIsAutoSolving).not.toHaveBeenCalled();
+    ui.dispose();
+  });
+
+  it("P14B02C_UI_D04 async language completion must not show old DONE after newer START", async () => {
+    let release!: (lang: "en") => void;
+    const languagePending = new Promise<"en">(resolve => { release = resolve; });
+    let call = 0;
+    const setFillFeedback = vi.fn();
+    const dispose = registerSidePanelRuntimeListeners({
+      renderWorkspace: false,
+      getFeedbackOrigin: () => ({ tabId: 7, url: tab(7).url }),
+      loadLanguage: () => ++call === 1 ? Promise.resolve("en") : languagePending,
+      setUiLang: vi.fn(), setCandidates: vi.fn(), setIsDetecting: vi.fn(),
+      setIsFullPageScan: vi.fn(), setScanProgress: vi.fn(), setExpandedIds: vi.fn(),
+      setIsAutoSolving: vi.fn(), setAutoSolveProgress: vi.fn(), setFillFeedback,
+    });
+    const old = await markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: old, ok: true }, 7);
+    await vi.waitFor(() => expect(call).toBe(2));
+    const replacement = await markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    release("en");
+    await vi.waitFor(async () => expect((await readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(setFillFeedback).not.toHaveBeenCalled();
+    expect(replacement).not.toBe(old);
+    dispose();
+  });
+
+  it("P14B02C_UI_D05 legacy untagged PROGRESS cannot override tagged owner or resurrect an owner", async () => {
+    const ui = newHandlers(true);
+    const owner = await markProtectedWorkOwnerWithGeneration("fullPage", 7);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_PROGRESS", progress: 95, found: 10 }, 7);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_DONE", generationId: null, candidates: [] }, 7);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(ui.setIsFullPageScan).not.toHaveBeenCalled();
+    expect(ui.setCandidates).not.toHaveBeenCalled();
+    expect((await readProtectedWorkOwners()).fullPage).toEqual([{ tabId: 7 }]);
+    expect(owner).toBeTruthy();
+    ui.dispose();
+  });
+
+  it("P14B02C_UI_D06 snapshot completion requires matching bound tab and origin", async () => {
+    const ui = newHandlers(false);
+    const otherOwner = await markProtectedWorkOwnerWithGeneration("autoSolve", 8);
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: otherOwner, ok: true }, 8);
+    await vi.waitFor(async () => expect((await readProtectedWorkOwners()).autoSolve).toEqual([]));
+    expect(ui.setFillFeedback).not.toHaveBeenCalled();
+    ui.dispose();
+  });
+
+  it("P14B02C_UI_D07 after tagged DONE, late legacy PROGRESS cannot resurrect old owner or scan buttons", async () => {
+    const ui = newHandlers(true);
+    const a = await markProtectedWorkOwnerWithGeneration("autoSolve", 7);
+    const f = await markProtectedWorkOwnerWithGeneration("fullPage", 7);
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", generationId: a, ok: true }, 7);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_DONE", generationId: f, candidates: [] }, 7);
+    await vi.waitFor(async () => expect(await readProtectedWorkOwners()).toEqual({ autoSolve: [], fullPage: [] }));
+    const oldAutoCalls = ui.setIsAutoSolving.mock.calls.length;
+    const oldFullCalls = ui.setIsFullPageScan.mock.calls.length;
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", running: true, solved: 88 }, 7);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_PROGRESS", progress: 88, found: 88 }, 7);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(await readProtectedWorkOwners()).toEqual({ autoSolve: [], fullPage: [] });
+    expect(ui.setIsAutoSolving).toHaveBeenCalledTimes(oldAutoCalls);
+    expect(ui.setIsFullPageScan).toHaveBeenCalledTimes(oldFullCalls);
+    // Untagged DONE replay after tagged completion must not re-show stale
+    // feedback or overwrite a finished scan's candidates.
+    const currentFeedbackCalls = ui.setFillFeedback.mock.calls.length;
+    const currentCandidateCalls = ui.setCandidates.mock.calls.length;
+    dispatchRuntimeMessage({ type: "AUTO_SOLVE_DONE", ok: false }, 7);
+    dispatchRuntimeMessage({ type: "FULL_PAGE_DETECT_DONE", candidates: [] }, 7);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(ui.setFillFeedback).toHaveBeenCalledTimes(currentFeedbackCalls);
+    expect(ui.setCandidates).toHaveBeenCalledTimes(currentCandidateCalls);
+    ui.dispose();
+  });
+
+});
