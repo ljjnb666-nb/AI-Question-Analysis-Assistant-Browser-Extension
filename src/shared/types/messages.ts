@@ -184,6 +184,8 @@ export interface FullPageDetectDoneMsg extends BaseMessage {
 
 export interface FullPageDetectCancelledMsg extends BaseMessage {
   type: "FULL_PAGE_DETECT_CANCELLED";
+  /** Exact work generation to cancel; absent only for legacy runs. */
+  generationId?: string;
 }
 
 export interface CaptureBlockImageMsg extends BaseMessage {
@@ -220,6 +222,8 @@ export interface StartAutoSolveAllMsg extends BaseMessage {
 
 export interface StopAutoSolveAllMsg extends BaseMessage {
   type: "STOP_AUTO_SOLVE_ALL";
+  /** Exact work generation to stop; absent only for legacy runs. */
+  generationId?: string;
 }
 
 export interface AutoSolveProgressMsg extends BaseMessage {

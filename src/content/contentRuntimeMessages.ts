@@ -8,7 +8,7 @@ import { isCurrentRuntimeQuestionBlock } from "./liveQuestionObservation";
 type RegisterContentRuntimeMessageHandlersOptions = {
   getWorkspaceSnapshot?: (expectedUrl: string) => WorkspaceSnapshotResponse;
   notifySelectionChanged?: () => void;
-  cancelFullPageScan: () => void;
+  cancelFullPageScan: (generationId?: string) => boolean | void;
   cancelManualCapture: () => void;
   candidateStatusMap: CandidateStatusMap;
   captureBlockImage: (bbox: BoundingBox) => Promise<string | null>;
@@ -25,7 +25,7 @@ type RegisterContentRuntimeMessageHandlersOptions = {
   resetDetectionArtifacts: () => void;
   startAutoSolveAll: (generationId?: string) => void;
   startManualCapture: (forceVisionMode: boolean) => void;
-  stopAutoSolveAll: () => void;
+  stopAutoSolveAll: (generationId?: string) => boolean | void;
   stopSpaWatch: () => void;
   verifyParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, expectedUrl?: string) => unknown;
   isRuntimeCurrent?: () => boolean;

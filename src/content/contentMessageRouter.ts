@@ -5,7 +5,7 @@ import { isProtectedWorkGenerationId } from "@/shared/auth/protectedWorkOwner";
 type MessageResponse = (response: unknown) => void;
 
 type ContentMessageRouterDeps = {
-  cancelFullPageScan: () => void;
+  cancelFullPageScan: (generationId?: string) => boolean | void;
   cancelManualCapture: () => void;
   captureBlockImage: (bbox: BoundingBox) => Promise<string | null>;
   clearHighlights: () => void;
@@ -16,7 +16,7 @@ type ContentMessageRouterDeps = {
   handleFullPageDetect: (generationId?: string) => void;
   startAutoSolveAll: (generationId?: string) => void;
   startManualCapture: (forceVisionMode: boolean) => void;
-  stopAutoSolveAll: () => void;
+  stopAutoSolveAll: (generationId?: string) => boolean | void;
   updateCandidateSelection: (message: UpdateCandidateSelectionMsg) => void;
   validateQuestionResultAuthority: (block: QuestionBlock, expectedUrl: string) => boolean;
   verifyParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, expectedUrl?: string) => unknown;
@@ -73,7 +73,14 @@ export function handleContentMessage(
       return false;
 
     case "FULL_PAGE_DETECT_CANCELLED":
-      deps.cancelFullPageScan();
+      if (message.generationId !== undefined && !isProtectedWorkGenerationId(message.generationId)) {
+        sendResponse({ ok: false, error: "INVALID_WORK_GENERATION" });
+        return false;
+      }
+      if (deps.cancelFullPageScan(message.generationId) === false) {
+        sendResponse({ ok: false, error: "STALE_WORK_GENERATION" });
+        return false;
+      }
       sendResponse({ ok: true });
       return false;
 
@@ -170,7 +177,14 @@ export function handleContentMessage(
       return false;
 
     case "STOP_AUTO_SOLVE_ALL":
-      deps.stopAutoSolveAll();
+      if (message.generationId !== undefined && !isProtectedWorkGenerationId(message.generationId)) {
+        sendResponse({ ok: false, error: "INVALID_WORK_GENERATION" });
+        return false;
+      }
+      if (deps.stopAutoSolveAll(message.generationId) === false) {
+        sendResponse({ ok: false, error: "STALE_WORK_GENERATION" });
+        return false;
+      }
       sendResponse({ ok: true });
       return false;
 

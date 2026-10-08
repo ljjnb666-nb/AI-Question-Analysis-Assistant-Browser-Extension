@@ -37,20 +37,22 @@ type StoredOwner = {
   key: string;
   kind: ProtectedWorkKind;
   tabId: number;
+  /** Populated ONLY for an explicit token-aware START. */
+  generationId?: string;
 };
 
 function legacyKeyFor(kind: ProtectedWorkKind, tabId: number): string {
   return `${KEY_PREFIX}${kind}:${tabId}`;
 }
 
-function parseOwnerKey(key: string): { kind: ProtectedWorkKind; tabId: number } | null {
+function parseOwnerKey(key: string): { kind: ProtectedWorkKind; tabId: number; generationId?: string } | null {
   // Optional UUID suffix supports previous extension versions whose session
   // records still use the single-key-per-tab layout.
-  const match = /^protectedWorkOwner:(autoSolve|fullPage):(\d+)(?::[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})?$/.exec(key);
+  const match = /^protectedWorkOwner:(autoSolve|fullPage):(\d+)(?::([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}))?$/.exec(key);
   if (!match) return null;
   const tabId = Number(match[2]);
   if (!Number.isSafeInteger(tabId) || tabId <= 0) return null;
-  return { kind: match[1] as ProtectedWorkKind, tabId };
+  return { kind: match[1] as ProtectedWorkKind, tabId, ...(match[3] ? { generationId: match[3] } : {}) };
 }
 
 function sessionArea(): chrome.storage.StorageArea | null {
@@ -66,11 +68,16 @@ function activeOwnerRecords(everything: Record<string, unknown>): StoredOwner[] 
   for (const [key, value] of Object.entries(everything)) {
     const parsed = parseOwnerKey(key);
     if (!parsed) continue;
-    const record = value as { active?: boolean; tabId?: unknown } | null;
+    const record = value as { active?: boolean; tabId?: unknown; completionProtocol?: unknown } | null;
     if (!record?.active) continue;
     // The persisted value must match the key's authoritative Tab identity.
     if (record.tabId !== undefined && record.tabId !== parsed.tabId) continue;
-    records.push({ key, ...parsed });
+    records.push({
+      key, kind: parsed.kind, tabId: parsed.tabId,
+      ...(record.completionProtocol === "generation" && parsed.generationId
+        ? { generationId: parsed.generationId }
+        : {}),
+    });
   }
   return records;
 }
@@ -233,35 +240,59 @@ export async function clearProtectedWorkOwner(
   if (keys.length) await area.remove(keys);
 }
 
+/** A STOP wire message targets one immutable owner identity. */
+type ProtectedStopMessage =
+  | { type: "STOP_AUTO_SOLVE_ALL"; generationId?: string }
+  | { type: "FULL_PAGE_DETECT_CANCELLED"; generationId?: string };
+
+function stopTargets(
+  captured: StoredOwner[],
+  kind: ProtectedWorkKind,
+  pendingTabId?: number,
+): Array<{ tabId: number; generationId?: string }> {
+  // Tagged generations get one targeted message EACH. Multiple legacy keys
+  // on the same tab get one legacy STOP; keep historical dedup behavior.
+  const byIdentity = new Map<string, { tabId: number; generationId?: string }>();
+  for (const owner of captured) {
+    if (owner.kind !== kind) continue;
+    const identity = `${owner.tabId}:${owner.generationId ?? "legacy"}`;
+    byIdentity.set(identity, { tabId: owner.tabId, ...(owner.generationId ? { generationId: owner.generationId } : {}) });
+  }
+  if (typeof pendingTabId === "number" && Number.isSafeInteger(pendingTabId) && pendingTabId > 0
+    && ![...byIdentity.values()].some((owner) => owner.tabId === pendingTabId)) {
+    // Only an uncommitted local intent may use a legacy pending-tab fallback.
+    // Tagged runtimes reject this fallback, preventing a stale-tab kill.
+    byIdentity.set(`${pendingTabId}:legacy`, { tabId: pendingTabId });
+  }
+  return [...byIdentity.values()].sort((a, b) => a.tabId - b.tabId
+    || (a.generationId ?? "").localeCompare(b.generationId ?? ""));
+}
+
+function stopWireMessage(kind: ProtectedWorkKind, generationId?: string): ProtectedStopMessage {
+  return kind === "autoSolve"
+    ? { type: "STOP_AUTO_SOLVE_ALL", ...(generationId ? { generationId } : {}) }
+    : { type: "FULL_PAGE_DETECT_CANCELLED", ...(generationId ? { generationId } : {}) };
+}
+
 /**
- * Manually stop/cancel ONE protected-work kind. Capture immutable generation
- * keys before sending, and remove ONLY those keys after the async transport.
- * An independent same-tab START during STOP cannot be erased by cleanup.
- *
- * NOTE: transport is still tab-scoped. A late STOP reaching a newer running
- * generation requires separate run-ID enforcement at the content runtime.
+ * Manually terminate ONE protected kind. All target generations are frozen
+ * before network I/O; STOP carries each captured generation and cleanup
+ * removes only captured storage keys (never a later same-tab START).
  */
 export async function terminateRecordedProtectedWorkKind(
   kind: ProtectedWorkKind,
-  send: (tabId: number, message: { type: "STOP_AUTO_SOLVE_ALL" } | { type: "FULL_PAGE_DETECT_CANCELLED" }) => Promise<unknown>,
+  send: (tabId: number, message: ProtectedStopMessage) => Promise<unknown>,
   localPendingTabId?: number,
 ): Promise<number> {
   const area = sessionArea();
-  const captured = area
-    ? activeOwnerRecords(await area.get(null)).filter((record) => record.kind === kind)
-    : [];
-  const tabs = new Set(captured.map(({ tabId }) => tabId));
-  if (localPendingTabId !== undefined && Number.isSafeInteger(localPendingTabId) && localPendingTabId > 0) {
-    tabs.add(localPendingTabId);
-  }
-  const message = kind === "autoSolve"
-    ? { type: "STOP_AUTO_SOLVE_ALL" as const }
-    : { type: "FULL_PAGE_DETECT_CANCELLED" as const };
-  await Promise.all([...tabs].sort((a, b) => a - b).map(
-    (tabId) => send(tabId, message).catch(() => undefined),
+  const captured = area ? activeOwnerRecords(await area.get(null)).filter(record => record.kind === kind) : [];
+  const targets = stopTargets(captured, kind, localPendingTabId);
+  await Promise.all(targets.map(({ tabId, generationId }) =>
+    send(tabId, stopWireMessage(kind, generationId)).catch(() => undefined),
   ));
   if (captured.length) await area?.remove(captured.map(({ key }) => key));
-  return tabs.size;
+  // Return number of distinct tabs, not number of generation-specific sends.
+  return new Set(targets.map(t => t.tabId)).size;
 }
 
 /** Test-only: purge all namespaced owner keys. Never used by termination. */
@@ -274,35 +305,23 @@ export async function resetProtectedWorkOwnersForTests(): Promise<void> {
 }
 
 /**
- * Auth-loss termination: capture immutable generation KEYS once, send one
- * STOP per logical kind/tab, and remove EXACTLY those captured keys. A new
- * generation marked after the snapshot, including on the same tab, survives.
- * A failed STOP send remains best effort as in the existing contract.
+ * Auth-loss termination: take one immutable snapshot before transport, send
+ * per-generation STOP/CANCEL (legacy one-per-tab remains), and clear only
+ * snapshotted keys. A new same-tab generation survives both the STOP wire
+ * and storage cleanup.
  */
 export async function terminateRecordedProtectedWork(
-  send: (tabId: number, message: { type: "STOP_AUTO_SOLVE_ALL" } | { type: "FULL_PAGE_DETECT_CANCELLED" }) => Promise<unknown>,
-  // Side Panel may have a synchronous START intent not yet persisted when
-  // authority is revoked. Include those exact tabs in STOP fanout, but do
-  // not broaden snapshot cleanup to keys that were not captured.
+  send: (tabId: number, message: ProtectedStopMessage) => Promise<unknown>,
   localPending?: Partial<Record<ProtectedWorkKind, number>>,
 ): Promise<void> {
   const area = sessionArea();
   const captured = area ? activeOwnerRecords(await area.get(null)) : [];
-  const byKind = {
-    autoSolve: new Set<number>(),
-    fullPage: new Set<number>(),
-  };
-  for (const { kind, tabId } of captured) byKind[kind].add(tabId);
-  for (const kind of ["autoSolve", "fullPage"] as const) {
-    const tabId = localPending?.[kind];
-    if (typeof tabId === "number" && Number.isSafeInteger(tabId) && tabId > 0) byKind[kind].add(tabId);
-  }
   const jobs: Promise<unknown>[] = [];
-  for (const tabId of [...byKind.autoSolve].sort((a, b) => a - b)) {
-    jobs.push(send(tabId, { type: "STOP_AUTO_SOLVE_ALL" }).catch(() => undefined));
-  }
-  for (const tabId of [...byKind.fullPage].sort((a, b) => a - b)) {
-    jobs.push(send(tabId, { type: "FULL_PAGE_DETECT_CANCELLED" }).catch(() => undefined));
+  for (const kind of ["autoSolve", "fullPage"] as const) {
+    const targets = stopTargets(captured, kind, localPending?.[kind]);
+    for (const { tabId, generationId } of targets) {
+      jobs.push(send(tabId, stopWireMessage(kind, generationId)).catch(() => undefined));
+    }
   }
   await Promise.all(jobs);
   if (captured.length) await area?.remove(captured.map(({ key }) => key));
