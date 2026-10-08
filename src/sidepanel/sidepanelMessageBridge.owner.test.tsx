@@ -75,10 +75,11 @@ describe("runtime reconciliation of protected-work owners", () => {
 
     // A run on tab 7 reports progress, then finishes.
     dispatchRuntimeMessage({ type: "AUTO_SOLVE_PROGRESS", running: true }, 7);
-    await vi.waitFor(
-      () => expect(sessionStore.has("protectedWorkOwner:autoSolve:7")).toBe(true),
-      { timeout: 2000, interval: 20 },
-    );
+    // Observe the public registry contract, not the legacy per-tab storage
+    // key layout: each START/progress generation now owns an immutable key.
+    await vi.waitFor(async () => {
+      expect((await readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
+    }, { timeout: 2000, interval: 20 });
     const owners = await readProtectedWorkOwners();
     expect(owners.autoSolve).toEqual([{ tabId: 7 }]);
 

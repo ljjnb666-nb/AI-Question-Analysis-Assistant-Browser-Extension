@@ -231,6 +231,113 @@ describe("cross-context protected-work owner registry", () => {
     expect(owners.autoSolve).toEqual([{ tabId: 8 }]);
   });
 
+  it("PHASE14B_01 same-kind same-tab new generation must survive older STOP cleanup", async () => {
+    const oldContext = await freshClient();
+    const newContext = await freshClient();
+    await oldContext.markProtectedWorkOwner("autoSolve", 7);
+
+    // STOP is already in flight for the old generation when a new
+    // authorized session starts autoSolve in the SAME tab.
+    let unblockStop!: () => void;
+    const stopBlocked = new Promise<void>((resolve) => { unblockStop = resolve; });
+    let stopObserved!: () => void;
+    const stopEntered = new Promise<void>((resolve) => { stopObserved = resolve; });
+    const sent: string[] = [];
+    const terminating = oldContext.terminateRecordedProtectedWork(async (tabId, message) => {
+      sent.push(`${tabId}:${message.type}`);
+      stopObserved();
+      await stopBlocked;
+      return {};
+    });
+    await stopEntered;
+    await newContext.markProtectedWorkOwner("autoSolve", 7);
+    unblockStop();
+    await terminating;
+    expect(sent).toEqual(["7:STOP_AUTO_SOLVE_ALL"]);
+    expect((await newContext.readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
+  });
+
+  it("PHASE14B_02 same-tab full-page new generation must survive old cancel cleanup", async () => {
+    const oldContext = await freshClient();
+    const newContext = await freshClient();
+    await oldContext.markProtectedWorkOwner("fullPage", 11);
+
+    let unblockStop!: () => void;
+    const parked = new Promise<void>((resolve) => { unblockStop = resolve; });
+    let observed!: () => void;
+    const entered = new Promise<void>((resolve) => { observed = resolve; });
+    const stopping = oldContext.terminateRecordedProtectedWork(async (tabId, message) => {
+      expect(tabId).toBe(11);
+      expect(message.type).toBe("FULL_PAGE_DETECT_CANCELLED");
+      observed();
+      await parked;
+      return {};
+    });
+    await entered;
+    await newContext.markProtectedWorkOwner("fullPage", 11);
+    unblockStop();
+    await stopping;
+    expect((await newContext.readProtectedWorkOwners()).fullPage).toEqual([{ tabId: 11 }]);
+  });
+
+  it("PHASE14B_03 multiple same-tab generations emit only one STOP but remove all captured keys", async () => {
+    const first = await freshClient();
+    const second = await freshClient();
+    await first.markProtectedWorkOwner("autoSolve", 7);
+    await second.markProtectedWorkOwner("autoSolve", 7);
+    await second.markProtectedWorkOwner("autoSolve", 8);
+    expect((await first.readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }, { tabId: 8 }]);
+
+    const messages: string[] = [];
+    await first.terminateRecordedProtectedWork(async (tabId, message) => {
+      messages.push(`${tabId}:${message.type}`);
+      return {};
+    });
+    expect(messages).toEqual(["7:STOP_AUTO_SOLVE_ALL", "8:STOP_AUTO_SOLVE_ALL"]);
+    expect((await second.readProtectedWorkOwners()).autoSolve).toEqual([]);
+  });
+
+  it("PHASE14B_04 legacy single-owner storage keys remain readable and clearable", async () => {
+    const client = await freshClient();
+    sessionStore.set("protectedWorkOwner:autoSolve:7", { active: true, tabId: 7 });
+    sessionStore.set("protectedWorkOwner:fullPage:9", { active: true, tabId: 9 });
+    sessionStore.set("protectedWorkOwner:autoSolve:8", { active: false, tabId: 8 });
+    sessionStore.set("protectedWorkOwner:autoSolve:10", { active: true, tabId: 999 });
+    expect(await client.readProtectedWorkOwners()).toEqual({
+      autoSolve: [{ tabId: 7 }],
+      fullPage: [{ tabId: 9 }],
+    });
+
+    await client.terminateRecordedProtectedWork(async () => ({}));
+    expect(await client.readProtectedWorkOwners()).toEqual({ autoSolve: [], fullPage: [] });
+    await client.clearProtectedWorkOwner("autoSolve", 8);
+    expect(sessionStore.has("protectedWorkOwner:autoSolve:8")).toBe(false);
+  });
+
+  it("PHASE14B_05 delayed completion removes captured keys but never a new same-tab generation", async () => {
+    const area = installSharedSessionStub();
+    const first = await freshClient();
+    const second = await freshClient();
+    await first.markProtectedWorkOwner("autoSolve", 7);
+
+    const normalRemove = area.remove.bind(area);
+    let signalRemoval!: () => void;
+    let releaseRemoval!: () => void;
+    const removeEntered = new Promise<void>((resolve) => { signalRemoval = resolve; });
+    const holdRemove = new Promise<void>((resolve) => { releaseRemoval = resolve; });
+    area.remove = async (keys) => {
+      signalRemoval();
+      await holdRemove;
+      await normalRemove(keys);
+    };
+    const clearOld = first.clearProtectedWorkOwner("autoSolve", 7);
+    await removeEntered;
+    await second.markProtectedWorkOwner("autoSolve", 7);
+    releaseRemoval();
+    await clearOld;
+    expect((await first.readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
+  });
+
   it("AUTH_UI_59_MANUAL_STOP_ALL_RECORDED_OWNERS stop terminates every recorded owner and clears them", async () => {
     const clientA = await freshClient();
     const clientB = await freshClient();

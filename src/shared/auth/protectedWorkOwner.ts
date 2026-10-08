@@ -1,25 +1,24 @@
 /**
- * AUTH-UI-INV-15 + INV-16 — cross-surface, multi-tab protected-work
- * ownership.
+ * AUTH-UI-INV-15/16 and PHASE14B_OWNER_FENCE — cross-surface, multi-tab owner
+ * records. Chrome storage.session has no compare-and-swap transaction.
  *
- * Any START_AUTO_SOLVE_ALL / START_FULL_PAGE_DETECT, no matter which
- * extension surface sent it (Popup, Side Panel, future surfaces), must
- * record an owner entry for the EXACT dispatch target tab. Content runtime
- * concurrency guards are TAB-LOCAL, so several tabs may run the same
- * workflow kind at once: owner identity is `kind + tabId`, and multiple
- * owners per kind coexist.
+ * Use a NEW IMMUTABLE key for every owner generation:
+ *   protectedWorkOwner:<kind>:<tabId>:<uuid>
+ * rather than overwriting protectedWorkOwner:<kind>:<tabId>.
+ * A STOP started before another context marks a new generation must only
+ * clear its captured keys; no later mark can be erased by that STOP's clear.
  *
- * Storage layout: ONE KEY PER OWNER (`protectedWorkOwner:<kind>:<tabId>`).
- * Every mutation writes only its own key — concurrent marks from different
- * surfaces and different tabs can never overwrite each other, and chrome
- * .storage.session is the visibility boundary (transient, extension-context
- * only, never user config), not a transaction coordinator.
+ * Legacy per-tab keys (before this change) remain readable and clearable.
+ * The public read view deduplicates generations by tab, since a STOP is
+ * targeted to a tab, not to an individual generation.
+ *
+ * Warning: clearProtectedWorkOwner(kind, tabId) is an explicit ALL-generations
+ * clear for normal completion/manual stop; it has no run-generation argument.
+ * It must not be used to implement snapshot-based auth-loss termination.
  */
 export type ProtectedWorkKind = "autoSolve" | "fullPage";
 
-export type ProtectedWorkOwnerEntry = {
-  tabId: number;
-};
+export type ProtectedWorkOwnerEntry = { tabId: number };
 
 export type ProtectedWorkOwners = {
   autoSolve: ProtectedWorkOwnerEntry[];
@@ -28,14 +27,28 @@ export type ProtectedWorkOwners = {
 
 const KEY_PREFIX = "protectedWorkOwner:";
 
-function keyFor(kind: ProtectedWorkKind, tabId: number): string {
+type StoredOwner = {
+  key: string;
+  kind: ProtectedWorkKind;
+  tabId: number;
+};
+
+function legacyKeyFor(kind: ProtectedWorkKind, tabId: number): string {
   return `${KEY_PREFIX}${kind}:${tabId}`;
 }
 
+function keyForNewGeneration(kind: ProtectedWorkKind, tabId: number): string {
+  return `${legacyKeyFor(kind, tabId)}:${globalThis.crypto.randomUUID()}`;
+}
+
 function parseOwnerKey(key: string): { kind: ProtectedWorkKind; tabId: number } | null {
-  const match = /^protectedWorkOwner:(autoSolve|fullPage):(\d+)$/.exec(key);
+  // Optional UUID suffix supports previous extension versions whose session
+  // records still use the single-key-per-tab layout.
+  const match = /^protectedWorkOwner:(autoSolve|fullPage):(\d+)(?::[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})?$/.exec(key);
   if (!match) return null;
-  return { kind: match[1] as ProtectedWorkKind, tabId: Number(match[2]) };
+  const tabId = Number(match[2]);
+  if (!Number.isSafeInteger(tabId) || tabId <= 0) return null;
+  return { kind: match[1] as ProtectedWorkKind, tabId };
 }
 
 function sessionArea(): chrome.storage.StorageArea | null {
@@ -46,40 +59,61 @@ function sessionArea(): chrome.storage.StorageArea | null {
   }
 }
 
-/** Read aggregation over all per-tab owner keys. Never used for writes. */
+function activeOwnerRecords(everything: Record<string, unknown>): StoredOwner[] {
+  const records: StoredOwner[] = [];
+  for (const [key, value] of Object.entries(everything)) {
+    const parsed = parseOwnerKey(key);
+    if (!parsed) continue;
+    const record = value as { active?: boolean; tabId?: unknown } | null;
+    if (!record?.active) continue;
+    // The persisted value must match the key's authoritative Tab identity.
+    if (record.tabId !== undefined && record.tabId !== parsed.tabId) continue;
+    records.push({ key, ...parsed });
+  }
+  return records;
+}
+
+function ownerRecordsFor(
+  everything: Record<string, unknown>,
+  kind: ProtectedWorkKind,
+  tabId: number,
+): StoredOwner[] {
+  return activeOwnerRecords(everything).filter((owner) => owner.kind === kind && owner.tabId === tabId);
+}
+
+/** Read aggregation over all owner generations. Never used for writes. */
 export async function readProtectedWorkOwners(): Promise<ProtectedWorkOwners> {
   const owners: ProtectedWorkOwners = { autoSolve: [], fullPage: [] };
   const area = sessionArea();
   if (!area) return owners;
-  const everything = await area.get(null);
-  for (const key of Object.keys(everything)) {
-    const parsed = parseOwnerKey(key);
-    if (!parsed) continue;
-    const record = everything[key] as { active?: boolean } | undefined;
-    if (!record?.active) continue;
-    owners[parsed.kind].push({ tabId: parsed.tabId });
-  }
-  // Deterministic ordering for callers and tests.
-  owners.autoSolve.sort((a, b) => a.tabId - b.tabId);
-  owners.fullPage.sort((a, b) => a.tabId - b.tabId);
+  const snapshot = activeOwnerRecords(await area.get(null));
+  const byKind = {
+    autoSolve: new Set<number>(),
+    fullPage: new Set<number>(),
+  };
+  for (const { kind, tabId } of snapshot) byKind[kind].add(tabId);
+  owners.autoSolve = [...byKind.autoSolve].sort((a, b) => a - b).map((tabId) => ({ tabId }));
+  owners.fullPage = [...byKind.fullPage].sort((a, b) => a - b).map((tabId) => ({ tabId }));
   return owners;
 }
 
 /**
- * START path: record the exact dispatch target tab. A single-key write — no
- * read of other owners, no merge — so a concurrent mark of the SAME kind
- * from another surface/tab cannot be lost (AUTH-UI-INV-16).
+ * START writes only its own generation key. Different contexts never
+ * overwrite the same key even when they mark the same kind + same tab.
  */
 export async function markProtectedWorkOwner(
   kind: ProtectedWorkKind,
   tabId: number,
 ): Promise<void> {
-  await sessionArea()?.set({ [keyFor(kind, tabId)]: { active: true, tabId } });
+  const area = sessionArea();
+  if (!area) return;
+  await area.set({ [keyForNewGeneration(kind, tabId)]: { active: true, tabId } });
 }
 
 /**
- * Runtime progress reconciliation: once a tab reports a running workflow,
- * its owner entry must exist (recovery path, never the only path).
+ * Runtime progress reconciliation: mark only when no active generation for
+ * this kind + tab currently exists. A racing START may create an extra
+ * generation; read and termination remain deduplicated by tab.
  */
 export async function reconcileProtectedWorkOwnerFromRuntime(
   kind: ProtectedWorkKind,
@@ -87,57 +121,66 @@ export async function reconcileProtectedWorkOwnerFromRuntime(
 ): Promise<void> {
   const area = sessionArea();
   if (!area) return;
-  const key = keyFor(kind, tabId);
-  const existing = await area.get(key);
-  const record = existing[key] as { active?: boolean } | undefined;
-  if (record?.active) return;
-  await area.set({ [key]: { active: true, tabId } });
+  if (ownerRecordsFor(await area.get(null), kind, tabId).length > 0) return;
+  await markProtectedWorkOwner(kind, tabId);
 }
 
 /**
- * Natural completion / explicit stop: remove THIS tab's key only. Other
- * tabs running the same kind are untouched. The tabId is required —
- * callers must know exactly whose owner they are clearing.
+ * Normal completion or explicit manual stop: clear all generations for this
+ * tab/kind captured at this call's storage snapshot. A later independent
+ * mark cannot reuse any captured key.
+ *
+ * This is intentionally NOT a per-run compare-and-swap. Callers clearing
+ * after a newer generation was already written need run-specific identity;
+ * do not use this function for auth-loss snapshot cleanup.
  */
 export async function clearProtectedWorkOwner(
   kind: ProtectedWorkKind,
   tabId: number,
 ): Promise<void> {
-  await sessionArea()?.remove(keyFor(kind, tabId));
+  const area = sessionArea();
+  if (!area) return;
+  const keys = ownerRecordsFor(await area.get(null), kind, tabId).map((entry) => entry.key);
+  // Also discard malformed/inactive matching legacy keys on explicit cleanup.
+  const legacyKey = legacyKeyFor(kind, tabId);
+  const all = await area.get(legacyKey);
+  if (Object.prototype.hasOwnProperty.call(all, legacyKey) && !keys.includes(legacyKey)) keys.push(legacyKey);
+  if (keys.length) await area.remove(keys);
 }
 
-/** Test/reset helper: remove every owner key. Never used by termination. */
+/** Test-only: purge all namespaced owner keys. Never used by termination. */
 export async function resetProtectedWorkOwnersForTests(): Promise<void> {
   const area = sessionArea();
   if (!area) return;
   const everything = await area.get(null);
-  const ownerKeys = Object.keys(everything).filter((key) => key.startsWith(KEY_PREFIX));
-  if (ownerKeys.length) await area.remove(ownerKeys);
+  const keys = Object.keys(everything).filter((key) => key.startsWith(KEY_PREFIX));
+  if (keys.length) await area.remove(keys);
 }
 
 /**
- * Auth-loss termination (AUTH-UI-INV-11/13/16): send the workflow-specific
- * termination message to EVERY recorded owner tab — several tabs may run
- * the same kind — and clear exactly the owner entries this snapshot
- * captured. Owners marked after the snapshot (a newer run) are left alone:
- * no global clear here.
+ * Auth-loss termination: capture immutable generation KEYS once, send one
+ * STOP per logical kind/tab, and remove EXACTLY those captured keys. A new
+ * generation marked after the snapshot, including on the same tab, survives.
+ * A failed STOP send remains best effort as in the existing contract.
  */
 export async function terminateRecordedProtectedWork(
   send: (tabId: number, message: { type: string }) => Promise<unknown>,
 ): Promise<void> {
-  const snapshot = await readProtectedWorkOwners();
-  const captured: Array<{ kind: ProtectedWorkKind; tabId: number }> = [];
+  const area = sessionArea();
+  if (!area) return;
+  const captured = activeOwnerRecords(await area.get(null));
+  const byKind = {
+    autoSolve: new Set<number>(),
+    fullPage: new Set<number>(),
+  };
+  for (const { kind, tabId } of captured) byKind[kind].add(tabId);
   const jobs: Promise<unknown>[] = [];
-  for (const { tabId } of snapshot.autoSolve) {
-    captured.push({ kind: "autoSolve", tabId });
+  for (const tabId of [...byKind.autoSolve].sort((a, b) => a - b)) {
     jobs.push(send(tabId, { type: "STOP_AUTO_SOLVE_ALL" }).catch(() => undefined));
   }
-  for (const { tabId } of snapshot.fullPage) {
-    captured.push({ kind: "fullPage", tabId });
+  for (const tabId of [...byKind.fullPage].sort((a, b) => a - b)) {
     jobs.push(send(tabId, { type: "FULL_PAGE_DETECT_CANCELLED" }).catch(() => undefined));
   }
   await Promise.all(jobs);
-  // Clear only what this termination captured — a newer owner that appeared
-  // mid-termination survives.
-  await Promise.all(captured.map(({ kind, tabId }) => clearProtectedWorkOwner(kind, tabId)));
+  if (captured.length) await area.remove(captured.map(({ key }) => key));
 }
