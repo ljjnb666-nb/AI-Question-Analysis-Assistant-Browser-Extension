@@ -27,6 +27,9 @@ export function createProtectedWorkRunAuthority() {
       const current = active.get(kind);
       return current !== undefined && current.generationId === generationId;
     },
+    isOwner(kind: ProtectedWorkKind, lease: number): boolean {
+      return active.get(kind)?.lease === lease;
+    },
     isCurrent(kind: ProtectedWorkKind, lease: number): boolean {
       const current = active.get(kind);
       return current !== undefined && current.lease === lease && !current.revoked;
