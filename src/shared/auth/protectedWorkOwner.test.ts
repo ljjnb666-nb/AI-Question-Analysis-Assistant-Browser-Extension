@@ -280,6 +280,64 @@ describe("cross-context protected-work owner registry", () => {
     expect((await newContext.readProtectedWorkOwners()).fullPage).toEqual([{ tabId: 11 }]);
   });
 
+  it("PHASE14B_03 multiple same-tab generations emit only one STOP but remove all captured keys", async () => {
+    const first = await freshClient();
+    const second = await freshClient();
+    await first.markProtectedWorkOwner("autoSolve", 7);
+    await second.markProtectedWorkOwner("autoSolve", 7);
+    await second.markProtectedWorkOwner("autoSolve", 8);
+    expect((await first.readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }, { tabId: 8 }]);
+
+    const messages: string[] = [];
+    await first.terminateRecordedProtectedWork(async (tabId, message) => {
+      messages.push(`${tabId}:${message.type}`);
+      return {};
+    });
+    expect(messages).toEqual(["7:STOP_AUTO_SOLVE_ALL", "8:STOP_AUTO_SOLVE_ALL"]);
+    expect((await second.readProtectedWorkOwners()).autoSolve).toEqual([]);
+  });
+
+  it("PHASE14B_04 legacy single-owner storage keys remain readable and clearable", async () => {
+    const client = await freshClient();
+    sessionStore.set("protectedWorkOwner:autoSolve:7", { active: true, tabId: 7 });
+    sessionStore.set("protectedWorkOwner:fullPage:9", { active: true, tabId: 9 });
+    sessionStore.set("protectedWorkOwner:autoSolve:8", { active: false, tabId: 8 });
+    sessionStore.set("protectedWorkOwner:autoSolve:10", { active: true, tabId: 999 });
+    expect(await client.readProtectedWorkOwners()).toEqual({
+      autoSolve: [{ tabId: 7 }],
+      fullPage: [{ tabId: 9 }],
+    });
+
+    await client.terminateRecordedProtectedWork(async () => ({}));
+    expect(await client.readProtectedWorkOwners()).toEqual({ autoSolve: [], fullPage: [] });
+    await client.clearProtectedWorkOwner("autoSolve", 8);
+    expect(sessionStore.has("protectedWorkOwner:autoSolve:8")).toBe(false);
+  });
+
+  it("PHASE14B_05 delayed completion removes captured keys but never a new same-tab generation", async () => {
+    const area = installSharedSessionStub();
+    const first = await freshClient();
+    const second = await freshClient();
+    await first.markProtectedWorkOwner("autoSolve", 7);
+
+    const normalRemove = area.remove.bind(area);
+    let signalRemoval!: () => void;
+    let releaseRemoval!: () => void;
+    const removeEntered = new Promise<void>((resolve) => { signalRemoval = resolve; });
+    const holdRemove = new Promise<void>((resolve) => { releaseRemoval = resolve; });
+    area.remove = async (keys) => {
+      signalRemoval();
+      await holdRemove;
+      await normalRemove(keys);
+    };
+    const clearOld = first.clearProtectedWorkOwner("autoSolve", 7);
+    await removeEntered;
+    await second.markProtectedWorkOwner("autoSolve", 7);
+    releaseRemoval();
+    await clearOld;
+    expect((await first.readProtectedWorkOwners()).autoSolve).toEqual([{ tabId: 7 }]);
+  });
+
   it("AUTH_UI_59_MANUAL_STOP_ALL_RECORDED_OWNERS stop terminates every recorded owner and clears them", async () => {
     const clientA = await freshClient();
     const clientB = await freshClient();
