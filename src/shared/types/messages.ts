@@ -210,6 +210,8 @@ export interface VerifyParsedAnswerMsg extends BaseMessage {
 
 export interface StartAutoSolveAllMsg extends BaseMessage {
   type: "START_AUTO_SOLVE_ALL";
+  /** Owner generation committed before START. Undefined for legacy senders. */
+  generationId?: string;
 }
 
 export interface StopAutoSolveAllMsg extends BaseMessage {
@@ -218,6 +220,8 @@ export interface StopAutoSolveAllMsg extends BaseMessage {
 
 export interface AutoSolveProgressMsg extends BaseMessage {
   type: "AUTO_SOLVE_PROGRESS";
+  /** Corresponding START owner generation for progress correlation. */
+  generationId?: string;
   running: boolean;
   solved: number;
   filled: number;

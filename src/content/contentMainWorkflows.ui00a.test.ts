@@ -176,3 +176,39 @@ vi.mock("@/shared/utils/aiSolvePreferences", async () => {
     },
   };
 });
+
+
+describe("Phase14B-02C Auto Solve START to PROGRESS/DONE generation propagation", () => {
+  it("P14B02C_AUTOSOLVE_01 tagged START emits the same immutable generation on progress and DONE", async () => {
+    mockSettings = { ...DEFAULT_SETTINGS, providerId: "ollama", apiKey: "" };
+    const generationId = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    const options = createWorkflowsOptions();
+    const workflows = createContentMainWorkflows(options);
+    await workflows.handleAutoSolveAll(generationId);
+    expect(options.sendAutoSolveProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ generationId, running: true }),
+    );
+    expect(options.sendAutoSolveDone).toHaveBeenCalledWith(
+      expect.objectContaining({ generationId }),
+    );
+  });
+
+  it("P14B02C_AUTOSOLVE_02 provider guard emits a tagged rejection, not an unbound DONE", async () => {
+    mockSettings = { ...DEFAULT_SETTINGS, providerId: "anthropic", apiKey: "" };
+    const generationId = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    const options = createWorkflowsOptions();
+    await createContentMainWorkflows(options).handleAutoSolveAll(generationId);
+    expect(options.sendAutoSolveDone).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: false, solved: 0, generationId }),
+    );
+    expect(options.sendAutoSolveProgress).not.toHaveBeenCalled();
+  });
+
+  it("P14B02C_AUTOSOLVE_03 omitted generation preserves legacy untagged completion", async () => {
+    mockSettings = { ...DEFAULT_SETTINGS, providerId: "anthropic", apiKey: "" };
+    const options = createWorkflowsOptions();
+    await createContentMainWorkflows(options).handleAutoSolveAll();
+    const done = vi.mocked(options.sendAutoSolveDone).mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(done).not.toHaveProperty("generationId");
+  });
+});
