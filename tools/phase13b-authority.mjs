@@ -60,6 +60,7 @@ export function examineReadOnlyObservation(observation) {
   if (!observation.snapshot || observation.snapshot.originUrl !== observation.urlAfter) return "WORKSPACE_ORIGIN_MISMATCH";
   if (observation.snapshot.detection?.phase !== "completed") return "DETECTION_NOT_COMPLETE";
   if (!Array.isArray(observation.snapshot.candidates) || observation.snapshot.candidates.length < 1) return "NO_CANDIDATE_DETECTED";
+  if (observation.monitorAlive !== true) return "PAGE_MONITOR_LOST";
   if (observation.events?.length) return "PAGE_INTERACTION_OBSERVED";
   if (observation.blockedWrites !== 0) return "NETWORK_WRITE_ATTEMPTED";
   if (observation.formCountBefore !== observation.formCountAfter) return "PAGE_FORM_STRUCTURE_CHANGED";
