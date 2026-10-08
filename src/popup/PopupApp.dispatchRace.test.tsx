@@ -11,6 +11,7 @@ vi.mock("@/shared/utils/analytics", () => ({ logEvent: vi.fn() }));
 
 const sentRuntimeMessages: string[] = [];
 const sentTabTargets: Array<{ tabId: number; type: string }> = [];
+const sentStartGenerations: Array<string | undefined> = [];
 
 vi.mock("@/shared/utils/messaging", () => ({
   sendToActiveTab: vi.fn(async (message: { type: string }) => {
@@ -19,9 +20,10 @@ vi.mock("@/shared/utils/messaging", () => ({
   }),
   // The popup dispatches long-running work straight to the recorded owner
   // tab; keep that channel observable too.
-  sendToTabWithBootstrap: vi.fn(async (tabId: number, message: { type: string }) => {
+  sendToTabWithBootstrap: vi.fn(async (tabId: number, message: { type: string; generationId?: string }) => {
     sentRuntimeMessages.push(message.type);
     sentTabTargets.push({ tabId, type: message.type });
+    sentStartGenerations.push(message.generationId);
     return {};
   }),
   isInjectablePageUrl: (url: string | undefined) => /^https?:/i.test(String(url || "")),
@@ -125,6 +127,7 @@ beforeEach(async () => {
   installSettingsMessaging();
   sentRuntimeMessages.length = 0;
   sentTabTargets.length = 0;
+  sentStartGenerations.length = 0;
   store.clear();
   sessionStore.clear();
   storageListeners.length = 0;
@@ -218,6 +221,10 @@ describe("PopupApp protected work ownership", () => {
     // The dispatch went to the recorded owner tab, and the cross-surface
     // registry now shows the popup-established owner.
     expect(sentTabTargets).toEqual([{ tabId: 5, type: "START_AUTO_SOLVE_ALL" }]);
+    expect(sentStartGenerations[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f-]+$/);
+    const ownerKey = [...sessionStore.keys()].find((key) => key.endsWith(`:${sentStartGenerations[0]}`));
+    expect(ownerKey).toBe(`protectedWorkOwner:autoSolve:5:${sentStartGenerations[0]}`);
+    expect(sessionStore.get(ownerKey!)).toMatchObject({ active: true, tabId: 5, completionProtocol: "generation" });
     const owners = await readProtectedWorkOwners();
     expect(owners.autoSolve).toEqual([{ tabId: 5 }]);
   });

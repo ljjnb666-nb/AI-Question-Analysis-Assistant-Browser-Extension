@@ -13,7 +13,9 @@ import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { useAuthController } from "@/shared/auth/useAuthController";
 import {
   clearProtectedWorkOwner,
+  clearProtectedWorkOwnerGeneration,
   markProtectedWorkOwner,
+  markProtectedWorkOwnerWithGeneration,
   terminateRecordedProtectedWork,
   type ProtectedWorkKind,
 } from "@/shared/auth/protectedWorkOwner";
@@ -260,6 +262,15 @@ export const PopupApp: React.FC = () => {
           ? "fullPage"
           : null;
     let ownerTabId: number | undefined;
+    let ownerGenerationId: string | undefined;
+    const clearThisOwner = async () => {
+      if (ownerTabId === undefined || !longRunningKind) return;
+      if (longRunningKind === "autoSolve") {
+        if (ownerGenerationId) await clearProtectedWorkOwnerGeneration(longRunningKind, ownerTabId, ownerGenerationId);
+      } else {
+        await clearProtectedWorkOwner(longRunningKind, ownerTabId);
+      }
+    };
 
     try {
       setActiveFeature(feature);
@@ -286,10 +297,15 @@ export const PopupApp: React.FC = () => {
           return;
         }
         ownerTabId = tab.id;
-        await markProtectedWorkOwner(longRunningKind, ownerTabId);
+        if (longRunningKind === "autoSolve") {
+          ownerGenerationId = (await markProtectedWorkOwnerWithGeneration(longRunningKind, ownerTabId)) ?? undefined;
+          if (!ownerGenerationId) throw new Error("PROTECTED_OWNER_UNAVAILABLE");
+        } else {
+          await markProtectedWorkOwner(longRunningKind, ownerTabId);
+        }
 
         if (!isAuthenticatedNow()) {
-          await clearProtectedWorkOwner(longRunningKind, ownerTabId);
+          await clearThisOwner();
           setFeedback(
             userFeedback("warning", copy.sessionExpiredNotice, {
               code: "AUTHORITY_LOST",
@@ -301,7 +317,13 @@ export const PopupApp: React.FC = () => {
 
         // Dispatch to the exact recorded owner tab (guard re-checks at every
         // await boundary inside the messaging chain).
-        await sendToTabWithBootstrap(ownerTabId, { type: messageType }, isAuthenticatedNow);
+        await sendToTabWithBootstrap(
+          ownerTabId,
+          messageType === "START_AUTO_SOLVE_ALL" && ownerGenerationId
+            ? { type: "START_AUTO_SOLVE_ALL", generationId: ownerGenerationId }
+            : { type: messageType },
+          isAuthenticatedNow,
+        );
       } else {
         await sendToActiveTab({ type: messageType }, isAuthenticatedNow);
       }
@@ -312,7 +334,7 @@ export const PopupApp: React.FC = () => {
     } catch (err) {
       // A failed dispatch must not leave an owner record behind.
       if (ownerTabId != null && longRunningKind) {
-        void clearProtectedWorkOwner(longRunningKind, ownerTabId);
+        void clearThisOwner();
       }
       const rawMsg = err instanceof Error ? err.message : String(err || "");
       const knownCode = extractKnownErrorCode(err) || "DISPATCH_FAILED";

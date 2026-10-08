@@ -14,7 +14,8 @@ describe("Phase14B-02C START generation protocol guard", () => {
 
   it("P14B02C_ROUTER_01 sends the unchanged valid generation into runtime execution", () => {
     const r = dispatch({ type: "START_AUTO_SOLVE_ALL", generationId });
-    expect(r.startAutoSolveAll).toHaveBeenCalledExactlyOnceWith(generationId);
+    expect(r.startAutoSolveAll).toHaveBeenCalledTimes(1);
+    expect(r.startAutoSolveAll).toHaveBeenCalledWith(generationId);
     expect(r.respond).toHaveBeenCalledWith({ ok: true });
   });
   it("P14B02C_ROUTER_02 rejects a malformed token rather than downgrading to legacy", () => {
@@ -26,7 +27,8 @@ describe("Phase14B-02C START generation protocol guard", () => {
   });
   it("P14B02C_ROUTER_03 preserves untagged compatibility", () => {
     const r = dispatch({ type: "START_AUTO_SOLVE_ALL" });
-    expect(r.startAutoSolveAll).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(r.startAutoSolveAll).toHaveBeenCalledTimes(1);
+    expect(r.startAutoSolveAll).toHaveBeenCalledWith(undefined);
     expect(r.respond).toHaveBeenCalledWith({ ok: true });
   });
 });

@@ -67,6 +67,10 @@ type UseSidePanelActionsOptions = {
    * every failed path clean up with the same exact (kind, tabId).
    */
   markProtectedWork: (kind: "autoSolve" | "fullPage", active: boolean, tabId: number) => Promise<void>;
+  /** New protected START authority; when available, only dispatch after UUID persistence. */
+  markProtectedWorkGeneration?: (kind: "autoSolve" | "fullPage", tabId: number) => Promise<string | null>;
+  /** Roll back ONLY the START generation created by this request. */
+  clearProtectedWorkGeneration?: (kind: "autoSolve" | "fullPage", tabId: number, generationId: string) => Promise<void>;
   /** Reset the component-owned synchronous local intent, without broad storage cleanup. */
   clearProtectedWorkIntent?: (kind: "autoSolve" | "fullPage") => void;
   protectedWork?: {
@@ -434,18 +438,33 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     // dispatch, and running UI state only flips on after a confirmed
     // transport dispatch with the authority still holding (AUTH-UI-INV-12
     // /13/16). Every failed path clears the exact owner record it created.
-    await options.markProtectedWork("autoSolve", true, activeTab.id);
+    const generationAware = Boolean(options.markProtectedWorkGeneration && options.clearProtectedWorkGeneration);
+    let generationId: string | undefined;
+    if (generationAware) {
+      generationId = (await options.markProtectedWorkGeneration!("autoSolve", activeTab.id)) ?? undefined;
+      if (!generationId) {
+        // A missing session store must not silently downgrade a new START.
+        options.clearProtectedWorkIntent?.("autoSolve");
+        return;
+      }
+    } else {
+      // Legacy callers and test harnesses migrate independently.
+      await options.markProtectedWork("autoSolve", true, activeTab.id);
+    }
+    const rollbackOwner = () => generationId
+      ? options.clearProtectedWorkGeneration!("autoSolve", activeTab.id!)
+      : options.markProtectedWork("autoSolve", false, activeTab.id!);
     if (!canDispatchToTab(activeTab)) {
-      await options.markProtectedWork("autoSolve", false, activeTab.id);
+      await rollbackOwner();
       return;
     }
     const response = await sendProtectedTabMessageWithBootstrap(
       activeTab.id,
-      { type: "START_AUTO_SOLVE_ALL" },
+      generationId ? { type: "START_AUTO_SOLVE_ALL", generationId } : { type: "START_AUTO_SOLVE_ALL" },
       () => canDispatchToTab(activeTab),
     );
     if (response.ok === false || !canDispatchToTab(activeTab)) {
-      await options.markProtectedWork("autoSolve", false, activeTab.id);
+      await rollbackOwner();
       return;
     }
     options.setFillFeedback(null);

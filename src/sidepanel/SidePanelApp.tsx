@@ -7,6 +7,8 @@ import { useAuthSession } from "@/shared/auth/useAuthSession";
 import {
   clearProtectedWorkOwner,
   markProtectedWorkOwner,
+  markProtectedWorkOwnerWithGeneration,
+  clearProtectedWorkOwnerGeneration,
   terminateRecordedProtectedWork,
 } from "@/shared/auth/protectedWorkOwner";
 import type { UILang } from "./displayUtils";
@@ -169,6 +171,27 @@ export const SidePanelApp: React.FC = () => {
     protectedWorkRef.current[kind] = { active: false };
   }, []);
 
+  const markProtectedWorkGeneration = useCallback(async (kind: "autoSolve" | "fullPage", tabId: number) => {
+    const intent = { active: true, tabId };
+    protectedWorkRef.current[kind] = intent;
+    const generationId = await markProtectedWorkOwnerWithGeneration(kind, tabId);
+    // An auth-loss watchdog may have cleared this intent during the await.
+    // Never re-arm a revoked intent with a late owner commit.
+    if (protectedWorkRef.current[kind] === intent && generationId) {
+      protectedWorkRef.current[kind] = { active: true, tabId };
+    }
+    return generationId;
+  }, []);
+
+  const clearProtectedWorkGeneration = useCallback(async (
+    kind: "autoSolve" | "fullPage", tabId: number, generationId: string,
+  ) => {
+    if (protectedWorkRef.current[kind].tabId === tabId) {
+      protectedWorkRef.current[kind] = { active: false };
+    }
+    await clearProtectedWorkOwnerGeneration(kind, tabId, generationId);
+  }, []);
+
   useEffect(() => {
     let disposed = false;
     // Transition marker lives in the effect closure: coordinator notifications
@@ -314,6 +337,8 @@ export const SidePanelApp: React.FC = () => {
     isWorkspaceReadyNow: () => workspaceAccessRef.current.status === "ready",
     getWorkspaceOrigin: () => workspaceAccessRef.current.origin,
     markProtectedWork,
+    markProtectedWorkGeneration,
+    clearProtectedWorkGeneration,
     clearProtectedWorkIntent,
     protectedWork: protectedWorkRef,
     setCandidates,
