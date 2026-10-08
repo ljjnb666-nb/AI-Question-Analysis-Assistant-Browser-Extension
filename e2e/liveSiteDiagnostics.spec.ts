@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { createLiveSiteDiagnostics } from "./helpers/liveSiteDiagnostics";
+import { createLiveSiteDiagnostics, isPintiaPartyHost } from "./helpers/liveSiteDiagnostics";
 
 test("PHASE13_DIAG_01 captures only allowlisted network categories and aggregates status", () => {
   const telemetry = createLiveSiteDiagnostics();
@@ -57,4 +57,13 @@ test("PHASE13_DIAG_03 telemetry alone never certifies a live target as ready", (
   // must still pass the independent expected-title assertion.
   expect(Object.keys(result)).not.toContain("ready");
   expect(Object.keys(result)).not.toContain("passed");
+});
+
+
+test("PHASE13_DIAG_04 distinguishes Pintia API hosts from spoofed suffixes", () => {
+  expect(isPintiaPartyHost("pintia.cn")).toBe(true);
+  expect(isPintiaPartyHost("API.PINTIA.CN")).toBe(true);
+  expect(isPintiaPartyHost("cdn.api.pintia.cn")).toBe(true);
+  expect(isPintiaPartyHost("evilpintia.cn")).toBe(false);
+  expect(isPintiaPartyHost("pintia.cn.example.invalid")).toBe(false);
 });
