@@ -196,7 +196,7 @@ export async function refineFullPageCandidatesViaManualPipeline(
   const startedAtUrl = location.href;
   const isRefinementCurrent = () => deps.isRuntimeCurrent?.() !== false
     && !deps.autoSolveStopRequested() && location.href === startedAtUrl
-    && (scrollRoot === window || scrollRoot.isConnected);
+    && (scrollRoot === window || (scrollRoot as HTMLElement).isConnected);
   const originalTop = deps.getScrollTop(scrollRoot);
   const originalLeft = deps.getScrollLeft(scrollRoot);
   const refined: QuestionBlock[] = [];

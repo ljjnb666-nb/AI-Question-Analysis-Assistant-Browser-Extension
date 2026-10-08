@@ -321,11 +321,11 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     detectZhihuishuCurrentQuestionBlock,
     findNextQuestionButton,
     handleAutoDetect: startViewportDetection,
-    handleFullPageDetect: (generationId?: string) => {
+    handleFullPageDetect: (generationId?: string, isExecutionCurrent?: () => boolean) => {
       if (!options.isRuntimeCurrent()) return;
       if (isFullPageScanRunning()) options.workspace?.cancelFullPage();
       else options.workspace?.beginDetection("fullpage");
-      return handleFullPageDetect(generationId);
+      return handleFullPageDetect(generationId, isExecutionCurrent);
     },
     layoutWatch,
     looksLikeGarbledFullPageText,

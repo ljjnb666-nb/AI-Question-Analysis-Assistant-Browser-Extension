@@ -27,7 +27,9 @@ describe("Phase14B-02C-E2 Full Page scroll lease and cancellation", () => {
       top = options.top ?? top;
       left = options.left ?? left;
     });
-    vi.spyOn(window, "scrollTo").mockImplementation(scrollTo);
+    vi.spyOn(window, "scrollTo").mockImplementation((...args: unknown[]) => {
+      scrollTo(args[0] as ScrollToOptions);
+    });
   });
 
   afterEach(() => {
