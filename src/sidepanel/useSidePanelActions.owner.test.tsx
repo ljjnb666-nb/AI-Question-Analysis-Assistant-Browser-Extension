@@ -6,6 +6,7 @@ import { useSidePanelActions } from "./useSidePanelActions";
 import {
   clearProtectedWorkOwner,
   markProtectedWorkOwner,
+  terminateRecordedProtectedWorkKind,
 } from "@/shared/auth/protectedWorkOwner";
 
 // The Auto Solve START path guards on provider configuration (UI-00A) before
@@ -83,6 +84,7 @@ vi.mock("@/shared/auth/protectedWorkOwner", () => ({
   markProtectedWorkOwner: vi.fn(async () => undefined),
   clearProtectedWorkOwner: vi.fn(async () => undefined),
   readProtectedWorkOwners: vi.fn(async () => ({ autoSolve: [], fullPage: [] })),
+  terminateRecordedProtectedWorkKind: vi.fn(async () => 1),
 }));
 
 beforeEach(() => {
@@ -272,4 +274,38 @@ describe("UI04A bound workspace dispatch", () => {
 vi.mock("@/shared/utils/aiSolvePreferences", async () => {
   const storage = await import("@/shared/utils/storage");
   return { loadParsePreferences: async () => { const { preferredRoute, language } = await storage.loadSettings(); return { preferredRoute, language }; }, getAIConnectionReadiness: async () => ({ ready: true }), getRuntimeCaptureInfo: async () => ({ name: "anthropic", baseUrl: "https://api.anthropic.com", supportsVision: true }) };
+});
+
+describe("Phase14B-02B manual STOP/CANCEL dispatch bridge", () => {
+  it("routes manual autoSolve STOP through a single snapshot-fenced cleanup", async () => {
+    const protectedWork = { current: {
+      autoSolve: { active: true, tabId: 7 },
+      fullPage: { active: false, tabId: undefined as number | undefined },
+    } };
+    const clearProtectedWorkIntent = vi.fn((kind: "autoSolve" | "fullPage") => {
+      if (kind === "autoSolve") protectedWork.current.autoSolve.active = false;
+      else protectedWork.current.fullPage.active = false;
+    });
+    const { result } = renderHook(() => useSidePanelActions(makeOptions({ protectedWork, clearProtectedWorkIntent })));
+    await result.current.handleStopAutoSolve();
+    expect(terminateRecordedProtectedWorkKind).toHaveBeenCalledWith("autoSolve", expect.any(Function), 7);
+    expect(protectedWork.current.autoSolve.active).toBe(false);
+    expect(clearProtectedWorkOwner).not.toHaveBeenCalled();
+  });
+
+  it("routes manual fullPage CANCEL through a single snapshot-fenced cleanup", async () => {
+    const protectedWork = { current: {
+      autoSolve: { active: false, tabId: undefined as number | undefined },
+      fullPage: { active: true, tabId: 7 },
+    } };
+    const clearProtectedWorkIntent = vi.fn((kind: "autoSolve" | "fullPage") => {
+      if (kind === "autoSolve") protectedWork.current.autoSolve.active = false;
+      else protectedWork.current.fullPage.active = false;
+    });
+    const { result } = renderHook(() => useSidePanelActions(makeOptions({ protectedWork, clearProtectedWorkIntent })));
+    await result.current.handleCancelFullPage();
+    expect(terminateRecordedProtectedWorkKind).toHaveBeenCalledWith("fullPage", expect.any(Function), 7);
+    expect(protectedWork.current.fullPage.active).toBe(false);
+    expect(clearProtectedWorkOwner).not.toHaveBeenCalled();
+  });
 });

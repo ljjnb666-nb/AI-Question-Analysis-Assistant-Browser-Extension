@@ -66,6 +66,8 @@ vi.mock("@/shared/auth/protectedWorkOwner", () => ({
   markProtectedWorkOwner: vi.fn(async () => undefined),
   clearProtectedWorkOwner: vi.fn(async () => undefined),
   readProtectedWorkOwners: vi.fn(async () => ({ autoSolve: [], fullPage: [] })),
+  // No owner was recorded in this test; legacy fallback must still send STOP/CANCEL.
+  terminateRecordedProtectedWorkKind: vi.fn(async () => 0),
 }));
 
 function makeCandidate(overrides: Partial<DetectedCandidate> = {}): DetectedCandidate {

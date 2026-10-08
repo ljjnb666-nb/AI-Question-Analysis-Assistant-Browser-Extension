@@ -163,6 +163,12 @@ export const SidePanelApp: React.FC = () => {
     [],
   );
 
+  // Keep ref mutations at the component that owns the work intent; the action
+  // hook only asks for intent to be cleared before asynchronous STOP.
+  const clearProtectedWorkIntent = useCallback((kind: "autoSolve" | "fullPage") => {
+    protectedWorkRef.current[kind] = { active: false };
+  }, []);
+
   useEffect(() => {
     let disposed = false;
     // Transition marker lives in the effect closure: coordinator notifications
@@ -308,6 +314,7 @@ export const SidePanelApp: React.FC = () => {
     isWorkspaceReadyNow: () => workspaceAccessRef.current.status === "ready",
     getWorkspaceOrigin: () => workspaceAccessRef.current.origin,
     markProtectedWork,
+    clearProtectedWorkIntent,
     protectedWork: protectedWorkRef,
     setCandidates,
     setExpandedIds,

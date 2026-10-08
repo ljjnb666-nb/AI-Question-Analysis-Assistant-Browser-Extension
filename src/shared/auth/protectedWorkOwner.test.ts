@@ -436,3 +436,77 @@ describe("cross-context protected-work owner registry", () => {
     expect(owners.fullPage).toEqual([{ tabId: 8 }]);
   });
 });
+
+describe("Phase14B-02B manual termination owner-generation snapshot fence", () => {
+  it("PHASE14B_02B_01 old same-tab manual STOP cannot erase a new autoSolve owner", async () => {
+    const first = await freshClient();
+    const next = await freshClient();
+    await first.markProtectedWorkOwner("autoSolve", 7);
+    await first.markProtectedWorkOwner("fullPage", 11);
+    let resolveSend!: () => void;
+    let enteredSend!: () => void;
+    const parked = new Promise<void>((resolve) => { resolveSend = resolve; });
+    const entered = new Promise<void>((resolve) => { enteredSend = resolve; });
+    const sends: string[] = [];
+    const terminating = first.terminateRecordedProtectedWorkKind("autoSolve", async (tab, msg) => {
+      sends.push(`${tab}:${msg.type}`);
+      enteredSend();
+      await parked;
+    });
+    await entered;
+    await next.markProtectedWorkOwner("autoSolve", 7);
+    resolveSend();
+    expect(await terminating).toBe(1);
+    expect(sends).toEqual(["7:STOP_AUTO_SOLVE_ALL"]);
+    expect(await next.readProtectedWorkOwners()).toEqual({
+      autoSolve: [{ tabId: 7 }],
+      fullPage: [{ tabId: 11 }],
+    });
+  });
+
+  it("PHASE14B_02B_02 old same-tab manual CANCEL cannot erase a new fullPage owner", async () => {
+    const first = await freshClient();
+    const next = await freshClient();
+    await first.markProtectedWorkOwner("fullPage", 9);
+    await first.markProtectedWorkOwner("autoSolve", 5);
+    let resolveSend!: () => void;
+    let enteredSend!: () => void;
+    const parked = new Promise<void>((resolve) => { resolveSend = resolve; });
+    const entered = new Promise<void>((resolve) => { enteredSend = resolve; });
+    const sends: string[] = [];
+    const cancel = first.terminateRecordedProtectedWorkKind("fullPage", async (tab, msg) => {
+      sends.push(`${tab}:${msg.type}`);
+      enteredSend();
+      await parked;
+    });
+    await entered;
+    await next.markProtectedWorkOwner("fullPage", 9);
+    resolveSend();
+    expect(await cancel).toBe(1);
+    expect(sends).toEqual(["9:FULL_PAGE_DETECT_CANCELLED"]);
+    expect(await next.readProtectedWorkOwners()).toEqual({
+      autoSolve: [{ tabId: 5 }],
+      fullPage: [{ tabId: 9 }],
+    });
+  });
+
+  it("PHASE14B_02B_03 deduplicates tabs, includes unpersisted local owner and handles failed sends", async () => {
+    const client = await freshClient();
+    await client.markProtectedWorkOwner("autoSolve", 7);
+    await client.markProtectedWorkOwner("autoSolve", 7);
+    await client.markProtectedWorkOwner("autoSolve", 8);
+    const sends: string[] = [];
+    const count = await client.terminateRecordedProtectedWorkKind("autoSolve", async (tab, msg) => {
+      sends.push(`${tab}:${msg.type}`);
+      if (tab === 7) throw new Error("closed tab");
+    }, 9);
+    expect(count).toBe(3);
+    expect(sends).toEqual([
+      "7:STOP_AUTO_SOLVE_ALL", "8:STOP_AUTO_SOLVE_ALL", "9:STOP_AUTO_SOLVE_ALL",
+    ]);
+    expect((await client.readProtectedWorkOwners()).autoSolve).toEqual([]);
+    expect(await client.terminateRecordedProtectedWorkKind("fullPage", async () => {
+      throw Error("unexpected send");
+    })).toBe(0);
+  });
+});
