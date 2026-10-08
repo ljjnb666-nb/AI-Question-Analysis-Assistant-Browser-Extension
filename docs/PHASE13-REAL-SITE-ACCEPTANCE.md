@@ -73,7 +73,7 @@ npm run accept:phase13b:local -- --site zhihuishu --url "https://online.zhihuish
 
 For Pintia use `--site pintia` and a user-authorized `https://pintia.cn/` URL. Polymas uses `--site polymas`; its actual platform host is **user-attested, not independently certified** and must be checked before supplying the URL.
 
-The helper enforces a clean Git HEAD, builds and verifies the extension locally, launches a **new temporary Chrome user-data directory**, and opens the supplied site. The account holder signs in **manually** in that same tab (including normal challenges, if required) and navigates to the appropriate question page. Only when they type `AUTHORIZED` in the terminal does the helper begin read-only detection.
+The CLI accepts **only the site origin** (for example, `https://online.zhihuishu.com/`), never a deep link, query string, or fragment. This prevents course/record IDs and login tokens from being written into shell history or process arguments. The helper enforces a clean Git HEAD, builds and verifies the extension locally, launches a **new temporary Chrome user-data directory**, and opens the supplied origin. The account holder signs in **manually** in that same tab (including normal challenges, if required) and navigates to the appropriate question page. Only when they type `AUTHORIZED` in the terminal does the helper begin read-only detection.
 
 Important boundaries:
 
