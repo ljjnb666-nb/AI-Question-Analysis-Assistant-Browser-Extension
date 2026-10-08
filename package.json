@@ -23,7 +23,7 @@
     "test:run": "node --disable-warning=ExperimentalWarning ./node_modules/vitest/vitest.mjs run",
     "test:coverage": "node --disable-warning=ExperimentalWarning ./node_modules/vitest/vitest.mjs run --coverage",
     "test:e2e": "npm run build && npm run test:e2e:dist",
-    "test:e2e:dist": "playwright test --grep-invert \"@admin|@phase12b\"",
+    "test:e2e:dist": "playwright test --grep-invert \"@admin|@phase12b|@phase13\"",
     "test:e2e:admin": "npm run build:admin && npm run test:e2e:admin:dist",
     "test:e2e:admin:dist": "playwright test --grep \"@admin\"",
     "build:admin": "vite build -c vite.admin.config.ts",
@@ -31,7 +31,8 @@
     "test:artifact:admin": "node --test tools/verify-admin-artifact.node-test.mjs",
     "test:rc-manifest": "node --test tools/generate-rc-manifest.node-test.mjs",
     "rc:manifest": "node tools/generate-rc-manifest.mjs",
-    "test:e2e:phase12b:dist": "playwright test --grep \"@phase12b\""
+    "test:e2e:phase12b:dist": "playwright test --grep \"@phase12b\"",
+    "test:e2e:phase13:dist": "playwright test --grep \"@phase13\""
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
