@@ -11,20 +11,24 @@ import type { ProtectedWorkKind } from "@/shared/auth/protectedWorkOwner";
  * interpreted as CANCEL (the old Full Page click-to-cancel behavior).
  */
 export function createProtectedWorkRunAuthority() {
-  const active = new Map<ProtectedWorkKind, { generationId?: string }>();
+  let nextLease = 0;
+  const active = new Map<ProtectedWorkKind, { generationId?: string; lease: number }>();
 
   return {
-    begin(kind: ProtectedWorkKind, generationId?: string): boolean {
-      if (active.has(kind)) return false;
-      active.set(kind, { generationId });
-      return true;
+    begin(kind: ProtectedWorkKind, generationId?: string): number | null {
+      if (active.has(kind)) return null;
+      // Unique local execution lease even for repeated legacy (untagged)
+      // runs after a SPA reset. Old finally handlers cannot clear new runs.
+      const lease = ++nextLease;
+      active.set(kind, { generationId, lease });
+      return lease;
     },
     canStop(kind: ProtectedWorkKind, generationId?: string): boolean {
       const current = active.get(kind);
       return current !== undefined && current.generationId === generationId;
     },
-    finish(kind: ProtectedWorkKind, generationId?: string): void {
-      if (active.get(kind)?.generationId === generationId) active.delete(kind);
+    finish(kind: ProtectedWorkKind, lease: number): void {
+      if (active.get(kind)?.lease === lease) active.delete(kind);
     },
     reset(): void {
       active.clear();

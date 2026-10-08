@@ -261,13 +261,14 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     getHighlightLayer: runtimeState.getHighlightLayer,
     handleAutoDetect,
     handleFullPageDetect: (generationId?: string) => {
-      if (!runAuthority.begin("fullPage", generationId)) return false;
+      const lease = runAuthority.begin("fullPage", generationId);
+      if (lease === null) return false;
       try {
         void Promise.resolve(handleFullPageDetect(generationId))
           .catch((error) => console.warn("[QS] Full Page run failed:", error))
-          .finally(() => runAuthority.finish("fullPage", generationId));
+          .finally(() => runAuthority.finish("fullPage", lease));
       } catch (error) {
-        runAuthority.finish("fullPage", generationId);
+        runAuthority.finish("fullPage", lease);
         throw error;
       }
       return true;
@@ -280,13 +281,14 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
       workspace.resetDetection();
     },
     startAutoSolveAll: (generationId) => {
-      if (!runAuthority.begin("autoSolve", generationId)) return false;
+      const lease = runAuthority.begin("autoSolve", generationId);
+      if (lease === null) return false;
       try {
         void workflows.handleAutoSolveAll(generationId)
           .catch((error) => console.warn("[QS] Auto Solve run failed:", error))
-          .finally(() => runAuthority.finish("autoSolve", generationId));
+          .finally(() => runAuthority.finish("autoSolve", lease));
       } catch (error) {
-        runAuthority.finish("autoSolve", generationId);
+        runAuthority.finish("autoSolve", lease);
         throw error;
       }
       return true;
