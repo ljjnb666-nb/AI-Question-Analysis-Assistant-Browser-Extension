@@ -132,3 +132,100 @@ test("ISSUE83_HOST_04 bounded DNS timeout and raw error cannot turn failure into
   expect(JSON.stringify(errored)).not.toContain("private");
   expect(requestCalls).toBe(0);
 });
+
+
+test("ISSUE83_HOST_05 compares two distinct public IPs within one global budget without leaking addresses", async () => {
+  const hosts: string[] = [];
+  let abandoned = 0;
+  const transport = ((options: RequestOptions) => {
+    hosts.push(String(options.hostname));
+    const req = new EventEmitter() as unknown as ClientRequest;
+    req.destroy = (() => { abandoned += 1; return req; }) as ClientRequest["destroy"];
+    req.end = (() => {
+      if (options.hostname === "9.9.9.9") {
+        queueMicrotask(() => {
+          const socket = new EventEmitter();
+          req.emit("socket", socket);
+          socket.emit("connect");
+          socket.emit("secureConnect");
+          const response = new EventEmitter() as EventEmitter & { statusCode: number; resume: () => void };
+          response.statusCode = 204;
+          response.resume = () => undefined;
+          req.emit("response", response);
+        });
+      }
+      return req;
+    }) as unknown as ClientRequest["end"];
+    return req;
+  }) as (options: RequestOptions) => ClientRequest;
+  const result = await probePendingPintiaScriptHost("cdn.pintia.cn", {
+    resolve: async () => [
+      { address: "8.8.8.8", family: 4 },
+      { address: "9.9.9.9", family: 4 },
+      { address: "8.8.8.8", family: 4 },
+    ],
+    request: transport,
+    timeoutMs: 25,
+  });
+  expect(hosts).toEqual(["8.8.8.8", "9.9.9.9"]);
+  expect(abandoned).toBe(1);
+  expect(result).toMatchObject({
+    outcome: "timeout", publicIpv4AnswerCount: 2,
+    addressComparisons: [
+      { slot: "first", outcome: "timeout", httpStatusClass: "none" },
+      { slot: "second", outcome: "response", httpStatusClass: "2xx" },
+    ],
+  });
+  expect(result.addressComparisons[0].milestones.find(x => x.phase === "tcp")?.observed).toBe(false);
+  expect(result.addressComparisons[1].milestones.find(x => x.phase === "tcp")?.observed).toBe(true);
+  expect(result.addressComparisons[1].milestones.find(x => x.phase === "headers")?.observed).toBe(true);
+  const printed = JSON.stringify(result);
+  for (const secret of ["8.8.8.8", "9.9.9.9", "cdn.pintia.cn", "https://", "private"]) {
+    expect(printed).not.toContain(secret);
+  }
+});
+
+test("ISSUE83_HOST_06 transport setup errors after completed DNS cannot be misclassified as DNS failures", async () => {
+  const result = await probePendingPintiaScriptHost("cdn.pintia.cn", {
+    resolve: async () => [{ address: "8.8.8.8", family: 4 }],
+    request: (() => { throw new Error("SECRET local transport initialization failure"); }) as (opts: RequestOptions) => ClientRequest,
+    timeoutMs: 100,
+  });
+  expect(result).toMatchObject({
+    outcome: "networkError", publicIpv4AnswerCount: 1,
+    addressComparisons: [{ slot: "first", outcome: "networkError" }],
+  });
+  expect(result.milestones.find(x => x.phase === "dns")?.observed).toBe(true);
+  expect(JSON.stringify(result)).not.toContain("SECRET");
+});
+
+test("ISSUE83_HOST_07 never probes more than two IPs even when DNS returns many valid records", async () => {
+  let sent = 0;
+  const transport = (() => {
+    sent += 1;
+    const req = new EventEmitter() as unknown as ClientRequest;
+    req.destroy = (() => req) as ClientRequest["destroy"];
+    req.end = (() => {
+      queueMicrotask(() => {
+        const response = new EventEmitter() as EventEmitter & { statusCode: number; resume: () => void };
+        response.statusCode = 200;
+        response.resume = () => undefined;
+        req.emit("response", response);
+      });
+      return req;
+    }) as unknown as ClientRequest["end"];
+    return req;
+  }) as (options: RequestOptions) => ClientRequest;
+  const result = await probePendingPintiaScriptHost("cdn.pintia.cn", {
+    resolve: async () => [
+      { address: "8.8.8.8", family: 4 },
+      { address: "9.9.9.9", family: 4 },
+      { address: "1.1.1.1", family: 4 },
+    ],
+    request: transport,
+  });
+  expect(sent).toBe(2);
+  expect(result.publicIpv4AnswerCount).toBe(3);
+  expect(result.addressComparisons).toHaveLength(2);
+  expect(result.addressComparisons.every(x => x.outcome === "response")).toBe(true);
+});
