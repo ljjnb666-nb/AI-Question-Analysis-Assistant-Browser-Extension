@@ -170,7 +170,7 @@ test("ISSUE83_HOST_05 compares two distinct public IPs within one global budget 
   expect(hosts).toEqual(["8.8.8.8", "9.9.9.9"]);
   expect(abandoned).toBe(1);
   expect(result).toMatchObject({
-    outcome: "timeout", publicIpv4AnswerCount: 2,
+    outcome: "mixedReachability", publicIpv4AnswerCount: 2,
     addressComparisons: [
       { slot: "first", outcome: "timeout", httpStatusClass: "none" },
       { slot: "second", outcome: "response", httpStatusClass: "2xx" },
