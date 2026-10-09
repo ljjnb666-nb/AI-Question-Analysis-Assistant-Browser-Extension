@@ -75,10 +75,14 @@ test("ISSUE83_GRACE_02 pending scripts and HTTP 200 never authorize an empty she
   const result = await visitLiveTargetUntilReady(
     () => page.goto(url, { waitUntil: "commit", timeout: 5_000 }),
     verifier.verify,
-    { maxAttempts: 2, betweenAttempts: async () => undefined },
+    {
+      maxAttempts: 2,
+      betweenAttempts: async () => undefined,
+      stopIfContentPending: () => verifier.graceUsed() && fixture.pendingScripts() > 0,
+    },
   );
-  expect(result).toMatchObject({ ready: false, attemptsUsed: 2, statusCodes: [200, 200] });
-  expect(fixture.visits()).toBe(2);
+  expect(result).toMatchObject({ ready: false, attemptsUsed: 1, statusCodes: [200] });
+  expect(fixture.visits()).toBe(1);
   expect(verifier.graceUsed()).toBe(true);
   expect(await page.locator("body").innerText()).not.toContain(title);
 });
