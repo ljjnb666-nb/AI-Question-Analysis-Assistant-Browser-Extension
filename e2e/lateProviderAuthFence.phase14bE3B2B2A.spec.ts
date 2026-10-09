@@ -27,7 +27,8 @@ function pageHtml(): string {
     <body style="margin:0">
     <form action="/__trap_submit" method="post" id="no-submit">
       <section class="question-item" id="question" style="width:720px;min-height:220px;padding:16px;box-sizing:border-box">
-        <h2>1. What is two plus two?</h2>
+        <div class="questionTit">1. Single-choice question</div>
+        <div class="questionContent">What is two plus two?</div>
         <label><input name="q1" type="radio" value="A">A. 3</label>
         <label><input name="q1" type="radio" value="B">B. 4</label>
         <label><input name="q1" type="radio" value="C">C. 5</label>
