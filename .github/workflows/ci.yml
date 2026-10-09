@@ -57,6 +57,9 @@ jobs:
       - name: Run quality gate
         run: npm run check
 
+      - name: Verify fail-only public-origin probe privacy contract
+        run: node --test tools/phase13-public-origin-probe.node-test.mjs
+
   build_artifact:
     runs-on: ubuntu-latest
     steps:
@@ -433,7 +436,15 @@ jobs:
         run: timeout 240s npx playwright install chromium
 
       - name: Run Phase 13 live public-site read-only acceptance
+        id: live_site
         run: xvfb-run -a npm run test:e2e:phase13:dist
+
+      # Only runs after a real-site failure on this same runner. This HEAD
+      # request targets the fixed public apex, not browser-discovered assets.
+      # Its result is diagnostic only: the original failed job remains failed.
+      - name: One bounded anonymous public-origin network comparison
+        if: ${{ failure() && steps.live_site.outcome == 'failure' }}
+        run: timeout 10s node tools/phase13-public-origin-probe.mjs
 
       - name: Upload Phase 13 live-site evidence
         if: always()
