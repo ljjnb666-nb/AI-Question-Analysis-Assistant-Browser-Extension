@@ -133,7 +133,7 @@ async function ownerGenerations(worker: Worker, tabId: number): Promise<string[]
 async function answerState(page: Page) {
   return page.evaluate(() => ({
     text: (document.querySelector("#answer") as HTMLInputElement).value,
-    selected: [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].filter(x => x.checked).map(x => x.value),
+    selected: Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]')).filter(x => x.checked).map(x => x.value),
     submits: (window as unknown as Window & { __domSubmitCount: number }).__domSubmitCount,
     changes: (window as unknown as Window & { __answerChangeCount: number }).__answerChangeCount,
   }));
