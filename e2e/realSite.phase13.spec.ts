@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
 import { visitLiveTargetUntilReady } from "@/shared/utils/liveSiteReadiness";
 import { createLiveSiteDiagnostics, formatLiveSiteReadinessDiagnostic, isPintiaPartyHost } from "./helpers/liveSiteDiagnostics";
+import { createScriptNetworkStageProbe } from "./helpers/liveSiteScriptNetworkStage";
 
 // Third-party page text must never enter uploaded failure traces, screenshots, or video.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -153,15 +154,22 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     const page = await context.newPage();
     await page.setViewportSize({ width: 1440, height: 960 });
     const resources = createLiveSiteDiagnostics();
+    const scriptStages = createScriptNetworkStageProbe();
+    const scriptStageSnapshots: Array<ReturnType<typeof scriptStages.snapshot>> = [];
     // In-flight script counts let us distinguish upstream script stalls from
     // ERR_ABORTED caused by our own bounded navigation retries.
     // Request URLs and response bodies are never persisted or logged.
     const inFlightScripts = new Set<object>();
     page.on("request", (request) => {
+      scriptStages.onRequest(request);
       if (request.resourceType() === "script") inFlightScripts.add(request);
     });
-    page.on("requestfinished", (request) => { inFlightScripts.delete(request); });
+    page.on("requestfinished", (request) => {
+      inFlightScripts.delete(request);
+      scriptStages.onFinished(request);
+    });
     page.on("response", (response) => {
+      scriptStages.onResponse(response);
       // Store first-party classification, status and resource type; never URLs.
       const hostname = (() => {
         try { return new URL(response.url()).hostname; }
@@ -171,6 +179,7 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     });
     page.on("requestfailed", (request) => {
       inFlightScripts.delete(request);
+      scriptStages.onFailed(request);
       resources.recordRequestFailure(request.resourceType(), request.failure()?.errorText);
     });
     page.on("pageerror", () => resources.recordPageError());
@@ -181,6 +190,7 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     // Snapshot every bounded visit. Never persist third-party content.
     const attemptSnapshots: Array<Record<string, string | number | boolean>> = [];
     const recordAttempt = async () => {
+      scriptStageSnapshots.push(scriptStages.snapshot());
       const state = await page.evaluate(() => ({
         finalHostname: location.hostname,
         finalPathname: location.pathname,
@@ -247,6 +257,7 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
           visitStatusCodes: visit.statusCodes,
           visitSnapshots: attemptSnapshots,
           resourceTelemetry: resources.snapshot(),
+          scriptNetworkStages: scriptStageSnapshots.slice(0, 5),
           finalHostname: diagnostic?.finalHostname ?? null,
           finalPathname: diagnostic?.finalPathname ?? null,
           documentTitleSha256: sha256(diagnostic?.documentTitleSha256Input ?? ""),
@@ -261,6 +272,9 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
       // Fail closed as before, but show a strictly allowlisted compact
       // diagnostic in the job log. Binary Actions artifacts may be inaccessible
       // to a read-only reviewer; raw page text and URLs still never enter logs.
+      console.error("PHASE13_SCRIPT_NETWORK_STAGE_DIAG " + JSON.stringify({
+        schemaVersion: 1, attempts: scriptStageSnapshots.slice(0, 5),
+      }));
       console.error("PHASE13_LIVE_NOT_READY_DIAG " + formatLiveSiteReadinessDiagnostic({
         attemptsUsed: visit.attemptsUsed,
         statusCodes: visit.statusCodes,
@@ -271,6 +285,9 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     }
     // Log the same allowlisted shape on successes for a controlled comparison.
     await recordAttempt();
+    console.info("PHASE13_SCRIPT_NETWORK_STAGE_DIAG " + JSON.stringify({
+      schemaVersion: 1, attempts: scriptStageSnapshots.slice(0, 5),
+    }));
     console.info("PHASE13_LIVE_READY_DIAG " + formatLiveSiteReadinessDiagnostic({
       attemptsUsed: visit.attemptsUsed,
       statusCodes: visit.statusCodes,
