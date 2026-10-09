@@ -34,7 +34,9 @@ export async function fetchWithTimeout<T>(
   signal.addEventListener("abort", onAbort, { once: true });
   if (signal.aborted) onAbort();
   try {
-    if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
+    // Await the rejection so an already-aborted signal cannot leave an
+    // unhandled rejected promise or accidentally dispatch a request.
+    if (signal.aborted) await interrupted;
     await Promise.race([context.beforeDispatch(), interrupted]);
     if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
     const response = await Promise.race([
@@ -173,6 +175,7 @@ async function consumeAnthropicStream(
       try {
         const evt = JSON.parse(data) as { type: string; delta?: { type: string; text?: string } };
         if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
+          if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
           fullText += evt.delta.text ?? "";
           onStream(fullText);
         }
@@ -282,7 +285,7 @@ async function consumeOpenAIStream(
       try {
         const evt = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
         const delta = evt.choices?.[0]?.delta?.content;
-        if (delta) { fullText += delta; onStream(fullText); }
+        if (delta && !signal.aborted) { fullText += delta; onStream(fullText); }
       } catch {
         logWarn("Malformed OpenAI SSE event", "consumeOpenAIStream");
       }
