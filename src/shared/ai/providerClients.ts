@@ -9,26 +9,57 @@ import type { SolverContentPart, SolverQuestionPackage } from "./questionPackage
 import { logError, logWarn } from "../utils/errorLogger";
 
 const REQUEST_TIMEOUT_MS = 30_000;
-export async function fetchWithTimeout(url: string, init: RequestInit, context: ProviderRequestContext): Promise<Response> {
+/**
+ * Owns the entire provider attempt, including response body consumption.
+ * Fetch resolving headers does NOT complete the request lease.
+ */
+export async function fetchWithTimeout<T>(
+  url: string,
+  init: RequestInit,
+  context: ProviderRequestContext,
+  consume: (response: Response, signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const controller = new AbortController();
-  let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
   const signal = context.signal ? AbortSignal.any([controller.signal, context.signal]) : controller.signal;
-  const request = { ...init, redirect: "error" as const, signal };
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    if (!signal.aborted) {
+      timedOut = true;
+      controller.abort();
+    }
+  }, REQUEST_TIMEOUT_MS);
+  let rejectInterrupted!: (reason: Error) => void;
+  const interrupted = new Promise<never>((_, reject) => { rejectInterrupted = reject; });
+  const onAbort = () => rejectInterrupted(new Error("AI_REQUEST_ABORTED"));
+  signal.addEventListener("abort", onAbort, { once: true });
+  if (signal.aborted) onAbort();
   try {
-    await context.beforeDispatch();
-    return await fetch(url, request);
+    // Await the rejection so an already-aborted signal cannot leave an
+    // unhandled rejected promise or accidentally dispatch a request.
+    if (signal.aborted) await interrupted;
+    await Promise.race([context.beforeDispatch(), interrupted]);
+    if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
+    const response = await Promise.race([
+      fetch(url, { ...init, redirect: "error", signal }),
+      interrupted,
+    ]);
+    const result = await Promise.race([consume(response, signal), interrupted]);
+    if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
+    return result;
   } catch (err) {
     const code = err && typeof err === "object" && "code" in err && typeof err.code === "string" ? err.code : undefined;
     const message = code?.startsWith("AI_") ? code : timedOut ? `Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
+      : signal.aborted ? "AI_REQUEST_ABORTED"
       : redactRequestSecret(err instanceof Error ? err.message : String(err), context.credential);
     const safeError = new Error(message);
     if (code) Object.assign(safeError, { code });
+    else if (signal.aborted && !timedOut) Object.assign(safeError, { code: "AI_REQUEST_ABORTED" });
     safeError.name = err instanceof Error ? redactRequestSecret(err.name, context.credential) : "Error";
     logError(timedOut ? "Request timeout" : "Fetch failed", safeError, "fetchWithTimeout", { url: redactRequestSecret(safeRequestLabel(new URL(url)), context.credential) });
     throw safeError;
   } finally {
     clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort);
   }
 }
 
@@ -112,21 +143,21 @@ export async function callAnthropic(
   });
 
   const auth = requestAuth(buildApiUrl(baseUrl, "/v1/messages"), context, { "anthropic-version": "2023-06-01" });
-  const res = await fetchWithTimeout(auth.url, { method: "POST", headers: auth.headers, body: requestBody }, context);
-  if (!res.ok) throw await boundedResponseError(res, context);
-
-  if (useStream && res.body) {
-    const text = await consumeAnthropicStream(res.body, partial => onStream!(redactRequestSecret(partial, context.credential)));
-    return buildResult(block, route, redactRequestSecret(text, context.credential));
-  }
-
-  const data = await readProviderJson<{ content: Array<{ type: string; text?: string }> }>(res);
-  return buildResult(block, route, redactRequestSecret(data.content.find(c => c.type === "text")?.text ?? "{}", context.credential));
+  return fetchWithTimeout(auth.url, { method: "POST", headers: auth.headers, body: requestBody }, context, async (res, signal) => {
+    if (!res.ok) throw await boundedResponseError(res, context);
+    if (useStream && res.body) {
+      const text = await consumeAnthropicStream(res.body, partial => onStream!(redactRequestSecret(partial, context.credential)), signal);
+      return buildResult(block, route, redactRequestSecret(text, context.credential));
+    }
+    const data = await readProviderJson<{ content: Array<{ type: string; text?: string }> }>(res);
+    return buildResult(block, route, redactRequestSecret(data.content.find(c => c.type === "text")?.text ?? "{}", context.credential));
+  });
 }
 
 async function consumeAnthropicStream(
   body: ReadableStream<Uint8Array>,
   onStream: (partial: string) => void,
+  signal: AbortSignal,
 ): Promise<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -134,6 +165,7 @@ async function consumeAnthropicStream(
 
   while (true) {
     const { done, value } = await reader.read();
+    if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
     if (done) break;
     const chunk = decoder.decode(value, { stream: true });
     for (const line of chunk.split("\n")) {
@@ -143,6 +175,7 @@ async function consumeAnthropicStream(
       try {
         const evt = JSON.parse(data) as { type: string; delta?: { type: string; text?: string } };
         if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
+          if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
           fullText += evt.delta.text ?? "";
           onStream(fullText);
         }
@@ -210,21 +243,19 @@ export async function callOpenAICompat(
     requestBody.max_tokens = 1024;
   }
 
-  const res = await fetchWithTimeout(auth.url, {
+  return fetchWithTimeout(auth.url, {
     method: "POST",
     headers: auth.headers,
     body: JSON.stringify(requestBody),
-  }, context);
-
-  if (!res.ok) throw await boundedResponseError(res, context);
-
-  if (useStream && res.body) {
-    const text = await consumeOpenAIStream(res.body, partial => onStream!(redactRequestSecret(partial, context.credential)));
-    return buildResult(block, route, redactRequestSecret(text, context.credential));
-  }
-
-  const data = await readProviderJson<{ choices: Array<{ message: { content: string } }> }>(res);
-  return buildResult(block, route, redactRequestSecret(data.choices?.[0]?.message?.content ?? "{}", context.credential));
+  }, context, async (res, signal) => {
+    if (!res.ok) throw await boundedResponseError(res, context);
+    if (useStream && res.body) {
+      const text = await consumeOpenAIStream(res.body, partial => onStream!(redactRequestSecret(partial, context.credential)), signal);
+      return buildResult(block, route, redactRequestSecret(text, context.credential));
+    }
+    const data = await readProviderJson<{ choices: Array<{ message: { content: string } }> }>(res);
+    return buildResult(block, route, redactRequestSecret(data.choices?.[0]?.message?.content ?? "{}", context.credential));
+  });
 }
 
 function isMiniMaxCodeProblem(block: QuestionBlock): boolean {
@@ -236,6 +267,7 @@ function isMiniMaxCodeProblem(block: QuestionBlock): boolean {
 async function consumeOpenAIStream(
   body: ReadableStream<Uint8Array>,
   onStream: (partial: string) => void,
+  signal: AbortSignal,
 ): Promise<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -243,6 +275,7 @@ async function consumeOpenAIStream(
 
   while (true) {
     const { done, value } = await reader.read();
+    if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
     if (done) break;
     const chunk = decoder.decode(value, { stream: true });
     for (const line of chunk.split("\n")) {
@@ -252,7 +285,7 @@ async function consumeOpenAIStream(
       try {
         const evt = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
         const delta = evt.choices?.[0]?.delta?.content;
-        if (delta) { fullText += delta; onStream(fullText); }
+        if (delta && !signal.aborted) { fullText += delta; onStream(fullText); }
       } catch {
         logWarn("Malformed OpenAI SSE event", "consumeOpenAIStream");
       }
@@ -288,18 +321,18 @@ export async function callGemini(
     parts.push({ text: prompt });
   } else parts.push({ text: prompt });
 
-  const res = await fetchWithTimeout(auth.url, {
+  return fetchWithTimeout(auth.url, {
     method: "POST",
     headers: auth.headers,
     body: JSON.stringify({
       contents: [{ parts }],
       generationConfig: { maxOutputTokens: 1024, temperature: 0.1 },
     }),
-  }, context);
-
-  if (!res.ok) throw await boundedResponseError(res, context);
-  const data = await readProviderJson<{ candidates: Array<{ content: { parts: Array<{ text: string }> } }> }>(res);
-  return buildResult(block, route, redactRequestSecret(data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}", context.credential));
+  }, context, async (res) => {
+    if (!res.ok) throw await boundedResponseError(res, context);
+    const data = await readProviderJson<{ candidates: Array<{ content: { parts: Array<{ text: string }> } }> }>(res);
+    return buildResult(block, route, redactRequestSecret(data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}", context.credential));
+  });
 }
 
 async function asOpenAIImageUrl(item: Extract<SolverContentPart, { type: "image" }>, supportsRemote: boolean): Promise<string> {
