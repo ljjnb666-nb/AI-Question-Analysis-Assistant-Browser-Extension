@@ -153,6 +153,14 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     const page = await context.newPage();
     await page.setViewportSize({ width: 1440, height: 960 });
     const resources = createLiveSiteDiagnostics();
+    // In-flight script counts let us distinguish upstream script stalls from
+    // ERR_ABORTED caused by our own bounded navigation retries.
+    // Request URLs and response bodies are never persisted or logged.
+    const inFlightScripts = new Set<object>();
+    page.on("request", (request) => {
+      if (request.resourceType() === "script") inFlightScripts.add(request);
+    });
+    page.on("requestfinished", (request) => { inFlightScripts.delete(request); });
     page.on("response", (response) => {
       // Store first-party classification, status and resource type; never URLs.
       const hostname = (() => {
@@ -162,6 +170,7 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
       resources.recordHttpFailure(response.request().resourceType(), response.status(), isPintiaPartyHost(hostname));
     });
     page.on("requestfailed", (request) => {
+      inFlightScripts.delete(request);
       resources.recordRequestFailure(request.resourceType(), request.failure()?.errorText);
     });
     page.on("pageerror", () => resources.recordPageError());
@@ -186,7 +195,11 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
         return;
       }
       const { documentTitle, ...sanitized } = state;
-      attemptSnapshots.push({ ...sanitized, documentTitleSha256: sha256(documentTitle) });
+      attemptSnapshots.push({
+        ...sanitized,
+        documentTitleSha256: sha256(documentTitle),
+        pendingScriptRequests: inFlightScripts.size,
+      });
     };
 
     // A successful HTTP 200 can still be an empty, challenged, or
