@@ -148,6 +148,7 @@ export async function probePendingPintiaScriptHost(
 
   return await new Promise<PublicEvidence>((resolve) => {
     let settled = false;
+    let launchComplete = false;
     const finishAll = (override?: Outcome) => {
       if (settled) return;
       settled = true;
@@ -167,7 +168,7 @@ export async function probePendingPintiaScriptHost(
       if (settled || attempt.outcome !== null) return;
       attempt.outcome = outcome;
       attempt.status = code;
-      if (attempts.length > 0 && attempts.every(a => a.outcome !== null)) finishAll();
+      if (launchComplete && attempts.length > 0 && attempts.every(a => a.outcome !== null)) finishAll();
     };
     Promise.resolve().then(() => resolver(hostname)).then((answers) => {
       if (settled) return;
@@ -216,6 +217,7 @@ export async function probePendingPintiaScriptHost(
           finished(attempt, "networkError");
         }
       }
+      launchComplete = true;
       if (attempts.length > 0 && attempts.every(a => a.outcome !== null)) finishAll();
     }).catch(() => {
       // Resolver rejected before any connection attempt.
