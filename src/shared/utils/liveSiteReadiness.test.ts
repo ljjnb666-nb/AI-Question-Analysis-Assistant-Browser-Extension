@@ -96,4 +96,32 @@ describe("Phase13A unowned public SPA content-ready retry gate", () => {
     })).rejects.toThrow("LIVE_TARGET_ATTEMPTS_INVALID");
     expect(navigate).not.toHaveBeenCalled();
   });
+
+  it("ISSUE83_RETRY_07 a pending script must stop destructive revisits and fail closed", async () => {
+    const navigate = vi.fn().mockResolvedValue(http(200));
+    const ready = vi.fn().mockRejectedValue(new Error("blocked SPA script"));
+    const delay = vi.fn(async () => undefined);
+    const stopIfContentPending = vi.fn(() => true);
+    const result = await visitLiveTargetUntilReady(navigate, ready, {
+      maxAttempts: 3, betweenAttempts: delay, stopIfContentPending,
+    });
+    expect(result).toMatchObject({ ready: false, attemptsUsed: 1, statusCodes: [200] });
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(delay).not.toHaveBeenCalled();
+    expect(stopIfContentPending).toHaveBeenCalledTimes(1);
+  });
+
+  it("ISSUE83_RETRY_08 a settled shell still retries normally with no fabricated PASS", async () => {
+    const navigate = vi.fn().mockResolvedValue(http(200));
+    const ready = vi.fn().mockRejectedValue(new Error("page did not hydrate"));
+    const delay = vi.fn(async () => undefined);
+    const stopIfContentPending = vi.fn(() => false);
+    const result = await visitLiveTargetUntilReady(navigate, ready, {
+      maxAttempts: 3, betweenAttempts: delay, stopIfContentPending,
+    });
+    expect(result).toMatchObject({ ready: false, attemptsUsed: 3, statusCodes: [200, 200, 200] });
+    expect(navigate).toHaveBeenCalledTimes(3);
+    expect(delay).toHaveBeenCalledTimes(2);
+    expect(stopIfContentPending).toHaveBeenCalledTimes(3);
+  });
 });
