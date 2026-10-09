@@ -1,7 +1,8 @@
 import { lookup } from "node:dns/promises";
 import https from "node:https";
 import { isIP } from "node:net";
-import type { ClientRequest, RequestOptions } from "node:http";
+import type { ClientRequest } from "node:http";
+import type { RequestOptions } from "node:https";
 
 /**
  * Diagnostic-only: the exact pending script's HOST is used in-memory.
