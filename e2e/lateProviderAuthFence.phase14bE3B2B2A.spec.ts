@@ -17,7 +17,7 @@ function pageHtml(): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>E3B2B2A delayed provider</title></head>
     <body style="margin:0">
     <form action="/__trap_submit" method="post" id="no-submit">
-      <section class="question-item" id="question">
+      <section class="question-item" id="question" style="width:720px;min-height:220px;padding:16px;box-sizing:border-box">
         <h2>1. What is two plus two?</h2>
         <label><input name="q1" type="radio" value="A">A. 3</label>
         <label><input name="q1" type="radio" value="B">B. 4</label>
@@ -48,7 +48,7 @@ function successResponse(): string {
 }
 
 async function probeServer() {
-  const pending = new Set<ServerResponse>();
+  const pending = new Map<ServerResponse, boolean>();
   let requested = 0;
   let released = false;
   let nativeSubmits = 0;
@@ -79,7 +79,7 @@ async function probeServer() {
         }
       };
       if (released) fulfill();
-      else { pending.add(res); res.on("close", () => pending.delete(res)); }
+      else { pending.set(res, stream); res.on("close", () => pending.delete(res)); }
       return;
     }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
@@ -95,11 +95,16 @@ async function probeServer() {
     nativeSubmits: () => nativeSubmits,
     release: () => {
       released = true;
-      for (const res of [...pending]) {
+      for (const [res, stream] of [...pending]) {
         if (res.writableEnded || res.destroyed) continue;
         const answer = JSON.parse(successResponse()) as { choices: Array<{ message: { content: string } }> };
-        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
-        res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: answer.choices[0].message.content } }] })}\n\ndata: [DONE]\n\n`);
+        if (stream) {
+          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
+          res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: answer.choices[0].message.content } }] })}\n\ndata: [DONE]\n\n`);
+        } else {
+          res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          res.end(successResponse());
+        }
       }
     },
     close: async () => {
