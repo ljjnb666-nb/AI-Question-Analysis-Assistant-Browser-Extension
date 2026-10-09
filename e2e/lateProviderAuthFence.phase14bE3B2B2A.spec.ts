@@ -7,8 +7,16 @@ import { readExtensionSettings, seedExtensionSettings, startTestAnalyticsBackend
 declare const chrome: {
   tabs: {
     query: (filter: { url: string }) => Promise<Array<{ id?: number }>>;
-    sendMessage: (id: number, message: { type: "STOP_AUTO_SOLVE_ALL"; generationId: string },
-      options: { frameId: number }) => Promise<{ ok?: boolean; error?: string }>;
+    sendMessage: (id: number, message:
+      | { type: "STOP_AUTO_SOLVE_ALL"; generationId: string }
+      | { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT"; expectedUrl: string },
+      options: { frameId: number }) => Promise<{
+        ok?: boolean; error?: string; snapshot?: {
+          candidates?: Array<{ block: { previewText: string; completeness?: { state: string } } }>;
+          autoSolve?: { running?: boolean; progress?: unknown };
+          detection?: { phase?: string };
+        };
+      }>;
   };
   storage: { session: { get: (keys: null) => Promise<Record<string, unknown>> } };
 };
@@ -173,6 +181,17 @@ test("@phase14b-e3b2b2a real held-provider reply after auth loss and account swi
       credential: { action: "REPLACE", value: ["fixture", "e3b2b2a", "not-a-real-key"].join("-") } });
     await expect(panel.locator("[data-candidate-workspace]")).toBeVisible({ timeout: 25_000 });
 
+    // First exercise the real viewport detection button. A scan-only owner
+    // mark without an eligible candidate must not masquerade as AI execution.
+    await panel.getByRole("group", { name: /^(候选题目操作|Candidate actions)$/ })
+      .getByRole("button", { name: /^(当前屏|Current View)$/ }).click();
+    await expect.poll(async () => {
+      const state = await worker.evaluate(async ({ id, url }) =>
+        chrome.tabs.sendMessage(id, { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT", expectedUrl: url }, { frameId: 0 }),
+      { id: tabId, url: examUrl });
+      return state.snapshot?.candidates?.length ?? 0;
+    }, { timeout: 12_000 }).toBeGreaterThan(0);
+
     // User-visible button must start the production auto-solve runtime. Do not
     // seed owner records, bypass runtime START, or fake the provider request.
     await panel.getByRole("group", { name: /^(候选题目操作|Candidate actions)$/ })
@@ -181,7 +200,19 @@ test("@phase14b-e3b2b2a real held-provider reply after auth loss and account swi
     const [oldGeneration] = await ownerGenerations(worker, tabId);
     // Critical anti-vacuity gate: a real OpenAI-protocol request must be
     // received and held *before* authority is revoked.
-    await expect.poll(() => probe.requests(), { timeout: 40_000 }).toBeGreaterThan(0);
+    try {
+      await expect.poll(() => probe.requests(), { timeout: 15_000 }).toBeGreaterThan(0);
+    } catch {
+      const state = await worker.evaluate(async ({ id, url }) =>
+        chrome.tabs.sendMessage(id, { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT", expectedUrl: url }, { frameId: 0 }),
+      { id: tabId, url: examUrl });
+      const metadata = await panel.evaluate(() =>
+        chrome.runtime.sendMessage({ type: "AI_CONNECTION_GET_ACTIVE_METADATA" }));
+      const ui = await panel.locator("body").innerText();
+      throw new Error("AI_REQUEST_NOT_OBSERVED: " + JSON.stringify({
+        runtime: state.snapshot, metadata, ui: ui.slice(-1400),
+      }).slice(0, 2900));
+    }
     expect(probe.pending()).toBeGreaterThan(0);
 
     await auth.revokeSession(oldAccount.userId, oldAccount.authToken);
