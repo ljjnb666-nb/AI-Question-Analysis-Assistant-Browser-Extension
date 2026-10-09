@@ -45,6 +45,16 @@ const SENSITIVE_QUERY_PARAMETER_NAMES = new Set([
   "credentials",
   "awsaccesskeyid",
   "googleaccessid",
+  "cookie",
+  "setcookie",
+  "sessionid",
+  "sessionkey",
+  "csrftoken",
+  "xcsrftoken",
+  "authcode",
+  "proxyauthorization",
+  "privatekey",
+  "clientassertion",
 ]);
 
 const SENSITIVE_LOG_FIELD_NAMES = new Set([
@@ -67,10 +77,25 @@ const SENSITIVE_LOG_FIELD_NAMES = new Set([
   "sessiontoken",
   "providercredential",
   "providercredentials",
+  "cookie",
+  "setcookie",
+  "proxyauthorization",
+  "sessionid",
+  "sessionkey",
+  "csrftoken",
+  "xcsrftoken",
+  "authcode",
+  "privatekey",
+  "clientassertion",
+  "encryptionkey",
 ]);
 
 const URL_IN_TEXT_PATTERN = /https?:\/\/[^\s"'<>]+/gi;
 const TRAILING_URL_PUNCTUATION = /[),.;!?]+$/;
+/** Sensitive HTTP headers may appear verbatim in thrown Error messages/stacks,
+ * not only in structured log fields. Consume the complete header value on
+ * that line; matching only a token prefix could leak Cookie attributes. */
+const CREDENTIAL_HEADER_LINE = /\b(Authorization|Proxy-Authorization|Cookie|Set-Cookie|X-Api-Key|Api-Key)\s*:\s*[^\r\n]*/gi;
 
 function normalizeCredentialName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -124,7 +149,10 @@ export function redactUrlForLog(value: string): string {
 }
 
 function sanitizeLogString(value: string): string {
-  return value.replace(URL_IN_TEXT_PATTERN, (rawUrl) => {
+  // Sanitize raw HTTP header dumps before parsing embedded URLs; credentials
+  // may never have URL syntax, and can be present in Error.stack as well.
+  const withoutHeaders = value.replace(CREDENTIAL_HEADER_LINE, (_match, name: string) => `${name}: [REDACTED]`);
+  return withoutHeaders.replace(URL_IN_TEXT_PATTERN, (rawUrl) => {
     let url = rawUrl;
     let punctuation = "";
     while (TRAILING_URL_PUNCTUATION.test(url)) {
