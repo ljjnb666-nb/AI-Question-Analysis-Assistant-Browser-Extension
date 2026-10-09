@@ -154,34 +154,94 @@ export async function callAnthropic(
   });
 }
 
+/**
+ * SSE framing is based on blank-line-delimited events, not on fetch chunks or
+ * individual data lines. Bound both an incomplete line and an entire event.
+ * Never log provider data: it may contain question text or credentials.
+ */
+async function* readSseData(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const MAX_SSE_FRAME = 64 * 1024;
+  let pendingLine = "";
+  let dataLines: string[] = [];
+  let eventLength = 0;
+  let exhausted = false;
+
+  function acceptLine(rawLine: string): string | null {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line.length > MAX_SSE_FRAME) throw new Error("AI_SSE_FRAME_TOO_LARGE");
+    if (line === "") {
+      if (dataLines.length === 0) return null;
+      const frame = dataLines.join("\n");
+      dataLines = [];
+      eventLength = 0;
+      return frame;
+    }
+    if (line.startsWith("data:") || line === "data") {
+      let data = line === "data" ? "" : line.slice(5);
+      if (data.startsWith(" ")) data = data.slice(1);
+      eventLength += data.length + 1;
+      if (eventLength > MAX_SSE_FRAME) throw new Error("AI_SSE_FRAME_TOO_LARGE");
+      dataLines.push(data);
+    }
+    // Ignore SSE comments, event IDs, retry fields, and event types.
+    return null;
+  }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
+      pendingLine += done ? decoder.decode() : decoder.decode(value, { stream: true });
+
+      let newline = pendingLine.indexOf("\n");
+      while (newline >= 0) {
+        if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
+        const line = pendingLine.slice(0, newline);
+        pendingLine = pendingLine.slice(newline + 1);
+        const frame = acceptLine(line);
+        if (frame !== null) {
+          if (frame.trim() === "[DONE]") return;
+          yield frame;
+        }
+        newline = pendingLine.indexOf("\n");
+      }
+      if (pendingLine.length > MAX_SSE_FRAME) throw new Error("AI_SSE_FRAME_TOO_LARGE");
+
+      if (done) {
+        // Some providers close immediately after their final data line.
+        const lastFrame = pendingLine ? acceptLine(pendingLine) : null;
+        const frame = lastFrame ?? (dataLines.length ? dataLines.join("\n") : null);
+        exhausted = true;
+        if (frame !== null && frame.trim() !== "[DONE]") yield frame;
+        return;
+      }
+    }
+  } finally {
+    // A terminal marker, abort, malformed stream, or consumer exception must
+    // not leave a live reader or late callback behind.
+    if (!exhausted) {
+      try { await reader.cancel(); } catch { /* best-effort stream shutdown */ }
+    }
+    reader.releaseLock();
+  }
+}
+
 async function consumeAnthropicStream(
   body: ReadableStream<Uint8Array>,
   onStream: (partial: string) => void,
   signal: AbortSignal,
 ): Promise<string> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
   let fullText = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
-    if (done) break;
-    const chunk = decoder.decode(value, { stream: true });
-    for (const line of chunk.split("\n")) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6).trim();
-      if (data === "[DONE]") break;
-      try {
-        const evt = JSON.parse(data) as { type: string; delta?: { type: string; text?: string } };
-        if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
-          if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
-          fullText += evt.delta.text ?? "";
-          onStream(fullText);
-        }
-      } catch {
-        logWarn("Malformed SSE event", "consumeAnthropicStream");
-      }
+  for await (const data of readSseData(body, signal)) {
+    let evt: { type: string; delta?: { type: string; text?: string } };
+    try { evt = JSON.parse(data) as typeof evt; }
+    catch { logWarn("Malformed SSE event", "consumeAnthropicStream"); continue; }
+    if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
+      if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
+      fullText += evt.delta.text ?? "";
+      onStream(fullText);
     }
   }
   return fullText;
@@ -269,26 +329,16 @@ async function consumeOpenAIStream(
   onStream: (partial: string) => void,
   signal: AbortSignal,
 ): Promise<string> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
   let fullText = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
-    if (done) break;
-    const chunk = decoder.decode(value, { stream: true });
-    for (const line of chunk.split("\n")) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6).trim();
-      if (data === "[DONE]") break;
-      try {
-        const evt = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
-        const delta = evt.choices?.[0]?.delta?.content;
-        if (delta && !signal.aborted) { fullText += delta; onStream(fullText); }
-      } catch {
-        logWarn("Malformed OpenAI SSE event", "consumeOpenAIStream");
-      }
+  for await (const data of readSseData(body, signal)) {
+    let evt: { choices?: Array<{ delta?: { content?: string } }> };
+    try { evt = JSON.parse(data) as typeof evt; }
+    catch { logWarn("Malformed OpenAI SSE event", "consumeOpenAIStream"); continue; }
+    const delta = evt.choices?.[0]?.delta?.content;
+    if (delta) {
+      if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
+      fullText += delta;
+      onStream(fullText);
     }
   }
   return fullText;
