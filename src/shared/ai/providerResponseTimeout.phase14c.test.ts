@@ -78,7 +78,7 @@ describe("PHASE14C_01 full provider attempt lifetime", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
       start(controller) {
         bodyController = controller;
-        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"first"}}]}\n'));
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"first"}}]}\n\n'));
       },
     }), { status: 200 })));
     const pending = callOpenAICompat(block, "text", context, (partial) => {
@@ -90,7 +90,7 @@ describe("PHASE14C_01 full provider attempt lifetime", () => {
     expect(partials).toEqual(["first"]);
     abort.abort();
     await rejected;
-    bodyController.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"late"}}]}\n'));
+    bodyController.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"late"}}]}\n\n'));
     await Promise.resolve();
     await Promise.resolve();
     expect(partials).toEqual(["first"]);
