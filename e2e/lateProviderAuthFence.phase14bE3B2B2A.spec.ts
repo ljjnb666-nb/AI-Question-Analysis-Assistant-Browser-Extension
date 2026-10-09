@@ -33,8 +33,8 @@ function pageHtml(): string {
         <label><input name="q1" type="radio" value="B">B. 4</label>
         <label><input name="q1" type="radio" value="C">C. 5</label>
         <label><input name="q1" type="radio" value="D">D. 6</label>
-        <input name="answer" id="answer" autocomplete="off">
       </section>
+      <input name="answer" id="answer" autocomplete="off" aria-label="Unrelated text control">
       <button type="submit">Submit answers</button>
     </form><div style="height:1200px"></div>
     <script>
@@ -343,8 +343,20 @@ test("@phase14b-e3b2b2b1 new UI generation survives duplicate stale STOP and rel
     // Positive control: authorized generation #2 receives its own response
     // and must be able to fill the real radio input without submitting.
     expect(probe.releaseOne(2)).toBe(true);
-    await expect.poll(async () => (await answerState(exam)).selected,
-      { timeout: 20_000 }).toContain("B");
+    try {
+      await expect.poll(async () => (await answerState(exam)).selected,
+        { timeout: 20_000 }).toContain("B");
+    } catch {
+      const runtime = await worker.evaluate(async ({ id, url }) =>
+        chrome.tabs.sendMessage(id, { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT", expectedUrl: url },
+          { frameId: 0 }), { id: tabId, url });
+      const ui = await panel.locator("body").innerText();
+      throw new Error("AUTHORIZED_FILL_NOT_OBSERVED: " + JSON.stringify({
+        answerState: await answerState(exam), pending: probe.pendingIndices(),
+        owner: await ownerGenerations(worker, tabId), runtime: runtime.snapshot?.autoSolve,
+        uiStatus: ui.slice(-650),
+      }).slice(0, 1700));
+    }
     const after = await answerState(exam);
     expect(after.submits).toBe(0);
     expect(probe.nativeSubmits()).toBe(0);
