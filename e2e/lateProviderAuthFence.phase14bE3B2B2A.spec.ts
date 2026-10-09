@@ -255,3 +255,111 @@ test("@phase14b-e3b2b2a real held-provider reply after auth loss and account swi
     await auth.close();
   }
 });
+
+
+test("@phase14b-e3b2b2b1 new UI generation survives duplicate stale STOP and released old AI response", async () => {
+  test.setTimeout(150_000);
+  const auth = await startTestAnalyticsBackend();
+  const probe = await probeServer();
+  let context: BrowserContext | undefined;
+  try {
+    const account = await auth.registerAccount("e3b2b2b1-overlap");
+    context = await launchExtensionContext();
+    await routeCanonicalOpenAIToFixture(context, probe.origin);
+    const extensionId = await resolveExtensionId(context);
+    const worker = await getWorker(context);
+    const exam = await context.newPage();
+    const url = probe.origin + "/overlap";
+    await exam.goto(url);
+    const tabId = await tabIdFor(worker, url);
+    const baseline = await answerState(exam);
+    expect(baseline).toEqual({ text: "", selected: [], submits: 0, changes: 0 });
+
+    await seedExtensionSettings(context, extensionId, {
+      analyticsBaseUrl: auth.baseUrl, userId: account.userId,
+      userEmail: account.email, authToken: account.authToken,
+    });
+    const panel = await context.newPage();
+    await panel.goto("chrome-extension://" + extensionId + "/sidepanel/sidepanel.html");
+    await expect(panel.locator("[data-candidate-workspace]")).toBeVisible({ timeout: 25_000 });
+    await seedAIConnection(panel, {
+      presetId: "openai", selectedModelId: "gpt-5.5",
+      credential: { action: "REPLACE", value: "fixture-e3b2b2b1-not-a-real-key" },
+    });
+    const actionGroup = panel.getByRole("group", { name: /^(候选题目操作|Candidate actions)$/ });
+    await actionGroup.getByRole("button", { name: /^(当前屏|Current View)$/ }).click();
+    await expect.poll(async () => {
+      const result = await worker.evaluate(async ({ id, url }) =>
+        chrome.tabs.sendMessage(id, { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT", expectedUrl: url },
+          { frameId: 0 }), { id: tabId, url });
+      return result.snapshot?.candidates?.length ?? 0;
+    }, { timeout: 12_000 }).toBeGreaterThan(0);
+
+    // The real first user gesture creates the original owner and reaches the
+    // canonical provider transport, where its answer remains held.
+    await actionGroup.getByRole("button", { name: /^(解析并填答|Solve & Fill)$/ }).click();
+    await expect.poll(() => ownerGenerations(worker, tabId), { timeout: 15_000 }).toHaveLength(1);
+    const [oldGeneration] = await ownerGenerations(worker, tabId);
+    await expect.poll(() => probe.requests(), { timeout: 15_000 }).toBe(1);
+    expect(probe.pendingIndices()).toEqual([1]);
+
+    // The production stop UI revokes old authority and aborts its attempt.
+    await actionGroup.getByRole("button", { name: /^(停止解析并填答|Stop Solve & Fill)$/ }).click();
+    await expect.poll(async () => (await ownerGenerations(worker, tabId)).includes(oldGeneration),
+      { timeout: 15_000 }).toBe(false);
+    await expect(actionGroup.getByRole("button", { name: /^(解析并填答|Solve & Fill)$/ }))
+      .toBeEnabled({ timeout: 15_000 });
+
+    // The new UI START must own a DIFFERENT generation with its own provider
+    // request, still held while the old network request is released.
+    await actionGroup.getByRole("button", { name: /^(解析并填答|Solve & Fill)$/ }).click();
+    await expect.poll(async () => (await ownerGenerations(worker, tabId))
+      .filter(g => g !== oldGeneration).length, { timeout: 15_000 }).toBe(1);
+    const [newGeneration] = (await ownerGenerations(worker, tabId))
+      .filter(g => g !== oldGeneration);
+    expect(newGeneration).not.toBe(oldGeneration);
+    await expect.poll(() => probe.requests(), { timeout: 15_000 }).toBe(2);
+    expect(probe.pendingIndices()).toContain(2);
+
+    // Replay/duplicate old STOP directly through the live extension runtime.
+    // No tab-owner seeding or synthetic START is used.
+    for (let n = 0; n < 3; n++) {
+      expect(await worker.evaluate(async ({ id, generationId }) =>
+        chrome.tabs.sendMessage(id, { type: "STOP_AUTO_SOLVE_ALL", generationId }, { frameId: 0 }),
+        { id: tabId, generationId: oldGeneration }))
+        .toEqual({ ok: false, error: "STALE_WORK_GENERATION" });
+      expect(await ownerGenerations(worker, tabId)).toContain(newGeneration);
+    }
+
+    // Old response is either already aborted (cannot deliver) or gets its
+    // original valid-looking answer. It must not commit while #2 is pending.
+    probe.releaseOne(1);
+    await exam.waitForTimeout(650);
+    expect(await answerState(exam)).toEqual(baseline);
+    expect(await ownerGenerations(worker, tabId)).toContain(newGeneration);
+    expect(probe.pendingIndices()).toContain(2);
+    expect(probe.nativeSubmits()).toBe(0);
+
+    // Positive control: authorized generation #2 receives its own response
+    // and must be able to fill the real radio input without submitting.
+    expect(probe.releaseOne(2)).toBe(true);
+    await expect.poll(async () => (await answerState(exam)).selected,
+      { timeout: 20_000 }).toContain("B");
+    const after = await answerState(exam);
+    expect(after.submits).toBe(0);
+    expect(probe.nativeSubmits()).toBe(0);
+
+    // Even after the newer answer commits, stale old STOP stays rejected.
+    for (let n = 0; n < 2; n++) {
+      expect(await worker.evaluate(async ({ id, generationId }) =>
+        chrome.tabs.sendMessage(id, { type: "STOP_AUTO_SOLVE_ALL", generationId }, { frameId: 0 }),
+        { id: tabId, generationId: oldGeneration }))
+        .toEqual({ ok: false, error: "STALE_WORK_GENERATION" });
+    }
+  } finally {
+    probe.release();
+    if (context) await closeExtensionContext(context);
+    await probe.close();
+    await auth.close();
+  }
+});
