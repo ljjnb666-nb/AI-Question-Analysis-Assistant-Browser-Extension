@@ -6,13 +6,13 @@ import type { RequestOptions } from "node:https";
 
 /**
  * Diagnostic-only: the exact pending script's HOST is used in-memory.
- * The only extra network operation is one anonymous HEAD / on that host.
+ * At most two anonymous HEAD / requests on DISTINCT vetted public A records.
  * This is NOT the script pathname nor the browser's actual connection.
  */
 export type ScriptRequestLike = { resourceType(): string; url(): string };
 type Mark = "dns" | "tcp" | "tls" | "headers";
 type ConnectionOutcome = "response" | "timeout" | "networkError";
-type Outcome = ConnectionOutcome | "dnsUnavailable" | "blockedResolution" | "ineligibleHost";
+type Outcome = ConnectionOutcome | "mixedReachability" | "dnsUnavailable" | "blockedResolution" | "ineligibleHost";
 type PublicEvidence = {
   schemaVersion: 1;
   target: "pending-pintia-script-subdomain";
@@ -161,7 +161,12 @@ export async function probePendingPintiaScriptHost(
         }
       }
       const first = attempts[0];
-      resolve(evidence(override ?? first?.outcome ?? "dnsUnavailable", first?.status ?? null));
+      const outcomes = attempts.map(a => a.outcome);
+      const mixed = outcomes.includes("response") && outcomes.some(x => x !== "response");
+      resolve(evidence(
+        mixed ? "mixedReachability" : override ?? first?.outcome ?? "dnsUnavailable",
+        first?.status ?? null,
+      ));
     };
     const timer = setTimeout(() => finishAll("timeout"), budget);
     const finished = (attempt: Connection, outcome: ConnectionOutcome, code: number | null = null) => {
