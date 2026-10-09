@@ -56,7 +56,7 @@ describe("PHASE14C_02B_R1 SSE framing through production adapters", () => {
 
   it("reconstructs multiline data belonging to one event, with comments and CRLF boundaries", async () => {
     const event = openAIEvent(answer);
-    const at = event.indexOf(',"');
+    const at = event.indexOf("[");
     expect(at).toBeGreaterThan(0);
     stubSse(":keepalive\r\nevent: message\r\ndata: " + event.slice(0, at + 1) +
       "\r\ndata: " + event.slice(at + 1) + "\r\n\r\ndata: [DONE]\r\n\r\n", 4);
