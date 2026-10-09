@@ -60,6 +60,10 @@ function successResponse(): string {
 
 async function probeServer() {
   const pending = new Map<number, ServerResponse>();
+  // Transport observability: a fixture write is NOT proof that an aborted
+  // browser request received or processed the AI completion.
+  const responseWritten = new Set<number>();
+  const closedWithoutResponse = new Set<number>();
   let requested = 0;
   let released = false;
   let nativeSubmits = 0;
@@ -82,11 +86,16 @@ async function probeServer() {
       const requestIndex = requested;
       const fulfill = () => {
         if (res.writableEnded || res.destroyed) return;
+        responseWritten.add(requestIndex);
         res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
         res.end(successResponse());
       };
+      res.on("close", () => {
+        pending.delete(requestIndex);
+        if (!responseWritten.has(requestIndex)) closedWithoutResponse.add(requestIndex);
+      });
       if (released) fulfill();
-      else { pending.set(requestIndex, res); res.on("close", () => pending.delete(requestIndex)); }
+      else pending.set(requestIndex, res);
       return;
     }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
@@ -101,11 +110,16 @@ async function probeServer() {
     pending: () => pending.size,
     nativeSubmits: () => nativeSubmits,
     pendingIndices: () => [...pending.keys()].sort((a, b) => a - b),
-    // Deliver only the specified request; an aborted request can have
+    responseWritten: (index: number) => responseWritten.has(index),
+    closedWithoutResponse: (index: number) => closedWithoutResponse.has(index),
+    // Write to the fixture HTTP proxy, NOT necessarily to a cancelled browser
+    // request. The application-side late-completion fence is tested separately.
+    // An aborted request can have
     // disconnected already, and cannot count as delivered bytes.
     releaseOne: (index: number): boolean => {
       const res = pending.get(index);
       if (!res || res.writableEnded || res.destroyed) return false;
+      responseWritten.add(index);
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(successResponse());
       return true;
@@ -114,6 +128,8 @@ async function probeServer() {
       released = true;
       for (const res of [...pending.values()]) {
         if (res.writableEnded || res.destroyed) continue;
+        const index = [...pending.entries()].find(([, response]) => response === res)?.[0];
+        if (index !== undefined) responseWritten.add(index);
         res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
         res.end(successResponse());
       }
@@ -257,7 +273,7 @@ test("@phase14b-e3b2b2a real held-provider reply after auth loss and account swi
 });
 
 
-test("@phase14b-e3b2b2b1 new UI generation survives duplicate stale STOP and released old AI response", async () => {
+test("@phase14b-e3b2b2b1 new UI generation survives duplicate stale STOP and old provider cancellation or proxy write", async () => {
   test.setTimeout(150_000);
   const auth = await startTestAnalyticsBackend();
   const probe = await probeServer();
@@ -331,9 +347,20 @@ test("@phase14b-e3b2b2b1 new UI generation survives duplicate stale STOP and rel
       expect(await ownerGenerations(worker, tabId)).toContain(newGeneration);
     }
 
-    // Old response is either already aborted (cannot deliver) or gets its
-    // original valid-looking answer. It must not commit while #2 is pending.
-    probe.releaseOne(1);
+    // This is a transport-level observation, NOT proof of stale content-script
+    // delivery. A stopped run may close #1; otherwise the fixture can write
+    // bytes only as far as Playwright's intercepted route.fetch proxy.
+    const oldProxyWrite = probe.releaseOne(1);
+    if (oldProxyWrite) {
+      expect(probe.responseWritten(1)).toBe(true);
+      expect(probe.closedWithoutResponse(1)).toBe(false);
+    } else {
+      await expect.poll(() => probe.closedWithoutResponse(1), { timeout: 10_000 }).toBe(true);
+      expect(probe.responseWritten(1)).toBe(false);
+    }
+    console.info("[E3B2B2B1] old provider #1:", oldProxyWrite
+      ? "HTTP fixture wrote to Playwright proxy (browser delivery NOT established)"
+      : "transport closed without response");
     await exam.waitForTimeout(650);
     expect(await answerState(exam)).toEqual(baseline);
     expect(await ownerGenerations(worker, tabId)).toContain(newGeneration);

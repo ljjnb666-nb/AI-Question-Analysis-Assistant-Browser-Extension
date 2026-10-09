@@ -131,6 +131,61 @@ describe("auto-solve history commit telemetry", () => {
     expect(logEvent).not.toHaveBeenCalledWith("provider_result_discarded_stale", expect.anything());
   });
 
+  it("E3B2B2B1-LATE-AI-01 rejects a resolved old provider completion while a replacement run commits", async () => {
+    const block = makeBlock();
+    const oldReply = deferred<ParseResult>();
+    const newReply = deferred<ParseResult>();
+    const oldAnswer = { ...makeResult(), answer: "stale-old-answer" };
+    const newAnswer = { ...makeResult(), answer: "authorized-new-answer" };
+    const history: HistoryEntry[] = [];
+    const contexts: ParseQuestionRuntimeContext[] = [];
+    const addHistoryEntryIfCurrent = vi.fn(async (entry: HistoryEntry, isCurrent: () => boolean) => {
+      if (!isCurrent()) return false;
+      history.push(entry);
+      return true;
+    });
+    const bridge = createBridge(block, newAnswer, addHistoryEntryIfCurrent, {
+      parseWithTieredRetries: (runtimeContext) => {
+        if (!runtimeContext) throw new Error("MISSING_REAL_RUNTIME_CONTEXT");
+        contexts.push(runtimeContext);
+        if (contexts.length === 1) return oldReply.promise;
+        if (contexts.length === 2) return newReply.promise;
+        throw new Error("UNEXPECTED_PROVIDER_REQUEST");
+      },
+    });
+
+    // Both starts go through the actual auto-solve parsing bridge. Deliberately
+    // ignore the first AbortSignal inside the simulated provider, so its
+    // Promise DOES resolve after STOP and after the new attempt starts.
+    const oldPending = bridge.parseBlockForAutoSolve(block);
+    await vi.waitFor(() => expect(contexts).toHaveLength(1));
+    bridge.abortCurrentSolveAttempt();
+    expect(contexts[0].signal?.aborted).toBe(true);
+
+    const newPending = bridge.parseBlockForAutoSolve(block);
+    await vi.waitFor(() => expect(contexts).toHaveLength(2));
+    expect(contexts[1].signal?.aborted).toBe(false);
+
+    // This explicitly exercises application-side receipt of stale completion;
+    // unlike HTTP route.fetch, it cannot be vacuously satisfied by cancellation.
+    oldReply.resolve(oldAnswer);
+    await expect(oldPending).rejects.toThrow("STALE_QUESTION_REVISION");
+    expect(bridge.isCurrentAutoSolveResult(block, oldAnswer)).toBe(false);
+    await expect(bridge.recordAutoSolveHistory(history, block, oldAnswer)).resolves.toBe(false);
+    expect(addHistoryEntryIfCurrent).not.toHaveBeenCalled();
+    expect(history).toEqual([]);
+    expect(contexts[1].signal?.aborted).toBe(false);
+
+    newReply.resolve(newAnswer);
+    const parsedNew = await newPending;
+    expect(parsedNew.answer).toBe("authorized-new-answer");
+    expect(bridge.isCurrentAutoSolveResult(block, parsedNew)).toBe(true);
+    await expect(bridge.recordAutoSolveHistory(history, block, parsedNew)).resolves.toBe(true);
+    expect(addHistoryEntryIfCurrent).toHaveBeenCalledTimes(1);
+    expect(history).toHaveLength(1);
+    expect(logEvent).toHaveBeenCalledWith("parse_success", expect.objectContaining({ source: "auto_solve_commit" }));
+  });
+
   it("P10B-AUTOSOLVE-SHUTDOWN-01 rejects a late provider result after the runtime generation is invalidated", async () => {
     const block = makeBlock();
     const result = makeResult();
