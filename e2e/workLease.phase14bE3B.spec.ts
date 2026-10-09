@@ -14,9 +14,25 @@ declare const chrome: {
     executeScript: (options: { target: { tabId: number; allFrames: boolean }; files: string[] }) =>
       Promise<Array<{ frameId: number }>>;
   };
+  runtime: {
+    onMessage: {
+      addListener: (listener: (
+        message: { type?: string; generationId?: string; currentStep?: number },
+        sender: { tab?: { id?: number }; frameId?: number },
+      ) => void) => void;
+    };
+  };
 };
 
-type ProbeWindow = Window & { __scanScrollCalls: number; __scanSubmits: number };
+type ProbeWindow = Window & {
+  __scanScrollCalls: number;
+  __scanScrollTops: number[];
+  __scanSubmits: number;
+};
+
+type ScanProgressEvent = { generationId: string; tabId: number; frameId: number; step: number };
+type ProgressRecorder = typeof globalThis & { __e3bScanProgress?: ScanProgressEvent[] };
+
 
 function pageHtml(label: string, nested: boolean): string {
   return '<!doctype html><html><head><meta charset="utf-8"><title>E3B ' + label +
@@ -26,9 +42,13 @@ function pageHtml(label: string, nested: boolean): string {
     '<h2>' + label + '. Which value equals two plus two?</h2>' +
     '<button>A. 3</button><button>B. 4</button><button>C. 5</button></section>' +
     (nested ? '' : '<iframe id="question-frame" src="/nested" style="height:680px;width:830px;border:0"></iframe>') +
-    '<div id="long-content" style="height:' + (nested ? 5200 : label === "B" ? 22000 : 8400) + 'px"></div>' +
-    '<script>window.__scanScrollCalls=0;window.__scanSubmits=0;' +
-    'window.addEventListener("scroll",()=>{window.__scanScrollCalls++});' +
+    // A real overlapping scan must still be active when the third START is
+    // acknowledged: these pages exceed the scan's first few scroll steps.
+    '<div id="long-content" style="height:64000px"></div>' +
+    '<script>window.__scanScrollCalls=0;window.__scanScrollTops=[];window.__scanSubmits=0;' +
+    'window.addEventListener("scroll",()=>{window.__scanScrollCalls++;' +
+    'window.__scanScrollTops.push(window.scrollY);' +
+    'if(window.__scanScrollTops.length>256)window.__scanScrollTops.shift()});' +
     'document.querySelector("#never-submit").addEventListener("submit",(event)=>{' +
     'event.preventDefault();window.__scanSubmits++});</script></body></html>';
 }
@@ -80,25 +100,77 @@ async function send(worker: Worker, tabId: number, message: ScanMessage, frameId
     chrome.tabs.sendMessage(tabId, message, { frameId }), { tabId, message, frameId });
 }
 
-async function scrollState(page: Page): Promise<{ calls: number; top: number; submits: number }> {
+/**
+ * Observe real extension PROGRESS messages in its service worker. This is
+ * passive: the browser produces START, lease, scrolls and messages itself.
+ * An accepted START ACK alone does not prove the scan reached its first step.
+ */
+async function recordScanProgress(worker: Worker): Promise<void> {
+  await worker.evaluate(() => {
+    const state = globalThis as ProgressRecorder;
+    state.__e3bScanProgress = [];
+    chrome.runtime.onMessage.addListener((message, sender) => {
+      if (message.type !== "FULL_PAGE_DETECT_PROGRESS" || !message.generationId) return;
+      state.__e3bScanProgress?.push({
+        generationId: message.generationId,
+        tabId: sender.tab?.id ?? -1,
+        frameId: sender.frameId ?? -1,
+        step: message.currentStep ?? -1,
+      });
+    });
+  });
+}
+
+async function scanProgress(worker: Worker): Promise<ScanProgressEvent[]> {
+  return worker.evaluate(() => [...((globalThis as ProgressRecorder).__e3bScanProgress ?? [])]);
+}
+
+async function expectRealScanProgress(worker: Worker, generationId: string, tabId: number, frameId: number) {
+  await expect.poll(async () => (await scanProgress(worker)).some(event =>
+    event.generationId === generationId && event.tabId === tabId
+    && event.frameId === frameId && event.step >= 1
+  ), { timeout: 8000 }).toBe(true);
+}
+
+async function scrollState(page: Page): Promise<{ calls: number; top: number; submits: number; tops: number[]; scrollRoot: string }> {
   return page.evaluate(() => {
     const w = window as unknown as ProbeWindow;
-    return { calls: w.__scanScrollCalls, top: window.scrollY, submits: w.__scanSubmits };
+    const root = document.scrollingElement;
+    return {
+      calls: w.__scanScrollCalls, top: window.scrollY, submits: w.__scanSubmits,
+      tops: [...w.__scanScrollTops],
+      scrollRoot: root ? root.tagName.toLowerCase() + (root.id ? "#" + root.id : "") : "none",
+    };
   });
+}
+
+async function armScrollObservation(page: Page): Promise<void> {
+  await page.evaluate(() => { (window as unknown as ProbeWindow).__scanScrollTops = []; });
+}
+
+async function observedScanTop(page: Page): Promise<boolean> {
+  return (await scrollState(page)).tops.includes(0);
 }
 
 test("@phase14b-e3b REAL_CHROMIUM isolates two tabs, nested frame and reinjection generation", async () => {
   test.slow();
   const server = await serveProbe();
   const context = await launchExtensionContext();
+  let observedWorker: Worker | undefined;
+  let observedTabA: Page | undefined;
+  let observedTabB: Page | undefined;
   try {
     const extensionId = await resolveExtensionId(context);
     const worker = await serviceWorker(context);
+    observedWorker = worker;
+    await recordScanProgress(worker);
     const driver = await context.newPage();
     await driver.goto("chrome-extension://" + extensionId + "/popup/popup.html");
 
     const tabA = await context.newPage();
     const tabB = await context.newPage();
+    observedTabA = tabA;
+    observedTabB = tabB;
     await tabA.goto(server.origin + "/a");
     await tabB.goto(server.origin + "/b");
     await expect(tabA.frameLocator("#question-frame").locator("#never-submit")).toBeVisible();
@@ -107,6 +179,15 @@ test("@phase14b-e3b REAL_CHROMIUM isolates two tabs, nested frame and reinjectio
     await tabA.frameLocator("#question-frame").locator("body").evaluate(() => window.scrollTo(0, 700));
     await expect.poll(async () => (await scrollState(tabA)).top).toBe(920);
     await expect.poll(async () => (await scrollState(tabB)).top).toBe(920);
+    await expect.poll(() => tabA.frameLocator("#question-frame").locator("body")
+      .evaluate(() => window.scrollY)).toBe(700);
+    // Discard scroll history from the test's initial positioning; subsequent
+    // zero positions must come from real extension scanning, not test setup.
+    await armScrollObservation(tabA);
+    await armScrollObservation(tabB);
+    await tabA.frameLocator("#question-frame").locator("body").evaluate(() => {
+      (window as unknown as ProbeWindow).__scanScrollTops = [];
+    });
     const idA = await tabIdFor(worker, server.origin + "/a");
     const idB = await tabIdFor(worker, server.origin + "/b");
     expect(idA).not.toBe(idB);
@@ -120,17 +201,26 @@ test("@phase14b-e3b REAL_CHROMIUM isolates two tabs, nested frame and reinjectio
     const oldA = "18aabcde-0ee2-4e98-8e12-48fdce879112";
     const oldB = "18aabcde-0ee2-4e98-8e12-48fdce879113";
     const oldFrame = "18aabcde-0ee2-4e98-8e12-48fdce879114";
+    // START ACK means the runtime accepted a generation. The scroll-to-zero
+    // state is transient: scan steps move away and normal completion restores
+    // the original 920. Assert durable observations per tab/frame instead of
+    // polling the CURRENT scrollY after all three serial START requests.
     expect(await send(worker, idA, { type: "START_FULL_PAGE_DETECT", generationId: oldA }, 0)).toEqual({ ok: true });
+    await expect.poll(() => observedScanTop(tabA), { timeout: 8000 }).toBe(true);
+    await expectRealScanProgress(worker, oldA, idA, 0);
+
     expect(await send(worker, idB, { type: "START_FULL_PAGE_DETECT", generationId: oldB }, 0)).toEqual({ ok: true });
+    await expect.poll(() => observedScanTop(tabB), { timeout: 8000 }).toBe(true);
+    await expectRealScanProgress(worker, oldB, idB, 0);
+
     expect(await send(worker, idA, { type: "START_FULL_PAGE_DETECT", generationId: oldFrame }, frameId!))
       .toEqual({ ok: true });
-
-    await expect.poll(async () => (await scrollState(tabA)).top, { timeout: 8000 }).toBe(0);
-    await expect.poll(async () => (await scrollState(tabB)).top, { timeout: 8000 }).toBe(0);
     await expect.poll(async () =>
-      tabA.frameLocator("#question-frame").locator("body").evaluate(() => window.scrollY),
+      tabA.frameLocator("#question-frame").locator("body").evaluate(() =>
+        (window as unknown as ProbeWindow).__scanScrollTops.includes(0)),
       { timeout: 8000 },
-    ).toBe(0);
+    ).toBe(true);
+    await expectRealScanProgress(worker, oldFrame, idA, frameId!);
     expect(await send(worker, idA, { type: "FULL_PAGE_DETECT_CANCELLED", generationId: oldA }, 0)).toEqual({ ok: true });
     expect(await send(worker, idA, { type: "FULL_PAGE_DETECT_CANCELLED", generationId: oldFrame }, frameId!))
       .toEqual({ ok: true });
@@ -174,6 +264,28 @@ test("@phase14b-e3b REAL_CHROMIUM isolates two tabs, nested frame and reinjectio
     // Real HTTP submission must also remain absent across all frames.
     expect(server.submitCount()).toBe(0);
   } finally {
+    // Preserve the actual browser state, root identity and production
+    // generation/step messages for both passing and failing CI attempts.
+    // Diagnostics must never mask the original failure or mutate work owners.
+    try {
+      const evidence = {
+        tabA: observedTabA && !observedTabA.isClosed() ? await scrollState(observedTabA) : null,
+        tabB: observedTabB && !observedTabB.isClosed() ? await scrollState(observedTabB) : null,
+        frame: observedTabA && !observedTabA.isClosed()
+          ? await observedTabA.frameLocator("#question-frame").locator("body").evaluate(() => ({
+            top: window.scrollY,
+            tops: [...(window as unknown as ProbeWindow).__scanScrollTops],
+            scrollRoot: document.scrollingElement?.tagName.toLowerCase() ?? "none",
+          })) : null,
+        progress: observedWorker ? await scanProgress(observedWorker) : [],
+      };
+      console.info("[ISSUE78-SCAN-EVIDENCE]", JSON.stringify(evidence));
+      await test.info().attach("issue78-scan-evidence.json", {
+        body: Buffer.from(JSON.stringify(evidence, null, 2)), contentType: "application/json",
+      });
+    } catch (error) {
+      console.warn("[ISSUE78] unable to capture complete test diagnostics", error);
+    }
     await closeExtensionContext(context);
     await server.close();
   }
