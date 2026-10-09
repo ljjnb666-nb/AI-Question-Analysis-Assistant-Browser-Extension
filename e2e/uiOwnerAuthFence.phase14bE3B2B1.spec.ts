@@ -176,7 +176,7 @@ test("@phase14b-e3b2b1 UI_START genuine owner survives account switch without st
       .toEqual({ ok: false, error: "STALE_WORK_GENERATION" });
 
     expect(await exam.locator("#answer").inputValue()).toBe("");
-    expect(await exam.evaluate(() => (window as Window & { __submitEvents: number }).__submitEvents)).toBe(0);
+    expect(await exam.evaluate(() => (window as unknown as Window & { __submitEvents: number }).__submitEvents)).toBe(0);
     expect(probe.submissions()).toBe(0); // Includes native HTMLFormElement.submit.
   } finally {
     if (context) await closeExtensionContext(context);
