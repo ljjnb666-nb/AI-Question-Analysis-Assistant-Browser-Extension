@@ -5,6 +5,7 @@ import { seedAIConnection, routeCanonicalOpenAIToFixture } from "./helpers/aiCon
 import { readExtensionSettings, seedExtensionSettings, startTestAnalyticsBackend } from "./helpers/authUiHarness";
 
 declare const chrome: {
+  runtime: { sendMessage: (message: { type: "AI_CONNECTION_GET_ACTIVE_METADATA" }) => Promise<unknown> };
   tabs: {
     query: (filter: { url: string }) => Promise<Array<{ id?: number }>>;
     sendMessage: (id: number, message:
