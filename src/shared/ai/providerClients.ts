@@ -63,9 +63,38 @@ export async function fetchWithTimeout<T>(
   }
 }
 
+const MAX_PROVIDER_JSON_BYTES = 512 * 1024;
+const MAX_STREAM_TEXT_BYTES = 256 * 1024;
+
+/**
+ * Limit actual decoded bytes, not a Content-Length claim. Chunked or
+ * misreported provider responses must not grow without a bounded budget.
+ * Malformed JSON is always a fixed code; never log the provider body.
+ */
 async function readProviderJson<T>(response: Response): Promise<T> {
-  try { return await response.json() as T; }
-  catch { throw new Error("AI_PROVIDER_RESPONSE_INVALID"); }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("AI_PROVIDER_RESPONSE_INVALID");
+  const decoder = new TextDecoder();
+  const parts: string[] = [];
+  let totalBytes = 0;
+  let exhausted = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) { exhausted = true; break; }
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_PROVIDER_JSON_BYTES) throw new Error("AI_PROVIDER_RESPONSE_TOO_LARGE");
+      parts.push(decoder.decode(value, { stream: true }));
+    }
+    parts.push(decoder.decode());
+    try { return JSON.parse(parts.join("")) as T; }
+    catch { throw new Error("AI_PROVIDER_RESPONSE_INVALID"); }
+  } finally {
+    if (!exhausted) {
+      try { await reader.cancel(); } catch { /* best-effort stream shutdown */ }
+    }
+    reader.releaseLock();
+  }
 }
 
 async function boundedResponseError(res: Response, context: ProviderRequestContext): Promise<Error> {
@@ -234,13 +263,19 @@ async function consumeAnthropicStream(
   signal: AbortSignal,
 ): Promise<string> {
   let fullText = "";
+  let totalBytes = 0;
+  const encoder = new TextEncoder();
   for await (const data of readSseData(body, signal)) {
     let evt: { type: string; delta?: { type: string; text?: string } };
     try { evt = JSON.parse(data) as typeof evt; }
     catch { logWarn("Malformed SSE event", "consumeAnthropicStream"); continue; }
     if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
       if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
-      fullText += evt.delta.text ?? "";
+      const delta = evt.delta.text ?? "";
+      const nextBytes = encoder.encode(delta).byteLength;
+      if (nextBytes > MAX_STREAM_TEXT_BYTES - totalBytes) throw new Error("AI_PROVIDER_RESPONSE_TOO_LARGE");
+      totalBytes += nextBytes;
+      fullText += delta;
       onStream(fullText);
     }
   }
@@ -330,6 +365,8 @@ async function consumeOpenAIStream(
   signal: AbortSignal,
 ): Promise<string> {
   let fullText = "";
+  let totalBytes = 0;
+  const encoder = new TextEncoder();
   for await (const data of readSseData(body, signal)) {
     let evt: { choices?: Array<{ delta?: { content?: string } }> };
     try { evt = JSON.parse(data) as typeof evt; }
@@ -337,6 +374,9 @@ async function consumeOpenAIStream(
     const delta = evt.choices?.[0]?.delta?.content;
     if (delta) {
       if (signal.aborted) throw new Error("AI_REQUEST_ABORTED");
+      const nextBytes = encoder.encode(delta).byteLength;
+      if (nextBytes > MAX_STREAM_TEXT_BYTES - totalBytes) throw new Error("AI_PROVIDER_RESPONSE_TOO_LARGE");
+      totalBytes += nextBytes;
       fullText += delta;
       onStream(fullText);
     }

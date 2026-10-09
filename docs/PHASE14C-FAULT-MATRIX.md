@@ -54,3 +54,29 @@ Popup/Side Panel --START + generationId--> contentMessageRouter
 - 30s transport timeout 不等于整个业务流程唯一超时：`withParseTimeout` 仍拥有 tier 级租约。
 - 不修改 UI、DOM 解析、答案填写、人工提交、Auth 数据结构或发布/CI。
 - 任何 GitHub Actions 结果需绑定新的 PR HEAD；本文件不能替代实际测试执行。
+
+
+## Phase 14C-05 — provider response resource budget (candidate, merge pending)
+
+Boundary: production provider clients enforce at most **512 KiB decoded HTTP body
+bytes** on successful provider JSON before parsing, and at most **256 KiB of
+UTF-8 answer text** accumulated across SSE deltas. The prior 64 KiB **per
+SSE event** frame limit remains independent. Neither chunked transfer nor
+a dishonest Content-Length bypasses the measured byte counter. An over-budget
+body fails with fixed code `AI_PROVIDER_RESPONSE_TOO_LARGE`, cancels the
+reader, does not create a fill-authoritative result, and is not retryable
+under the existing `parseRouter` AI-prefixed error rule. The 30s attempt
+timeout and owner-generation cancellation fences remain intact.
+
+The conservative limits may reject exceptionally long legitimate code
+answers; raising them requires a separate capacity and user-product review.
+No provider text, credentials, URL or full question content is logged.
+
+Deterministic tests cover the three production JSON adapters, exact byte
+boundary, malformed JSON, two SSE adapters and split Unicode/aggregate
+overflow, callback fencing and normal completion. Phase 13 live Pintia
+read-only acceptance, RC gates, Phase13B AUTH_REQUIRED_NOT_RUN, and the
+NO_AUTOMATIC_SUBMISSION invariant remain unchanged.
+
+This section documents a **candidate only** until exact-HEAD CI and explicit
+merge approval; it does not claim shipped main behavior.
