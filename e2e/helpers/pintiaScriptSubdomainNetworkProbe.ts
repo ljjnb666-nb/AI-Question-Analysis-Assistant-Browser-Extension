@@ -11,9 +11,8 @@ import type { RequestOptions } from "node:https";
  */
 export type ScriptRequestLike = { resourceType(): string; url(): string };
 type Mark = "dns" | "tcp" | "tls" | "headers";
-type Outcome =
-  | "response" | "timeout" | "networkError"
-  | "dnsUnavailable" | "blockedResolution" | "ineligibleHost";
+type ConnectionOutcome = "response" | "timeout" | "networkError";
+type Outcome = ConnectionOutcome | "dnsUnavailable" | "blockedResolution" | "ineligibleHost";
 type PublicEvidence = {
   schemaVersion: 1;
   target: "pending-pintia-script-subdomain";
@@ -23,6 +22,14 @@ type PublicEvidence = {
   httpStatusClass: "none" | "2xx" | "3xx" | "4xx" | "5xx" | "other";
   totalLatencyBucket: "under1s" | "1to3s" | "over3s";
   milestones: Array<{ phase: Mark; observed: boolean; latencyBucket: "unobserved" | "under1s" | "1to3s" | "over3s" }>;
+  /** Public counts, never IPs: at most two fresh connections on two DIFFERENT public A answers. */
+  publicIpv4AnswerCount: number;
+  addressComparisons: Array<{
+    slot: "first" | "second";
+    outcome: ConnectionOutcome;
+    httpStatusClass: PublicEvidence["httpStatusClass"];
+    milestones: PublicEvidence["milestones"];
+  }>;
 };
 const phases: readonly Mark[] = ["dns", "tcp", "tls", "headers"];
 
@@ -83,6 +90,12 @@ function statusClass(status: number | null): PublicEvidence["httpStatusClass"] {
   return "other";
 }
 
+/**
+ * One global 6s budget, including DNS. Probe at most two DISTINCT vetted
+ * public IPv4 candidates in parallel and report only fixed-index safe enums.
+ * This does not replay browser script URL, and never changes site test authority.
+ * Errors AFTER successful DNS must not be misreported as DNS failures.
+ */
 export async function probePendingPintiaScriptHost(
   hostname: string | null,
   options: {
@@ -94,19 +107,37 @@ export async function probePendingPintiaScriptHost(
 ): Promise<PublicEvidence> {
   const now = options.now ?? Date.now;
   const start = now();
-  const marks: Partial<Record<Mark, number>> = {};
-  const finish = (outcome: Outcome, httpStatus: number | null): PublicEvidence => ({
+  const dnsMarks: Partial<Record<Mark, number>> = {};
+  type Connection = {
+    slot: "first" | "second";
+    marks: Partial<Record<Mark, number>>;
+    outcome: ConnectionOutcome | null;
+    status: number | null;
+    request?: ClientRequest;
+  };
+  let publicIpv4AnswerCount = 0;
+  const attempts: Connection[] = [];
+  const timings = (marks: Partial<Record<Mark, number>>) => phases.map(phase => ({
+    phase, observed: marks[phase] !== undefined,
+    latencyBucket: marks[phase] === undefined
+      ? "unobserved" as const : latency(Math.max(0, marks[phase] - start)),
+  }));
+  const evidence = (outcome: Outcome, code: number | null): PublicEvidence => ({
     schemaVersion: 1, target: "pending-pintia-script-subdomain",
     requestMethod: "HEAD", requestPath: "/", outcome,
-    httpStatusClass: statusClass(httpStatus),
+    httpStatusClass: statusClass(code),
     totalLatencyBucket: latency(Math.max(0, now() - start)),
-    milestones: phases.map(phase => ({
-      phase, observed: marks[phase] !== undefined,
-      latencyBucket: marks[phase] === undefined ? "unobserved" : latency(Math.max(0, marks[phase] - start)),
+    milestones: timings({ ...dnsMarks, ...(attempts[0]?.marks ?? {}) }),
+    publicIpv4AnswerCount,
+    addressComparisons: attempts.map(a => ({
+      slot: a.slot,
+      outcome: a.outcome ?? "timeout",
+      httpStatusClass: statusClass(a.status),
+      milestones: timings({ ...dnsMarks, ...a.marks }),
     })),
   });
   if (!hostname || validScriptSubdomain(`https://${hostname}/`) !== hostname) {
-    return finish("ineligibleHost", null);
+    return evidence("ineligibleHost", null);
   }
   const budget = options.timeoutMs ?? 6_000;
   if (!Number.isSafeInteger(budget) || budget < 1 || budget > 10_000) {
@@ -114,47 +145,81 @@ export async function probePendingPintiaScriptHost(
   }
   const resolver = options.resolve ?? ((host: string) => lookup(host, { all: true, family: 4 }));
   const transport = options.request ?? https.request;
+
   return await new Promise<PublicEvidence>((resolve) => {
     let settled = false;
-    let request: ClientRequest | undefined;
-    const done = (outcome: Outcome, code: number | null = null) => {
+    const finishAll = (override?: Outcome) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve(finish(outcome, code));
+      // A timeout is recorded only for candidates still outstanding.
+      for (const attempt of attempts) {
+        if (attempt.outcome === null) {
+          attempt.outcome = "timeout";
+          attempt.request?.destroy();
+        }
+      }
+      const first = attempts[0];
+      resolve(evidence(override ?? first?.outcome ?? "dnsUnavailable", first?.status ?? null));
     };
-    // Covers the entire DNS + TCP + TLS + response wait. No retry.
-    const timer = setTimeout(() => {
-      done("timeout");
-      request?.destroy();
-    }, budget);
+    const timer = setTimeout(() => finishAll("timeout"), budget);
+    const finished = (attempt: Connection, outcome: ConnectionOutcome, code: number | null = null) => {
+      if (settled || attempt.outcome !== null) return;
+      attempt.outcome = outcome;
+      attempt.status = code;
+      if (attempts.length > 0 && attempts.every(a => a.outcome !== null)) finishAll();
+    };
     Promise.resolve().then(() => resolver(hostname)).then((answers) => {
       if (settled) return;
-      if (!answers.length || !answers.some(a => a.family === 4)) { done("dnsUnavailable"); return; }
-      // Reject mixed private/public DNS answers; prevents DNS rebinding SSRF.
-      if (answers.some(a => a.family !== 4 || !isPublicIpv4(a.address))) {
-        done("blockedResolution"); return;
+      // Don't follow DNS answers into private addresses, even if another
+      // record is public. Reject large unexpected DNS sets fail-closed.
+      if (!answers.length || answers.length > 32 || !answers.some(a => a.family === 4)) {
+        finishAll("dnsUnavailable");
+        return;
       }
-      marks.dns = now();
-      const selected = answers[0].address;
-      request = transport({
-        // Connect directly to the verified public IPv4. Preserve hostname
-        // as TLS SNI/certificate identity and HTTP Host; no second DNS.
-        protocol: "https:", hostname: selected, servername: hostname, port: 443,
-        method: "HEAD", path: "/", agent: false, rejectUnauthorized: true,
-        headers: { Host: hostname, Accept: "*/*" },
-      });
-      request.once("socket", (socket) => {
-        socket.once("connect", () => { marks.tcp ??= now(); });
-        socket.once("secureConnect", () => { marks.tls ??= now(); });
-      });
-      request.once("response", (response) => {
-        marks.headers ??= now();
-        response.resume();
-        done("response", response.statusCode ?? null);
-      });
-      request.once("error", () => done("networkError"));
-      request.end();
-    }).catch(() => done("dnsUnavailable"));
+      if (answers.some(a => a.family !== 4 || !isPublicIpv4(a.address))) {
+        finishAll("blockedResolution");
+        return;
+      }
+      dnsMarks.dns = now();
+      const distinct = [...new Set(answers.map(a => a.address))];
+      publicIpv4AnswerCount = distinct.length;
+      for (const [i, address] of distinct.slice(0, 2).entries()) {
+        const attempt: Connection = {
+          slot: i === 0 ? "first" : "second",
+          marks: {}, outcome: null, status: null,
+        };
+        attempts.push(attempt);
+        try {
+          // IP is validated and pinned. TLS SNI + Host remain target's real
+          // hostname to preserve certificate/HTTP routing checks.
+          const request = transport({
+            protocol: "https:", hostname: address, servername: hostname, port: 443,
+            method: "HEAD", path: "/", agent: false, rejectUnauthorized: true,
+            headers: { Host: hostname, Accept: "*/*" },
+          });
+          attempt.request = request;
+          request.once("socket", socket => {
+            socket.once("connect", () => { attempt.marks.tcp ??= now(); });
+            socket.once("secureConnect", () => { attempt.marks.tls ??= now(); });
+          });
+          request.once("response", response => {
+            attempt.marks.headers ??= now();
+            response.resume();
+            finished(attempt, "response", response.statusCode ?? null);
+          });
+          request.once("error", () => finished(attempt, "networkError"));
+          request.end();
+        } catch {
+          // This is a transport/setup failure, never a DNS failure.
+          attempt.request?.destroy();
+          finished(attempt, "networkError");
+        }
+      }
+      if (attempts.length > 0 && attempts.every(a => a.outcome !== null)) finishAll();
+    }).catch(() => {
+      // Resolver rejected before any connection attempt.
+      if (!settled) finishAll("dnsUnavailable");
+    });
   });
 }
