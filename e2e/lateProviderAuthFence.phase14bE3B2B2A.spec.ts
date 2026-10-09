@@ -31,6 +31,7 @@ function pageHtml(): string {
         <label><input name="q1" type="radio" value="A">A. 3</label>
         <label><input name="q1" type="radio" value="B">B. 4</label>
         <label><input name="q1" type="radio" value="C">C. 5</label>
+        <label><input name="q1" type="radio" value="D">D. 6</label>
         <input name="answer" id="answer" autocomplete="off">
       </section>
       <button type="submit">Submit answers</button>
@@ -51,7 +52,7 @@ function successResponse(): string {
     choices: [{ message: { content: JSON.stringify({
       questionType: "single_choice", answer: "B", confidence: 1,
       briefExplanation: "Four", detailedExplanation: "2 + 2 = 4",
-      recognizedText: "1. What is two plus two? A. 3 B. 4 C. 5",
+      recognizedText: "1. What is two plus two? A. 3 B. 4 C. 5 D. 6",
     }) } }],
   });
 }
