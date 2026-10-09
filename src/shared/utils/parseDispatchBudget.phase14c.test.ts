@@ -14,6 +14,14 @@ const block: QuestionBlock = {
 const settings = { preferredRoute: "text" as const, language: "en" as const };
 const response = () => new Response("temporary provider failure", { status: 503 });
 
+function accelerateOnlyRetryBackoff() {
+  // We are checking dispatch count, not elapsed wall-clock time. Preserve
+  // transport timeouts (30s); shorten only parseRouter's 1s/2s retry delays.
+  const realSetTimeout = globalThis.setTimeout;
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: Parameters<typeof setTimeout>[0], ms?: number, ...args: unknown[]) =>
+    realSetTimeout(callback, ms === 1_000 || ms === 2_000 ? 0 : ms, ...args)) as typeof setTimeout);
+}
+
 beforeEach(async () => {
   installMemoryStorage();
   await seedAIConnectionFixture({
@@ -30,28 +38,21 @@ afterEach(() => {
 
 describe("PHASE14C_02A real retry dispatch budget", () => {
   it("prevents nested provider retries and tier retries from exceeding six real fetch dispatches", async () => {
-    vi.useFakeTimers();
-    let firstDispatched!: () => void;
-    const dispatched = new Promise<void>(resolve => { firstDispatched = resolve; });
-    const fetchMock = vi.fn(async () => { firstDispatched(); return response(); });
+    accelerateOnlyRetryBackoff();
+    const fetchMock = vi.fn(async () => response());
     vi.stubGlobal("fetch", fetchMock);
     const pending = parseWithTieredRetries(block, settings, false, () => {}, [10_000, 10_000, 10_000], {
       parseQuestion, logEvent: vi.fn(), setStreamingText: vi.fn(),
       withTimeout: <T>(promise: Promise<T>) => promise,
     });
     const rejection = expect(pending).rejects.toThrow();
-    // Complete async runtime/credential setup before advancing fake time.
-    await dispatched;
-    await vi.advanceTimersByTimeAsync(60_000);
     await rejection;
     expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
   it("does not issue a seventh request when the provider keeps failing", async () => {
-    vi.useFakeTimers();
-    let firstDispatched!: () => void;
-    const dispatched = new Promise<void>(resolve => { firstDispatched = resolve; });
-    const fetchMock = vi.fn(async () => { firstDispatched(); return response(); });
+    accelerateOnlyRetryBackoff();
+    const fetchMock = vi.fn(async () => response());
     vi.stubGlobal("fetch", fetchMock);
     const logs = vi.fn();
     const pending = parseWithTieredRetries(block, settings, false, () => {}, [10_000, 10_000, 10_000], {
@@ -59,9 +60,6 @@ describe("PHASE14C_02A real retry dispatch budget", () => {
       withTimeout: <T>(promise: Promise<T>) => promise,
     });
     const rejection = expect(pending).rejects.toThrow("AI_PROVIDER_DISPATCH_BUDGET_EXHAUSTED");
-    // Complete async runtime/credential setup before advancing fake time.
-    await dispatched;
-    await vi.advanceTimersByTimeAsync(60_000);
     await rejection;
     expect(fetchMock).toHaveBeenCalledTimes(6);
     expect(logs).not.toHaveBeenCalledWith("manual_parse_attempt_succeeded", expect.anything());
