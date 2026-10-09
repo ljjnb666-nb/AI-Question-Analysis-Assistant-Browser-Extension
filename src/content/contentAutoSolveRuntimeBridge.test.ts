@@ -139,11 +139,9 @@ describe("auto-solve history commit telemetry", () => {
     const newAnswer = { ...makeResult(), answer: "authorized-new-answer" };
     const history: HistoryEntry[] = [];
     const contexts: ParseQuestionRuntimeContext[] = [];
-    const addHistoryEntryIfCurrent = vi.fn(async (entry: HistoryEntry, isCurrent: () => boolean) => {
-      if (!isCurrent()) return false;
-      history.push(entry);
-      return true;
-    });
+    // The production bridge adds successful entries to this array itself;
+    // the persistence mock must only acknowledge the guarded write.
+    const addHistoryEntryIfCurrent = vi.fn(async (_entry: HistoryEntry, isCurrent: () => boolean) => isCurrent());
     const bridge = createBridge(block, newAnswer, addHistoryEntryIfCurrent, {
       parseWithTieredRetries: (runtimeContext) => {
         if (!runtimeContext) throw new Error("MISSING_REAL_RUNTIME_CONTEXT");
