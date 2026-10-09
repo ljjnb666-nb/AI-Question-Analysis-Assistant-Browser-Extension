@@ -220,10 +220,17 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
         timeout: 25_000,
       }),
       titleVerifier.verify,
-      { maxAttempts: 3, betweenAttempts: async () => {
-        await recordAttempt();
-        await page.waitForTimeout(1_000);
-      } },
+      {
+        maxAttempts: 3,
+        betweenAttempts: async () => {
+          await recordAttempt();
+          await page.waitForTimeout(1_000);
+        },
+        // Once the bounded title check and one-shot script grace have failed,
+        // re-navigating with scripts still in flight would abort those requests.
+        // Preserve the real failure and its telemetry instead.
+        stopIfContentPending: () => titleVerifier.graceUsed() && inFlightScripts.size > 0,
+      },
     );
     if (!visit.ready || !visit.response) {
       await recordAttempt();
