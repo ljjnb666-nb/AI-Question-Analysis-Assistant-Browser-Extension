@@ -37,15 +37,26 @@ export { PROVIDER_NOT_CONFIGURED, ProviderNotConfiguredError, isProviderNotConfi
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1_000;
+/** Upper bound shared by nested parse-router retries, route tiers and stream fallback. */
+const MAX_PROVIDER_DISPATCHES_PER_RUN = 6;
 export type SolveAuthorityLease = Readonly<{ kind: "solve-authority" }>;
+type ProviderDispatchBudget = { readonly limit: number; used: number };
 const solveRuntimes = new WeakMap<SolveAuthorityLease, AIConnectionRuntimeConfig>();
 
 export function withSolveAuthorityLease(context?: ParseQuestionRuntimeContext): ParseQuestionRuntimeContext {
-  return { ...context, authorityLease: context?.authorityLease ?? Object.freeze({ kind: "solve-authority" as const }) };
+  return {
+    ...context,
+    authorityLease: context?.authorityLease ?? Object.freeze({ kind: "solve-authority" as const }),
+    // Keep the same mutable budget object across child timeout contexts and
+    // fallback calls. A new top-level solve receives a fresh budget.
+    providerDispatchBudget: context?.providerDispatchBudget ?? { limit: MAX_PROVIDER_DISPATCHES_PER_RUN, used: 0 },
+  };
 }
 
 export type ParseQuestionRuntimeContext = {
   authorityLease?: SolveAuthorityLease;
+  /** Only initialized by the tiered parse owner; direct parses retain their own retry bound. */
+  providerDispatchBudget?: ProviderDispatchBudget;
   signal?: AbortSignal;
   screenshotFallback?: QuestionScreenshotFallback;
   isQuestionRevisionCurrent?: (identity: { questionId: string; contentFingerprint: string }) => boolean;
@@ -159,6 +170,13 @@ async function parseQuestionCore(
         beforeDispatch: async () => {
           await assertRuntimeConfigCurrent(runtime);
           if (isRuntimeContextStale(block, runtimeContext, questionPackage)) throw new StaleQuestionRevisionError();
+          const budget = runtimeContext?.providerDispatchBudget;
+          // The awaited authority check is complete: this synchronous claim
+          // precedes fetch and cannot be interleaved with another JS task.
+          if (budget && budget.used >= budget.limit) {
+            throw new AIRequestBoundaryError("AI_PROVIDER_DISPATCH_BUDGET_EXHAUSTED");
+          }
+          if (budget) budget.used += 1;
           providerDispatchStarted = true;
         },
       };
