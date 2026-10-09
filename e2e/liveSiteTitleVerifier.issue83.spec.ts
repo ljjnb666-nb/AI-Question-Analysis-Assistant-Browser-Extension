@@ -1,4 +1,4 @@
-import type { Request } from "@playwright/test";
+import type { Page, Request } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { visitLiveTargetUntilReady } from "@/shared/utils/liveSiteReadiness";
 import { createLiveSiteTitleVerifier } from "./helpers/liveSiteTitleVerifier";
@@ -8,7 +8,7 @@ const title = "SYNTHETIC_PUBLIC_PROBLEM_LOADED";
 
 // A controlled, entirely intercepted browser site. These tests never visit
 // Pintia or promote fixture content into live-platform compatibility claims.
-async function setupSyntheticPage(page: import("@playwright/test").Page, delayMs: number, scriptLoadsTitle: boolean) {
+async function setupSyntheticPage(page: Page, delayMs: number, scriptLoadsTitle: boolean) {
   const pending = new Set<Request>();
   let visits = 0;
   page.on("request", (request) => {
