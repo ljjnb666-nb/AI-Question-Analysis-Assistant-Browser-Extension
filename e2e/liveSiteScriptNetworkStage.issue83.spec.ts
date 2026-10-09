@@ -75,3 +75,40 @@ test("ISSUE83_NETWORK_02 controlled Chromium reports an in-flight slow script be
     release();
   }
 });
+
+
+test("ISSUE83_NETWORK_03 classifies only observed connection milestones, not guessed DNS causes", () => {
+  const probe = createScriptNetworkStageProbe();
+  const base = {
+    domainLookupStart: -1, domainLookupEnd: -1, connectStart: -1,
+    secureConnectionStart: -1, connectEnd: -1, requestStart: -1, responseStart: -1,
+  };
+  const startConnect = {
+    ...fakeScript("https://pintia.cn/a.js?private=keep-hidden"),
+    timing: () => ({ ...base, connectStart: 2 }),
+  };
+  const requestStarted = {
+    ...fakeScript("https://pintia.cn/b.js?private=keep-hidden"),
+    timing: () => ({ ...base, connectStart: 2, connectEnd: 4, requestStart: 5 }),
+  };
+  const unavailable = fakeScript("https://pintia.cn/c.js?private=keep-hidden");
+  probe.onRequest(startConnect);
+  probe.onRequest(requestStarted);
+  probe.onRequest(unavailable);
+  const snapshot = probe.snapshot();
+  expect(snapshot).toMatchObject({
+    pendingScripts: 3, firstPartyBeforeHeaders: 3,
+    firstPartyAfterHeaders: 0,
+  });
+  const phases = Object.fromEntries(snapshot.firstPartyNetworkPhases.map(({ phase, count }) => [phase, count]));
+  expect(phases).toMatchObject({
+    timingUnavailable: 1, connectStarted: 1, requestStarted: 1,
+    dnsStarted: 0, tlsStarted: 0, firstByteReceived: 0,
+  });
+  expect(snapshot.firstPartyNetworkPhases.reduce((total, x) => total + x.count, 0)).toBe(3);
+  const json = JSON.stringify(snapshot);
+  expect(json).not.toContain("keep-hidden");
+  expect(json).not.toContain("a.js");
+  expect(json).not.toContain("b.js");
+  expect(json).not.toContain("c.js");
+});
