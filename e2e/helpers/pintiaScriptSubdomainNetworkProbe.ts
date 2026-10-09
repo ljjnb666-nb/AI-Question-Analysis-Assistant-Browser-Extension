@@ -138,11 +138,11 @@ export async function probePendingPintiaScriptHost(
       marks.dns = now();
       const selected = answers[0].address;
       request = transport({
-        protocol: "https:", hostname, servername: hostname, port: 443,
+        // Connect directly to the verified public IPv4. Preserve hostname
+        // as TLS SNI/certificate identity and HTTP Host; no second DNS.
+        protocol: "https:", hostname: selected, servername: hostname, port: 443,
         method: "HEAD", path: "/", agent: false, rejectUnauthorized: true,
-        // Pin previously verified public IP: no implicit second DNS lookup.
-        lookup: (_host, _opt, callback) => callback(null, selected, 4),
-        headers: { Accept: "*/*" },
+        headers: { Host: hostname, Accept: "*/*" },
       });
       request.once("socket", (socket) => {
         socket.once("connect", () => { marks.tcp ??= now(); });
