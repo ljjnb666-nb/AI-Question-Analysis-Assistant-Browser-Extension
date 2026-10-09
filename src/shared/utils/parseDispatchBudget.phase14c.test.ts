@@ -31,21 +31,27 @@ afterEach(() => {
 describe("PHASE14C_02A real retry dispatch budget", () => {
   it("prevents nested provider retries and tier retries from exceeding six real fetch dispatches", async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn(async () => response());
+    let firstDispatched!: () => void;
+    const dispatched = new Promise<void>(resolve => { firstDispatched = resolve; });
+    const fetchMock = vi.fn(async () => { firstDispatched(); return response(); });
     vi.stubGlobal("fetch", fetchMock);
     const pending = parseWithTieredRetries(block, settings, false, () => {}, [10_000, 10_000, 10_000], {
       parseQuestion, logEvent: vi.fn(), setStreamingText: vi.fn(),
       withTimeout: <T>(promise: Promise<T>) => promise,
     });
     const rejection = expect(pending).rejects.toThrow();
-    await vi.runAllTimersAsync();
+    // Complete async runtime/credential setup before advancing fake time.
+    await dispatched;
+    await vi.advanceTimersByTimeAsync(60_000);
     await rejection;
     expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
   it("does not issue a seventh request when the provider keeps failing", async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn(async () => response());
+    let firstDispatched!: () => void;
+    const dispatched = new Promise<void>(resolve => { firstDispatched = resolve; });
+    const fetchMock = vi.fn(async () => { firstDispatched(); return response(); });
     vi.stubGlobal("fetch", fetchMock);
     const logs = vi.fn();
     const pending = parseWithTieredRetries(block, settings, false, () => {}, [10_000, 10_000, 10_000], {
@@ -53,7 +59,9 @@ describe("PHASE14C_02A real retry dispatch budget", () => {
       withTimeout: <T>(promise: Promise<T>) => promise,
     });
     const rejection = expect(pending).rejects.toThrow("AI_PROVIDER_DISPATCH_BUDGET_EXHAUSTED");
-    await vi.runAllTimersAsync();
+    // Complete async runtime/credential setup before advancing fake time.
+    await dispatched;
+    await vi.advanceTimersByTimeAsync(60_000);
     await rejection;
     expect(fetchMock).toHaveBeenCalledTimes(6);
     expect(logs).not.toHaveBeenCalledWith("manual_parse_attempt_succeeded", expect.anything());
