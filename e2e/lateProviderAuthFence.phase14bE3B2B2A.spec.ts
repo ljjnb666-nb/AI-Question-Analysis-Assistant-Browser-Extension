@@ -59,7 +59,7 @@ function successResponse(): string {
 }
 
 async function probeServer() {
-  const pending = new Map<ServerResponse, boolean>();
+  const pending = new Set<ServerResponse>();
   let requested = 0;
   let released = false;
   let nativeSubmits = 0;
@@ -74,23 +74,18 @@ async function probeServer() {
     if (url.pathname === "/api/v1/chat/completions") {
       let body = "";
       for await (const chunk of req) body += String(chunk);
-      let stream = false;
-      try { stream = (JSON.parse(body) as { stream?: boolean }).stream === true; }
+      // The canonical network harness parses fixture JSON and then adapts
+      // it to the production request's streaming mode. Never send SSE here.
+      try { JSON.parse(body) as { stream?: boolean }; }
       catch { res.writeHead(400); res.end("invalid request"); return; }
       requested += 1;
       const fulfill = () => {
         if (res.writableEnded || res.destroyed) return;
-        if (stream) {
-          const answer = JSON.parse(successResponse()) as { choices: Array<{ message: { content: string } }> };
-          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
-          res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: answer.choices[0].message.content } }] })}\n\ndata: [DONE]\n\n`);
-        } else {
-          res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-          res.end(successResponse());
-        }
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        res.end(successResponse());
       };
       if (released) fulfill();
-      else { pending.set(res, stream); res.on("close", () => pending.delete(res)); }
+      else { pending.add(res); res.on("close", () => pending.delete(res)); }
       return;
     }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
@@ -106,16 +101,10 @@ async function probeServer() {
     nativeSubmits: () => nativeSubmits,
     release: () => {
       released = true;
-      for (const [res, stream] of [...pending]) {
+      for (const res of [...pending]) {
         if (res.writableEnded || res.destroyed) continue;
-        const answer = JSON.parse(successResponse()) as { choices: Array<{ message: { content: string } }> };
-        if (stream) {
-          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
-          res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: answer.choices[0].message.content } }] })}\n\ndata: [DONE]\n\n`);
-        } else {
-          res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-          res.end(successResponse());
-        }
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        res.end(successResponse());
       }
     },
     close: async () => {
