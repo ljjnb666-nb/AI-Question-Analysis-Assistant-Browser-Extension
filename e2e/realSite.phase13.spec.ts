@@ -5,7 +5,7 @@ import type { BrowserContext, Page, Worker } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
 import { visitLiveTargetUntilReady } from "@/shared/utils/liveSiteReadiness";
-import { createLiveSiteDiagnostics, isPintiaPartyHost } from "./helpers/liveSiteDiagnostics";
+import { createLiveSiteDiagnostics, formatLiveSiteReadinessDiagnostic, isPintiaPartyHost } from "./helpers/liveSiteDiagnostics";
 
 // Third-party page text must never enter uploaded failure traces, screenshots, or video.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -245,8 +245,25 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
         }, null, 2)}\n`,
         "utf8",
       );
+      // Fail closed as before, but show a strictly allowlisted compact
+      // diagnostic in the job log. Binary Actions artifacts may be inaccessible
+      // to a read-only reviewer; raw page text and URLs still never enter logs.
+      console.error("PHASE13_LIVE_NOT_READY_DIAG " + formatLiveSiteReadinessDiagnostic({
+        attemptsUsed: visit.attemptsUsed,
+        statusCodes: visit.statusCodes,
+        snapshots: attemptSnapshots,
+        telemetry: resources.snapshot(),
+      }));
       throw new Error("LIVE_TARGET_CONTENT_UNAVAILABLE: public Pintia title not visible after bounded content-ready revisits; detection was not started");
     }
+    // Log the same allowlisted shape on successes for a controlled comparison.
+    await recordAttempt();
+    console.info("PHASE13_LIVE_READY_DIAG " + formatLiveSiteReadinessDiagnostic({
+      attemptsUsed: visit.attemptsUsed,
+      statusCodes: visit.statusCodes,
+      snapshots: attemptSnapshots,
+      telemetry: resources.snapshot(),
+    }));
     const response = visit.response;
     expect(response.status(), "live Pintia main document must be a successful public response").toBeGreaterThanOrEqual(200);
     expect(response.status(), "live Pintia main document must not be a redirect or error").toBeLessThan(400);
