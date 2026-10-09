@@ -315,9 +315,16 @@ export function getErrorLogs(): ErrorLogEntry[] {
  */
 export function clearErrorLogs(): void {
   ERROR_LOG.length = 0;
-  chrome.storage.local.remove("errorLog").catch((err) => {
-    if (isExtensionContextInvalidatedError(err)) return;
-    // Ignore storage errors
+  // Clear must be sequenced after every already-accepted persist and before
+  // subsequent writes/loads. An out-of-band remove can race an in-flight set
+  // and resurrect entries the user explicitly cleared.
+  void enqueuePersist(async () => {
+    try {
+      await chrome.storage.local.remove("errorLog");
+    } catch (err) {
+      if (isExtensionContextInvalidatedError(err)) return;
+      // Ignore storage errors, as before.
+    }
   });
 }
 
