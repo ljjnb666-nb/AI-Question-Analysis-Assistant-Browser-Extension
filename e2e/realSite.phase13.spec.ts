@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
 import { visitLiveTargetUntilReady } from "@/shared/utils/liveSiteReadiness";
 import { createLiveSiteDiagnostics, formatLiveSiteReadinessDiagnostic, isPintiaPartyHost } from "./helpers/liveSiteDiagnostics";
+import { createPendingPintiaScriptHostTracker, probePendingPintiaScriptHost } from "./helpers/pintiaScriptSubdomainNetworkProbe";
 
 // Third-party page text must never enter uploaded failure traces, screenshots, or video.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -153,14 +154,19 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     const page = await context.newPage();
     await page.setViewportSize({ width: 1440, height: 960 });
     const resources = createLiveSiteDiagnostics();
+    const pendingPintiaHosts = createPendingPintiaScriptHostTracker();
     // In-flight script counts let us distinguish upstream script stalls from
     // ERR_ABORTED caused by our own bounded navigation retries.
     // Request URLs and response bodies are never persisted or logged.
     const inFlightScripts = new Set<object>();
     page.on("request", (request) => {
+      pendingPintiaHosts.started(request);
       if (request.resourceType() === "script") inFlightScripts.add(request);
     });
-    page.on("requestfinished", (request) => { inFlightScripts.delete(request); });
+    page.on("requestfinished", (request) => {
+      inFlightScripts.delete(request);
+      pendingPintiaHosts.finished(request);
+    });
     page.on("response", (response) => {
       // Store first-party classification, status and resource type; never URLs.
       const hostname = (() => {
@@ -171,6 +177,7 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     });
     page.on("requestfailed", (request) => {
       inFlightScripts.delete(request);
+      pendingPintiaHosts.failed(request);
       resources.recordRequestFailure(request.resourceType(), request.failure()?.errorText);
     });
     page.on("pageerror", () => resources.recordPageError());
@@ -227,6 +234,15 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     );
     if (!visit.ready || !visit.response) {
       await recordAttempt();
+      // One anonymous HEAD / to the actual pending script SUBDOMAIN only.
+      // No user cookies, asset paths, query values or browser network mutation.
+      // A successful probe cannot overrule real-site content readiness.
+      const hostSummary = pendingPintiaHosts.publicSummary();
+      const hostNetworkProbe = await probePendingPintiaScriptHost(pendingPintiaHosts.pendingHost())
+        .catch(() => null);
+      console.error("PHASE13_PENDING_SCRIPT_SUBDOMAIN_DIAG " + JSON.stringify({
+        schemaVersion: 1, ...hostSummary, network: hostNetworkProbe ?? { outcome: "diagnosticError" },
+      }));
       // The live upstream is not an owned fixture. Preserve a compact diagnostic,
       // but never turn an unreachable/challenged/changed page into a green result.
       const diagnostic = await page.evaluate(() => ({
@@ -247,6 +263,7 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
           visitStatusCodes: visit.statusCodes,
           visitSnapshots: attemptSnapshots,
           resourceTelemetry: resources.snapshot(),
+          pendingScriptSubdomain: { ...hostSummary, network: hostNetworkProbe },
           finalHostname: diagnostic?.finalHostname ?? null,
           finalPathname: diagnostic?.finalPathname ?? null,
           documentTitleSha256: sha256(diagnostic?.documentTitleSha256Input ?? ""),
