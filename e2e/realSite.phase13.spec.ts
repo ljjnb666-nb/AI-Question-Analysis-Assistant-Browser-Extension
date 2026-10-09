@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
 import { visitLiveTargetUntilReady } from "@/shared/utils/liveSiteReadiness";
 import { createLiveSiteDiagnostics, formatLiveSiteReadinessDiagnostic, isPintiaPartyHost } from "./helpers/liveSiteDiagnostics";
+import { createLiveSiteTitleVerifier } from "./helpers/liveSiteTitleVerifier";
 
 // Third-party page text must never enter uploaded failure traces, screenshots, or video.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -156,9 +157,13 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     // In-flight script counts let us distinguish upstream script stalls from
     // ERR_ABORTED caused by our own bounded navigation retries.
     // Request URLs and response bodies are never persisted or logged.
-    const inFlightScripts = new Set<object>();
+    const inFlightScripts = new Map<object, boolean>();
     page.on("request", (request) => {
-      if (request.resourceType() === "script") inFlightScripts.add(request);
+      if (request.resourceType() !== "script") return;
+      // Classify host only; the script URL is never persisted or logged.
+      let firstParty = false;
+      try { firstParty = isPintiaPartyHost(new URL(request.url()).hostname); } catch { /* non-URL */ }
+      inFlightScripts.set(request, firstParty);
     });
     page.on("requestfinished", (request) => { inFlightScripts.delete(request); });
     page.on("response", (response) => {
@@ -172,6 +177,13 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     page.on("requestfailed", (request) => {
       inFlightScripts.delete(request);
       resources.recordRequestFailure(request.resourceType(), request.failure()?.errorText);
+    });
+    const titleVerifier = createLiveSiteTitleVerifier({
+      page,
+      expectedTitle: PINTIA_EXPECTED_TITLE,
+      pendingScriptCount: () => inFlightScripts.size,
+      baseTimeoutMs: 17_000,
+      graceTimeoutMs: 6_000,
     });
     page.on("pageerror", () => resources.recordPageError());
     page.on("console", (message) => {
@@ -199,6 +211,9 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
         ...sanitized,
         documentTitleSha256: sha256(documentTitle),
         pendingScriptRequests: inFlightScripts.size,
+        pendingFirstPartyScripts: [...inFlightScripts.values()].filter(Boolean).length,
+        pendingThirdPartyScripts: [...inFlightScripts.values()].filter((x) => !x).length,
+        pendingScriptGraceUsed: titleVerifier.graceUsed(),
       });
     };
 
@@ -210,20 +225,18 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
         waitUntil: "commit",
         timeout: 25_000,
       }),
-      async () => {
-        await expect.poll(
-          async () => {
-            const body = page.locator("body");
-            if (await body.count() === 0) return false;
-            return (await body.innerText()).includes(PINTIA_EXPECTED_TITLE);
-          },
-          { timeout: 17_000, intervals: [500, 1_000, 2_000, 4_000] },
-        ).toBe(true);
+      titleVerifier.verify,
+      {
+        maxAttempts: 3,
+        betweenAttempts: async () => {
+          await recordAttempt();
+          await page.waitForTimeout(1_000);
+        },
+        // Once the bounded title check and one-shot script grace have failed,
+        // re-navigating with scripts still in flight would abort those requests.
+        // Preserve the real failure and its telemetry instead.
+        stopIfContentPending: () => titleVerifier.graceUsed() && inFlightScripts.size > 0,
       },
-      { maxAttempts: 3, betweenAttempts: async () => {
-        await recordAttempt();
-        await page.waitForTimeout(1_000);
-      } },
     );
     if (!visit.ready || !visit.response) {
       await recordAttempt();
