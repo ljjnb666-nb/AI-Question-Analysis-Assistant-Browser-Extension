@@ -79,7 +79,7 @@ test("ISSUE83_DIAG_01 log projection includes status/hydration signals without t
       finalHostname: "pintia.cn", finalPathname: "/problem-sets/434/exam/problems/type/6",
       documentTitle: "private-title-token", documentTitleSha256: "a".repeat(64),
       bodyText: "private-body-token", url: "https://private.example/user-token",
-      readyState: "complete", bodyTextLength: 42, scriptCount: 8, hasBody: true,
+      readyState: "complete", bodyTextLength: 42, scriptCount: 8, pendingScriptRequests: 2, hasBody: true,
     }],
     telemetry: telemetry.snapshot(),
   });
