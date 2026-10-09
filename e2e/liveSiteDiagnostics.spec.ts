@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { createLiveSiteDiagnostics, isPintiaPartyHost } from "./helpers/liveSiteDiagnostics";
+import { createLiveSiteDiagnostics, formatLiveSiteReadinessDiagnostic, isPintiaPartyHost } from "./helpers/liveSiteDiagnostics";
 
 test("PHASE13_DIAG_01 captures only allowlisted network categories and aggregates status", () => {
   const telemetry = createLiveSiteDiagnostics();
@@ -66,4 +66,58 @@ test("PHASE13_DIAG_04 distinguishes Pintia API hosts from spoofed suffixes", () 
   expect(isPintiaPartyHost("cdn.api.pintia.cn")).toBe(true);
   expect(isPintiaPartyHost("evilpintia.cn")).toBe(false);
   expect(isPintiaPartyHost("pintia.cn.example.invalid")).toBe(false);
+});
+
+test("ISSUE83_DIAG_01 log projection includes status/hydration signals without third-party content", () => {
+  const telemetry = createLiveSiteDiagnostics();
+  telemetry.recordHttpFailure("fetch", 503, true);
+  telemetry.recordRequestFailure("script", "net::ERR_BLOCKED_BY_CLIENT user=private-secret");
+  const summary = formatLiveSiteReadinessDiagnostic({
+    attemptsUsed: 3,
+    statusCodes: [200, 200, 200],
+    snapshots: [{
+      finalHostname: "pintia.cn", finalPathname: "/problem-sets/434/exam/problems/type/6",
+      documentTitle: "private-title-token", documentTitleSha256: "a".repeat(64),
+      bodyText: "private-body-token", url: "https://private.example/user-token",
+      readyState: "complete", bodyTextLength: 42, scriptCount: 8, hasBody: true,
+    }],
+    telemetry: telemetry.snapshot(),
+  });
+  expect(JSON.parse(summary)).toMatchObject({
+    schemaVersion: 1, attemptsUsed: 3, statusCodes: [200, 200, 200],
+    visitSnapshots: [{
+      expectedHost: true, expectedProblemPath: true, hasBody: true,
+      readyState: "complete", bodyTextLength: 42, scriptCount: 8,
+      documentTitleSha256: "a".repeat(64),
+    }],
+    resources: {
+      httpFailures: [{ resourceKind: "fetch", status: 503, firstParty: true, count: 1 }],
+      requestFailures: [{ resourceKind: "script", failure: "blocked", count: 1 }],
+    },
+  });
+  for (const secret of ["private-title-token", "private-body-token", "private.example", "user-token", "private-secret"]) {
+    expect(summary).not.toContain(secret);
+  }
+  expect(summary).not.toContain('"ready":true');
+});
+
+test("ISSUE83_DIAG_02 redirects and hostile snapshot metadata do not leak private paths", () => {
+  const summary = formatLiveSiteReadinessDiagnostic({
+    attemptsUsed: 2, statusCodes: [302, 403],
+    snapshots: [{
+      finalHostname: "private.example", finalPathname: "/users/private-user",
+      documentTitleSha256: "raw-private-title", readyState: "secret-state",
+      bodyTextLength: -3, scriptCount: Infinity, hasBody: true,
+      networkUrl: "https://private.example/?token=sensitive",
+    }],
+    telemetry: createLiveSiteDiagnostics().snapshot(),
+  });
+  expect(JSON.parse(summary).visitSnapshots[0]).toMatchObject({
+    expectedHost: false, expectedProblemPath: false,
+    readyState: "unknown", bodyTextLength: 0, scriptCount: 0,
+    documentTitleSha256: "",
+  });
+  for (const secret of ["private.example", "private-user", "raw-private-title", "sensitive", "secret-state"]) {
+    expect(summary).not.toContain(secret);
+  }
 });
