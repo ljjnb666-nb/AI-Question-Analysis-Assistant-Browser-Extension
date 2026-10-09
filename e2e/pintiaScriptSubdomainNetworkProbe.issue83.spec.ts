@@ -94,15 +94,11 @@ test("ISSUE83_HOST_03 one pinned-public-IP anonymous HEAD, sanitized DNS/TCP/TLS
   });
   expect(calls).toBe(1);
   expect(observedOptions).toMatchObject({
-    hostname: "cdn.pintia.cn", servername: "cdn.pintia.cn", protocol: "https:",
+    hostname: "8.8.8.8", servername: "cdn.pintia.cn", protocol: "https:",
     method: "HEAD", path: "/", agent: false, rejectUnauthorized: true,
-    headers: { Accept: "*/*" },
+    headers: { Host: "cdn.pintia.cn", Accept: "*/*" },
   });
-  expect(typeof (observedOptions as unknown as { lookup: unknown }).lookup).toBe("function");
-  const lookupFn = (observedOptions as unknown as { lookup: (host: string, o: unknown, cb: (err: null, ip: string, family: number) => void) => void }).lookup;
-  let ip: string | undefined;
-  lookupFn("cdn.pintia.cn", {}, (_err, resolved) => { ip = resolved; });
-  expect(ip).toBe("8.8.8.8");
+  expect((observedOptions as unknown as { lookup?: unknown }).lookup).toBeUndefined();
   expect(result).toMatchObject({
     target: "pending-pintia-script-subdomain",
     requestMethod: "HEAD", requestPath: "/",
