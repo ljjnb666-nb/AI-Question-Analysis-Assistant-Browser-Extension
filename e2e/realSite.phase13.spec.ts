@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
 import { visitLiveTargetUntilReady } from "@/shared/utils/liveSiteReadiness";
 import { createLiveSiteDiagnostics, formatLiveSiteReadinessDiagnostic, isPintiaPartyHost } from "./helpers/liveSiteDiagnostics";
+import { createCdpScriptLifecycleDiagnostic } from "./helpers/liveSiteCdpScriptLifecycle";
 
 // Third-party page text must never enter uploaded failure traces, screenshots, or video.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -152,6 +153,17 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     const worker = await getExtensionWorker(context);
     const page = await context.newPage();
     await page.setViewportSize({ width: 1440, height: 960 });
+    // Observe passive Network.* CDP events. No interception, cache toggles,
+    // response modification, request headers or body extraction.
+    const cdpSession = await context.newCDPSession(page);
+    const cdpScripts = createCdpScriptLifecycleDiagnostic();
+    cdpSession.on("Network.requestWillBeSent", (e) => cdpScripts.requestWillBeSent(e));
+    cdpSession.on("Network.requestWillBeSentExtraInfo", (e) => cdpScripts.requestWillBeSentExtraInfo(e));
+    cdpSession.on("Network.responseReceived", (e) => cdpScripts.responseReceived(e));
+    cdpSession.on("Network.loadingFinished", (e) => cdpScripts.loadingFinished(e));
+    cdpSession.on("Network.loadingFailed", (e) => cdpScripts.loadingFailed(e));
+    await cdpSession.send("Network.enable");
+    const cdpScriptSnapshots: Array<ReturnType<typeof cdpScripts.snapshot>> = [];
     const resources = createLiveSiteDiagnostics();
     // In-flight script counts let us distinguish upstream script stalls from
     // ERR_ABORTED caused by our own bounded navigation retries.
@@ -181,6 +193,7 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     // Snapshot every bounded visit. Never persist third-party content.
     const attemptSnapshots: Array<Record<string, string | number | boolean>> = [];
     const recordAttempt = async () => {
+      cdpScriptSnapshots.push(cdpScripts.snapshot());
       const state = await page.evaluate(() => ({
         finalHostname: location.hostname,
         finalPathname: location.pathname,
@@ -247,6 +260,7 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
           visitStatusCodes: visit.statusCodes,
           visitSnapshots: attemptSnapshots,
           resourceTelemetry: resources.snapshot(),
+          cdpScriptLifecycle: cdpScriptSnapshots.slice(0, 5),
           finalHostname: diagnostic?.finalHostname ?? null,
           finalPathname: diagnostic?.finalPathname ?? null,
           documentTitleSha256: sha256(diagnostic?.documentTitleSha256Input ?? ""),
@@ -261,6 +275,9 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
       // Fail closed as before, but show a strictly allowlisted compact
       // diagnostic in the job log. Binary Actions artifacts may be inaccessible
       // to a read-only reviewer; raw page text and URLs still never enter logs.
+      console.error("PHASE13_CDP_SCRIPT_LIFECYCLE_DIAG " + JSON.stringify({
+        schemaVersion: 1, attempts: cdpScriptSnapshots.slice(0, 5),
+      }));
       console.error("PHASE13_LIVE_NOT_READY_DIAG " + formatLiveSiteReadinessDiagnostic({
         attemptsUsed: visit.attemptsUsed,
         statusCodes: visit.statusCodes,
@@ -271,6 +288,9 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     }
     // Log the same allowlisted shape on successes for a controlled comparison.
     await recordAttempt();
+    console.info("PHASE13_CDP_SCRIPT_LIFECYCLE_DIAG " + JSON.stringify({
+      schemaVersion: 1, attempts: cdpScriptSnapshots.slice(0, 5),
+    }));
     console.info("PHASE13_LIVE_READY_DIAG " + formatLiveSiteReadinessDiagnostic({
       attemptsUsed: visit.attemptsUsed,
       statusCodes: visit.statusCodes,
