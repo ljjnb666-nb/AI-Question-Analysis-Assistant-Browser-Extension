@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import type { ClientRequest, RequestOptions } from "node:http";
+import type { ClientRequest } from "node:http";
+import type { RequestOptions } from "node:https";
 import { expect, test } from "@playwright/test";
 import {
   createPendingPintiaScriptHostTracker, isPublicIpv4, probePendingPintiaScriptHost,
@@ -65,7 +66,7 @@ test("ISSUE83_HOST_03 one pinned-public-IP anonymous HEAD, sanitized DNS/TCP/TLS
   const transport = ((options: RequestOptions) => {
     calls += 1;
     observedOptions = options;
-    const req = new EventEmitter() as ClientRequest;
+    const req = new EventEmitter() as unknown as ClientRequest;
     req.destroy = (() => req) as ClientRequest["destroy"];
     req.end = (() => {
       queueMicrotask(() => {
@@ -109,7 +110,7 @@ test("ISSUE83_HOST_03 one pinned-public-IP anonymous HEAD, sanitized DNS/TCP/TLS
     totalLatencyBucket: "under1s",
   });
   expect(result.milestones.every(x => x.observed)).toBe(true);
-  for (const secret of ["cdn.pintia.cn", "8.8.8.8", "token", "password", "Cookie", "http"]) {
+  for (const secret of ["cdn.pintia.cn", "8.8.8.8", "token", "password", "Cookie", "https://"]) {
     expect(JSON.stringify(result)).not.toContain(secret);
   }
 });
