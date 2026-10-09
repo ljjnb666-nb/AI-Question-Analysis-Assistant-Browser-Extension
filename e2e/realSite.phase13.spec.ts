@@ -157,9 +157,13 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     // In-flight script counts let us distinguish upstream script stalls from
     // ERR_ABORTED caused by our own bounded navigation retries.
     // Request URLs and response bodies are never persisted or logged.
-    const inFlightScripts = new Set<object>();
+    const inFlightScripts = new Map<object, boolean>();
     page.on("request", (request) => {
-      if (request.resourceType() === "script") inFlightScripts.add(request);
+      if (request.resourceType() !== "script") return;
+      // Classify host only; the script URL is never persisted or logged.
+      let firstParty = false;
+      try { firstParty = isPintiaPartyHost(new URL(request.url()).hostname); } catch { /* non-URL */ }
+      inFlightScripts.set(request, firstParty);
     });
     page.on("requestfinished", (request) => { inFlightScripts.delete(request); });
     page.on("response", (response) => {
@@ -207,6 +211,8 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
         ...sanitized,
         documentTitleSha256: sha256(documentTitle),
         pendingScriptRequests: inFlightScripts.size,
+        pendingFirstPartyScripts: [...inFlightScripts.values()].filter(Boolean).length,
+        pendingThirdPartyScripts: [...inFlightScripts.values()].filter((x) => !x).length,
         pendingScriptGraceUsed: titleVerifier.graceUsed(),
       });
     };
