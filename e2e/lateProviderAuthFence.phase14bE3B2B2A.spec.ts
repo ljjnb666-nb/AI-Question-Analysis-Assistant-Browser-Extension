@@ -59,7 +59,7 @@ function successResponse(): string {
 }
 
 async function probeServer() {
-  const pending = new Set<ServerResponse>();
+  const pending = new Map<number, ServerResponse>();
   let requested = 0;
   let released = false;
   let nativeSubmits = 0;
@@ -79,13 +79,14 @@ async function probeServer() {
       try { JSON.parse(body) as { stream?: boolean }; }
       catch { res.writeHead(400); res.end("invalid request"); return; }
       requested += 1;
+      const requestIndex = requested;
       const fulfill = () => {
         if (res.writableEnded || res.destroyed) return;
         res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
         res.end(successResponse());
       };
       if (released) fulfill();
-      else { pending.add(res); res.on("close", () => pending.delete(res)); }
+      else { pending.set(requestIndex, res); res.on("close", () => pending.delete(requestIndex)); }
       return;
     }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
@@ -99,9 +100,19 @@ async function probeServer() {
     requests: () => requested,
     pending: () => pending.size,
     nativeSubmits: () => nativeSubmits,
+    pendingIndices: () => [...pending.keys()].sort((a, b) => a - b),
+    // Deliver only the specified request; an aborted request can have
+    // disconnected already, and cannot count as delivered bytes.
+    releaseOne: (index: number): boolean => {
+      const res = pending.get(index);
+      if (!res || res.writableEnded || res.destroyed) return false;
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(successResponse());
+      return true;
+    },
     release: () => {
       released = true;
-      for (const res of [...pending]) {
+      for (const res of [...pending.values()]) {
         if (res.writableEnded || res.destroyed) continue;
         res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
         res.end(successResponse());
