@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 import { closeExtensionContext, launchExtensionContext } from "./helpers/extensionHarness";
 import { visitLiveTargetUntilReady } from "@/shared/utils/liveSiteReadiness";
 import { createLiveSiteDiagnostics, formatLiveSiteReadinessDiagnostic, isPintiaPartyHost } from "./helpers/liveSiteDiagnostics";
+import { createLiveSiteTitleVerifier } from "./helpers/liveSiteTitleVerifier";
 
 // Third-party page text must never enter uploaded failure traces, screenshots, or video.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -173,6 +174,13 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
       inFlightScripts.delete(request);
       resources.recordRequestFailure(request.resourceType(), request.failure()?.errorText);
     });
+    const titleVerifier = createLiveSiteTitleVerifier({
+      page,
+      expectedTitle: PINTIA_EXPECTED_TITLE,
+      pendingScriptCount: () => inFlightScripts.size,
+      baseTimeoutMs: 17_000,
+      graceTimeoutMs: 6_000,
+    });
     page.on("pageerror", () => resources.recordPageError());
     page.on("console", (message) => {
       if (message.type() === "error") resources.recordConsoleError();
@@ -199,6 +207,7 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
         ...sanitized,
         documentTitleSha256: sha256(documentTitle),
         pendingScriptRequests: inFlightScripts.size,
+        pendingScriptGraceUsed: titleVerifier.graceUsed(),
       });
     };
 
@@ -210,16 +219,7 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
         waitUntil: "commit",
         timeout: 25_000,
       }),
-      async () => {
-        await expect.poll(
-          async () => {
-            const body = page.locator("body");
-            if (await body.count() === 0) return false;
-            return (await body.innerText()).includes(PINTIA_EXPECTED_TITLE);
-          },
-          { timeout: 17_000, intervals: [500, 1_000, 2_000, 4_000] },
-        ).toBe(true);
-      },
+      titleVerifier.verify,
       { maxAttempts: 3, betweenAttempts: async () => {
         await recordAttempt();
         await page.waitForTimeout(1_000);
