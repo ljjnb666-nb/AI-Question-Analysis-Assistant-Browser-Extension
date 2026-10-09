@@ -73,3 +73,53 @@ export function createLiveSiteDiagnostics() {
     },
   };
 }
+
+/**
+ * Log-safe projection of live-site content readiness. Explicit field picks
+ * prevent accidental leakage of the page title, location/search, response
+ * bodies, browser errors, and arbitrary future snapshot keys into CI logs.
+ * This is diagnostics only; it never changes pass/fail authority.
+ */
+export function formatLiveSiteReadinessDiagnostic(input: {
+  attemptsUsed: number;
+  statusCodes: readonly number[];
+  snapshots: readonly Readonly<Record<string, unknown>>[];
+  telemetry: ReturnType<ReturnType<typeof createLiveSiteDiagnostics>["snapshot"]>;
+}): string {
+  const boundedInt = (value: unknown) =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 1_000_000) : 0;
+  const allowedKinds = new Set(["document", "script", "xhr", "fetch", "stylesheet", "image", "font", "other"]);
+  const allowedReasons = new Set(["timeout", "blocked", "aborted", "connection", "other"]);
+  return JSON.stringify({
+    schemaVersion: 1,
+    attemptsUsed: boundedInt(input.attemptsUsed),
+    statusCodes: input.statusCodes.slice(0, 5).map(boundedInt),
+    visitSnapshots: input.snapshots.slice(0, 5).map((snapshot) => ({
+      snapshotUnavailable: snapshot.snapshotUnavailable === true,
+      expectedHost: snapshot.finalHostname === "pintia.cn",
+      expectedProblemPath: snapshot.finalPathname === "/problem-sets/434/exam/problems/type/6",
+      hasBody: snapshot.hasBody === true,
+      readyState: ["loading", "interactive", "complete"].includes(String(snapshot.readyState))
+        ? snapshot.readyState : "unknown",
+      bodyTextLength: boundedInt(snapshot.bodyTextLength),
+      scriptCount: boundedInt(snapshot.scriptCount),
+      documentTitleSha256: typeof snapshot.documentTitleSha256 === "string" && /^[a-f0-9]{64}$/.test(snapshot.documentTitleSha256)
+        ? snapshot.documentTitleSha256 : "",
+    })),
+    resources: {
+      httpFailures: input.telemetry.httpFailures.slice(0, 24).map(({ resourceKind, status, firstParty, count }) => ({
+        resourceKind: allowedKinds.has(resourceKind) ? resourceKind : "other",
+        status: boundedInt(status), firstParty: firstParty === true, count: boundedInt(count),
+      })),
+      requestFailures: input.telemetry.requestFailures.slice(0, 24).map(({ resourceKind, failure, count }) => ({
+        resourceKind: allowedKinds.has(resourceKind) ? resourceKind : "other",
+        failure: allowedReasons.has(failure) ? failure : "other",
+        count: boundedInt(count),
+      })),
+      suppressedHttpFailures: boundedInt(input.telemetry.suppressedHttpFailures),
+      suppressedRequestFailures: boundedInt(input.telemetry.suppressedRequestFailures),
+      pageErrors: boundedInt(input.telemetry.pageErrors),
+      consoleErrors: boundedInt(input.telemetry.consoleErrors),
+    },
+  });
+}
