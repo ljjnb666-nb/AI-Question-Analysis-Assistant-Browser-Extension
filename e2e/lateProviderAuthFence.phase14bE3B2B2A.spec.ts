@@ -33,8 +33,8 @@ function pageHtml(): string {
         <label><input name="q1" type="radio" value="B">B. 4</label>
         <label><input name="q1" type="radio" value="C">C. 5</label>
         <label><input name="q1" type="radio" value="D">D. 6</label>
-        <input name="answer" id="answer" autocomplete="off">
       </section>
+      <input name="answer" id="answer" autocomplete="off" aria-label="Unrelated text control">
       <button type="submit">Submit answers</button>
     </form><div style="height:1200px"></div>
     <script>
@@ -59,7 +59,11 @@ function successResponse(): string {
 }
 
 async function probeServer() {
-  const pending = new Set<ServerResponse>();
+  const pending = new Map<number, ServerResponse>();
+  // Transport observability: a fixture write is NOT proof that an aborted
+  // browser request received or processed the AI completion.
+  const responseWritten = new Set<number>();
+  const closedWithoutResponse = new Set<number>();
   let requested = 0;
   let released = false;
   let nativeSubmits = 0;
@@ -79,13 +83,19 @@ async function probeServer() {
       try { JSON.parse(body) as { stream?: boolean }; }
       catch { res.writeHead(400); res.end("invalid request"); return; }
       requested += 1;
+      const requestIndex = requested;
       const fulfill = () => {
         if (res.writableEnded || res.destroyed) return;
+        responseWritten.add(requestIndex);
         res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
         res.end(successResponse());
       };
+      res.on("close", () => {
+        pending.delete(requestIndex);
+        if (!responseWritten.has(requestIndex)) closedWithoutResponse.add(requestIndex);
+      });
       if (released) fulfill();
-      else { pending.add(res); res.on("close", () => pending.delete(res)); }
+      else pending.set(requestIndex, res);
       return;
     }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
@@ -99,10 +109,27 @@ async function probeServer() {
     requests: () => requested,
     pending: () => pending.size,
     nativeSubmits: () => nativeSubmits,
+    pendingIndices: () => [...pending.keys()].sort((a, b) => a - b),
+    responseWritten: (index: number) => responseWritten.has(index),
+    closedWithoutResponse: (index: number) => closedWithoutResponse.has(index),
+    // Write to the fixture HTTP proxy, NOT necessarily to a cancelled browser
+    // request. The application-side late-completion fence is tested separately.
+    // An aborted request can have
+    // disconnected already, and cannot count as delivered bytes.
+    releaseOne: (index: number): boolean => {
+      const res = pending.get(index);
+      if (!res || res.writableEnded || res.destroyed) return false;
+      responseWritten.add(index);
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(successResponse());
+      return true;
+    },
     release: () => {
       released = true;
-      for (const res of [...pending]) {
+      for (const res of [...pending.values()]) {
         if (res.writableEnded || res.destroyed) continue;
+        const index = [...pending.entries()].find(([, response]) => response === res)?.[0];
+        if (index !== undefined) responseWritten.add(index);
         res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
         res.end(successResponse());
       }
@@ -237,6 +264,137 @@ test("@phase14b-e3b2b2a real held-provider reply after auth loss and account swi
     expect(await ownerGenerations(worker, tabId)).not.toContain(oldGeneration);
     expect(await answerState(exam)).toEqual(baseline);
     expect(probe.nativeSubmits()).toBe(0);
+  } finally {
+    probe.release();
+    if (context) await closeExtensionContext(context);
+    await probe.close();
+    await auth.close();
+  }
+});
+
+
+test("@phase14b-e3b2b2b1 new UI generation survives duplicate stale STOP and old provider cancellation or proxy write", async () => {
+  test.setTimeout(150_000);
+  const auth = await startTestAnalyticsBackend();
+  const probe = await probeServer();
+  let context: BrowserContext | undefined;
+  try {
+    const account = await auth.registerAccount("e3b2b2b1-overlap");
+    context = await launchExtensionContext();
+    await routeCanonicalOpenAIToFixture(context, probe.origin);
+    const extensionId = await resolveExtensionId(context);
+    const worker = await getWorker(context);
+    const exam = await context.newPage();
+    const url = probe.origin + "/overlap";
+    await exam.goto(url);
+    const tabId = await tabIdFor(worker, url);
+    const baseline = await answerState(exam);
+    expect(baseline).toEqual({ text: "", selected: [], submits: 0, changes: 0 });
+
+    await seedExtensionSettings(context, extensionId, {
+      analyticsBaseUrl: auth.baseUrl, userId: account.userId,
+      userEmail: account.email, authToken: account.authToken,
+    });
+    const panel = await context.newPage();
+    await panel.goto("chrome-extension://" + extensionId + "/sidepanel/sidepanel.html");
+    await expect(panel.locator("[data-candidate-workspace]")).toBeVisible({ timeout: 25_000 });
+    await seedAIConnection(panel, {
+      presetId: "openai", selectedModelId: "gpt-5.5",
+      credential: { action: "REPLACE", value: "fixture-e3b2b2b1-not-a-real-key" },
+    });
+    const actionGroup = panel.getByRole("group", { name: /^(候选题目操作|Candidate actions)$/ });
+    await actionGroup.getByRole("button", { name: /^(当前屏|Current View)$/ }).click();
+    await expect.poll(async () => {
+      const result = await worker.evaluate(async ({ id, url }) =>
+        chrome.tabs.sendMessage(id, { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT", expectedUrl: url },
+          { frameId: 0 }), { id: tabId, url });
+      return result.snapshot?.candidates?.length ?? 0;
+    }, { timeout: 12_000 }).toBeGreaterThan(0);
+
+    // The real first user gesture creates the original owner and reaches the
+    // canonical provider transport, where its answer remains held.
+    await actionGroup.getByRole("button", { name: /^(解析并填答|Solve & Fill)$/ }).click();
+    await expect.poll(() => ownerGenerations(worker, tabId), { timeout: 15_000 }).toHaveLength(1);
+    const [oldGeneration] = await ownerGenerations(worker, tabId);
+    await expect.poll(() => probe.requests(), { timeout: 15_000 }).toBe(1);
+    expect(probe.pendingIndices()).toEqual([1]);
+
+    // The production stop UI revokes old authority and aborts its attempt.
+    await actionGroup.getByRole("button", { name: /^(停止解析并填答|Stop Solve & Fill)$/ }).click();
+    await expect.poll(async () => (await ownerGenerations(worker, tabId)).includes(oldGeneration),
+      { timeout: 15_000 }).toBe(false);
+    await expect(actionGroup.getByRole("button", { name: /^(解析并填答|Solve & Fill)$/ }))
+      .toBeEnabled({ timeout: 15_000 });
+
+    // The new UI START must own a DIFFERENT generation with its own provider
+    // request, still held while the old network request is released.
+    await actionGroup.getByRole("button", { name: /^(解析并填答|Solve & Fill)$/ }).click();
+    await expect.poll(async () => (await ownerGenerations(worker, tabId))
+      .filter(g => g !== oldGeneration).length, { timeout: 15_000 }).toBe(1);
+    const [newGeneration] = (await ownerGenerations(worker, tabId))
+      .filter(g => g !== oldGeneration);
+    expect(newGeneration).not.toBe(oldGeneration);
+    await expect.poll(() => probe.requests(), { timeout: 15_000 }).toBe(2);
+    expect(probe.pendingIndices()).toContain(2);
+
+    // Replay/duplicate old STOP directly through the live extension runtime.
+    // No tab-owner seeding or synthetic START is used.
+    for (let n = 0; n < 3; n++) {
+      expect(await worker.evaluate(async ({ id, generationId }) =>
+        chrome.tabs.sendMessage(id, { type: "STOP_AUTO_SOLVE_ALL", generationId }, { frameId: 0 }),
+        { id: tabId, generationId: oldGeneration }))
+        .toEqual({ ok: false, error: "STALE_WORK_GENERATION" });
+      expect(await ownerGenerations(worker, tabId)).toContain(newGeneration);
+    }
+
+    // This is a transport-level observation, NOT proof of stale content-script
+    // delivery. A stopped run may close #1; otherwise the fixture can write
+    // bytes only as far as Playwright's intercepted route.fetch proxy.
+    const oldProxyWrite = probe.releaseOne(1);
+    if (oldProxyWrite) {
+      expect(probe.responseWritten(1)).toBe(true);
+      expect(probe.closedWithoutResponse(1)).toBe(false);
+    } else {
+      await expect.poll(() => probe.closedWithoutResponse(1), { timeout: 10_000 }).toBe(true);
+      expect(probe.responseWritten(1)).toBe(false);
+    }
+    console.info("[E3B2B2B1] old provider #1:", oldProxyWrite
+      ? "HTTP fixture wrote to Playwright proxy (browser delivery NOT established)"
+      : "transport closed without response");
+    await exam.waitForTimeout(650);
+    expect(await answerState(exam)).toEqual(baseline);
+    expect(await ownerGenerations(worker, tabId)).toContain(newGeneration);
+    expect(probe.pendingIndices()).toContain(2);
+    expect(probe.nativeSubmits()).toBe(0);
+
+    // Positive control: authorized generation #2 receives its own response
+    // and must be able to fill the real radio input without submitting.
+    expect(probe.releaseOne(2)).toBe(true);
+    try {
+      await expect.poll(async () => (await answerState(exam)).selected,
+        { timeout: 20_000 }).toContain("B");
+    } catch {
+      const runtime = await worker.evaluate(async ({ id, url }) =>
+        chrome.tabs.sendMessage(id, { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT", expectedUrl: url },
+          { frameId: 0 }), { id: tabId, url });
+      const ui = await panel.locator("body").innerText();
+      throw new Error("AUTHORIZED_FILL_NOT_OBSERVED: " + JSON.stringify({
+        answerState: await answerState(exam), pending: probe.pendingIndices(),
+        owner: await ownerGenerations(worker, tabId), runtime: runtime.snapshot?.autoSolve,
+        uiStatus: ui.slice(-650),
+      }).slice(0, 1700));
+    }
+    const after = await answerState(exam);
+    expect(after.submits).toBe(0);
+    expect(probe.nativeSubmits()).toBe(0);
+
+    // Even after the newer answer commits, stale old STOP stays rejected.
+    for (let n = 0; n < 2; n++) {
+      expect(await worker.evaluate(async ({ id, generationId }) =>
+        chrome.tabs.sendMessage(id, { type: "STOP_AUTO_SOLVE_ALL", generationId }, { frameId: 0 }),
+        { id: tabId, generationId: oldGeneration }))
+        .toEqual({ ok: false, error: "STALE_WORK_GENERATION" });
+    }
   } finally {
     probe.release();
     if (context) await closeExtensionContext(context);
