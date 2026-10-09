@@ -56,7 +56,9 @@ describe("PHASE14C_05 bounded provider response consumption", () => {
     "%s rejects oversized chunked success JSON before parsing and cancels the body",
     async provider => {
       let cancelled = false;
-      const oversized = wireJson(provider, "x".repeat(JSON_LIMIT));
+      // Leave at least four unread chunks when crossing the limit so the
+      // stream has not naturally closed before reader.cancel() is observed.
+      const oversized = wireJson(provider, "x".repeat(JSON_LIMIT + 64 * 1024));
       vi.stubGlobal("fetch", vi.fn(async () => new Response(byteStream(oversized, () => { cancelled = true; }), {
         status: 200, headers: { "Content-Type": "application/json" },
       })));
