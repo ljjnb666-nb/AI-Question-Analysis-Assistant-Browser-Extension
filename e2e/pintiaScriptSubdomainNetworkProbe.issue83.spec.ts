@@ -98,7 +98,7 @@ test("ISSUE83_HOST_03 one pinned-public-IP anonymous HEAD, sanitized DNS/TCP/TLS
     method: "HEAD", path: "/", agent: false, rejectUnauthorized: true,
     headers: { Accept: "*/*" },
   });
-  expect((observedOptions as unknown as { lookup: (host: string, o: unknown, cb: (err: null, ip: string, family: number) => void) => void }).lookup).toBeTypeOf("function");
+  expect(typeof (observedOptions as unknown as { lookup: unknown }).lookup).toBe("function");
   const lookupFn = (observedOptions as unknown as { lookup: (host: string, o: unknown, cb: (err: null, ip: string, family: number) => void) => void }).lookup;
   let ip: string | undefined;
   lookupFn("cdn.pintia.cn", {}, (_err, resolved) => { ip = resolved; });
