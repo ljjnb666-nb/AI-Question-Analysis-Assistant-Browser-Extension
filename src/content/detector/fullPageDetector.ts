@@ -7,6 +7,7 @@
 
 import type { QuestionBlock } from "@/shared/types";
 import { detectCandidatesInViewport } from "./domDetector";
+import { isLikelyControlPanelText } from "./domDetectorShared";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -376,7 +377,7 @@ function normalizePreviewText(raw: string): string {
 
 function isLikelyUsefulPreview(text: string, questionType: QuestionBlock["questionTypeGuess"]): boolean {
   if (!text) return false;
-  const controlPanelLike = /试题检索|教材版本|题型|难易度|按章节|按知识点|试题篮|组卷预览|登录|注册/.test(text);
+  const controlPanelLike = isLikelyControlPanelText(text);
   if (controlPanelLike) return false;
   if (text.length < 28) {
     const shortJudgeLike = (questionType === "judge" || questionType === "unknown")
