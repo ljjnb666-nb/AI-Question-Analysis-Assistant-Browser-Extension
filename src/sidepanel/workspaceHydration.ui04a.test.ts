@@ -171,6 +171,26 @@ describe("UI-04A Side Panel opening fence", () => {
     expect(h2.last()).toEqual(["idle"]);
   });
 
+  it("RC03D-B7 retires the previous runtime after verified event-only recovery", async () => {
+    const h = harness();
+    const opening = h.c.sync();
+    h.response.resolve({ ok: true, snapshot: fixture({ seq: 10, runtimeInstanceId: "old", runtimeGeneration: 1 }) });
+    await opening;
+    const second = deferred<unknown>();
+    h.request.mockImplementationOnce(() => second.promise);
+    const retry = h.c.sync();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(2));
+    h.event(fixture({ seq: 1, runtimeInstanceId: "replacement", runtimeGeneration: 2 }));
+    second.resolve(null);
+    await retry;
+    expect(h.last()?.[1].runtimeInstanceId).toBe("replacement");
+    const count = h.publish.mock.calls.length;
+    // Even a forged high generation from the retired ID cannot regain control.
+    h.event(fixture({ seq: 99, runtimeInstanceId: "old", runtimeGeneration: 3 }));
+    expect(h.publish).toHaveBeenCalledTimes(count);
+    expect(h.last()?.[1].runtimeInstanceId).toBe("replacement");
+  });
+
   it("RC03D-B6 stale same-runtime updates cannot override the previous high-water mark on retry", async () => {
     const h = harness();
     const opening = h.c.sync();
