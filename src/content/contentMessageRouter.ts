@@ -12,7 +12,7 @@ type ContentMessageRouterDeps = {
   closeFloatingResult: () => void;
   fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options: { mode: "manual"; expectedUrl?: string }) => Promise<unknown>;
   flashCandidate: (blockId: string) => void;
-  handleAutoDetect: () => void;
+  handleAutoDetect: () => void | Promise<void> | false;
   handleFullPageDetect: (generationId?: string) => boolean | void;
   startAutoSolveAll: (generationId?: string) => boolean | void;
   startManualCapture: (forceVisionMode: boolean) => void;
@@ -43,10 +43,17 @@ export function handleContentMessage(
       sendResponse({ ok: true });
       return false;
 
-    case "START_AUTO_DETECT":
-      deps.handleAutoDetect();
+    case "START_AUTO_DETECT": {
+      const execution = deps.handleAutoDetect();
+      if (execution === false) {
+        sendResponse({ ok: false, error: "WORK_ALREADY_RUNNING" });
+        return false;
+      }
+      // Legacy ACK callers do not await the detector; observe rejections.
+      void Promise.resolve(execution).catch(() => undefined);
       sendResponse({ ok: true });
       return false;
+    }
 
     case "HIGHLIGHT_CANDIDATE":
       if ("blockId" in message && typeof message.blockId === "string") deps.flashCandidate(message.blockId);
