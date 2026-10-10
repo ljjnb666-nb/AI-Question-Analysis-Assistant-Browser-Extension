@@ -4,6 +4,7 @@ import type { CandidateStatusMap } from "./contentRuntimeState";
 import { applySelectionUpdate as applySelectionUpdateCore } from "./layoutSync";
 import { handleContentMessage } from "./contentMessageRouter";
 import { isCurrentRuntimeQuestionBlock } from "./liveQuestionObservation";
+import { isProtectedWorkGenerationId } from "@/shared/auth/protectedWorkOwner";
 
 type RegisterContentRuntimeMessageHandlersOptions = {
   getWorkspaceSnapshot?: (expectedUrl: string) => WorkspaceSnapshotResponse;
@@ -18,7 +19,8 @@ type RegisterContentRuntimeMessageHandlersOptions = {
   getActiveCandidates: () => QuestionBlock[];
   getActiveHighlightBlocks: () => QuestionBlock[];
   getHighlightLayer: () => HighlightLayer | null;
-  handleAutoDetect: () => void;
+  handleAutoDetect: (requestId?: string) => void | Promise<void>;
+  onViewportDetectError?: (requestId: string) => void;
   handleFullPageDetect: (generationId?: string) => boolean | void;
   notifySidePanel: (candidates: QuestionBlock[]) => void;
   refreshLayoutResizeObservation: () => void;
@@ -43,6 +45,52 @@ export function createContentRuntimeMessageListener(options: RegisterContentRunt
     if (message.type === "GET_CANDIDATE_WORKSPACE_SNAPSHOT") {
       sendResponse(options.getWorkspaceSnapshot?.(message.expectedUrl) ?? { ok: false });
       return false;
+    }
+    if (message.type === "START_AUTO_DETECT" && message.requestId !== undefined) {
+      const requestId = message.requestId;
+      const expectedUrl = message.expectedUrl;
+      // Keep the legacy untagged command unchanged. A tagged command requires
+      // a valid exact-origin runtime and MUST return a terminal generation-bound
+      // result, not merely a transport ACK.
+      if (!isProtectedWorkGenerationId(requestId) || !expectedUrl || !/^https?:\/\//i.test(expectedUrl)) {
+        sendResponse({ ok: false, error: "INVALID_VIEWPORT_REQUEST" });
+        return false;
+      }
+      const before = options.getWorkspaceSnapshot?.(expectedUrl);
+      if (!before?.ok || !before.snapshot || before.snapshot.disposed) {
+        sendResponse({ ok: false, error: "STALE_VIEWPORT_ORIGIN" });
+        return false;
+      }
+      const fail = (code: "VIEWPORT_DETECT_FAILED" | "VIEWPORT_RESULT_NOT_CURRENT") => {
+        if (code === "VIEWPORT_DETECT_FAILED") options.onViewportDetectError?.(requestId);
+        sendResponse({ ok: false, requestId, error: code });
+      };
+      try {
+        const execution = options.handleAutoDetect(requestId);
+        void Promise.resolve(execution).then(() => {
+          if (options.isRuntimeCurrent && !options.isRuntimeCurrent()) {
+            fail("VIEWPORT_RESULT_NOT_CURRENT");
+            return;
+          }
+          const current = options.getWorkspaceSnapshot?.(expectedUrl);
+          const after = current?.snapshot;
+          if (!current?.ok || !after || after.disposed || after.originUrl !== expectedUrl
+            || after.runtimeInstanceId !== before.snapshot?.runtimeInstanceId
+            || after.runtimeGeneration !== before.snapshot?.runtimeGeneration
+            || after.routeEpoch !== before.snapshot?.routeEpoch
+            || after.seq <= before.snapshot.seq
+            || after.detection.mode !== "viewport" || after.detection.phase !== "completed"
+            || after.detection.requestId !== requestId) {
+            fail("VIEWPORT_RESULT_NOT_CURRENT");
+            return;
+          }
+          sendResponse({ ok: true, requestId });
+        }).catch(() => fail("VIEWPORT_DETECT_FAILED"));
+      } catch {
+        fail("VIEWPORT_DETECT_FAILED");
+        return false;
+      }
+      return true;
     }
     return handleContentMessage(message, sendResponse, {
       cancelFullPageScan: options.cancelFullPageScan,
