@@ -163,7 +163,15 @@ if (!isHtmlElementNode(node)) return false;
 push(isHtmlElementNode(container) ? ((container.innerText || container.textContent || "")) : (container.textContent || ""));
   }
 
-  return normalizeText(dedupeJoinedStructuredText(pieces).join(" "));
+  const structured = normalizeText(dedupeJoinedStructuredText(pieces).join(" "));
+  if (isHtmlElementNode(container)) {
+    const original = container.innerText || "";
+    const restored = recoverDetachedChoiceLabels(original);
+    if (restored !== original && !/A[.、:)：][\\s\\S]*B[.、:)：][\\s\\S]*C[.、:)：][\\s\\S]*D[.、:)：]/.test(structured)) {
+      return normalizeText(restored);
+    }
+  }
+  return structured;
 }
 
 export function extractStructuredQuestionDisplaySegments(container: Element): QuestionDisplaySegment[] | undefined {
