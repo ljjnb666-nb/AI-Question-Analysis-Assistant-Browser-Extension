@@ -175,7 +175,8 @@ export async function detectCandidatesFullPage(
 
 /** Readiness evidence is advisory only. It never grants scan authority. */
 function isPageContentPending(): boolean {
-  if (document.readyState === "loading") return true;
+  // Only an explicit site loading marker authorizes one bounded recheck.
+  // document.readyState can stay "loading" inside test or embedded documents.
   return !!document.querySelector(
     'body[aria-busy="true"],main[aria-busy="true"],[data-loading="true"],' +
     '[role="progressbar"],[class*="skeleton"],[class*="loading-spinner"]',
