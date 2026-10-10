@@ -80,7 +80,7 @@ export function buildPreviewTextForBbox(el: Element, bbox: BoundingBox, fallback
     const original = sourceNode.innerText || "";
     const restored = recoverDetachedChoiceLabels(original);
     if (restored !== original && restored.length <= 900
-      && !/A[.、:)：][\\s\\S]*B[.、:)：][\\s\\S]*C[.、:)：][\\s\\S]*D[.、:)：]/.test(compact)) {
+      && !/A[.、:)：].*B[.、:)：].*C[.、:)：].*D[.、:)：]/.test(compact)) {
       const sourceRect = sourceNode.getBoundingClientRect();
       if (sourceRect.width >= 2 && sourceRect.height >= 2 && bboxIntersectsRect(bbox, sourceRect)) {
         return sanitizePreviewText(restored).slice(0, 420);
