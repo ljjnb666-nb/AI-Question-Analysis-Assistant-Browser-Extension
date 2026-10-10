@@ -70,6 +70,7 @@ export function createWorkspaceHydration(options: Options) {
     inFlight = true;
     buffered = [];
     applied = undefined;
+    const previouslyObserved = observed;
     options.publish("syncing", undefined, origin);
     try {
       const captured = boundTabId != null ? await options.readOrigin(boundTabId) : await options.resolveOrigin();
@@ -79,16 +80,49 @@ export function createWorkspaceHydration(options: Options) {
       const before = await options.readOrigin(captured.tabId);
       if (!validTicket(t)) return;
       if (before?.url !== captured.url) return fail(t);
-      const response = await options.request(captured);
+      // Transport can fail while the same content runtime is still publishing
+      // authenticated, full-state workspace events (e.g. during an MV3 wake).
+      // A thrown transport failure is equivalent to null, never an authority
+      // success. Keep a confirmed origin read AFTER the request settles.
+      let response: unknown;
+      try {
+        response = await options.request(captured);
+      } catch {
+        response = null;
+      }
       if (!validTicket(t)) return;
       const after = await options.readOrigin(captured.tabId);
       if (!validTicket(t)) return;
+      if (after?.url !== captured.url) return fail(t);
+      const matching = buffered.filter((e) => e.tabId === captured.tabId && e.snapshot.originUrl === captured.url
+        && !e.snapshot.disposed && !retiredRuntimes.has(e.snapshot.runtimeInstanceId));
+      // Recovery is permitted only for an explicit transport loss, never for
+      // malformed/negative domain replies. A single runtime must have emitted
+      // a validated, main-frame, same-tab/same-URL live update DURING this sync.
+      // Competing runtime instances cannot be disambiguated without a read,
+      // and may not self-authorize a candidate or protected-work control.
+      if (response == null && matching.length > 0) {
+        const instances = new Set(matching.map((e) => e.snapshot.runtimeInstanceId));
+        if (instances.size !== 1) return fail(t);
+        const candidate = matching.map((e) => e.snapshot)
+          .sort((a, b) => b.routeEpoch - a.routeEpoch || b.seq - a.seq)[0]!;
+        if (previouslyObserved?.originUrl === captured.url) {
+          if (previouslyObserved.runtimeInstanceId !== candidate.runtimeInstanceId
+            && candidate.runtimeGeneration <= previouslyObserved.runtimeGeneration) return fail(t);
+          if (previouslyObserved.runtimeInstanceId === candidate.runtimeInstanceId
+            && (candidate.routeEpoch < previouslyObserved.routeEpoch
+              || candidate.routeEpoch === previouslyObserved.routeEpoch && candidate.seq <= previouslyObserved.seq)) return fail(t);
+        }
+        inFlight = false;
+        buffered = [];
+        apply(candidate);
+        return;
+      }
       const payload = response as { ok?: boolean; snapshot?: unknown } | null;
-      if (after?.url !== captured.url || !payload?.ok || !isWorkspaceSnapshot(payload.snapshot)
+      if (!payload?.ok || !isWorkspaceSnapshot(payload.snapshot)
         || payload.snapshot.originUrl !== captured.url || payload.snapshot.disposed
         || retiredRuntimes.has(payload.snapshot.runtimeInstanceId)) return fail(t);
       const s = payload.snapshot;
-      const matching = buffered.filter((e) => e.tabId === captured.tabId && e.snapshot.originUrl === captured.url);
       // A retry/navigation read also shares the previously observed high-water
       // mark. Clearing the opening buffer must never revive an older same-runtime tuple.
       if (observed?.runtimeInstanceId === s.runtimeInstanceId && observed.originUrl === captured.url) {
