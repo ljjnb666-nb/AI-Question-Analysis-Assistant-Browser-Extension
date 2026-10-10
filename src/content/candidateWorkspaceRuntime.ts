@@ -71,11 +71,22 @@ export function createCandidateWorkspaceRuntime(options: {
       publish();
       return snapshot().candidates;
     },
-    beginDetection(mode: "viewport" | "fullpage") {
+    beginDetection(mode: "viewport" | "fullpage", requestId?: string) {
       ensureRoute();
       ++detectionGeneration;
-      state = { ...state, detection: { phase: "detecting", mode }, candidates: [], fullPage: { running: mode === "fullpage", progress: null } };
+      state = { ...state, detection: { phase: "detecting", mode, ...(requestId ? { requestId } : {}) },
+        candidates: [], fullPage: { running: mode === "fullpage", progress: null } };
       publish();
+    },
+    /** A failed viewport run may reset ONLY its own still-running generation. */
+    failViewportDetection(requestId: string) {
+      if (state.disposed || state.originUrl !== options.url()
+        || state.detection.mode !== "viewport" || state.detection.phase !== "detecting"
+        || state.detection.requestId !== requestId) return false;
+      ++detectionGeneration;
+      state = { ...state, detection: { phase: "never_started", mode: null }, candidates: [] };
+      publish();
+      return true;
     },
     resetDetection() {
       ensureRoute();
