@@ -51,7 +51,11 @@ describe("UI-04 candidate workspace behavior", () => {
     const { rerender } = render(<CandidateEmptyState lang="en" phase="never_started" />);
     expect(screen.getByRole("status")).toHaveTextContent('Use "Current View"');
     rerender(<CandidateEmptyState lang="en" phase="completed" />);
-    expect(screen.getByRole("status")).toHaveTextContent("Detection finished");
+    expect(screen.getByRole("status")).toHaveTextContent("Scan completed, but no usable questions were recognized");
+    rerender(<CandidateEmptyState lang="zh" phase="failed" />);
+    expect(screen.getByRole("status")).toHaveTextContent("扫描过程中发生错误");
+    rerender(<CandidateEmptyState lang="zh" phase="incomplete" />);
+    expect(screen.getByRole("status")).toHaveTextContent("精修阶段未保留题目");
     rerender(<CandidateEmptyState lang="en" phase="completed" filteredEmpty />);
     expect(screen.getByRole("status")).toHaveTextContent("No questions match");
   });
