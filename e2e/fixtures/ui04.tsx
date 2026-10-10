@@ -65,7 +65,7 @@ function Fixture() {
   useEffect(() => { document.documentElement.lang = lang === "en" ? "en" : "zh-CN"; }, []);
   const noop = () => {};
   return <div style={APP_SHELL_STYLE}><style>{ORBIT_SCROLLBAR_CSS}</style>
-    <SidePanelHeader lang={lang} authStatus="authenticated" isAuthenticated userEmail="" tab={tab} onTabChange={setTab} workspaceStatus={running ? "solving" : "ready"} providerName="Fixture" />
+    <SidePanelHeader lang={lang} authStatus="authenticated" isAuthenticated userEmail="" tab={tab} onTabChange={setTab} workspaceStatus={running ? "solving" : "ready"} />
     <div className="orbit-panel-scroll" style={PANEL_BODY_STYLE}>
       <WorkspaceTabPanel id={`sidepanel-tabpanel-${tab}`} tabId={tab}>
         <WorkspaceUserFeedback feedback={feedback} activity={activity} />

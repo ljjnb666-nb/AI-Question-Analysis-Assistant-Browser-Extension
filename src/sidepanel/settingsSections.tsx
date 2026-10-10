@@ -18,6 +18,7 @@ import type { UILang } from "./displayUtils";
 import { getSettingsCopy, type SetupStatusType } from "./settingsCopy";
 
 type AuthText = {
+  passwordHint: string;
   registerPage: string;
   loginPage: string;
   emailPlaceholder: string;
