@@ -104,6 +104,87 @@ describe("UI-04A Side Panel opening fence", () => {
     expect(h.last()?.[0]).toBe("runtime_unavailable");
     expect(h.publish.mock.calls.some(([status]) => status === "ready")).toBe(false);
   });
+  it("RC03D-B1 rehydrates using a same-origin live snapshot when the transport request fails", async () => {
+    const h = harness();
+    const opening = h.c.sync();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledOnce());
+    const live = fixture({ seq: 6, fullPage: { running: true, progress: null } });
+    h.event(live);
+    h.response.resolve(null);
+    await opening;
+    expect(h.last()?.[0]).toBe("ready");
+    expect(h.last()?.[1].seq).toBe(6);
+    expect(h.last()?.[1].fullPage.running).toBe(true);
+    // Fail-closed: none of these events grant new protected work authority.
+  });
+
+  it("RC03D-B2 never recovers from an unrelated tab or different URL event", async () => {
+    const h = harness();
+    const opening = h.c.sync();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledOnce());
+    h.event(fixture({ seq: 5 }), 9);
+    h.event(fixture({ originUrl: "https://quiz.example/elsewhere", seq: 6 }));
+    h.response.resolve(null);
+    await opening;
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+    expect(h.publish.mock.calls.some(([status]) => status === "ready")).toBe(false);
+  });
+
+  it("RC03D-B3 refuses to guess when competing runtime generations broadcast during failed sync", async () => {
+    const h = harness();
+    const opening = h.c.sync();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledOnce());
+    h.event(fixture({ seq: 3, runtimeInstanceId: "r1", runtimeGeneration: 1 }));
+    h.event(fixture({ seq: 1, runtimeInstanceId: "r2", runtimeGeneration: 2 }));
+    h.response.resolve(null);
+    await opening;
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+  });
+
+  it("RC03D-B4 an invalid domain response cannot be rescued by a live event", async () => {
+    const h = harness();
+    const opening = h.c.sync();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledOnce());
+    h.event(fixture({ seq: 8 }));
+    h.response.resolve({ ok: true, snapshot: { ...fixture(), protocolVersion: 999 } });
+    await opening;
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+  });
+
+  it("RC03D-B5 auth loss or navigation while awaiting transport denies buffered recovery", async () => {
+    const h = harness();
+    const opening = h.c.sync();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledOnce());
+    h.event(fixture({ seq: 9 }));
+    h.route("https://quiz.example/new");
+    h.response.resolve(null);
+    await opening;
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+
+    const h2 = harness();
+    const pending = h2.c.sync();
+    await vi.waitFor(() => expect(h2.request).toHaveBeenCalledOnce());
+    h2.event(fixture({ seq: 10 }));
+    h2.authLoss();
+    h2.response.resolve(null);
+    await pending;
+    expect(h2.last()).toEqual(["idle"]);
+  });
+
+  it("RC03D-B6 stale same-runtime updates cannot override the previous high-water mark on retry", async () => {
+    const h = harness();
+    const opening = h.c.sync();
+    h.response.resolve({ ok: true, snapshot: fixture({ seq: 20 }) });
+    await opening;
+    const retry = h.c.sync();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(2));
+    // An older event is rejected by the observed high-water mark.
+    h.event(fixture({ seq: 19 }));
+    await retry;
+    expect(h.last()?.[0]).toBe("ready");
+    expect(h.last()?.[1].seq).toBe(20);
+  });
+
   it("UI04A-11 auth loss invalidates an awaiting hydration and cannot unlock", async () => {
     const h = harness(); const opening = h.c.sync();
     await vi.waitFor(() => expect(h.request).toHaveBeenCalledOnce());
