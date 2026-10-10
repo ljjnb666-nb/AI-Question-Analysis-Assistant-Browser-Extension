@@ -1,5 +1,5 @@
 import type { CandidateOrigin, WorkspaceSnapshotResponse } from "@/shared/types";
-import { sendProtectedTabMessageWithBootstrap } from "./tabActions";
+import { sendProtectedTabMessageWithBootstrap, shouldBootstrapContentScript } from "./tabActions";
 
 type WorkspaceTab = Pick<chrome.tabs.Tab, "id" | "url" | "active"> & { lastAccessed?: number };
 const eligible = (tab: WorkspaceTab) => tab.id != null && /^https?:\/\//i.test(tab.url ?? "");
@@ -54,7 +54,7 @@ export async function requestWorkspaceSnapshot(origin: CandidateOrigin, isAuthen
   const first = await requestOnce();
   if (!isAuthenticated()) return null;
   if (first.result?.ok) return first.result.response ?? null;
-  if (first.timedOut) return null;
+  if (first.timedOut || !first.result || !shouldBootstrapContentScript(first.result.error)) return null;
 
   // Revalidate the exact origin before any retry. Tab replacement/navigation,
   // auth loss and an invalid snapshot all fail closed without another send.

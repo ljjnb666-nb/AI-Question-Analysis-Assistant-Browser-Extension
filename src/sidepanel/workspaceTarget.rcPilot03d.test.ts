@@ -4,6 +4,7 @@ import { requestWorkspaceSnapshot } from "./workspaceTarget";
 
 vi.mock("./tabActions", () => ({
   sendProtectedTabMessageWithBootstrap: vi.fn(),
+  shouldBootstrapContentScript: vi.fn((err: unknown) => /Receiving end does not exist|Could not establish connection/i.test(String(err))),
 }));
 
 const origin = { tabId: 7, url: "https://quiz.example/exam" };
@@ -54,7 +55,13 @@ describe("RC-PILOT-03D bounded workspace hydration transport retry", () => {
     expect(sent).toHaveBeenCalledOnce();
   });
 
-  it("does not retry into a new tab URL", async () => {
+  it("does not repeat an authority-loss or permission error even if the auth UI is stale", async () => {
+    sent.mockResolvedValueOnce({ ok: false, error: "AUTHORITY_LOST" });
+    expect(await requestWorkspaceSnapshot(origin, auth)).toBeNull();
+    expect(sent).toHaveBeenCalledOnce();
+  });
+
+    it("does not retry into a new tab URL", async () => {
     sent.mockImplementationOnce(async () => {
       tabUrl = "https://quiz.example/other";
       return { ok: false, error: "Receiving end does not exist" };
