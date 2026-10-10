@@ -80,6 +80,38 @@ describe("RC-PILOT-03A-02 current-screen request authority", () => {
     expect(f.workspace.snapshot(url).snapshot?.detection.phase).toBe("never_started");
   });
 
+  it("rolls back an already emitted candidate snapshot when a downstream render step fails", async () => {
+    const f = fixture();
+    f.options.handleAutoDetect = vi.fn(async (id?: string) => {
+      f.workspace.beginDetection("viewport", id);
+      // The detector emitted a candidate result, then rendering failed.
+      f.workspace.observe({ type: "AUTO_DETECT_RESULT_READY",
+        candidates: [{ block: { id: "q1", previewText: "Question 1" }, status: "idle", selected: false }] });
+      throw new Error("highlight rendering failed");
+    });
+    expect((await f.call()).value).toEqual({ ok: false, requestId, error: "VIEWPORT_DETECT_FAILED" });
+    expect(f.workspace.snapshot(url).snapshot?.detection.phase).toBe("never_started");
+    expect(f.workspace.snapshot(url).snapshot?.candidates).toEqual([]);
+  });
+
+  it("a failed older completion cannot clear an already completed newer request", async () => {
+    const f = fixture();
+    let rejectOld!: (error: unknown) => void;
+    const pendingOld = new Promise<void>((_, reject) => { rejectOld = reject; });
+    f.options.handleAutoDetect = vi.fn((id?: string) => {
+      f.workspace.beginDetection("viewport", id);
+      if (id === requestId) return pendingOld;
+      f.workspace.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [] });
+      return Promise.resolve();
+    });
+    const older = f.call(requestId);
+    expect((await f.call(nextId)).value).toEqual({ ok: true, requestId: nextId });
+    rejectOld(new Error("older run failed late"));
+    expect((await older).value).toEqual({ ok: false, requestId, error: "VIEWPORT_DETECT_FAILED" });
+    expect(f.workspace.snapshot(url).snapshot?.detection)
+      .toEqual({ mode: "viewport", phase: "completed", requestId: nextId });
+  });
+
   it("a failed older request never clears a newer viewport generation", async () => {
     const f = fixture();
     let rejectOld!: (error: unknown) => void;
