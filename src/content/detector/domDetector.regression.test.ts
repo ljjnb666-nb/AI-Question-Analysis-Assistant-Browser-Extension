@@ -67,7 +67,7 @@ describe("domDetector regressions", () => {
   it("RC03B-R8 does not promote detached or menu-only options during structural fallback", () => {
     document.body.innerHTML = `
       <section id="guide-section">如何安排课程复习时间？请先浏览我们的学习资源和在线答疑。</section>
-      <div id="menu-only">A. 会计 B. 金融 C. 教师考试 D. 专业课程</div>
+      <div id="menu-only">课程分类及常见考试资料汇总，方便学生查看备考资讯与学习资料，不构成一道完整试题的题干。 A. 会计 B. 金融 C. 教师考试 D. 专业课程</div>
     `;
     setRect(document.getElementById("guide-section")!, { left: 30, top: 10, width: 650, height: 160 });
     setRect(document.getElementById("menu-only")!, { left: 100, top: 230, width: 760, height: 250 });
