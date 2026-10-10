@@ -109,9 +109,12 @@ guaranteed to be recognized by the credential sanitizer.
 In addition to the 100-entry count and 32 KiB compact-JSON per-entry
 limits, the logger retains only a **newest contiguous suffix** whose
 entire **pretty-printed JSON export** fits within **256 KiB UTF-8**.
-The same selected records are used for in-memory logs, FIFO-serialized
-local persistence, sanitized historical loads and JSON exports. Oldest
-entries are evicted first, with no partial unredacted truncation.
+The same retention **algorithm** is applied independently to in-memory
+logs, FIFO-serialized persisted error entries, sanitized historical loads
+and JSON exports. These views are not always identical: warning/info logs
+remain memory-only, and historical stored logs are not hydrated into the
+current process's in-memory buffer. Oldest entries are evicted first, with
+no partial unredacted truncation.
 Ordinary small logs remain unaffected, and the earlier user-requested
 clear ordering is unchanged.
 
