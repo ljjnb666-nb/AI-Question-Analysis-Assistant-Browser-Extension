@@ -349,9 +349,10 @@ function postProcessCandidates(blocks: QuestionBlock[]): QuestionBlock[] {
   const fingerprintSet = new Set<string>();
 
   for (const block of byRank) {
+    // Blocks have already passed the complete-text preview gate before
+    // truncation to 420 characters. Revalidating the truncated preview can
+    // drop a legitimate choice question whose D option appears after 420.
     const text = normalizePreviewText(block.previewText);
-    if (!isLikelyUsefulPreview(text, block.questionTypeGuess)) continue;
-
     const fp = textFingerprint(text);
     if (fp.length >= 28 && fingerprintSet.has(fp)) continue;
 

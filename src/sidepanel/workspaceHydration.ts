@@ -11,7 +11,7 @@ export function isWorkspaceSnapshot(value: unknown): value is CandidateWorkspace
     && count(s.runtimeGeneration) && s.runtimeGeneration > 0 && count(s.routeEpoch) && count(s.seq)
     && typeof s.originUrl === "string" && /^https?:\/\//i.test(s.originUrl) && typeof s.disposed === "boolean"
     && !!s.detection && ["never_started", "detecting", "completed", "failed", "incomplete"].includes(s.detection.phase)
-    && (s.detection.outcome === undefined || ["completed", "no_candidates", "refinement_empty", "failed"].includes(s.detection.outcome))
+    && (s.detection.outcome === undefined || ["completed", "no_candidates", "filtered_empty", "postprocess_empty", "refinement_empty", "failed"].includes(s.detection.outcome))
     && (s.detection.failureStage === undefined || ["scanning", "refining", "publishing"].includes(s.detection.failureStage))
     && (s.detection.diagnostics === undefined || (count(s.detection.diagnostics.observedCandidates)
       && count(s.detection.diagnostics.retainedCandidates)

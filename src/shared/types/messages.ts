@@ -179,7 +179,7 @@ export interface FullPageDetectProgressMsg extends BaseMessage {
   currentStep: number;
 }
 
-export type FullPageDetectOutcome = "completed" | "no_candidates" | "refinement_empty" | "failed";
+export type FullPageDetectOutcome = "completed" | "no_candidates" | "filtered_empty" | "postprocess_empty" | "refinement_empty" | "failed";
 export type FullPageDetectFailureStage = "scanning" | "refining" | "publishing";
 export interface FullPageDetectDiagnostics {
   observedCandidates: number;

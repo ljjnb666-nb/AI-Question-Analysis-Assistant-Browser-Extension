@@ -67,6 +67,45 @@ describe("RC03B R10 full-page terminal outcome and stage accounting", () => {
     });
   });
 
+  it("R13A reports initial filtering instead of no candidates when DOM saw raw candidates", async () => {
+    const { send, detect, deps } = setup();
+    detect.mockImplementation(async (onProgress: (p: unknown) => void) => {
+      onProgress({ progress: 99, found: 0, currentStep: 1, totalScrollSteps: 1,
+        observedCandidates: 4, retainedCandidates: 0 });
+      return [];
+    });
+    await handleFullPageDetect(deps);
+    expect(done(send)).toMatchObject({ outcome: "filtered_empty",
+      diagnostics: { observedCandidates: 4, retainedCandidates: 0, postprocessedCandidates: 0 } });
+  });
+
+  it("R13B reports postprocessing loss instead of no candidates when scan retained them", async () => {
+    const { send, detect, deps } = setup();
+    detect.mockImplementation(async (onProgress: (p: unknown) => void) => {
+      onProgress({ progress: 99, found: 2, currentStep: 1, totalScrollSteps: 1,
+        observedCandidates: 3, retainedCandidates: 2 });
+      return []; // postProcessCandidates removed the accepted scan candidates
+    });
+    await handleFullPageDetect(deps);
+    expect(done(send)).toMatchObject({ outcome: "postprocess_empty",
+      diagnostics: { observedCandidates: 3, retainedCandidates: 2, postprocessedCandidates: 0 } });
+  });
+
+  it("R13C synchronously commits the final content state before DONE is sent", async () => {
+    const { send, detect, deps } = setup();
+    detect.mockResolvedValue([sample()]);
+    const commitBeforeDone = vi.fn();
+    deps.commitBeforeDone = commitBeforeDone;
+    send.mockImplementation((m) => {
+      if (m.type === "FULL_PAGE_DETECT_DONE") {
+        expect(commitBeforeDone).toHaveBeenCalledOnce();
+        expect(commitBeforeDone).toHaveBeenCalledWith(expect.objectContaining({ activeCandidates: [expect.objectContaining({ id: "q1" })] }));
+      }
+    });
+    await handleFullPageDetect(deps);
+    expect(done(send)).toMatchObject({ outcome: "completed", totalFound: 1 });
+  });
+
   it("identifies the refinement exception without fabricating an empty success", async () => {
     const { send, detect, refine, deps } = setup();
     detect.mockResolvedValue([sample()]);

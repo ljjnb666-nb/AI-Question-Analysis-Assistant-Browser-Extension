@@ -1,7 +1,7 @@
 import React from "react";
 import { OrbitButton, OrbitSurface } from "@/shared/ui/orbitPrimitives";
 import { orbitColors, orbitRadius, orbitSpacing, orbitTypography, orbitTokens } from "@/shared/ui/orbitTokens";
-import type { DetectionPhase } from "@/shared/types";
+import type { DetectionPhase, FullPageDetectOutcome } from "@/shared/types";
 import type { UILang } from "./displayUtils";
 import type { CandidateViewFilter } from "./sidepanelCandidateMetrics";
 import { CANDIDATE_WORKSPACE_COPY } from "./candidateWorkspaceCopy";
@@ -330,10 +330,12 @@ export function CandidateReviewToolbar({
 export function CandidateEmptyState({
   lang,
   phase,
+  outcome,
   filteredEmpty = false,
 }: {
   lang: UILang;
   phase: DetectionPhase;
+  outcome?: FullPageDetectOutcome;
   filteredEmpty?: boolean;
 }) {
   const copy = CANDIDATE_WORKSPACE_COPY[lang];
@@ -344,7 +346,8 @@ export function CandidateEmptyState({
       : phase === "failed"
         ? copy.failedEmpty
       : phase === "incomplete"
-        ? copy.incompleteEmpty
+        ? outcome === "filtered_empty" ? copy.filteredCandidateEmpty
+          : outcome === "postprocess_empty" ? copy.postprocessedEmpty : copy.incompleteEmpty
       : phase === "completed"
         ? copy.completedEmpty
         : copy.notStarted;
