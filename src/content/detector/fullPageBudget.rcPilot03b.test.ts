@@ -43,7 +43,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     document.body.setAttribute("aria-busy", "true");
     const candidate = {
       id: "public-question", bbox: { x: 50, y: 150, width: 680, height: 310 },
-      previewText: "这属于哪种品德心理结构？ A. 道德认识 B. 道德情感 C. 道德意志 D. 道德行为",
+      previewText: "这属于哪种品德心理结构？ A. 道德认识 B. 道德情感 C. 道德意志 D. 道德行为 题型：单选题",
       questionTypeGuess: "single_choice" as const, confidence: 0.94,
       source: "auto_dom" as const, hasImage: false,
     };
@@ -59,6 +59,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     await vi.runAllTimersAsync();
     const candidates = await scan;
     expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.previewText).toContain("题型：单选题");
     expect(detects).toBe(3); // first empty, one same-position recheck, one next step
     expect(progress.map((p) => p.currentStep)).toEqual([1, 2]);
     expect(progress.every((p) => p.totalScrollSteps === 2)).toBe(true);
