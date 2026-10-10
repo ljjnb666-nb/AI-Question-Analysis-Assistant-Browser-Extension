@@ -113,7 +113,8 @@ export function createCandidateWorkspaceRuntime(options: {
       ensureRoute();
       switch (message.type) {
         case "AUTO_DETECT_RESULT_READY":
-          state = { ...state, candidates: message.candidates as CandidateSnapshot[], detection: { phase: "completed", mode: state.detection.mode ?? "viewport" } };
+          state = { ...state, candidates: message.candidates as CandidateSnapshot[],
+            detection: { ...state.detection, phase: "completed", mode: state.detection.mode ?? "viewport" } };
           break;
         case "FULL_PAGE_DETECT_PROGRESS":
           if (!state.fullPage.running) return false;
