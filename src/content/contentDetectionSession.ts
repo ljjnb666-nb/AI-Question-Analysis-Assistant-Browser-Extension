@@ -95,7 +95,9 @@ export async function runFullPageDetectSession(
       deps.setActiveHighlightBlocks(result.activeHighlightBlocks);
       deps.setActiveDetectMode(result.activeDetectMode);
       deps.setLastFullPageLayoutKey(result.lastFullPageLayoutKey);
-      deps.setHighlightLayer(result.highlightLayer);
+      // The real factory returns HighlightLayer; orchestration's generic
+      // signature intentionally exposes only the setBlocks capability.
+      deps.setHighlightLayer(result.highlightLayer as HighlightLayer | null);
     },
     detectCandidatesFullPage: deps.detectCandidatesFullPage,
     refineFullPageCandidatesViaManualPipeline: deps.refineFullPageCandidatesViaManualPipeline,
@@ -107,7 +109,7 @@ export async function runFullPageDetectSession(
   });
   // All active state has been committed synchronously BEFORE terminal DONE.
   // Never replay a stale result here after another generation has started.
-  if (result && !isRuntimeCurrent()) result.highlightLayer?.destroy();
+  if (result && !isRuntimeCurrent()) (result.highlightLayer as HighlightLayer | null)?.destroy();
 }
 
 export async function runAutoDetectSession(deps: DetectSessionDeps): Promise<void> {
