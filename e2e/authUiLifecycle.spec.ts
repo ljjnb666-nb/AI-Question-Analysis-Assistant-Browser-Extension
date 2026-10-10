@@ -946,7 +946,10 @@ test("RC_PILOT_01_POPUP_REGISTRATION_RESUME after email-tab switch restores safe
 
     const sessionDraft = await popup.evaluate(async () => {
       const key = "quizSolver:popupRegistrationDraft:v1";
-      const value = await chrome.storage.session.get(key);
+      const api = (globalThis as unknown as {
+        chrome: { storage: { session: { get: (key: string) => Promise<Record<string, unknown>> } } };
+      }).chrome;
+      const value = await api.storage.session.get(key);
       return JSON.stringify(value[key]);
     });
     expect(sessionDraft).toContain(email);
