@@ -23,12 +23,43 @@ export async function readWorkspaceOrigin(tabId: number): Promise<CandidateOrigi
 }
 export async function requestWorkspaceSnapshot(origin: CandidateOrigin, isAuthenticated: () => boolean): Promise<WorkspaceSnapshotResponse | null> {
   if (!isAuthenticated()) return null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const response = await Promise.race([
-      sendProtectedTabMessageWithBootstrap<WorkspaceSnapshotResponse>(origin.tabId, { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT", expectedUrl: origin.url }, isAuthenticated),
-      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 6000); }),
-    ]);
-    return isAuthenticated() && response?.ok ? response.response ?? null : null;
-  } finally { clearTimeout(timer); }
+
+  // Every attempt is still the same authenticated, read-only snapshot request.
+  // Retry at most once for a *quick transport failure*, e.g. an MV3 content
+  // receiver waking during an active scan. A 6s timeout never starts another
+  // 6s wait; invalid content payloads must not be retried or trusted here.
+  const requestOnce = async (): Promise<{ result: { ok: boolean; response?: WorkspaceSnapshotResponse; error?: string } | null; timedOut: boolean }> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    try {
+      const result = await Promise.race([
+        sendProtectedTabMessageWithBootstrap<WorkspaceSnapshotResponse>(
+          origin.tabId,
+          { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT", expectedUrl: origin.url },
+          isAuthenticated,
+        ),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => {
+            timedOut = true;
+            resolve(null);
+          }, 6000);
+        }),
+      ]);
+      return { result, timedOut };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const first = await requestOnce();
+  if (!isAuthenticated()) return null;
+  if (first.result?.ok) return first.result.response ?? null;
+  if (first.timedOut) return null;
+
+  // Revalidate the exact origin before any retry. Tab replacement/navigation,
+  // auth loss and an invalid snapshot all fail closed without another send.
+  const current = await readWorkspaceOrigin(origin.tabId);
+  if (!isAuthenticated() || current?.url !== origin.url) return null;
+  const second = await requestOnce();
+  return isAuthenticated() && second.result?.ok ? second.result.response ?? null : null;
 }
