@@ -96,13 +96,24 @@ export async function detectCandidatesFullPage(
     setScrollPosition(root, 0, originalLeft);
     await pause(SCROLL_PAUSE_MS);
 
+    // Capture an immutable scan budget after the initial top-of-page scroll.
+    // Live sites may grow/shrink their scrollHeight as ads/images load or the
+    // scroll root reflows. Recomputing the denominator on every iteration
+    // used to yield "31 / 15" and to keep scrolling well past the advertised
+    // number of steps (only the unrelated 200-step safety cap applied).
+    if (!isCurrent()) return [];
+    const initialMetrics = getScrollMetrics(root);
+    const initialDistance = initialMetrics.scrollHeight - initialMetrics.clientHeight;
+    const totalSteps = Number.isFinite(initialDistance)
+      ? Math.min(Math.max(1, Math.ceil(Math.max(0, initialDistance) / SCROLL_STEP_PX) + 1), MAX_SCROLL_STEPS)
+      : 1;
     let step = 0;
-    while (isCurrent()) {
+    let previousTop: number | null = null;
+    while (isCurrent() && step < totalSteps) {
       const metrics = getScrollMetrics(root);
-      const totalSteps = Math.min(
-        Math.ceil(Math.max(0, metrics.scrollHeight - metrics.clientHeight) / SCROLL_STEP_PX) + 1,
-        MAX_SCROLL_STEPS,
-      );
+      // A scroll trap or fixed-position container must not repeatedly parse
+      // the same viewport while claiming forward progress.
+      if (previousTop !== null && metrics.scrollTop <= previousTop) break;
 
       const viewportBlocks = detectCandidatesInViewport();
       if (!isCurrent()) break;
@@ -124,10 +135,14 @@ export async function detectCandidatesFullPage(
       // User handlers may synchronously CANCEL or change the route.
       if (!isCurrent()) break;
       if (metrics.scrollTop + metrics.clientHeight >= metrics.scrollHeight - 10) break;
-      if (step >= MAX_SCROLL_STEPS) break;
+      // The immutable budget is an execution limit, not just a UI total.
+      if (step >= totalSteps) break;
 
       if (!isCurrent()) break;
-      setScrollPosition(root, Math.min(metrics.scrollTop + SCROLL_STEP_PX, metrics.scrollHeight), metrics.scrollLeft);
+      const nextTop = Math.min(metrics.scrollTop + SCROLL_STEP_PX, metrics.scrollHeight);
+      if (nextTop <= metrics.scrollTop) break;
+      previousTop = metrics.scrollTop;
+      setScrollPosition(root, nextTop, metrics.scrollLeft);
       await pause(SCROLL_PAUSE_MS);
     }
 
