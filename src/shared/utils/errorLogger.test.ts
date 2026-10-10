@@ -393,6 +393,10 @@ describe("PHASE14D_04 per-entry error-log resource budgets", () => {
     const entry = getErrorLogs()[0];
     expect(entry.message).toBe("Log entry redacted after exceeding resource or sanitization limit");
     expect(new TextEncoder().encode(JSON.stringify(entry)).byteLength).toBeLessThanOrEqual(32 * 1024);
+    // Persistence is serialized and asynchronous: wait on the same queue
+    // before inspecting durable storage, not just the synchronous memory log.
+    const committed = await loadErrorLogs();
+    expect(committed[0].message).toBe(entry.message);
     expect(JSON.stringify(localStorageData.errorLog)).not.toContain("record-59-");
     expect(await exportErrorLogs()).not.toContain("record-59-");
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("record-59-");
