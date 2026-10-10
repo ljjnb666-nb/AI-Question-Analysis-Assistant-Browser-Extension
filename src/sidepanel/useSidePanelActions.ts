@@ -43,6 +43,7 @@ import {
 import type { UILang } from "./displayUtils";
 import { requestWorkspaceSnapshot, readWorkspaceOrigin } from "./workspaceTarget";
 import { viewportDetectionSnapshotFeedback } from "./viewportDetectionFeedback.rcPilot03a";
+import { awaitViewportCommand, VIEWPORT_COMMAND_TIMEOUT_MS } from "./viewportDetectionTimeout";
 
 type UseSidePanelActionsOptions = {
   isWorkspaceReadyNow?: () => boolean;
@@ -199,16 +200,32 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       if (options.getWorkspaceOrigin && (!targetOrigin || targetOrigin.tabId !== activeTab.id
         || targetOrigin.url !== activeTab.url)) return;
       const requestId = targetOrigin ? crypto.randomUUID() : undefined;
-      const response = await sendProtectedTabMessageWithBootstrap<{
-        ok?: boolean; requestId?: string; error?: string;
-      }>(
-        activeTab.id,
-        requestId
-          ? { type: "START_AUTO_DETECT", requestId, expectedUrl: targetOrigin!.url }
-          : { type: "START_AUTO_DETECT" },
-        () => canDispatchToTab(activeTab),
+      let expired = false;
+      const dispatch = await awaitViewportCommand(
+        sendProtectedTabMessageWithBootstrap<{
+          ok?: boolean; requestId?: string; error?: string;
+        }>(
+          activeTab.id,
+          requestId
+            ? { type: "START_AUTO_DETECT", requestId, expectedUrl: targetOrigin!.url }
+            : { type: "START_AUTO_DETECT" },
+          () => !expired && canDispatchToTab(activeTab),
+        ),
+        VIEWPORT_COMMAND_TIMEOUT_MS,
+        () => { expired = true; },
       );
       if (!canDispatchToTab(activeTab)) return;
+      if (dispatch.timedOut) {
+        options.setFillFeedback(userFeedback(
+          "warning",
+          options.uiLang === "en"
+            ? "Current-screen detection timed out. The page may still be processing; wait or sync the workspace before retrying."
+            : "当前屏识别等待超时，页面可能仍在处理。请稍候或同步工作区后重试。",
+          { code: "VIEWPORT_DETECT_TIMEOUT" },
+        ));
+        return;
+      }
+      const response = dispatch.value;
       // The tagged START completes only after the content workflow has either
       // committed its exact generation or rejected it. An ACK cannot count.
       if (!response.ok || response.response?.ok !== true
@@ -216,16 +233,22 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
         const stale = ["STALE_VIEWPORT_ORIGIN", "VIEWPORT_RESULT_NOT_CURRENT"].includes(
           response.response?.error ?? "",
         );
+        const busy = response.response?.error === "WORK_ALREADY_RUNNING";
         options.setFillFeedback(userFeedback(
-          stale ? "warning" : "error",
-          stale
+          stale || busy ? "warning" : "error",
+          busy
             ? options.uiLang === "en"
-              ? "The page or detection run changed. Sync the workspace before retrying."
-              : "页面或识别任务已经变化，请同步工作区后重试。"
-            : options.uiLang === "en"
-              ? "Current-screen detection failed or could not be confirmed. Check the page connection and retry."
-              : "当前屏识别失败或无法确认，请检查页面连接后重试。",
-          { code: stale ? "VIEWPORT_DETECT_STALE_RUN" : "VIEWPORT_DETECT_START_UNCONFIRMED",
+              ? "This page already has a detection running. Wait for it to finish before retrying."
+              : "当前页面已有识别任务正在运行，请等待结束后重试。"
+            : stale
+              ? options.uiLang === "en"
+                ? "The page or detection run changed. Sync the workspace before retrying."
+                : "页面或识别任务已经变化，请同步工作区后重试。"
+              : options.uiLang === "en"
+                ? "Current-screen detection failed or could not be confirmed. Check the page connection and retry."
+                : "当前屏识别失败或无法确认，请检查页面连接后重试。",
+          { code: busy ? "VIEWPORT_DETECT_ALREADY_RUNNING"
+            : stale ? "VIEWPORT_DETECT_STALE_RUN" : "VIEWPORT_DETECT_START_UNCONFIRMED",
             technicalDetail: response.response?.error ?? response.error },
         ));
         return;
