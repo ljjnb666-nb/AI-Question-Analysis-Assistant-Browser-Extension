@@ -17,6 +17,16 @@ export interface ErrorLogEntry {
 
 const ERROR_LOG: ErrorLogEntry[] = [];
 const MAX_LOG_SIZE = 100;
+// Fail-closed budgets for current and historical error-log entries.
+const MAX_LOG_STRING_CHARS = 8 * 1024;
+const MAX_LOG_ENTRY_BYTES = 32 * 1024;
+const MAX_LOG_VALUE_DEPTH = 10;
+const MAX_LOG_VALUE_NODES = 512;
+const MAX_LOG_COLLECTION_ITEMS = 64;
+const MAX_LOG_FIELD_NAME_CHARS = 256;
+const MAX_LOG_URL_DEPTH = 6;
+const OVERSIZED_LOG_VALUE = "[REDACTED_OVERSIZED_LOG_VALUE]";
+const COMPLEX_LOG_VALUE = "[REDACTED_COMPLEX_LOG_VALUE]";
 let persistQueue: Promise<void> = Promise.resolve();
 
 const SENSITIVE_QUERY_PARAMETER_NAMES = new Set([
@@ -122,7 +132,11 @@ function decodeURIComponentSafe(value: string): string {
 }
 
 /** Return a diagnostic URL without userinfo or credential-bearing query values. */
-export function redactUrlForLog(value: string): string {
+export function redactUrlForLog(value: string, urlDepth = 0): string {
+  // Reject the entire secret-bearing URL instead of truncating it.
+  if (value.length > MAX_LOG_STRING_CHARS || urlDepth > MAX_LOG_URL_DEPTH) {
+    return OVERSIZED_LOG_VALUE;
+  }
   try {
     const url = new URL(value);
     url.username = "";
@@ -132,7 +146,7 @@ export function redactUrlForLog(value: string): string {
     url.searchParams.forEach((parameterValue, name) => {
       safeParams.append(
         name,
-        isSensitiveQueryParameter(name) ? "[REDACTED]" : sanitizeLogString(parameterValue),
+        isSensitiveQueryParameter(name) ? "[REDACTED]" : sanitizeLogString(parameterValue, urlDepth + 1),
       );
     });
     url.search = safeParams.toString();
@@ -141,55 +155,85 @@ export function redactUrlForLog(value: string): string {
       url.hash = "#[REDACTED]";
     }
 
-    return url.toString();
+    const redacted = url.toString();
+    return redacted.length <= MAX_LOG_STRING_CHARS ? redacted : OVERSIZED_LOG_VALUE;
   } catch {
     // A URL-shaped value we cannot parse must not be retained verbatim.
     return "[REDACTED_URL]";
   }
 }
 
-function sanitizeLogString(value: string): string {
-  // Sanitize raw HTTP header dumps before parsing embedded URLs; credentials
-  // may never have URL syntax, and can be present in Error.stack as well.
-  const withoutHeaders = value.replace(CREDENTIAL_HEADER_LINE, (_match, name: string) => `${name}: [REDACTED]`);
-  return withoutHeaders.replace(URL_IN_TEXT_PATTERN, (rawUrl) => {
+function sanitizeLogString(value: string, urlDepth = 0): string {
+  // Reject whole oversized inputs BEFORE regexes or URL parsing. Truncating
+  // credential-bearing text could otherwise leave only part of a token.
+  if (value.length > MAX_LOG_STRING_CHARS || urlDepth > MAX_LOG_URL_DEPTH) {
+    return OVERSIZED_LOG_VALUE;
+  }
+  const withoutHeaders = value.replace(
+    CREDENTIAL_HEADER_LINE,
+    (_match, name: string) => name + ": [REDACTED]",
+  );
+  const safeText = withoutHeaders.replace(URL_IN_TEXT_PATTERN, (rawUrl) => {
     let url = rawUrl;
     let punctuation = "";
     while (TRAILING_URL_PUNCTUATION.test(url)) {
-      punctuation = `${url.slice(-1)}${punctuation}`;
+      punctuation = url.slice(-1) + punctuation;
       url = url.slice(0, -1);
     }
-    return `${redactUrlForLog(url)}${punctuation}`;
+    return redactUrlForLog(url, urlDepth + 1) + punctuation;
   });
+  return safeText.length <= MAX_LOG_STRING_CHARS ? safeText : OVERSIZED_LOG_VALUE;
 }
 
-function sanitizeLogValue(value: unknown, seen = new WeakSet<object>(), fieldName?: string): unknown {
+type LogSanitizationBudget = {
+  seen: WeakSet<object>;
+  nodes: number;
+};
+
+function sanitizeLogValue(
+  value: unknown,
+  budget: LogSanitizationBudget,
+  depth = 0,
+  fieldName?: string,
+): unknown {
+  // Bound field-key work before normalization or value inspection.
+  if (fieldName && fieldName.length > MAX_LOG_FIELD_NAME_CHARS) return COMPLEX_LOG_VALUE;
   if (fieldName && SENSITIVE_LOG_FIELD_NAMES.has(normalizeCredentialName(fieldName))) {
     return "[REDACTED]";
   }
+  if (depth > MAX_LOG_VALUE_DEPTH || ++budget.nodes > MAX_LOG_VALUE_NODES) {
+    return COMPLEX_LOG_VALUE;
+  }
   if (typeof value === "string") return sanitizeLogString(value);
-  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "bigint") return sanitizeLogString(value.toString());
   if (typeof value === "symbol" || typeof value === "function") return "[REDACTED]";
   if (value === null || typeof value !== "object") return value;
 
   try {
     if (value instanceof URL) return redactUrlForLog(value.toString());
-    if (seen.has(value)) return "[REDACTED_CIRCULAR_DATA]";
-    seen.add(value);
+    if (budget.seen.has(value)) return "[REDACTED_CIRCULAR_DATA]";
+    budget.seen.add(value);
 
     if (value instanceof Error) {
       const safeError = new Error(sanitizeLogString(value.message));
       safeError.name = sanitizeLogString(value.name) || "Error";
       if (value.stack) safeError.stack = sanitizeLogString(value.stack);
-
       const errorWithCause = value as Error & { cause?: unknown };
       if (errorWithCause.cause !== undefined) {
-        (safeError as Error & { cause?: unknown }).cause = sanitizeLogValue(errorWithCause.cause, seen, "cause");
+        (safeError as Error & { cause?: unknown }).cause =
+          sanitizeLogValue(errorWithCause.cause, budget, depth + 1, "cause");
       }
-      for (const key of Object.keys(value)) {
+      let extraFields = 0;
+      for (const key in value) {
+        if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
         if (key === "name" || key === "message" || key === "stack" || key === "cause") continue;
+        if (++extraFields > MAX_LOG_COLLECTION_ITEMS || key.length > MAX_LOG_FIELD_NAME_CHARS) {
+          return COMPLEX_LOG_VALUE;
+        }
         Object.defineProperty(safeError, key, {
-          value: sanitizeLogValue((value as unknown as Record<string, unknown>)[key], seen, key),
+          value: sanitizeLogValue(
+            (value as unknown as Record<string, unknown>)[key], budget, depth + 1, key,
+          ),
           enumerable: true,
           configurable: true,
           writable: true,
@@ -199,17 +243,26 @@ function sanitizeLogValue(value: unknown, seen = new WeakSet<object>(), fieldNam
     }
 
     if (Array.isArray(value)) {
-      return value.map((item) => sanitizeLogValue(item, seen));
+      if (value.length > MAX_LOG_COLLECTION_ITEMS) return COMPLEX_LOG_VALUE;
+      return value.map((item) => sanitizeLogValue(item, budget, depth + 1));
     }
 
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) return "[REDACTED]";
-
-    return Object.fromEntries(
-      Object.entries(value).map(([key, propertyValue]) => [key, sanitizeLogValue(propertyValue, seen, key)]),
-    );
+    const entries: Array<[string, unknown]> = [];
+    for (const key in value) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      if (entries.length >= MAX_LOG_COLLECTION_ITEMS || key.length > MAX_LOG_FIELD_NAME_CHARS) {
+        return COMPLEX_LOG_VALUE;
+      }
+      entries.push([
+        key,
+        sanitizeLogValue((value as Record<string, unknown>)[key], budget, depth + 1, key),
+      ]);
+    }
+    return Object.fromEntries(entries);
   } catch {
-    // Unexpected values must not escape the logging boundary.
+    // Getters, proxies, invalid values, and unexpected types fail closed.
     return "[REDACTED]";
   }
 }
@@ -217,22 +270,30 @@ function sanitizeLogValue(value: unknown, seen = new WeakSet<object>(), fieldNam
 /** Sanitize structured log data while retaining ordinary diagnostic fields. */
 export function sanitizeLogData(value: unknown): unknown {
   try {
-    return sanitizeLogValue(value);
+    return sanitizeLogValue(value, { seen: new WeakSet<object>(), nodes: 0 });
   } catch {
     return "[REDACTED]";
   }
 }
 
 function sanitizeLogEntry(entry: ErrorLogEntry): ErrorLogEntry {
-  const sanitized = sanitizeLogData(entry);
-  if (sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)) {
-    return sanitized as ErrorLogEntry;
-  }
-  return {
+  const fallback = (): ErrorLogEntry => ({
     level: "error",
-    message: "Log entry redacted after sanitization failure",
+    message: "Log entry redacted after exceeding resource or sanitization limit",
     timestamp: Date.now(),
-  };
+  });
+  const sanitized = sanitizeLogData(entry);
+  if (!sanitized || typeof sanitized !== "object" || Array.isArray(sanitized)) {
+    return fallback();
+  }
+  try {
+    // Count compact UTF-8 JSON bytes only after bounding and sanitizing.
+    const bytes = new TextEncoder().encode(JSON.stringify(sanitized)).byteLength;
+    if (bytes > MAX_LOG_ENTRY_BYTES) return fallback();
+    return sanitized as ErrorLogEntry;
+  } catch {
+    return fallback();
+  }
 }
 
 function enqueuePersist(task: () => Promise<void>): Promise<void> {

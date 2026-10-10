@@ -330,3 +330,89 @@ describe("PHASE14D_03 legacy persisted error-log retention", () => {
     expect(JSON.parse(await exportErrorLogs())).toHaveLength(100);
   });
 });
+
+
+describe("PHASE14D_04 per-entry error-log resource budgets", () => {
+  it("fails closed for oversized messages, stacks, URL fields and legacy data at every boundary", async () => {
+    await loadErrorLogs();
+    const secret = ["very", "private", "token"].join("-");
+    const oversized = "Authorization: Bearer " + secret + " ".repeat(9000);
+    const hugeUrl = "https://api.example.test/run?token=" + secret + "&memo=" + "x".repeat(9000);
+    const thrown = new Error(oversized);
+    thrown.stack = oversized;
+    logError(oversized, thrown, "limits", { url: hugeUrl, oversized });
+    const entries = getErrorLogs();
+    const exported = await exportErrorLogs();
+    const stored = JSON.stringify(localStorageData.errorLog);
+    const consoleOutput = JSON.stringify(vi.mocked(console.error).mock.calls);
+    for (const output of [JSON.stringify(entries), exported, stored, consoleOutput]) {
+      expect(output).not.toContain(secret);
+      expect(output.length).toBeLessThan(32 * 1024);
+    }
+    expect(entries[0].message).toBe("[REDACTED_OVERSIZED_LOG_VALUE]");
+    expect(entries[0].stack).toBe("[REDACTED_OVERSIZED_LOG_VALUE]");
+    expect(entries[0].error?.message).toBe("[REDACTED_OVERSIZED_LOG_VALUE]");
+    expect(entries[0].data?.url).toBe("[REDACTED_OVERSIZED_LOG_VALUE]");
+    expect(redactUrlForLog(hugeUrl)).toBe("[REDACTED_OVERSIZED_LOG_VALUE]");
+
+    localStorageData.errorLog = [{
+      level: "error", message: oversized, timestamp: 1, stack: oversized,
+      data: { url: hugeUrl, payload: oversized },
+    }];
+    const legacy = await loadErrorLogs();
+    expect(legacy[0].message).toBe("[REDACTED_OVERSIZED_LOG_VALUE]");
+    expect(JSON.stringify(legacy)).not.toContain(secret);
+    expect(await exportErrorLogs()).not.toContain(secret);
+    expect(JSON.stringify(localStorageData.errorLog)).not.toContain(secret);
+  });
+
+  it("terminates deep, wide and cyclic structured logs without traversing oversized data", async () => {
+    await loadErrorLogs();
+    const secret = ["nested", "credential", "value"].join("-");
+    let deep: Record<string, unknown> = { token: secret };
+    for (let depth = 0; depth < 80; depth++) deep = { child: deep };
+    const wide = Array.from({ length: 500 }, () => ({ apiKey: secret }));
+    const cyclic: Record<string, unknown> = { context: "diagnostic" };
+    cyclic.self = cyclic;
+    logError("resource-limits", undefined, "test", { deep, wide, cyclic });
+    const [entry] = getErrorLogs();
+    const data = entry.data as Record<string, unknown>;
+    expect(data.wide).toBe("[REDACTED_COMPLEX_LOG_VALUE]");
+    expect(JSON.stringify(data.deep)).toContain("[REDACTED_COMPLEX_LOG_VALUE]");
+    expect(JSON.stringify(data.cyclic)).toContain("[REDACTED_CIRCULAR_DATA]");
+    expect(JSON.stringify(entry)).not.toContain(secret);
+    const exported = await exportErrorLogs();
+    expect(exported).not.toContain(secret);
+    expect(new TextEncoder().encode(JSON.stringify(entry)).byteLength).toBeLessThanOrEqual(32 * 1024);
+  });
+
+  it("replaces aggregate over-budget entries without retaining raw content", async () => {
+    await loadErrorLogs();
+    const payload = Array.from({ length: 60 }, (_unused, i) => "record-" + i + "-" + "x".repeat(790));
+    logError("large structured entry", undefined, "budget", { payload });
+    const entry = getErrorLogs()[0];
+    expect(entry.message).toBe("Log entry redacted after exceeding resource or sanitization limit");
+    expect(new TextEncoder().encode(JSON.stringify(entry)).byteLength).toBeLessThanOrEqual(32 * 1024);
+    // Persistence is serialized and asynchronous: wait on the same queue
+    // before inspecting durable storage, not just the synchronous memory log.
+    const committed = await loadErrorLogs();
+    expect(committed[0].message).toBe(entry.message);
+    expect(JSON.stringify(localStorageData.errorLog)).not.toContain("record-59-");
+    expect(await exportErrorLogs()).not.toContain("record-59-");
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("record-59-");
+    expect((await loadErrorLogs())[0].message).toBe(entry.message);
+  });
+
+  it("preserves bounded diagnostics, semantic keys and token masking", () => {
+    const credential = ["header", "secret", "value"].join("-");
+    logError("ordinary request failure", undefined, "provider", {
+      url: "https://api.example.test/call?mode=test&token=" + credential,
+      key: "semantic-name",
+    });
+    const [entry] = getErrorLogs();
+    expect(entry.message).toBe("ordinary request failure");
+    expect(entry.data?.key).toBe("semantic-name");
+    expect(new URL(entry.data?.url as string).searchParams.get("token")).toBe("[REDACTED]");
+    expect(JSON.stringify(entry)).not.toContain(credential);
+  });
+});

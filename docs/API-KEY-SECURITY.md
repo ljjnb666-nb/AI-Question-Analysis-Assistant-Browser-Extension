@@ -85,3 +85,20 @@ sanitized entries to local storage before those entries can be exported.
 This is an **entry-count** budget; it is not a per-entry byte-size,
 storage quota, or general-purpose sensitive-text detection guarantee.
 Clear operations remain serialized with preceding and subsequent writes.
+
+
+## Phase 14D-04 · Per-entry logging resource ceilings
+
+The logger rejects whole raw strings over **8192 UTF-16 code units** with
+`[REDACTED_OVERSIZED_LOG_VALUE]` before regex or URL parsing. Deep or
+high-cardinality arrays and objects, recursive URL processing, and excessive
+node counts fail closed with fixed markers. A single entry whose **compact
+sanitized JSON** exceeds **32 KiB UTF-8** is replaced with a fixed diagnostic
+before memory retention, console output, persistence or export. Existing
+HTTP header, URL and structured-field credential masking still applies to
+normal-sized inputs and historical records.
+
+These are per-entry budgets, not a total storage byte ceiling or a promise
+that Chrome's initial legacy storage read is allocation-free. Pretty-printed
+exports may use additional whitespace. Unknown free-form secrets are not
+guaranteed to be recognized by the credential sanitizer.
