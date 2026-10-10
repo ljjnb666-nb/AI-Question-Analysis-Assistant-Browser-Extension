@@ -17,7 +17,7 @@ export type SidePanelAppState = {
   hydrationStatus: WorkspaceHydrationStatus;
   workspaceOrigin: CandidateOrigin | undefined;
   detectionPhase: DetectionPhase;
-  detectionOutcome?: FullPageDetectOutcome;
+  detectionOutcome: FullPageDetectOutcome | undefined;
   uiLang: UILang;
   /** Server-validated session status; never derived from local storage. */
   authStatus: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
