@@ -364,8 +364,12 @@ async function persistErrorLog(entry: ErrorLogEntry): Promise<void> {
     try {
       const result = await chrome.storage.local.get("errorLog");
       const stored = result["errorLog"];
-      const log = Array.isArray(stored) ? stored.map((item) => sanitizeLogEntry(item as ErrorLogEntry)) : [];
-      const updated = [...log, sanitizeLogEntry(entry)].slice(-MAX_LOG_SIZE);
+      // Historical storage may exceed MAX_LOG_SIZE. Select the retained
+      // newest entries BEFORE sanitization to bound per-entry processing.
+      const log = Array.isArray(stored)
+        ? stored.slice(-(MAX_LOG_SIZE - 1)).map((item) => sanitizeLogEntry(item as ErrorLogEntry))
+        : [];
+      const updated = [...log, sanitizeLogEntry(entry)];
       await chrome.storage.local.set({ errorLog: updated });
     } catch (err) {
       if (isExtensionContextInvalidatedError(err)) return;
@@ -383,7 +387,11 @@ export async function loadErrorLogs(): Promise<ErrorLogEntry[]> {
     await enqueuePersist(async () => {
       const result = await chrome.storage.local.get("errorLog");
       const stored = result["errorLog"];
-      logs = Array.isArray(stored) ? stored.map((item) => sanitizeLogEntry(item as ErrorLogEntry)) : [];
+      // Apply the same retention contract as new writes before sanitizing
+      // legacy entries and compact storage before exporting any of them.
+      logs = Array.isArray(stored)
+        ? stored.slice(-MAX_LOG_SIZE).map((item) => sanitizeLogEntry(item as ErrorLogEntry))
+        : [];
       // This also scrubs entries written by older versions before they can be exported.
       if (logs.length > 0) await chrome.storage.local.set({ errorLog: logs });
     });

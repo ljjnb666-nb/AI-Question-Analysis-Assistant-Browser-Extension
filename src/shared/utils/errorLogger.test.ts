@@ -280,3 +280,53 @@ describe("PHASE14D_01 error-log deletion consistency", () => {
     expect(JSON.stringify(localStorageData.errorLog)).not.toContain("before clear");
   });
 });
+
+
+describe("PHASE14D_03 legacy persisted error-log retention", () => {
+  it("caps an oversized legacy array on load, storage rewrite, and export while scrubbing retained secrets", async () => {
+    // Drain the beforeEach clear operation before seeding legacy storage.
+    await loadErrorLogs();
+    const secret = ["legacy", "retained", "credential"].join("-");
+    localStorageData.errorLog = Array.from({ length: 137 }, (_unused, index) => ({
+      level: "error",
+      message: "legacy-" + index,
+      timestamp: index,
+      data: { url: "https://provider.example.test/fail?token=" + secret + "&mode=test" },
+    }));
+
+    const loaded = await loadErrorLogs();
+    expect(loaded).toHaveLength(100);
+    expect(loaded[0].message).toBe("legacy-37");
+    expect(loaded[99].message).toBe("legacy-136");
+    const stored = localStorageData.errorLog as Array<{ message: string; data: { url: string } }>;
+    expect(stored).toHaveLength(100);
+    expect(stored.map((entry) => entry.message)).toEqual(loaded.map((entry) => entry.message));
+    const exported = JSON.parse(await exportErrorLogs()) as Array<{ message: string }>;
+    expect(exported).toHaveLength(100);
+    expect(exported[0].message).toBe("legacy-37");
+    expect(exported[99].message).toBe("legacy-136");
+    expect(JSON.stringify(loaded)).not.toContain(secret);
+    expect(JSON.stringify(stored)).not.toContain(secret);
+    expect(JSON.stringify(exported)).not.toContain(secret);
+    expect(new URL(stored[0].data.url).searchParams.get("token")).toBe("[REDACTED]");
+  });
+
+  it("caps oversized historical data before appending a newly committed error", async () => {
+    await loadErrorLogs();
+    localStorageData.errorLog = Array.from({ length: 140 }, (_unused, index) => ({
+      level: "error",
+      message: "legacy-" + index,
+      timestamp: index,
+    }));
+
+    logError("latest-new-error", undefined, "retention");
+    // Wait behind the write on the same serialized persistence queue.
+    const stored = await loadErrorLogs();
+    expect(stored).toHaveLength(100);
+    expect(stored[0].message).toBe("legacy-41");
+    expect(stored[98].message).toBe("legacy-139");
+    expect(stored[99].message).toBe("latest-new-error");
+    expect(localStorageData.errorLog as unknown[]).toHaveLength(100);
+    expect(JSON.parse(await exportErrorLogs())).toHaveLength(100);
+  });
+});
