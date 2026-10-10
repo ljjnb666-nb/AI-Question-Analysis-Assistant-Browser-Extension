@@ -422,6 +422,44 @@ describe("PHASE14D_05 aggregate log storage, memory and export byte budgets", ()
   const MAX_TOTAL_BYTES = 256 * 1024;
   const byteLength = (value: string): number => new TextEncoder().encode(value).byteLength;
 
+  it("removes corrupt legacy non-array storage instead of leaving unredacted diagnostics at rest", async () => {
+    await loadErrorLogs(); // wait for beforeEach clear
+    const secret = ["legacy", "corrupt", "unredacted"].join("-");
+    localStorageData.errorLog = { token: secret, message: "historical invalid storage" };
+
+    expect(await loadErrorLogs()).toEqual([]);
+    expect(localStorageData.errorLog).toBeUndefined();
+    expect(await exportErrorLogs()).toBe("[]");
+    expect(JSON.stringify(localStorageData)).not.toContain(secret);
+  });
+
+  it("retains the maximal newest suffix with exact UTF-8 pretty-JSON accounting", async () => {
+    await loadErrorLogs();
+    // Every value is below the per-entry budgets, but Unicode byte length
+    // exceeds JS string length, so char-count approximations are insufficient.
+    const history = Array.from({ length: 100 }, (_unused, index) => ({
+      level: "error" as const,
+      message: "unicode-" + index + ":" + "🧩".repeat(1100),
+      data: { detail: "漢字".repeat(200) },
+      timestamp: index,
+    }));
+    localStorageData.errorLog = history;
+
+    const retained = await loadErrorLogs();
+    expect(retained.length).toBeGreaterThan(0);
+    expect(retained.length).toBeLessThan(history.length);
+    expect(retained).toEqual(history.slice(-retained.length));
+    const exported = await exportErrorLogs();
+    expect(byteLength(exported)).toBeLessThanOrEqual(MAX_TOTAL_BYTES);
+    expect(JSON.parse(exported)).toEqual(retained);
+    expect(localStorageData.errorLog).toEqual(retained);
+
+    const immediatelyOlder = history[history.length - retained.length - 1];
+    expect(immediatelyOlder).toBeDefined();
+    expect(byteLength(JSON.stringify([immediatelyOlder, ...retained], null, 2)))
+      .toBeGreaterThan(MAX_TOTAL_BYTES);
+  });
+
   it("compacts large historical storage to the newest contiguous suffix before returning or exporting", async () => {
     await loadErrorLogs(); // queue fence for beforeEach deletion
     const secret = ["historical", "aggregate", "credential"].join("-");

@@ -478,8 +478,14 @@ export async function loadErrorLogs(): Promise<ErrorLogEntry[]> {
           ? stored.slice(-MAX_LOG_SIZE).map((item) => sanitizeLogEntry(item as ErrorLogEntry))
           : [],
       );
-      // This also scrubs entries written by older versions before they can be exported.
-      if (logs.length > 0) await chrome.storage.local.set({ errorLog: logs });
+      // Rewrite valid legacy arrays only when there is historical content.
+      // A corrupt non-array value may still contain unsanitized diagnostics;
+      // returning [] alone must not leave that raw value in persistent storage.
+      if (Array.isArray(stored)) {
+        if (stored.length > 0) await chrome.storage.local.set({ errorLog: logs });
+      } else if (stored !== undefined) {
+        await chrome.storage.local.remove("errorLog");
+      }
     });
     return logs.map(sanitizeLogEntry);
   } catch (err) {
