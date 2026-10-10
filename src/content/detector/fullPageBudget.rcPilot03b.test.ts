@@ -18,6 +18,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     vi.useFakeTimers();
     vi.mocked(detectCandidatesInViewport).mockReset().mockReturnValue([]);
     document.body.innerHTML = "<main>Public question page fixture</main>";
+    document.body.removeAttribute("aria-busy"); // Isolate readiness fixtures across tests.
     top = 200;
     pageHeight = 9000; // (9000 - 600) / 600 + 1 = 15 expected steps
     Object.defineProperty(window, "scrollY", { configurable: true, get: () => top });
@@ -36,6 +37,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
     document.body.innerHTML = "";
+    document.body.removeAttribute("aria-busy");
   });
 
   it("RC03B-R2 revisits a pending first viewport once without inventing scan steps", async () => {
