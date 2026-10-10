@@ -152,6 +152,54 @@ describe("fullPageDetector", () => {
     });
   });
 
+
+    it("R12A rejects an oversized navigation scroller in favor of a question pane", () => {
+      document.body.innerHTML = `
+        <nav id="primary-nav" style="overflow-y:auto;height:600px;"><a href="/one">题目目录</a></nav>
+        <main id="paper-root" style="overflow-y:auto;height:600px;">
+          <article class="question-item">下列哪个选项正确？ A. 甲 B. 乙 C. 丙 D. 丁</article>
+        </main>
+      `;
+      const nav = document.getElementById("primary-nav")!;
+      const paper = document.getElementById("paper-root")!;
+      for (const [node, height] of [[nav, 100000], [paper, 2600]] as const) {
+        Object.defineProperty(node, "scrollHeight", { configurable: true, value: height });
+        Object.defineProperty(node, "clientHeight", { configurable: true, value: 600 });
+        Object.defineProperty(node, "getBoundingClientRect", {
+          configurable: true, value: () => ({ width: 800, height: 600, left: 12, top: 10 }),
+        });
+      }
+      expect(resolveFullPageScrollRoot()).toBe(paper);
+    });
+
+    it("R12B does not scan a navigation-only page sidebar as the full-page question root", () => {
+      document.body.innerHTML = `<nav id="question-nav" style="overflow-y:auto;height:600px;">题号跳转目录</nav>`;
+      const nav = document.getElementById("question-nav")!;
+      Object.defineProperty(nav, "scrollHeight", { configurable: true, value: 70000 });
+      Object.defineProperty(nav, "clientHeight", { configurable: true, value: 600 });
+      Object.defineProperty(nav, "getBoundingClientRect", {
+        configurable: true, value: () => ({ width: 800, height: 600, left: 10, top: 10 }),
+      });
+      expect(resolveFullPageScrollRoot()).toBe(window);
+    });
+
+    it("R12C ignores a long div sidebar menu without suppressing a neutral scroll pane", () => {
+      document.body.innerHTML = `
+        <div id="sidebar-toc" style="overflow-y:auto;height:600px;">目录与筛选菜单</div>
+        <div id="scroll-content" style="overflow-y:auto;height:600px;">正文加载中</div>
+      `;
+      const menu = document.getElementById("sidebar-toc")!;
+      const content = document.getElementById("scroll-content")!;
+      for (const [node, height] of [[menu, 90000], [content, 2300]] as const) {
+        Object.defineProperty(node, "scrollHeight", { configurable: true, value: height });
+        Object.defineProperty(node, "clientHeight", { configurable: true, value: 600 });
+        Object.defineProperty(node, "getBoundingClientRect", {
+          configurable: true, value: () => ({ width: 800, height: 600, left: 10, top: 10 }),
+        });
+      }
+      expect(resolveFullPageScrollRoot()).toBe(content);
+    });
+
   describe("detectCandidatesFullPage", () => {
     it("tracks running state correctly", () => {
       expect(isFullPageScanRunning()).toBe(false);
