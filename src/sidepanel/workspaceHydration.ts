@@ -94,14 +94,16 @@ export function createWorkspaceHydration(options: Options) {
       const after = await options.readOrigin(captured.tabId);
       if (!validTicket(t)) return;
       if (after?.url !== captured.url) return fail(t);
-      const matching = buffered.filter((e) => e.tabId === captured.tabId && e.snapshot.originUrl === captured.url
-        && !e.snapshot.disposed && !retiredRuntimes.has(e.snapshot.runtimeInstanceId));
+      const matching = buffered.filter((e) => e.tabId === captured.tabId && e.snapshot.originUrl === captured.url);
       // Recovery is permitted only for an explicit transport loss, never for
       // malformed/negative domain replies. A single runtime must have emitted
       // a validated, main-frame, same-tab/same-URL live update DURING this sync.
       // Competing runtime instances cannot be disambiguated without a read,
       // and may not self-authorize a candidate or protected-work control.
       if (response == null && matching.length > 0) {
+        // A disposed or already retired runtime event is an explicit
+        // contradiction, not evidence that an active runtime is current.
+        if (matching.some((e) => e.snapshot.disposed || retiredRuntimes.has(e.snapshot.runtimeInstanceId))) return fail(t);
         const instances = new Set(matching.map((e) => e.snapshot.runtimeInstanceId));
         if (instances.size !== 1) return fail(t);
         const candidate = matching.map((e) => e.snapshot)
