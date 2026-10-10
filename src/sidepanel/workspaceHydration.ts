@@ -115,6 +115,13 @@ export function createWorkspaceHydration(options: Options) {
             && (candidate.routeEpoch < previouslyObserved.routeEpoch
               || candidate.routeEpoch === previouslyObserved.routeEpoch && candidate.seq <= previouslyObserved.seq)) return fail(t);
         }
+        // During buffering, observe() has already advanced its high-water
+        // pointer to this candidate. Explicitly retire the previous runtime
+        // so its delayed events cannot trigger a new hydration/replay later.
+        if (previouslyObserved?.originUrl === captured.url
+          && previouslyObserved.runtimeInstanceId !== candidate.runtimeInstanceId) {
+          retiredRuntimes.add(previouslyObserved.runtimeInstanceId);
+        }
         inFlight = false;
         buffered = [];
         apply(candidate);
