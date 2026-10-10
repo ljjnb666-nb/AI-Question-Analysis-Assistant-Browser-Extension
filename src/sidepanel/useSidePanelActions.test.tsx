@@ -414,6 +414,73 @@ describe("useSidePanelActions authority gate", () => {
     // With no runtime dispatch authority, no fill side effect may follow.
     expect(sentMessages.filter((m) => m.type === "FILL_PARSED_ANSWER")).toEqual([]);
   });
+  describe("RC-PILOT-03A isolated viewport feedback mocks", () => {
+    beforeEach(async () => {
+      const { getBestActionTab, sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+      // clearAllMocks does not empty mockImplementationOnce queues. Reset the
+      // action mocks inside this nested suite to avoid hidden cross-test awaits.
+      vi.mocked(getBestActionTab).mockReset().mockImplementation(() => {
+        if (parkNextTabLookup) {
+          parkNextTabLookup = false;
+          return new Promise<chrome.tabs.Tab | null>((resolve) => deferredTabResolvers.push(resolve));
+        }
+        return Promise.resolve({ id: 7 } as chrome.tabs.Tab);
+      });
+      vi.mocked(sendProtectedTabMessageWithBootstrap).mockReset().mockImplementation(async (tabId, message) => {
+        sentMessages.push({ tabId, type: message.type });
+        return { ok: true, response: { ok: true } };
+      });
+    });
+
+  it("RC03A-01 reports unavailable page rather than silently returning", async () => {
+    const { getBestActionTab } = await import("./tabActions");
+    authenticated = true;
+    vi.mocked(getBestActionTab).mockResolvedValueOnce(null);
+    const setFillFeedback = vi.fn();
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({ setFillFeedback, uiLang: "zh" }),
+    });
+    await result.current.handleDetect();
+    expect(sentMessages).toEqual([]);
+    expect(setFillFeedback).toHaveBeenCalledWith(expect.objectContaining({
+      code: "VIEWPORT_DETECT_NO_TARGET", tone: "warning",
+      message: expect.stringContaining("当前页面不可用"),
+    }));
+  });
+
+  it("RC03A-02 distinguishes failed transport from a successfully detected question", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    authenticated = true;
+    vi.mocked(sendProtectedTabMessageWithBootstrap).mockResolvedValueOnce({
+      ok: false, error: "Receiving end does not exist",
+    });
+    const setFillFeedback = vi.fn();
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({ setFillFeedback, uiLang: "zh" }),
+    });
+    await result.current.handleDetect();
+    expect(setFillFeedback).toHaveBeenCalledWith(expect.objectContaining({
+      code: "VIEWPORT_DETECT_STARTING", tone: "info",
+    }));
+    expect(setFillFeedback).toHaveBeenLastCalledWith(expect.objectContaining({
+      code: "VIEWPORT_DETECT_START_UNCONFIRMED", tone: "error",
+    }));
+  });
+
+  it("RC03A-03 suppresses a duplicate click during unresolved tab authority lookup", async () => {
+    authenticated = true;
+    parkNextTabLookup = true;
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions(),
+    });
+    const first = result.current.handleDetect();
+    await result.current.handleDetect();
+    expect(deferredTabResolvers).toHaveLength(1);
+    deferredTabResolvers[0]({ id: 7 } as chrome.tabs.Tab);
+    await first;
+    expect(sentMessages).toEqual([{ tabId: 7, type: "START_AUTO_DETECT" }]);
+  });
+  });
 });
 
 // This suite isolates auth/owner choreography with a configured AI readiness fixture.
