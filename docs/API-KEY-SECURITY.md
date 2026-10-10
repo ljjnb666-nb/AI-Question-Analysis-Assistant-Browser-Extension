@@ -56,3 +56,21 @@ analytics 白名单字段，history 不含 settings）。
 因此 tamper fail-closed 保证严格适用于 `qse:v1:` 版本化密文。
 
 相关测试：`src/shared/utils/encryption.test.ts`、`src/shared/utils/storage.test.ts`（KEY_01–KEY_15）。
+
+
+## Phase 14D-02 · Explicit credential header redaction
+
+The centralized error logger masks structured `Cookie`, `Set-Cookie`,
+`Proxy-Authorization`, session/CSRF identifiers, private-key and client
+assertion fields. Common authentication fields in HTTPS query parameters are
+also masked. When thrown error messages or stack traces contain literal
+HTTP `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie` or
+`(X-)Api-Key` header lines, their full values are redacted before logs
+are retained, persisted, exported or printed in development. Legacy stored
+entries are scrubbed on load/export.
+
+This protects **known credential representations**; it is not a guarantee
+that an arbitrary unknown secret or private question text in a free-form
+error string can be identified. Callers must still avoid logging raw
+credentials, page content, and private request/response bodies. No new
+analytics payload or network behavior is introduced.

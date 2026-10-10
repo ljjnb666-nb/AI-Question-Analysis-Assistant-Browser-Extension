@@ -168,3 +168,115 @@ describe("error log secret redaction", () => {
     expect(redactUrlForLog("https://[malformed?key=secret")).toBe("[REDACTED_URL]");
   });
 });
+
+
+describe("PHASE14D_02 explicit HTTP credential redaction", () => {
+  it("redacts credentials in structured headers, URL query parameters, and Error stack at all log boundaries", async () => {
+    const bearer = ["private", "bearer", "value"].join("-");
+    const proxy = ["proxy", "credential", "value"].join("-");
+    const cookie = ["session", "cookie", "value"].join("-");
+    const apiKey = ["service", "key", "value"].join("-");
+    const csrf = ["csrf", "token", "value"].join("-");
+    const assertion = ["client", "assertion", "value"].join("-");
+    const session = ["session", "identifier", "value"].join("-");
+    const url = "https://service.example.test/endpoint?session_id=" + session
+      + "&csrf_token=" + csrf + "&mode=test";
+    const error = new Error("Authorization: Bearer " + bearer + "\nserver rejected request");
+    error.stack = "Error: Authorization: Bearer " + bearer
+      + "\nProxy-Authorization: Basic " + proxy + "\n at test-helper";
+    Object.assign(error, { extraHeaders: { "Set-Cookie": "id=" + cookie } });
+
+    logError("Failed with Cookie: id=" + cookie + "; Secure\nrequest stayed in diagnostic mode", error, "security", {
+      url,
+      headers: { Cookie: "id=" + cookie, "X-Api-Key": apiKey },
+      nested: { clientAssertion: assertion, privateKey: assertion, context: "safe-context" },
+    });
+    const memory = getErrorLogs();
+    const serializedMemory = JSON.stringify(memory, (_key, value) =>
+      value instanceof Error ? { message: value.message, stack: value.stack, extraHeaders: (value as Error & { extraHeaders?: unknown }).extraHeaders } : value,
+    );
+    const exported = await exportErrorLogs();
+    const storage = JSON.stringify(localStorageData.errorLog);
+    const devConsole = JSON.stringify(vi.mocked(console.error).mock.calls);
+    for (const secret of [bearer, proxy, cookie, apiKey, csrf, assertion, session]) {
+      for (const output of [serializedMemory, exported, storage, devConsole]) {
+        expect(output).not.toContain(secret);
+      }
+    }
+    expect(memory[0].message).toContain("Cookie: [REDACTED]");
+    expect(memory[0].error?.message).toContain("Authorization: [REDACTED]");
+    expect(memory[0].data?.headers).toEqual({ Cookie: "[REDACTED]", "X-Api-Key": "[REDACTED]" });
+    expect((memory[0].data?.nested as Record<string, unknown>).context).toBe("safe-context");
+    const parsed = new URL(memory[0].data?.url as string);
+    expect(parsed.searchParams.get("session_id")).toBe("[REDACTED]");
+    expect(parsed.searchParams.get("csrf_token")).toBe("[REDACTED]");
+    expect(parsed.searchParams.get("mode")).toBe("test");
+  });
+
+  it("scrubs legacy stored Cookie/Proxy-Authorization and URL auth-code fields before export", async () => {
+    const cookie = ["legacy", "cookie", "value"].join("-");
+    const authCode = ["legacy", "auth", "code"].join("-");
+    const proxy = ["legacy", "proxy", "value"].join("-");
+    localStorageData.errorLog = [{
+      level: "error", timestamp: 42,
+      message: "Proxy-Authorization: Bearer " + proxy,
+      data: {
+        httpHeaders: { "Set-Cookie": "session=" + cookie },
+        url: "https://id.example.test/return?auth_code=" + authCode + "&mode=test",
+      },
+    }];
+    const logs = await loadErrorLogs();
+    const exported = await exportErrorLogs();
+    const stored = JSON.stringify(localStorageData.errorLog);
+    for (const secret of [cookie, authCode, proxy]) {
+      expect(JSON.stringify(logs)).not.toContain(secret);
+      expect(exported).not.toContain(secret);
+      expect(stored).not.toContain(secret);
+    }
+    expect(logs[0].message).toBe("Proxy-Authorization: [REDACTED]");
+    expect((logs[0].data?.httpHeaders as Record<string, unknown>)["Set-Cookie"]).toBe("[REDACTED]");
+    expect(new URL(logs[0].data?.url as string).searchParams.get("auth_code")).toBe("[REDACTED]");
+  });
+});
+
+describe("PHASE14D_01 error-log deletion consistency", () => {
+  it("serializes clear behind a parked older persistence write", async () => {
+    // Drain any previous tests' queued storage work before installing the gate.
+    await loadErrorLogs();
+    let persistedWriteStarted!: () => void;
+    let releasePersistedWrite!: () => void;
+    const writeStarted = new Promise<void>((resolve) => { persistedWriteStarted = resolve; });
+    const writeGate = new Promise<void>((resolve) => { releasePersistedWrite = resolve; });
+    let parkNextSet = true;
+    vi.mocked(chrome.storage.local.set).mockImplementation(async (items) => {
+      if (parkNextSet && Array.isArray(items.errorLog)) {
+        parkNextSet = false;
+        persistedWriteStarted();
+        await writeGate;
+      }
+      localStorageData = { ...localStorageData, ...items };
+    });
+
+    logError("old queued error", new Error("old entry"));
+    await writeStarted;
+    clearErrorLogs();
+    releasePersistedWrite();
+
+    // loadErrorLogs is serialized through the exact same queue and provides
+    // a deterministic completion fence. The cleared entry must not resurrect.
+    expect(await loadErrorLogs()).toEqual([]);
+    expect(localStorageData.errorLog).toBeUndefined();
+    expect(getErrorLogs()).toEqual([]);
+  });
+
+  it("retains only logs committed after a clear, even with queued pre-clear writes", async () => {
+    await loadErrorLogs();
+    logError("before clear");
+    clearErrorLogs();
+    logError("after clear");
+    const logs = await loadErrorLogs();
+    expect(logs.map((entry) => entry.message)).toEqual(["after clear"]);
+    expect(getErrorLogs().map((entry) => entry.message)).toEqual(["after clear"]);
+    expect(JSON.stringify(localStorageData.errorLog)).not.toContain("before clear");
+  });
+});
