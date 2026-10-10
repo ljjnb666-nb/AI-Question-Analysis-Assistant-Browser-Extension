@@ -159,6 +159,18 @@ export function useAuthController(options: UseAuthControllerOptions) {
       setFeedback(copy.requiredRegistrationFields);
       return;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setFeedback(copy.authFailureMessage("email_invalid"));
+      return;
+    }
+    if (password.length < 6) {
+      setFeedback(copy.authFailureMessage("password_too_short"));
+      return;
+    }
+    if (!/^\d{6}$/.test(verificationCode.trim())) {
+      setFeedback(copy.authFailureMessage("invalid_verification_code"));
+      return;
+    }
 
     try {
       await runBeforeAction();
@@ -216,6 +228,10 @@ export function useAuthController(options: UseAuthControllerOptions) {
     const normalizedEmail = email.trim();
     if (!normalizedEmail) {
       setFeedback(copy.requiredEmail);
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setFeedback(copy.authFailureMessage("email_invalid"));
       return;
     }
 

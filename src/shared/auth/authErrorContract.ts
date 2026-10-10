@@ -11,6 +11,8 @@ export type AuthFeedbackKind =
   | "invalid_credentials"
   | "email_already_registered"
   | "invalid_verification_code"
+  | "password_too_short"
+  | "email_invalid"
   | "generic";
 
 const KNOWN_SAFE_ERROR_CODES = new Set([
@@ -34,7 +36,9 @@ export function classifyAuthError(error: unknown): AuthFeedbackKind {
   if (message === "EMAIL_SERVICE_UNAVAILABLE") return "email_service_unavailable";
   if (message === "AUTH_INVALID_CREDENTIALS") return "invalid_credentials";
   if (message === "email already registered") return "email_already_registered";
-  if (message === "invalid verification code") return "invalid_verification_code";
+  if (message === "invalid verification code" || message === "invalid or expired verification code") return "invalid_verification_code";
+  if (message === "password must be at least 6 characters") return "password_too_short";
+  if (message === "email is required" || message === "invalid email address") return "email_invalid";
 
   // Registration errors are deliberate, user-facing server contract strings;
   // anything else (including internal config text) collapses to generic copy.

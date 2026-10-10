@@ -17,18 +17,27 @@ const VerificationSlot: React.FC<{
   ariaLabel: string;
   onChange: (val: string) => void;
   reducedMotion: boolean;
-}> = ({ index, digit, ariaLabel, onChange, reducedMotion }) => {
+  inputRef: (node: HTMLInputElement | null) => void;
+  onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
+}> = ({ index, digit, ariaLabel, onChange, reducedMotion, inputRef, onKeyDown }) => {
   const { isFocusVisible, onFocus, onBlur } = useFocusVisible();
-
   return (
     <input
       key={index}
+      ref={inputRef}
+      type="text"
       inputMode="numeric"
+      pattern="[0-9]*"
+      autoComplete="one-time-code"
       maxLength={6}
       aria-label={ariaLabel}
       value={digit.trim()}
       onChange={(event) => onChange(event.target.value)}
-      onFocus={onFocus}
+      onKeyDown={onKeyDown}
+      onFocus={(event) => {
+        onFocus();
+        event.currentTarget.select();
+      }}
       onBlur={onBlur}
       style={{
         width: "100%",
@@ -52,14 +61,13 @@ const VerificationSlot: React.FC<{
 };
 
 export const AuthVerificationCodeInput: React.FC<AuthVerificationCodeInputProps> = ({
-  value,
-  onChange,
-  ariaLabel = "验证码",
-  digitLabel,
-  lang,
+  value, onChange, ariaLabel = "验证码", digitLabel, lang,
 }) => {
   const reducedMotion = usePrefersReducedMotion();
+  const inputRefs = React.useRef<Array<HTMLInputElement | null>>([]);
   const digits = value.padEnd(6, " ").slice(0, 6).split("");
+  const focusDigit = (index: number) =>
+    inputRefs.current[Math.max(0, Math.min(index, 5))]?.focus();
 
   const getDigitAriaLabel = (index: number): string => {
     if (digitLabel) return digitLabel(index);
@@ -71,33 +79,47 @@ export const AuthVerificationCodeInput: React.FC<AuthVerificationCodeInputProps>
 
   const handleValueChange = (index: number, raw: string) => {
     const cleaned = raw.replace(/\D/g, "");
+    const offset = Math.min(index, value.length);
     if (!cleaned) {
-      const next = value.padEnd(6, " ").slice(0, 6).split("");
-      next[index] = " ";
-      onChange(next.join("").replace(/\s/g, ""));
+      onChange(value.slice(0, offset) + value.slice(offset + 1));
+      focusDigit(offset);
       return;
     }
+    const next = (value.slice(0, offset) + cleaned + value.slice(offset + cleaned.length)).slice(0, 6);
+    onChange(next);
+    focusDigit(Math.min(offset + cleaned.length, 5));
+  };
 
-    const next = value.padEnd(6, " ").slice(0, 6).split("");
-    for (let offset = 0; offset < cleaned.length && index + offset < 6; offset += 1) {
-      next[index + offset] = cleaned[offset];
+  const handleKeyDown = (index: number, event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Backspace" && !digits[index]?.trim() && index > 0) {
+      event.preventDefault();
+      onChange(value.slice(0, index - 1) + value.slice(index));
+      focusDigit(index - 1);
+    } else if (event.key === "ArrowLeft" && index > 0) {
+      event.preventDefault();
+      focusDigit(index - 1);
+    } else if (event.key === "ArrowRight" && index < 5) {
+      event.preventDefault();
+      focusDigit(index + 1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      focusDigit(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      focusDigit(Math.min(value.length, 5));
     }
-    onChange(next.join("").replace(/\s/g, "").slice(0, 6));
   };
 
   return (
-    <div
-      role="group"
-      aria-label={ariaLabel}
-      style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: orbitSpacing[2] }}
-    >
+    <div role="group" aria-label={ariaLabel}
+      style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: orbitSpacing[2] }}>
       {digits.map((digit, index) => (
         <VerificationSlot
-          key={index}
-          index={index}
-          digit={digit}
+          key={index} index={index} digit={digit}
           ariaLabel={getDigitAriaLabel(index)}
-          onChange={(val) => handleValueChange(index, val)}
+          onChange={(raw) => handleValueChange(index, raw)}
+          inputRef={(node) => { inputRefs.current[index] = node; }}
+          onKeyDown={(event) => handleKeyDown(index, event)}
           reducedMotion={reducedMotion}
         />
       ))}
@@ -198,7 +220,7 @@ export const AuthPasswordField: React.FC<AuthPasswordFieldProps> = ({
             style={{
               border: "none",
               background: "transparent",
-              color: orbitColors.brand.primary,
+              color: orbitColors.brand.linkText,
               cursor: "pointer",
               fontSize: orbitTypography.fontSize.xs,
               fontWeight: orbitTypography.fontWeight.semibold,

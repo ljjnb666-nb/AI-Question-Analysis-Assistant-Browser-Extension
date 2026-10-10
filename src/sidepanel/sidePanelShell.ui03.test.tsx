@@ -512,10 +512,9 @@ describe("UI-03 Side Panel Workspace Shell Test Matrix (including Review Fix 01)
           onTabChange={vi.fn()}
           userEmail="user@example.com"
           workspaceStatus="ready"
-          providerName={undefined}
         />,
       );
-      expect(screen.getByText("当前页面")).toBeInTheDocument();
+      expect(screen.queryByText("当前页面")).toBeNull();
       expect(screen.queryByText(/Claude/)).toBeNull();
 
       // English
@@ -528,10 +527,9 @@ describe("UI-03 Side Panel Workspace Shell Test Matrix (including Review Fix 01)
           onTabChange={vi.fn()}
           userEmail="user@example.com"
           workspaceStatus="ready"
-          providerName={undefined}
         />,
       );
-      expect(screen.getByText("Current page")).toBeInTheDocument();
+      expect(screen.queryByText("Current page")).toBeNull();
       expect(screen.queryByText(/Claude/)).toBeNull();
       unmount();
     });
@@ -546,10 +544,9 @@ describe("UI-03 Side Panel Workspace Shell Test Matrix (including Review Fix 01)
           onTabChange={vi.fn()}
           userEmail="user@example.com"
           workspaceStatus="ready"
-          providerName="Gemini"
         />,
       );
-      expect(screen.getByText("当前页面 · Gemini")).toBeInTheDocument();
+      expect(screen.queryByText(/当前页面|Gemini/)).toBeNull();
     });
 
     it("RF01-C03: provider loaded OpenAI -> OpenAI", () => {
@@ -562,10 +559,9 @@ describe("UI-03 Side Panel Workspace Shell Test Matrix (including Review Fix 01)
           onTabChange={vi.fn()}
           userEmail="user@example.com"
           workspaceStatus="ready"
-          providerName="OpenAI"
         />,
       );
-      expect(screen.getByText("Current page · OpenAI")).toBeInTheDocument();
+      expect(screen.queryByText(/Current page|OpenAI/)).toBeNull();
     });
 
     it("RF01-C04: rendered user copy contains zero '自动答题'", () => {
@@ -657,7 +653,6 @@ describe("UI-03 Side Panel Workspace Shell Test Matrix (including Review Fix 01)
             onTabChange={vi.fn()}
             userEmail="test@example.com"
             workspaceStatus="solving"
-            providerName="Anthropic Claude 3.5 Sonnet"
           />
           <SidePanelActivityStrip
             activity={{
@@ -1088,3 +1083,36 @@ describe("UI-03 Side Panel Workspace Shell Test Matrix (including Review Fix 01)
   });
 });
 
+
+describe("RC-PILOT-02 truthful workspace badge", () => {
+  const base = {
+    authStatus: "authenticated" as const,
+    isAuthenticated: true,
+    lang: "zh" as const,
+    tab: "candidates" as const,
+    onTabChange: vi.fn(),
+    userEmail: "pilot@example.test",
+    workspaceStatus: "ready" as const,
+  };
+  it("does not misreport AI-ready while provider is unconfigured", () => {
+    render(<SidePanelHeader {...base} aiReadiness="unconfigured" />);
+    expect(screen.getByText("待配置 AI")).toBeInTheDocument();
+    expect(screen.queryByText("已就绪")).toBeNull();
+    expect(screen.queryByText(/当前页面|Claude/)).toBeNull();
+  });
+  it("uses success only when both workspace and AI are ready", () => {
+    render(<SidePanelHeader {...base} aiReadiness="ready" />);
+    expect(screen.getByText("已就绪")).toBeInTheDocument();
+  });
+  it("never describes an unchecked provider as ready", () => {
+    render(<SidePanelHeader {...base} aiReadiness="checking" />);
+    expect(screen.getByText("正在检查 AI")).toBeInTheDocument();
+    expect(screen.queryByText("已就绪")).toBeNull();
+  });
+  it("preserves higher priority review and unavailable statuses", () => {
+    const { rerender } = render(<SidePanelHeader {...base} aiReadiness="unconfigured" workspaceStatus="review_required" />);
+    expect(screen.getByText("需要检查")).toBeInTheDocument();
+    rerender(<SidePanelHeader {...base} aiReadiness="ready" workspaceStatus="runtime_unavailable" />);
+    expect(screen.getByText(/题目工作区暂时不可用/)).toBeInTheDocument();
+  });
+});

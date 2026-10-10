@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { logoutAccount } from "@/shared/utils/auth";
-import { sendAIConnectionCommand } from "@/shared/utils/aiConnectionClient";
-import { getProviderShortName } from "@/shared/ai/providers";
+import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
 import { useAuthSession } from "@/shared/auth/useAuthSession";
 import {
   clearProtectedWorkOwner,
@@ -48,7 +47,7 @@ export { findNextFractionExpression, normalizeRenderableMathText, renderMathText
 
 export const SidePanelApp: React.FC = () => {
   const [state, dispatch] = useReducer(sidePanelAppReducer, initialSidePanelAppState);
-  const [providerName, setProviderName] = useState<string | undefined>(undefined);
+  const [aiReadiness, setAIReadiness] = useState<"checking" | "ready" | "unconfigured" | "unavailable">("checking");
 
   const setUiLang = useCallback((updater: React.SetStateAction<UILang>) => dispatch({ type: "uiLang", updater }), []);
   const setIsAuthenticated = useCallback(
@@ -270,10 +269,20 @@ export const SidePanelApp: React.FC = () => {
   }, [session, setAuthStatus, setAutoSolveProgress, setIsAuthenticated, setIsAutoSolving, setIsBatchFilling, setIsBatchParsing, setIsDetecting, setIsFullPageScan, setIsRetryingRisky, setScanProgress, setSessionRejected, setTab, setUserEmail]);
 
   useEffect(() => {
-    const refreshProvider = () => void sendAIConnectionCommand({ type: "AI_CONNECTION_GET_ACTIVE_METADATA" }).then(response => {
-      setProviderName(response.metadata ? getProviderShortName(response.metadata.presetId) : undefined);
-    }).catch(() => setProviderName(undefined));
-    loadSettings().then(settings => setUiLang(settings.language));
+    let disposed = false;
+    let generation = 0;
+    const refreshProvider = () => {
+      const version = ++generation;
+      setAIReadiness("checking");
+      void getAIConnectionReadiness().then((result) => {
+        if (disposed || version !== generation) return;
+        setAIReadiness(result.ready ? "ready"
+          : result.code === "AI_CONNECTION_AUTHORITY_UNAVAILABLE" ? "unavailable" : "unconfigured");
+      }).catch(() => {
+        if (!disposed && version === generation) setAIReadiness("unavailable");
+      });
+    };
+    loadSettings().then(settings => { if (!disposed) setUiLang(settings.language); }).catch(() => undefined);
     refreshProvider();
 
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
@@ -311,6 +320,8 @@ export const SidePanelApp: React.FC = () => {
     });
 
     return () => {
+      disposed = true;
+      generation += 1;
       chrome.storage.onChanged.removeListener(handleStorageChange);
       unregisterRuntime();
     };
@@ -467,7 +478,7 @@ export const SidePanelApp: React.FC = () => {
         tab={state.tab}
         userEmail={state.userEmail}
         workspaceStatus={workspaceStatus}
-        providerName={providerName}
+        aiReadiness={aiReadiness}
         onToggleLanguage={handleToggleLanguage}
         onLogout={handleLogout}
         onRetryValidation={() => session.retryValidation()}
