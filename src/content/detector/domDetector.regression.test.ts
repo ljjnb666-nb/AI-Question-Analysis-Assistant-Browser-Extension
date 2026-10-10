@@ -30,6 +30,33 @@ describe("domDetector regressions", () => {
     document.body.innerHTML = "";
   });
 
+  it("RC03B-R1 detects a complete public question card with detached ABCD lines", () => {
+    document.body.innerHTML = `
+      <article id="public-card" class="question-item">
+        <p id="public-stem">凡是符合自己维护的道德观念时会产生积极情绪，这属于哪种品德心理结构？（ ）</p>
+        <ul>
+          <li>A <span>道德认识</span></li>
+          <li>B <span>道德情感</span></li>
+          <li>C <span>道德意志</span></li>
+          <li>D <span>道德行为</span></li>
+        </ul>
+      </article>
+    `;
+    const card = document.getElementById("public-card")!;
+    // Chromium innerText preserves block line breaks; jsdom does not.
+    Object.defineProperty(card, "innerText", { configurable: true, value:
+      "凡是符合自己维护的道德观念时会产生积极情绪，这属于哪种品德心理结构？（ ）\\nA\\n道德认识\\nB\\n道德情感\\nC\\n道德意志\\nD\\n道德行为" });
+    setRect(card, { left: 80, top: 100, width: 800, height: 420 });
+    const candidates = detectCandidatesInViewport();
+    expect(candidates.length).toBeGreaterThanOrEqual(1);
+    const publicCard = candidates.find((candidate) => candidate.previewText.includes("道德观念"));
+    expect(publicCard?.questionTypeGuess).toBe("single_choice");
+    expect(publicCard?.previewText).toContain("A.");
+    expect(publicCard?.previewText).toContain("B.");
+    expect(publicCard?.previewText).toContain("C.");
+    expect(publicCard?.previewText).toContain("D.");
+  });
+
   it("keeps leading tables that belong to the same math single-choice question", () => {
     document.body.innerHTML = `
       <div id="question-box" class="questionBox">
