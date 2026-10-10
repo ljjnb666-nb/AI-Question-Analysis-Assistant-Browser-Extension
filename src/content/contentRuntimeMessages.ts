@@ -57,7 +57,8 @@ export function createContentRuntimeMessageListener(options: RegisterContentRunt
         return false;
       }
       const before = options.getWorkspaceSnapshot?.(expectedUrl);
-      if (!before?.ok || !before.snapshot || before.snapshot.disposed) {
+      const prior = before?.snapshot;
+      if (!before?.ok || !prior || prior.disposed) {
         sendResponse({ ok: false, error: "STALE_VIEWPORT_ORIGIN" });
         return false;
       }
@@ -75,10 +76,10 @@ export function createContentRuntimeMessageListener(options: RegisterContentRunt
           const current = options.getWorkspaceSnapshot?.(expectedUrl);
           const after = current?.snapshot;
           if (!current?.ok || !after || after.disposed || after.originUrl !== expectedUrl
-            || after.runtimeInstanceId !== before.snapshot?.runtimeInstanceId
-            || after.runtimeGeneration !== before.snapshot?.runtimeGeneration
-            || after.routeEpoch !== before.snapshot?.routeEpoch
-            || after.seq <= before.snapshot.seq
+            || after.runtimeInstanceId !== prior.runtimeInstanceId
+            || after.runtimeGeneration !== prior.runtimeGeneration
+            || after.routeEpoch !== prior.routeEpoch
+            || after.seq <= prior.seq
             || after.detection.mode !== "viewport" || after.detection.phase !== "completed"
             || after.detection.requestId !== requestId) {
             fail("VIEWPORT_RESULT_NOT_CURRENT");
