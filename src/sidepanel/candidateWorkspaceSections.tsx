@@ -341,6 +341,10 @@ export function CandidateEmptyState({
     ? copy.filterEmpty
     : phase === "detecting"
       ? copy.detectingEmpty
+      : phase === "failed"
+        ? copy.failedEmpty
+      : phase === "incomplete"
+        ? copy.incompleteEmpty
       : phase === "completed"
         ? copy.completedEmpty
         : copy.notStarted;

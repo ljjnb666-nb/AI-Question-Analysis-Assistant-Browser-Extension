@@ -10,7 +10,13 @@ export function isWorkspaceSnapshot(value: unknown): value is CandidateWorkspace
   return s.protocolVersion === 1 && typeof s.runtimeInstanceId === "string" && s.runtimeInstanceId.length > 0
     && count(s.runtimeGeneration) && s.runtimeGeneration > 0 && count(s.routeEpoch) && count(s.seq)
     && typeof s.originUrl === "string" && /^https?:\/\//i.test(s.originUrl) && typeof s.disposed === "boolean"
-    && !!s.detection && ["never_started", "detecting", "completed"].includes(s.detection.phase)
+    && !!s.detection && ["never_started", "detecting", "completed", "failed", "incomplete"].includes(s.detection.phase)
+    && (s.detection.outcome === undefined || ["completed", "no_candidates", "refinement_empty", "failed"].includes(s.detection.outcome))
+    && (s.detection.failureStage === undefined || ["scanning", "refining", "publishing"].includes(s.detection.failureStage))
+    && (s.detection.diagnostics === undefined || (count(s.detection.diagnostics.observedCandidates)
+      && count(s.detection.diagnostics.retainedCandidates)
+      && count(s.detection.diagnostics.postprocessedCandidates)
+      && count(s.detection.diagnostics.refinedCandidates)))
     && [null, "viewport", "fullpage"].includes(s.detection.mode)
     && (s.detection.requestId === undefined || typeof s.detection.requestId === "string"
       && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(s.detection.requestId))
