@@ -67,6 +67,14 @@ Required CI jobs:
 
 **Post-merge.** CI on the exact merge SHA must pass before a release stage freeze. The merge-SHA run is the authoritative green signal for the frozen state.
 
+## RC-FREEZE-01 · 有限范围候选评估
+
+See [RC-FREEZE-01.md](./RC-FREEZE-01.md) for the SHA-bound release-candidate
+evidence, scope of valid claims, outstanding Issue #83, explicit risk owners,
+and post-merge/publication decision gates. This is an **assessment in review**,
+not a release tag, published extension, production deployment or claim of
+authenticated-site support.
+
 ## Deferred work
 
 The following are explicitly **not** release-hardening blockers and are **not** completed. They are future work and must not be presented as shipped capability:
