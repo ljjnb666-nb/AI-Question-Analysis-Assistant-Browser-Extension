@@ -74,3 +74,14 @@ that an arbitrary unknown secret or private question text in a free-form
 error string can be identified. Callers must still avoid logging raw
 credentials, page content, and private request/response bodies. No new
 analytics payload or network behavior is introduced.
+
+
+## Phase 14D-03 · Error-log retention for legacy storage
+
+The local `errorLog` store retains at most **100 recent entries**.
+On both new writes and legacy loads, older entries are dropped before
+per-entry sanitization. Successful legacy loads rewrite only the retained,
+sanitized entries to local storage before those entries can be exported.
+This is an **entry-count** budget; it is not a per-entry byte-size,
+storage quota, or general-purpose sensitive-text detection guarantee.
+Clear operations remain serialized with preceding and subsequent writes.
