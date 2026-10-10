@@ -414,6 +414,24 @@ describe("useSidePanelActions authority gate", () => {
     // With no runtime dispatch authority, no fill side effect may follow.
     expect(sentMessages.filter((m) => m.type === "FILL_PARSED_ANSWER")).toEqual([]);
   });
+  describe("RC-PILOT-03A isolated viewport feedback mocks", () => {
+    beforeEach(async () => {
+      const { getBestActionTab, sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+      // clearAllMocks does not empty mockImplementationOnce queues. Reset the
+      // action mocks inside this nested suite to avoid hidden cross-test awaits.
+      vi.mocked(getBestActionTab).mockReset().mockImplementation(() => {
+        if (parkNextTabLookup) {
+          parkNextTabLookup = false;
+          return new Promise<chrome.tabs.Tab | null>((resolve) => deferredTabResolvers.push(resolve));
+        }
+        return Promise.resolve({ id: 7 } as chrome.tabs.Tab);
+      });
+      vi.mocked(sendProtectedTabMessageWithBootstrap).mockReset().mockImplementation(async (tabId, message) => {
+        sentMessages.push({ tabId, type: message.type });
+        return { ok: true, response: { ok: true } };
+      });
+    });
+
   it("RC03A-01 reports unavailable page rather than silently returning", async () => {
     const { getBestActionTab } = await import("./tabActions");
     authenticated = true;
@@ -461,6 +479,7 @@ describe("useSidePanelActions authority gate", () => {
     deferredTabResolvers[0]({ id: 7 } as chrome.tabs.Tab);
     await first;
     expect(sentMessages).toEqual([{ tabId: 7, type: "START_AUTO_DETECT" }]);
+  });
   });
 });
 
