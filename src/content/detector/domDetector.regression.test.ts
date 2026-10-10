@@ -69,7 +69,7 @@ describe("domDetector regressions", () => {
     `;
     const card = document.getElementById("rich-detached-card")!;
     Object.defineProperty(card, "innerText", { configurable: true, value:
-      "观察下图的电路，哪种参数能够保持稳定？（ ）\\nA\\n电阻\\nB\\n电容\\nC\\n电感\\nD\\n电压" });
+      "观察下图的电路，哪种参数能够保持稳定？（ ）\nA\n电阻\nB\n电容\nC\n电感\nD\n电压" });
     // The raw-text fallback must not erase the IMG alt evidence already
     // collected by the semantic structured-text path.
     expect(extractStructuredQuestionText(card)).toContain("语义图像关键值");
@@ -86,7 +86,7 @@ describe("domDetector regressions", () => {
     const card = document.getElementById("partial-detached-card")!;
     const stemNode = document.getElementById("partial-stem")!;
     Object.defineProperty(card, "innerText", { configurable: true, value:
-      "凡是符合自己维护的道德观念时会产生积极情绪，这属于哪种品德心理结构？（ ）\\nA\\n道德认识\\nB\\n道德情感\\nC\\n道德意志\\nD\\n道德行为" });
+      "凡是符合自己维护的道德观念时会产生积极情绪，这属于哪种品德心理结构？（ ）\nA\n道德认识\nB\n道德情感\nC\n道德意志\nD\n道德行为" });
     setRect(card, { left: 80, top: 100, width: 800, height: 420 });
     setRect(stemNode, { left: 90, top: 112, width: 680, height: 30 });
     const preview = buildPreviewTextForBbox(
