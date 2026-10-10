@@ -30,6 +30,8 @@ export function recoverDetachedChoiceLabels(raw: string): string {
     const end = index + 1 < matches.length ? (matches[index + 1]!.index ?? raw.length) : raw.length;
     const option = raw.slice(start, end).trim();
     if (option.length < 2 || option.length > 180
+      || /[?？]/.test(option)
+      || /(?:^|[\\r\\n])\\s*(?:第\\s*\\d+\\s*题|\\d{1,3}[.、)）])/.test(option)
       || /^([A-D]|查看答案|点击查看|试题检索|提交作业)$/u.test(option)) return raw;
   }
 
