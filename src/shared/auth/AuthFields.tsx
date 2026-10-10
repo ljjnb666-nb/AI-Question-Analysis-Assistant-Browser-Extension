@@ -71,14 +71,14 @@ export const AuthVerificationCodeInput: React.FC<AuthVerificationCodeInputProps>
 
   const getDigitAriaLabel = (index: number): string => {
     if (digitLabel) return digitLabel(index);
-    if (lang === "en" || /^[a-zA-Z\\s]+$/.test(ariaLabel)) {
+    if (lang === "en" || /^[a-zA-Z\s]+$/.test(ariaLabel)) {
       return `Verification code digit ${index + 1}`;
     }
     return `验证码第 ${index + 1} 位`;
   };
 
   const handleValueChange = (index: number, raw: string) => {
-    const cleaned = raw.replace(/\\D/g, "");
+    const cleaned = raw.replace(/\D/g, "");
     const offset = Math.min(index, value.length);
     if (!cleaned) {
       onChange(value.slice(0, offset) + value.slice(offset + 1));

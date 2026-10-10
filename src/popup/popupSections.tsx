@@ -637,7 +637,7 @@ export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }
     auth.email.trim() !== "" &&
     auth.password.length >= 6 &&
     auth.codeSent &&
-    /^\\d{6}$/.test(auth.verificationCode.trim());
+    /^\d{6}$/.test(auth.verificationCode.trim());
 
   const isSendCodeDisabled =
     !!auth.authBusy || auth.codeCooldown > 0 || auth.email.trim() === "";
