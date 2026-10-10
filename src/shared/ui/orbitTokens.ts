@@ -41,6 +41,8 @@ export const orbitColors = {
     primary: "#2563EB",
     hover: "#1D4ED8",
     active: "#1E40AF",
+    /** Accessible blue for text on dark surfaces; primary is reserved for filled buttons. */
+    linkText: "#93C5FD",
     subtle: "rgba(37, 99, 235, 0.14)",
     border: "rgba(59, 130, 246, 0.4)",
   },

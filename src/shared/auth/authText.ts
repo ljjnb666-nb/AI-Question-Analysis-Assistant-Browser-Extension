@@ -10,6 +10,7 @@ type AuthText = {
   loginPage: string;
   emailPlaceholder: string;
   passwordPlaceholder: string;
+  passwordHint: string;
   verificationCodePlaceholder: string;
   sendCode: string;
   sendingCode: string;
@@ -51,6 +52,7 @@ export function getAuthText(lang: AuthLang, variant: AuthCopyVariant): AuthText 
       loginPage: "Login Page",
       emailPlaceholder: "Email",
       passwordPlaceholder: "Password",
+      passwordHint: "Use at least 6 characters for your password.",
       verificationCodePlaceholder: "Verification Code",
       sendCode: "Send Code",
       sendingCode: "Sending...",
@@ -91,6 +93,10 @@ export function getAuthText(lang: AuthLang, variant: AuthCopyVariant): AuthText 
             return "This email is already registered. Try signing in.";
           case "invalid_verification_code":
             return "The verification code is invalid or has expired.";
+          case "password_too_short":
+            return "Password must be at least 6 characters.";
+          case "email_invalid":
+            return "Enter a valid email address.";
           case "rate_limited":
             return "Too many attempts. Please wait a moment and try again.";
           case "timeout":
@@ -125,6 +131,7 @@ export function getAuthText(lang: AuthLang, variant: AuthCopyVariant): AuthText 
     loginPage: "登录页",
     emailPlaceholder: "邮箱",
     passwordPlaceholder: "密码",
+    passwordHint: "注册密码至少需要 6 位字符。",
     verificationCodePlaceholder: "邮箱验证码",
     sendCode: "发送验证码",
     sendingCode: "发送中...",
@@ -159,6 +166,10 @@ export function getAuthText(lang: AuthLang, variant: AuthCopyVariant): AuthText 
           return "该邮箱已注册，请直接登录。";
         case "invalid_verification_code":
           return "验证码不正确或已过期。";
+        case "password_too_short":
+          return "密码长度不足，至少需要 6 位字符。";
+        case "email_invalid":
+          return "请输入有效的邮箱地址。";
         case "rate_limited":
           return "尝试次数过多，请稍后再试。";
         case "timeout":

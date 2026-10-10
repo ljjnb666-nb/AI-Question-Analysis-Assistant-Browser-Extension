@@ -980,7 +980,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               <span style={{ fontSize: 13, fontWeight: 700, color: orbitColors.text.primary }}>
                 {isEn ? "Step 2: Choose AI Provider" : "第二步：选择 AI 服务商"}
               </span>
-              <span style={{ fontSize: 11, color: orbitColors.brand.border, fontWeight: 600 }}>
+              <span style={{ fontSize: 11, color: orbitColors.brand.linkText, fontWeight: 600 }}>
                 {isEn ? "Action Required" : "待配置"}
               </span>
             </div>
@@ -1050,7 +1050,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               gap: 6,
               background: "transparent",
               border: "none",
-              color: orbitColors.brand.border,
+              color: orbitColors.brand.linkText,
               cursor: "pointer",
               fontSize: 12,
               padding: "4px 0",
@@ -1095,7 +1095,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               gap: 6,
               background: "transparent",
               border: "none",
-              color: orbitColors.brand.border,
+              color: orbitColors.brand.linkText,
               cursor: "pointer",
               fontSize: 12,
               padding: "4px 0",
@@ -1114,7 +1114,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             style={{
               background: "transparent",
               border: "none",
-              color: orbitColors.brand.border,
+              color: orbitColors.brand.linkText,
               cursor: "pointer",
               fontSize: 12,
               padding: "4px 0",

@@ -81,7 +81,7 @@ export const SidePanelHeader: React.FC<{
   tab: SidePanelTabId;
   userEmail: string;
   workspaceStatus?: SidePanelWorkspaceStatus;
-  providerName?: string;
+  aiReadiness?: "checking" | "ready" | "unconfigured" | "unavailable";
   onToggleLanguage?: () => void;
   onLogout?: () => void;
   onRetryValidation?: () => void;
@@ -93,7 +93,7 @@ export const SidePanelHeader: React.FC<{
   tab,
   userEmail,
   workspaceStatus = "ready",
-  providerName,
+  aiReadiness,
   onToggleLanguage,
   onLogout,
 }) => {
@@ -159,7 +159,17 @@ export const SidePanelHeader: React.FC<{
     }
   };
 
-  const statusBadge = getStatusBadgeProps(workspaceStatus, lang);
+  const workspaceBadge = getStatusBadgeProps(workspaceStatus, lang);
+  // Workspace hydration alone never proves an AI provider is configured.
+  // Keep scan/detect available while the badge accurately describes AI setup.
+  const statusBadge: { label: string; variant: OrbitBadgeVariant } =
+    isAuthenticated && workspaceStatus === "ready" && aiReadiness && aiReadiness !== "ready"
+      ? aiReadiness === "checking"
+        ? { label: lang === "zh" ? "正在检查 AI" : "Checking AI", variant: "info" }
+        : aiReadiness === "unconfigured"
+          ? { label: lang === "zh" ? "待配置 AI" : "Configure AI", variant: "warning" }
+          : { label: lang === "zh" ? "AI 状态不可用" : "AI Unavailable", variant: "warning" }
+      : workspaceBadge;
 
   return (
     <header
@@ -217,25 +227,15 @@ export const SidePanelHeader: React.FC<{
               </>
             ) : null}
           </div>
-          <span
-            style={{
-              fontSize: orbitTypography.fontSize.xs,
-              color: orbitColors.text.secondary,
-              marginTop: 2,
-              lineHeight: 1.2,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {isAuthenticated
-              ? copy.contextLine(providerName)
-              : _authStatus === "loading" || _authStatus === "validating"
+          {!isAuthenticated ? (
+            <span style={{ fontSize: orbitTypography.fontSize.xs, color: orbitColors.text.secondary, marginTop: 2, lineHeight: 1.2 }}>
+              {_authStatus === "loading" || _authStatus === "validating"
                 ? (lang === "en" ? "Verifying Session..." : "正在验证登录状态")
                 : _authStatus === "server_unavailable"
                   ? (lang === "en" ? "Cannot Verify Session" : "无法验证登录状态")
                   : (lang === "en" ? "Login Account" : "登录账号")}
-          </span>
+            </span>
+          ) : null}
         </div>
 
         {/* Right: Global Status Badge & Product Menu */}

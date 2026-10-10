@@ -233,7 +233,6 @@ export const PopupContextLine: React.FC<PopupContextLineProps> = ({
       }}
     >
       <span>{pageText}</span>
-      <span>·</span>
       <span>{providerText}</span>
     </div>
   );
@@ -636,9 +635,9 @@ export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }
 
   const canRegister =
     auth.email.trim() !== "" &&
-    auth.password.trim() !== "" &&
+    auth.password.length >= 6 &&
     auth.codeSent &&
-    auth.verificationCode.trim() !== "";
+    /^\\d{6}$/.test(auth.verificationCode.trim());
 
   const isSendCodeDisabled =
     !!auth.authBusy || auth.codeCooldown > 0 || auth.email.trim() === "";
@@ -768,6 +767,13 @@ export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }
           showLabel={copy.showPassword}
           hideLabel={copy.hidePassword}
         />
+        {isRegister ? (
+          <div role={auth.password.length > 0 && auth.password.length < 6 ? "alert" : "note"}
+            style={{ fontSize: orbitTypography.fontSize.xs, color: auth.password.length > 0 && auth.password.length < 6
+              ? orbitColors.semantic.warning : orbitColors.text.secondary }}>
+            {copy.passwordHint}
+          </div>
+        ) : null}
 
         {isRegister && auth.codeSent ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -814,7 +820,7 @@ export const PopupAuthSection: React.FC<PopupAuthSectionProps> = ({ auth, copy }
           style={{
             background: "transparent",
             border: "none",
-            color: orbitColors.brand.primary,
+            color: orbitColors.brand.linkText,
             fontSize: orbitTypography.fontSize.xs,
             cursor: "pointer",
             textAlign: "center",

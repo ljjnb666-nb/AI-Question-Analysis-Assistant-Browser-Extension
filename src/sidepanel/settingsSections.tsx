@@ -106,7 +106,7 @@ export const linkStyle: React.CSSProperties = {
   display: "inline-block",
   marginTop: 6,
   fontSize: 11,
-  color: orbitColors.brand.border,
+  color: orbitColors.brand.linkText,
   textDecoration: "none",
   fontWeight: 500,
 };
@@ -267,7 +267,7 @@ export const SettingsHomeSummaryCard: React.FC<{
           </div>
           <div style={{ fontSize: 16, fontWeight: 700, color: orbitColors.text.primary, marginTop: 2, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span>{providerName}</span>
-            <span style={{ fontSize: 12, fontWeight: 500, color: orbitColors.brand.border, background: "rgba(59, 130, 246, 0.1)", padding: "2px 8px", borderRadius: orbitRadius.pill }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: orbitColors.brand.linkText, background: "rgba(59, 130, 246, 0.1)", padding: "2px 8px", borderRadius: orbitRadius.pill }}>
               {modelName}
             </span>
           </div>
@@ -668,7 +668,7 @@ export const SettingsProviderPicker: React.FC<{
                 </div>
 
                 {meta ? (
-                  <div style={{ fontSize: 10, color: orbitColors.brand.border, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <div style={{ fontSize: 10, color: orbitColors.brand.linkText, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {meta.modelFamily[isEn ? "en" : "zh"]}
                   </div>
                 ) : null}
@@ -884,7 +884,7 @@ export const SettingsModelSection: React.FC<{
                 style={{
                   background: "transparent",
                   border: "none",
-                  color: orbitColors.brand.border,
+                  color: orbitColors.brand.linkText,
                   fontSize: 11,
                   textAlign: "left",
                   cursor: "pointer",
@@ -1331,6 +1331,11 @@ export const SettingsAccountSection: React.FC<{
               showLabel={authText.showPassword}
               hideLabel={authText.hidePassword}
             />
+            <div role={auth.password.length > 0 && auth.password.length < 6 ? "alert" : "note"}
+              style={{ ...hintStyle, color: auth.password.length > 0 && auth.password.length < 6
+                ? orbitColors.semantic.warning : orbitColors.text.secondary }}>
+              {authText.passwordHint}
+            </div>
             {auth.codeSent ? (
               <>
                 <AuthVerificationCodeInput
