@@ -1,4 +1,5 @@
 import { isElementNode, isHtmlElementNode } from "./domDetectorShared";
+import { recoverDetachedChoiceLabels } from "./detachedChoiceLabels";
 import type { QuestionDisplaySegment } from "@/shared/types";
 import {
   extractSemanticSvgLikeText,
@@ -87,7 +88,13 @@ if (isHtmlElementNode(node)) {
     }
 
     if (node.matches(".question-item,.questionBox,.base-question-component")) {
-      return extractStructuredQuestionText(node);
+      const structured = extractStructuredQuestionText(node);
+      const original = node.innerText || "";
+      const restored = recoverDetachedChoiceLabels(original);
+      // Prefer complete layout evidence only when ordinary flattened
+      // extraction lost all standard A./B./C./D. labels.
+      return restored !== original && !/A[.、:)：][\\s\\S]*B[.、:)：][\\s\\S]*C[.、:)：][\\s\\S]*D[.、:)：]/.test(structured)
+        ? normalizeText(restored) : structured;
     }
 
     if (node.matches(".questionContent,.qeustion-content")) {
@@ -108,7 +115,8 @@ if (isHtmlElementNode(node)) {
       return extractOrderedChildContentText(node);
     }
 
-    return normalizeText(node.innerText || node.textContent || attrText || "");
+    const original = node.innerText || node.textContent || attrText || "";
+    return normalizeText(recoverDetachedChoiceLabels(original));
   }
 
   return normalizeText(node.textContent || attrText || "");
