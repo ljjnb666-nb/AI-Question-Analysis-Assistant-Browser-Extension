@@ -36,6 +36,14 @@ function fixture() {
 }
 
 describe("RC-PILOT-03A-02 current-screen request authority", () => {
+  it("rejects a second tagged START from another Surface before changing state", async () => {
+    const f = fixture();
+    f.options.handleAutoDetect = vi.fn(() => false as const);
+    expect(await f.call()).toEqual({ keepalive: false,
+      value: { ok: false, requestId, error: "WORK_ALREADY_RUNNING" } });
+    expect(f.workspace.snapshot(url).snapshot?.detection.phase).toBe("never_started");
+  });
+
   it("accepts only a completed result bound to this exact UUID", async () => {
     const f = fixture();
     const result = await f.call();

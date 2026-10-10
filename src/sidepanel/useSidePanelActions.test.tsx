@@ -467,6 +467,23 @@ describe("useSidePanelActions authority gate", () => {
     }));
   });
 
+  it("RC03A-03B maps a content-wide concurrent-run rejection to Chinese", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    authenticated = true;
+    vi.mocked(sendProtectedTabMessageWithBootstrap).mockResolvedValueOnce({
+      ok: true, response: { ok: false, error: "WORK_ALREADY_RUNNING" },
+    });
+    const feedback = vi.fn();
+    const { result } = renderHook((options: HookOptions) => useSidePanelActions(options), {
+      initialProps: makeOptions({ setFillFeedback: feedback, uiLang: "zh" }),
+    });
+    await result.current.handleDetect();
+    expect(feedback).toHaveBeenLastCalledWith(expect.objectContaining({
+      code: "VIEWPORT_DETECT_ALREADY_RUNNING", tone: "warning",
+      message: expect.stringContaining("已有识别任务正在运行"),
+    }));
+  });
+
   it("RC03A-03 suppresses a duplicate click during unresolved tab authority lookup", async () => {
     authenticated = true;
     parkNextTabLookup = true;

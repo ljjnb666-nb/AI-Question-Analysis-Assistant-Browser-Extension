@@ -19,7 +19,7 @@ type RegisterContentRuntimeMessageHandlersOptions = {
   getActiveCandidates: () => QuestionBlock[];
   getActiveHighlightBlocks: () => QuestionBlock[];
   getHighlightLayer: () => HighlightLayer | null;
-  handleAutoDetect: (requestId?: string) => void | Promise<void>;
+  handleAutoDetect: (requestId?: string) => void | Promise<void> | false;
   onViewportDetectError?: (requestId: string) => void;
   handleFullPageDetect: (generationId?: string) => boolean | void;
   notifySidePanel: (candidates: QuestionBlock[]) => void;
@@ -68,6 +68,10 @@ export function createContentRuntimeMessageListener(options: RegisterContentRunt
       };
       try {
         const execution = options.handleAutoDetect(requestId);
+        if (execution === false) {
+          sendResponse({ ok: false, requestId, error: "WORK_ALREADY_RUNNING" });
+          return false;
+        }
         void Promise.resolve(execution).then(() => {
           if (options.isRuntimeCurrent && !options.isRuntimeCurrent()) {
             fail("VIEWPORT_RESULT_NOT_CURRENT");
