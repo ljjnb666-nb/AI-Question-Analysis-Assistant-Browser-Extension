@@ -32,6 +32,48 @@ describe("domDetector regressions", () => {
     document.body.innerHTML = "";
   });
 
+
+  it("RC03B-R6 does not let an offscreen direct-card shell suppress real structured questions", () => {
+    document.body.innerHTML = `
+      <div class="card mb-3 q-detail rounded-0"><div id="offscreen-shell" class="card-body">尚未呈现题目</div></div>
+      <article id="valid-structured" class="question-item">
+        <p>哪种品德心理结构与积极情绪体验有关？（ ）</p>
+        <ul><li>A. 道德认识</li><li>B. 道德情感</li><li>C. 道德意志</li><li>D. 道德行为</li></ul>
+      </article>
+    `;
+    const shell = document.getElementById("offscreen-shell")!;
+    const card = document.getElementById("valid-structured")!;
+    setRect(shell, { left: 90, top: -1000, width: 760, height: 300 });
+    setRect(card, { left: 100, top: 110, width: 760, height: 320 });
+    Object.defineProperty(card, "innerText", { configurable: true, value:
+      "哪种品德心理结构与积极情绪体验有关？（ ） A. 道德认识 B. 道德情感 C. 道德意志 D. 道德行为" });
+    const blocks = detectCandidatesInViewport();
+    expect(blocks.some((block) => block.previewText.includes("品德心理结构"))).toBe(true);
+    expect(blocks.some((block) => block.previewText.includes("A.") && block.previewText.includes("D."))).toBe(true);
+  });
+
+  it("RC03B-R7 rechecks credible independent questions when unrelated article/section captures the structural gate", () => {
+    document.body.innerHTML = `
+      <section id="unrelated-guide">如何有效安排备考和复习时间？请先了解课程介绍和报名流程。</section>
+      <div id="real-question">下列哪种说法属于正确的知识分类？（ ） A. 科学 B. 艺术 C. 经验 D. 技能</div>
+    `;
+    setRect(document.getElementById("unrelated-guide")!, { left: 50, top: 20, width: 650, height: 140 });
+    setRect(document.getElementById("real-question")!, { left: 100, top: 230, width: 760, height: 250 });
+    const blocks = detectCandidatesInViewport();
+    expect(blocks.some((block) => block.previewText.includes("知识分类") && block.previewText.includes("A."))).toBe(true);
+    expect(blocks.some((block) => block.previewText.includes("报名流程"))).toBe(false);
+  });
+
+  it("RC03B-R8 does not promote detached or menu-only options during structural fallback", () => {
+    document.body.innerHTML = `
+      <section id="guide-section">如何安排课程复习时间？请先浏览我们的学习资源和在线答疑。</section>
+      <div id="menu-only">A. 会计 B. 金融 C. 教师考试 D. 专业课程</div>
+    `;
+    setRect(document.getElementById("guide-section")!, { left: 30, top: 10, width: 650, height: 160 });
+    setRect(document.getElementById("menu-only")!, { left: 100, top: 230, width: 760, height: 250 });
+    expect(detectCandidatesInViewport()).toHaveLength(0);
+  });
+
   it("RC03B-R1 detects a complete public question card with detached ABCD lines", () => {
     document.body.innerHTML = `
       <article id="public-card" class="question-item">
