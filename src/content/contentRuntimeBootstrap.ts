@@ -266,6 +266,7 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     getActiveHighlightBlocks: runtimeState.getActiveHighlightBlocks,
     getHighlightLayer: runtimeState.getHighlightLayer,
     handleAutoDetect,
+    onViewportDetectError: (requestId: string) => { workspace.failViewportDetection(requestId); },
     handleFullPageDetect: (generationId?: string) => {
       const lease = runAuthority.begin("fullPage", generationId);
       if (lease === null) return false;
