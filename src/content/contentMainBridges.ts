@@ -69,6 +69,7 @@ import type { FloatingWindowManager } from "./floating/FloatingWindowManager";
 import type { HighlightLayer as _HighlightLayerInstance } from "./highlight/HighlightLayer";
 import type { CandidateStatusMap, ContentMainBridgeState } from "./contentRuntimeState";
 import type { createCandidateWorkspaceRuntime } from "./candidateWorkspaceRuntime";
+import { createViewportDetectionSingleFlight } from "./viewportDetectionSingleFlight";
 
 const MANUAL_PARSE_TIER_TIMEOUTS_MS = [10_000, 20_000, 30_000] as const;
 const MANUAL_PARSE_PIPELINE_TIMEOUT_MS = 45_000;
@@ -298,11 +299,11 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     waitForQuestionAdvanceCore,
   });
 
-  const startViewportDetection = (requestId?: string) => {
-    if (!options.isRuntimeCurrent()) return;
+  // One live-tab gate covers Side Panel, Popup and Alt+W.
+  const startViewportDetection = createViewportDetectionSingleFlight((requestId?: string) => {
     options.workspace?.beginDetection("viewport", requestId);
     return handleAutoDetect();
-  };
+  }, options.isRuntimeCurrent);
   const disposeBindings = initializeContentBindings({
     floatingMgr: options.floatingMgr,
     handleAutoDetect: startViewportDetection,
