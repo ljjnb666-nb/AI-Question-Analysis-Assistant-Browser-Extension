@@ -195,18 +195,38 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       }
       // The captured tab and exact URL remain the dispatch authority.
       if (!canDispatchToTab(activeTab)) return;
-      const response = await sendProtectedTabMessageWithBootstrap<{ ok?: boolean }>(
+      const targetOrigin = options.getWorkspaceOrigin?.();
+      if (options.getWorkspaceOrigin && (!targetOrigin || targetOrigin.tabId !== activeTab.id
+        || targetOrigin.url !== activeTab.url)) return;
+      const requestId = targetOrigin ? crypto.randomUUID() : undefined;
+      const response = await sendProtectedTabMessageWithBootstrap<{
+        ok?: boolean; requestId?: string; error?: string;
+      }>(
         activeTab.id,
-        { type: "START_AUTO_DETECT" },
+        requestId
+          ? { type: "START_AUTO_DETECT", requestId, expectedUrl: targetOrigin!.url }
+          : { type: "START_AUTO_DETECT" },
         () => canDispatchToTab(activeTab),
       );
       if (!canDispatchToTab(activeTab)) return;
-      // Transport success alone is only an ACK; it is not detection success.
-      if (!response.ok || response.response?.ok !== true) {
+      // The tagged START completes only after the content workflow has either
+      // committed its exact generation or rejected it. An ACK cannot count.
+      if (!response.ok || response.response?.ok !== true
+        || (requestId && response.response.requestId !== requestId)) {
+        const stale = ["STALE_VIEWPORT_ORIGIN", "VIEWPORT_RESULT_NOT_CURRENT"].includes(
+          response.response?.error ?? "",
+        );
         options.setFillFeedback(userFeedback(
-          "error",
-          options.uiLang === "en" ? "Current-screen detection could not be started. Check the page connection and retry." : "当前屏识别未能启动，请检查页面连接后重试。",
-          { code: "VIEWPORT_DETECT_START_UNCONFIRMED", technicalDetail: response.error },
+          stale ? "warning" : "error",
+          stale
+            ? options.uiLang === "en"
+              ? "The page or detection run changed. Sync the workspace before retrying."
+              : "页面或识别任务已经变化，请同步工作区后重试。"
+            : options.uiLang === "en"
+              ? "Current-screen detection failed or could not be confirmed. Check the page connection and retry."
+              : "当前屏识别失败或无法确认，请检查页面连接后重试。",
+          { code: stale ? "VIEWPORT_DETECT_STALE_RUN" : "VIEWPORT_DETECT_START_UNCONFIRMED",
+            technicalDetail: response.response?.error ?? response.error },
         ));
         return;
       }
@@ -228,7 +248,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       if (!canDispatchToTab(activeTab)) return;
       const after = await readWorkspaceOrigin(origin.tabId).catch(() => null);
       if (!canDispatchToTab(activeTab) || after?.url !== origin.url) return;
-      options.setFillFeedback(viewportDetectionSnapshotFeedback(options.uiLang, origin, snapshot));
+      options.setFillFeedback(viewportDetectionSnapshotFeedback(options.uiLang, origin, snapshot, requestId));
     } catch (error) {
       // A delayed exception from a superseded route may not overwrite feedback
       // for the newly selected tab. Preflight failures (no tab captured) still
