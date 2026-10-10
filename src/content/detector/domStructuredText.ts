@@ -93,7 +93,7 @@ if (isHtmlElementNode(node)) {
       const restored = recoverDetachedChoiceLabels(original);
       // Prefer complete layout evidence only when ordinary flattened
       // extraction lost all standard A./B./C./D. labels.
-      return restored !== original && !/A[.、:)：][\\s\\S]*B[.、:)：][\\s\\S]*C[.、:)：][\\s\\S]*D[.、:)：]/.test(structured)
+      return restored !== original && !/A[.、:)：].*B[.、:)：].*C[.、:)：].*D[.、:)：]/.test(structured)
         ? normalizeText(restored) : structured;
     }
 
@@ -167,7 +167,7 @@ push(isHtmlElementNode(container) ? ((container.innerText || container.textConte
   if (isHtmlElementNode(container)) {
     const original = container.innerText || "";
     const restored = recoverDetachedChoiceLabels(original);
-    if (restored !== original && !/A[.、:)：][\\s\\S]*B[.、:)：][\\s\\S]*C[.、:)：][\\s\\S]*D[.、:)：]/.test(structured)) {
+    if (restored !== original && !/A[.、:)：].*B[.、:)：].*C[.、:)：].*D[.、:)：]/.test(structured)) {
       return normalizeText(restored);
     }
   }
