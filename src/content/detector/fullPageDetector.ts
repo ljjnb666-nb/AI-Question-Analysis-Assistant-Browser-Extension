@@ -7,6 +7,7 @@
 
 import type { QuestionBlock } from "@/shared/types";
 import { detectCandidatesInViewport } from "./domDetector";
+import { isLikelyControlPanelText } from "./domDetectorShared";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -115,7 +116,16 @@ export async function detectCandidatesFullPage(
       // the same viewport while claiming forward progress.
       if (previousTop !== null && metrics.scrollTop <= previousTop) break;
 
-      const viewportBlocks = detectCandidatesInViewport();
+      let viewportBlocks = detectCandidatesInViewport();
+      // An explicit loading/busy marker at the first viewport means an empty
+      // result may be premature. Revisit this SAME scroll position once after
+      // a bounded delay. This is not another scroll step, and it must never
+      // extend the immutable scan budget or bypass STOP / route ownership.
+      if (step === 0 && viewportBlocks.length === 0 && isPageContentPending()) {
+        await pause(650);
+        if (!isCurrent()) break;
+        viewportBlocks = detectCandidatesInViewport();
+      }
       if (!isCurrent()) break;
       for (const block of viewportBlocks) {
         const absoluteBlock = toAbsoluteCoords(block, root);
@@ -161,6 +171,16 @@ export async function detectCandidatesFullPage(
       if (activeScan === scan) activeScan = null;
     }
   }
+}
+
+/** Readiness evidence is advisory only. It never grants scan authority. */
+function isPageContentPending(): boolean {
+  // Only an explicit site loading marker authorizes one bounded recheck.
+  // document.readyState can stay "loading" inside test or embedded documents.
+  return !!document.querySelector(
+    'body[aria-busy="true"],main[aria-busy="true"],[data-loading="true"],' +
+    '[role="progressbar"],[class*="skeleton"],[class*="loading-spinner"]',
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -358,7 +378,7 @@ function normalizePreviewText(raw: string): string {
 
 function isLikelyUsefulPreview(text: string, questionType: QuestionBlock["questionTypeGuess"]): boolean {
   if (!text) return false;
-  const controlPanelLike = /试题检索|教材版本|题型|难易度|按章节|按知识点|试题篮|组卷预览|登录|注册/.test(text);
+  const controlPanelLike = isLikelyControlPanelText(text);
   if (controlPanelLike) return false;
   if (text.length < 28) {
     const shortJudgeLike = (questionType === "judge" || questionType === "unknown")

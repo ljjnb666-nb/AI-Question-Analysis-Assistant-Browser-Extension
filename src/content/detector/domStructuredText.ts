@@ -1,4 +1,5 @@
 import { isElementNode, isHtmlElementNode } from "./domDetectorShared";
+import { recoverDetachedChoiceLabels } from "./detachedChoiceLabels";
 import type { QuestionDisplaySegment } from "@/shared/types";
 import {
   extractSemanticSvgLikeText,
@@ -87,6 +88,8 @@ if (isHtmlElementNode(node)) {
     }
 
     if (node.matches(".question-item,.questionBox,.base-question-component")) {
+      // The structured extractor owns the only detached-choice fallback.
+      // A second raw-innerText fallback here would erase semantic media text.
       return extractStructuredQuestionText(node);
     }
 
@@ -108,7 +111,8 @@ if (isHtmlElementNode(node)) {
       return extractOrderedChildContentText(node);
     }
 
-    return normalizeText(node.innerText || node.textContent || attrText || "");
+    const original = node.innerText || node.textContent || attrText || "";
+    return normalizeText(recoverDetachedChoiceLabels(original));
   }
 
   return normalizeText(node.textContent || attrText || "");
@@ -155,7 +159,21 @@ if (!isHtmlElementNode(node)) return false;
 push(isHtmlElementNode(container) ? ((container.innerText || container.textContent || "")) : (container.textContent || ""));
   }
 
-  return normalizeText(dedupeJoinedStructuredText(pieces).join(" "));
+  const structured = normalizeText(dedupeJoinedStructuredText(pieces).join(" "));
+  if (isHtmlElementNode(container)) {
+    const original = container.innerText || "";
+    const restored = recoverDetachedChoiceLabels(original);
+    // Plain innerText has no image alt text, math semantics or table structure.
+    // Do not let a label recovery silently downgrade rich question evidence.
+    const hasRichSemanticNodes = !!container.querySelector(
+      "img,svg,math,mjx-container,.MathJax,.katex,embed,canvas,table",
+    );
+    if (restored !== original && !hasRichSemanticNodes
+      && !/A[.、:)：].*B[.、:)：].*C[.、:)：].*D[.、:)：]/.test(structured)) {
+      return normalizeText(restored);
+    }
+  }
+  return structured;
 }
 
 export function extractStructuredQuestionDisplaySegments(container: Element): QuestionDisplaySegment[] | undefined {

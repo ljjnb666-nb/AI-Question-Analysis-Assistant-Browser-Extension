@@ -18,6 +18,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     vi.useFakeTimers();
     vi.mocked(detectCandidatesInViewport).mockReset().mockReturnValue([]);
     document.body.innerHTML = "<main>Public question page fixture</main>";
+    document.body.removeAttribute("aria-busy"); // Isolate readiness fixtures across tests.
     top = 200;
     pageHeight = 9000; // (9000 - 600) / 600 + 1 = 15 expected steps
     Object.defineProperty(window, "scrollY", { configurable: true, get: () => top });
@@ -36,6 +37,47 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
     document.body.innerHTML = "";
+    document.body.removeAttribute("aria-busy");
+  });
+
+  it("RC03B-R2 revisits a pending first viewport once without inventing scan steps", async () => {
+    pageHeight = 1200;
+    document.body.setAttribute("aria-busy", "true");
+    const candidate = {
+      id: "public-question", bbox: { x: 50, y: 150, width: 680, height: 310 },
+      previewText: "这属于哪种品德心理结构？ A. 道德认识 B. 道德情感 C. 道德意志 D. 道德行为 题型：单选题",
+      questionTypeGuess: "single_choice" as const, confidence: 0.94,
+      source: "auto_dom" as const, hasImage: false,
+    };
+    let detects = 0;
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      detects++;
+      if (detects === 1) return [];
+      document.body.removeAttribute("aria-busy");
+      return [candidate];
+    });
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.runAllTimersAsync();
+    const candidates = await scan;
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.previewText).toContain("题型：单选题");
+    expect(detects).toBe(3); // first empty, one same-position recheck, one next step
+    expect(progress.map((p) => p.currentStep)).toEqual([1, 2]);
+    expect(progress.every((p) => p.totalScrollSteps === 2)).toBe(true);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("RC03B-R3 CANCEL during readiness recheck cannot revive old scan authority", async () => {
+    document.body.setAttribute("aria-busy", "true");
+    const scan = detectCandidatesFullPage(() => undefined);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledOnce();
+    cancelFullPageScan();
+    await vi.runAllTimersAsync();
+    expect(await scan).toEqual([]);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledOnce();
+    expect(isFullPageScanRunning()).toBe(false);
   });
 
   it("never reports or executes 31/15 when content grows after the first viewport", async () => {
