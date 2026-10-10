@@ -176,6 +176,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
   const handleDetect = useCallback(async () => {
     if (viewportDetectInFlight.current || !requireAuthenticatedAction()) return;
     viewportDetectInFlight.current = true;
+    let dispatchedTab: chrome.tabs.Tab | null = null;
     options.setFillFeedback(userFeedback(
       "info",
       options.uiLang === "en" ? "Starting current-screen detection…" : "正在启动当前屏识别…",
@@ -183,6 +184,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     ));
     try {
       const activeTab = await getActionTab();
+      dispatchedTab = activeTab;
       if (!activeTab?.id) {
         if (options.isAuthenticatedNow()) options.setFillFeedback(userFeedback(
           "warning",
@@ -228,7 +230,10 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       if (!canDispatchToTab(activeTab) || after?.url !== origin.url) return;
       options.setFillFeedback(viewportDetectionSnapshotFeedback(options.uiLang, origin, snapshot));
     } catch (error) {
-      if (options.isAuthenticatedNow()) options.setFillFeedback(userFeedback(
+      // A delayed exception from a superseded route may not overwrite feedback
+      // for the newly selected tab. Preflight failures (no tab captured) still
+      // produce explicit user feedback while authentication remains valid.
+      if (options.isAuthenticatedNow() && (!dispatchedTab || canDispatchToTab(dispatchedTab))) options.setFillFeedback(userFeedback(
         "error",
         options.uiLang === "en" ? "Current-screen detection could not be confirmed. Retry after syncing the workspace." : "当前屏识别状态无法确认，请同步工作区后重试。",
         { code: "VIEWPORT_DETECT_DISPATCH_ERROR", technicalDetail: String(error) },
