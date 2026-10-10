@@ -137,6 +137,18 @@ if (isHtmlElementNode(titleBox)) {
   );
   if (stemNode) {
     push(extractReadableNodeText(stemNode));
+  } else {
+    // Plain question cards often render the stem as a bare <p> before a
+    // <ul> of punctuated A./B./C./D. options. Extracting only the option
+    // nodes used to discard this real stem and reject the entire candidate.
+    // Never promote option-inner paragraphs or trailing explanations.
+    const firstOption = container.querySelector(".option-item,li,label");
+    const leadingParagraph = Array.from(container.querySelectorAll("p")).find((paragraph) =>
+      !paragraph.closest(".option-item,li,label,nav,header,footer,aside")
+      && (!firstOption || !!(paragraph.compareDocumentPosition(firstOption) & Node.DOCUMENT_POSITION_FOLLOWING))
+      && normalizeText(extractReadableNodeText(paragraph)).length >= 18,
+    );
+    if (leadingParagraph) push(extractReadableNodeText(leadingParagraph));
   }
 
   const tableNodes = Array.from(container.querySelectorAll("table"));
