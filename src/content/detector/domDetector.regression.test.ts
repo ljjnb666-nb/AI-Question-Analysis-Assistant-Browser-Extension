@@ -45,7 +45,7 @@ describe("domDetector regressions", () => {
     const card = document.getElementById("public-card")!;
     // Chromium innerText preserves block line breaks; jsdom does not.
     Object.defineProperty(card, "innerText", { configurable: true, value:
-      "凡是符合自己维护的道德观念时会产生积极情绪，这属于哪种品德心理结构？（ ）\\nA\\n道德认识\\nB\\n道德情感\\nC\\n道德意志\\nD\\n道德行为" });
+      "凡是符合自己维护的道德观念时会产生积极情绪，这属于哪种品德心理结构？（ ）\nA\n道德认识\nB\n道德情感\nC\n道德意志\nD\n道德行为" });
     setRect(card, { left: 80, top: 100, width: 800, height: 420 });
     const candidates = detectCandidatesInViewport();
     expect(candidates.length).toBeGreaterThanOrEqual(1);
