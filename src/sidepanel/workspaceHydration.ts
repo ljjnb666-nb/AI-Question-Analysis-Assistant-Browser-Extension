@@ -12,6 +12,8 @@ export function isWorkspaceSnapshot(value: unknown): value is CandidateWorkspace
     && typeof s.originUrl === "string" && /^https?:\/\//i.test(s.originUrl) && typeof s.disposed === "boolean"
     && !!s.detection && ["never_started", "detecting", "completed"].includes(s.detection.phase)
     && [null, "viewport", "fullpage"].includes(s.detection.mode)
+    && (s.detection.requestId === undefined || typeof s.detection.requestId === "string"
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(s.detection.requestId))
     && Array.isArray(s.candidates) && s.candidates.every((c) => c && typeof c.selected === "boolean"
       && ["idle", "loading", "success", "error"].includes(c.status) && c.block && typeof c.block.id === "string" && typeof c.block.previewText === "string")
     && !!s.autoSolve && typeof s.autoSolve.running === "boolean" && validProgress(s.autoSolve.progress, "auto")
