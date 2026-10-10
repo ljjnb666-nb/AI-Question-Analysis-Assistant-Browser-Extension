@@ -68,6 +68,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
 
   async function refineFullPageCandidatesViaManualPipeline(
     candidates: QuestionBlock[], isExecutionCurrent: () => boolean = () => true,
+    respectAutoSolveStop = true,
   ): Promise<QuestionBlock[]> {
     return refineFullPageCandidatesViaManualPipelineCore(
       candidates,
@@ -88,7 +89,10 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
         shouldPreferViewportPreview,
         projectViewportBboxToAbsolute: deps.projectViewportBboxToAbsolute,
         getAutoSolveTextFingerprint: deps.getAutoSolveTextFingerprint,
-        autoSolveStopRequested: deps.setAutoSolveStopRequestedGetter,
+        // Standalone Full Page owns an independent scan generation/STOP lease.
+        // A previous Auto Solve STOP must not silently erase detected questions.
+        // Auto Solve callers retain their own stop authority via the default.
+        autoSolveStopRequested: () => respectAutoSolveStop && deps.setAutoSolveStopRequestedGetter(),
         isRuntimeCurrent: () => isRuntimeCurrent() && isExecutionCurrent(),
       }),
     );
@@ -136,7 +140,7 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
       refreshFullPageHighlightsAfterLayoutChange: deps.refreshFullPageHighlightsAfterLayoutChange,
       refreshLayoutResizeObservation: deps.refreshLayoutResizeObservation,
       refineFullPageCandidatesViaManualPipeline: (candidates) =>
-        refineFullPageCandidatesViaManualPipeline(candidates, isDetectionCurrent),
+        refineFullPageCandidatesViaManualPipeline(candidates, isDetectionCurrent, false),
       resolveFullPageScrollRoot: deps.resolveFullPageScrollRoot,
       safeRuntimeSendMessage: deps.safeRuntimeSendMessage,
       setActiveCandidates: deps.setActiveCandidates,
