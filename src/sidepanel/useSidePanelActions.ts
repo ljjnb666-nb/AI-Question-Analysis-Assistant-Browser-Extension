@@ -41,6 +41,8 @@ import {
   sendTabMessageWithBootstrap,
 } from "./tabActions";
 import type { UILang } from "./displayUtils";
+import { requestWorkspaceSnapshot, readWorkspaceOrigin } from "./workspaceTarget";
+import { viewportDetectionSnapshotFeedback } from "./viewportDetectionFeedback.rcPilot03a";
 
 type UseSidePanelActionsOptions = {
   isWorkspaceReadyNow?: () => boolean;
@@ -168,22 +170,72 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     [options, candidateAttempts],
   );
 
+  // Side Panel-local single flight: repeated clicks must never schedule a
+  // hidden parallel viewport detection while a dispatch/result read is pending.
+  const viewportDetectInFlight = useRef(false);
   const handleDetect = useCallback(async () => {
-    if (!requireAuthenticatedAction()) return;
-    const activeTab = await getActionTab();
-    if (!activeTab?.id) return;
-    // Last-responsible-moment recheck after the tab lookup await.
-    if (!canDispatchToTab(activeTab)) return;
-    const response = await sendProtectedTabMessageWithBootstrap(
-      activeTab.id,
-      { type: "START_AUTO_DETECT" },
-      () => canDispatchToTab(activeTab),
-    );
-    // A rejected/authority-lost START — or one whose authority lapsed during
-    // the dispatch itself — must not flip the UI into a stale running state
-    // (AUTH-UI-INV-12/13).
-    if (response.ok === false || !canDispatchToTab(activeTab)) return;
-    if (!options.getWorkspaceOrigin) applyDetectState(resetDetectState());
+    if (viewportDetectInFlight.current || !requireAuthenticatedAction()) return;
+    viewportDetectInFlight.current = true;
+    options.setFillFeedback(userFeedback(
+      "info",
+      options.uiLang === "en" ? "Starting current-screen detection…" : "正在启动当前屏识别…",
+      { code: "VIEWPORT_DETECT_STARTING" },
+    ));
+    try {
+      const activeTab = await getActionTab();
+      if (!activeTab?.id) {
+        if (options.isAuthenticatedNow()) options.setFillFeedback(userFeedback(
+          "warning",
+          options.uiLang === "en" ? "The current page is unavailable. Sync the workspace and try again." : "当前页面不可用，请重新同步工作区后重试。",
+          { code: "VIEWPORT_DETECT_NO_TARGET" },
+        ));
+        return;
+      }
+      // The captured tab and exact URL remain the dispatch authority.
+      if (!canDispatchToTab(activeTab)) return;
+      const response = await sendProtectedTabMessageWithBootstrap<{ ok?: boolean }>(
+        activeTab.id,
+        { type: "START_AUTO_DETECT" },
+        () => canDispatchToTab(activeTab),
+      );
+      if (!canDispatchToTab(activeTab)) return;
+      // Transport success alone is only an ACK; it is not detection success.
+      if (!response.ok || response.response?.ok !== true) {
+        options.setFillFeedback(userFeedback(
+          "error",
+          options.uiLang === "en" ? "Current-screen detection could not be started. Check the page connection and retry." : "当前屏识别未能启动，请检查页面连接后重试。",
+          { code: "VIEWPORT_DETECT_START_UNCONFIRMED", technicalDetail: response.error },
+        ));
+        return;
+      }
+      const origin = options.getWorkspaceOrigin?.();
+      if (!origin) {
+        // Legacy non-workspace caller retains its previous state path.
+        applyDetectState(resetDetectState());
+        options.setFillFeedback(userFeedback(
+          "info",
+          options.uiLang === "en" ? "Detection request sent. Awaiting verified workspace results." : "识别请求已发送，等待工作区确认结果。",
+          { code: "VIEWPORT_DETECT_ACK_ONLY" },
+        ));
+        return;
+      }
+      if (origin.tabId !== activeTab.id || origin.url !== activeTab.url) return;
+      // Only a content-owned, versioned snapshot can report a candidate count;
+      // no legacy AUTO_DETECT_RESULT_READY payload is used as render authority.
+      const snapshot = await requestWorkspaceSnapshot(origin, () => canDispatchToTab(activeTab));
+      if (!canDispatchToTab(activeTab)) return;
+      const after = await readWorkspaceOrigin(origin.tabId).catch(() => null);
+      if (!canDispatchToTab(activeTab) || after?.url !== origin.url) return;
+      options.setFillFeedback(viewportDetectionSnapshotFeedback(options.uiLang, origin, snapshot));
+    } catch (error) {
+      if (options.isAuthenticatedNow()) options.setFillFeedback(userFeedback(
+        "error",
+        options.uiLang === "en" ? "Current-screen detection could not be confirmed. Retry after syncing the workspace." : "当前屏识别状态无法确认，请同步工作区后重试。",
+        { code: "VIEWPORT_DETECT_DISPATCH_ERROR", technicalDetail: String(error) },
+      ));
+    } finally {
+      viewportDetectInFlight.current = false;
+    }
   }, [applyDetectState, options, requireAuthenticatedAction, getActionTab, canDispatchToTab]);
 
   const handleFullPageDetect = useCallback(async () => {
