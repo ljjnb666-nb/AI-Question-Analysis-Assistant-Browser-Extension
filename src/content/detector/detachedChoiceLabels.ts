@@ -19,15 +19,15 @@ export function recoverDetachedChoiceLabels(raw: string): string {
   const matches = [...raw.matchAll(DETACHED_MARKER)];
   if (matches.length !== 4 || matches.map((m) => m[3]).join("") !== "ABCD") return raw;
 
-  const stem = raw.slice(0, matches[0].index ?? 0).trim();
+  const stem = raw.slice(0, matches[0]!.index ?? 0).trim();
   if (stem.length < 18 || stem.length > 450
     || !/[?？]|[（(]\s*[）)]|下列|哪种|哪项|属于|单选|多选|选择|Which|Select/i.test(stem)) {
     return raw;
   }
 
   for (let index = 0; index < matches.length; index++) {
-    const start = (matches[index].index ?? 0) + matches[index][0].length;
-    const end = index + 1 < matches.length ? (matches[index + 1].index ?? raw.length) : raw.length;
+    const start = (matches[index]!.index ?? 0) + matches[index]![0].length;
+    const end = index + 1 < matches.length ? (matches[index + 1]!.index ?? raw.length) : raw.length;
     const option = raw.slice(start, end).trim();
     if (option.length < 2 || option.length > 180
       || /^([A-D]|查看答案|点击查看|试题检索|提交作业)$/u.test(option)) return raw;
