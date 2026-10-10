@@ -217,11 +217,26 @@ function toAbsoluteCoords(block: QuestionBlock, scrollRoot: ScanScrollRoot): Que
   };
 }
 
+/**
+ * A long navigation/sidebar scroller must not outrank the question surface.
+ * An explicit navigation landmark is never the document's question scroll root.
+ * A generic pane remains eligible until a credible question-bearing pane exists.
+ */
+function isNavigationScrollPane(el: HTMLElement): boolean {
+  if (el.closest('nav,[role="navigation"],[role="menu"]')) return true;
+  const identity = `${el.id} ${typeof el.className === "string" ? el.className : ""}`;
+  const navigationName = /(?:^|[\s_-])(?:sidebar|sidenav|navigation|navbar|menu|toc|catalog)(?=$|[\s_-])/i.test(identity);
+  if (!navigationName && !el.closest("aside")) return false;
+  return !el.matches(".question-item,.questionBox,.base-question-component")
+    && !el.querySelector(".question-item,.questionBox,.base-question-component");
+}
+
 export function resolveFullPageScrollRoot(): ScanScrollRoot {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   let best: HTMLElement | null = null;
   let bestScore = 0;
+  let bestContainsQuestions = false;
 
   const nodes = Array.from(document.querySelectorAll<HTMLElement>("body *"));
   for (const el of nodes) {
@@ -235,15 +250,22 @@ export function resolveFullPageScrollRoot(): ScanScrollRoot {
     const rect = el.getBoundingClientRect();
     if (rect.width < Math.max(320, vw * 0.3)) continue;
     if (rect.height < Math.max(220, vh * 0.3)) continue;
+    if (isNavigationScrollPane(el)) continue;
 
+    // Prefer a question-bearing pane even when a generic layout scroller is
+    // taller. Do not make empty or still-loading content panes ineligible.
+    const containsQuestions = el.matches(".question-item,.questionBox,.base-question-component")
+      || !!el.querySelector(".question-item,.questionBox,.base-question-component");
     let score = scrollDelta;
     score += Math.min(rect.width, vw) * 0.2;
     score += Math.min(rect.height, vh) * 0.3;
     if (/question|exam|scroll|content|main|body|list|paper/i.test(`${el.className} ${el.id}`)) score += 240;
     if (rect.left < vw * 0.2) score += 60;
 
-    if (score > bestScore) {
+    if (!best || (containsQuestions && !bestContainsQuestions)
+      || (containsQuestions === bestContainsQuestions && score > bestScore)) {
       bestScore = score;
+      bestContainsQuestions = containsQuestions;
       best = el;
     }
   }
