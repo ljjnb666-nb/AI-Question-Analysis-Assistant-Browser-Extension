@@ -298,9 +298,9 @@ export function createContentMainBridges(options: CreateContentMainBridgesOption
     waitForQuestionAdvanceCore,
   });
 
-  const startViewportDetection = () => {
+  const startViewportDetection = (requestId?: string) => {
     if (!options.isRuntimeCurrent()) return;
-    options.workspace?.beginDetection("viewport");
+    options.workspace?.beginDetection("viewport", requestId);
     return handleAutoDetect();
   };
   const disposeBindings = initializeContentBindings({

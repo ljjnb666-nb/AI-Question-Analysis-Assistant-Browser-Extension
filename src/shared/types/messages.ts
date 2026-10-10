@@ -115,6 +115,9 @@ export interface SaveWindowStateMsg extends BaseMessage {
 
 export interface StartAutoDetectMsg extends BaseMessage {
   type: "START_AUTO_DETECT";
+  /** Optional, generation-bound Side Panel command. Legacy callers omit both fields. */
+  requestId?: string;
+  expectedUrl?: string;
 }
 
 export interface AutoDetectResultReadyMsg extends BaseMessage {

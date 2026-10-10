@@ -12,10 +12,13 @@ export function viewportDetectionSnapshotFeedback(
   lang: UILang,
   origin: CandidateOrigin,
   response: WorkspaceSnapshotResponse | null,
+  expectedRequestId?: string,
 ): UserFeedback {
   const snapshot = response?.snapshot;
   if (!response?.ok || !isWorkspaceSnapshot(snapshot) || snapshot.disposed
-    || snapshot.originUrl !== origin.url || snapshot.detection.mode !== "viewport"
+    || snapshot.originUrl !== origin.url
+    || (expectedRequestId !== undefined && snapshot.detection.requestId !== expectedRequestId)
+    || snapshot.detection.mode !== "viewport"
     || snapshot.detection.phase !== "completed") {
     return userFeedback(
       "warning",

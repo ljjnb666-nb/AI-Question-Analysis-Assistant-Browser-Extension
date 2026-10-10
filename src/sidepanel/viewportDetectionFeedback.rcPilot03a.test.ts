@@ -70,6 +70,22 @@ describe("RC-PILOT-03A current-screen verified feedback", () => {
     }
   });
 
+  it("refuses another click generation even when URL and candidate count look valid", () => {
+    const id = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    const other = "18aabcde-0ee2-4e98-8e12-48fdce879013";
+    const runtime = createCandidateWorkspaceRuntime({ url: () => origin.url, send: vi.fn(),
+      runtimeInstanceId: "viewport-exact-identity", runtimeGeneration: 1 });
+    runtime.beginDetection("viewport", id);
+    runtime.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [] });
+    const current = runtime.snapshot(origin.url);
+    expect(viewportDetectionSnapshotFeedback("zh", origin, current, id).code).toBe("VIEWPORT_DETECT_EMPTY");
+    expect(viewportDetectionSnapshotFeedback("zh", origin, current, other).code)
+      .toBe("VIEWPORT_DETECT_RESULT_UNCONFIRMED");
+    const malformed = { ...current.snapshot!, detection: { phase: "completed", mode: "viewport", requestId: "invalid" } };
+    expect(viewportDetectionSnapshotFeedback("zh", origin, { ok: true, snapshot: malformed as never }, id).code)
+      .toBe("VIEWPORT_DETECT_RESULT_UNCONFIRMED");
+  });
+
   it("keeps English-language feedback readable without displaying machine status codes", () => {
     const value = viewportDetectionSnapshotFeedback("en", origin, snapshot(1));
     expect(value.message).toContain("1 candidate question");

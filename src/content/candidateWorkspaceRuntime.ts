@@ -71,11 +71,26 @@ export function createCandidateWorkspaceRuntime(options: {
       publish();
       return snapshot().candidates;
     },
-    beginDetection(mode: "viewport" | "fullpage") {
+    beginDetection(mode: "viewport" | "fullpage", requestId?: string) {
       ensureRoute();
       ++detectionGeneration;
-      state = { ...state, detection: { phase: "detecting", mode }, candidates: [], fullPage: { running: mode === "fullpage", progress: null } };
+      state = { ...state, detection: { phase: "detecting", mode, ...(requestId ? { requestId } : {}) },
+        candidates: [], fullPage: { running: mode === "fullpage", progress: null } };
       publish();
+    },
+    /** A failed viewport run may reset ONLY its matching generation. Its
+     * completion message may already have been projected before a later
+     * highlight/render step throws, so even a "completed" snapshot is not
+     * final until the tagged command returns success. */
+    failViewportDetection(requestId: string) {
+      if (state.disposed || state.originUrl !== options.url()
+        || state.detection.mode !== "viewport"
+        || !["detecting", "completed"].includes(state.detection.phase)
+        || state.detection.requestId !== requestId) return false;
+      ++detectionGeneration;
+      state = { ...state, detection: { phase: "never_started", mode: null }, candidates: [] };
+      publish();
+      return true;
     },
     resetDetection() {
       ensureRoute();
@@ -102,7 +117,8 @@ export function createCandidateWorkspaceRuntime(options: {
       ensureRoute();
       switch (message.type) {
         case "AUTO_DETECT_RESULT_READY":
-          state = { ...state, candidates: message.candidates as CandidateSnapshot[], detection: { phase: "completed", mode: state.detection.mode ?? "viewport" } };
+          state = { ...state, candidates: message.candidates as CandidateSnapshot[],
+            detection: { ...state.detection, phase: "completed", mode: state.detection.mode ?? "viewport" } };
           break;
         case "FULL_PAGE_DETECT_PROGRESS":
           if (!state.fullPage.running) return false;
