@@ -517,6 +517,7 @@ export const SidePanelApp: React.FC = () => {
             <WorkspaceUserFeedback feedback={state.fillFeedback} activity={activity} />
             <CandidatesTab
               detectionPhase={state.detectionPhase}
+              detectionOutcome={state.detectionOutcome}
               workspaceOrigin={state.workspaceOrigin}
               autoSolveProgress={state.autoSolveProgress}
               candidateViewFilter={state.candidateViewFilter}

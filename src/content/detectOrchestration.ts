@@ -44,6 +44,14 @@ type FullPageDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], st
   }) => TLayer;
   refreshFullPageHighlightsAfterLayoutChange: () => void;
   notifySidePanel: (candidates: QuestionBlock[]) => void;
+  /** Commit content-owned active state before any terminal DONE is observable. */
+  commitBeforeDone?: (result: {
+    activeCandidates: QuestionBlock[];
+    activeHighlightBlocks: QuestionBlock[];
+    activeDetectMode: "fullpage";
+    lastFullPageLayoutKey: string;
+    highlightLayer: TLayer | null;
+  }) => void;
 };
 
 type ViewportDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], statusMap: Map<string, CandidateStatus>) => void }> = {
@@ -171,11 +179,17 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
     });
     deps.refreshFullPageHighlightsAfterLayoutChange();
 
+    // Make legacy content activeCandidates and the authoritative workspace
+    // agree before publishing the terminal event to any listener.
+    deps.commitBeforeDone?.({ ...state, highlightLayer });
     deps.safeRuntimeSendMessage({
       type: "FULL_PAGE_DETECT_DONE",
       candidates,
       totalFound: candidates.length,
-      outcome: candidates.length ? "completed" : postprocessedCandidates ? "refinement_empty" : "no_candidates",
+      outcome: candidates.length ? "completed"
+        : postprocessedCandidates ? "refinement_empty"
+        : retainedCandidates ? "postprocess_empty"
+        : observedCandidates ? "filtered_empty" : "no_candidates",
       diagnostics: { observedCandidates, retainedCandidates, postprocessedCandidates, refinedCandidates },
     });
 
@@ -184,6 +198,14 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
     if (!isCurrentRoute()) return null;
     console.error("[QS] Full page detect error:", err);
     deps.refreshLayoutResizeObservation();
+    const failedResult = {
+      activeCandidates: [] as QuestionBlock[],
+      activeHighlightBlocks: [] as QuestionBlock[],
+      activeDetectMode: "fullpage" as const,
+      lastFullPageLayoutKey: "",
+      highlightLayer: null,
+    };
+    deps.commitBeforeDone?.(failedResult);
     deps.safeRuntimeSendMessage({
       type: "FULL_PAGE_DETECT_DONE",
       candidates: [],
@@ -192,13 +214,7 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
       failureStage,
       diagnostics: { observedCandidates, retainedCandidates, postprocessedCandidates, refinedCandidates },
     });
-    return {
-      activeCandidates: [],
-      activeHighlightBlocks: [],
-      activeDetectMode: "fullpage",
-      lastFullPageLayoutKey: "",
-      highlightLayer: null,
-    };
+    return failedResult;
   }
 }
 

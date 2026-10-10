@@ -20,6 +20,8 @@ export const CANDIDATE_WORKSPACE_COPY = {
     notStarted: 'Use "Current View" or "Full Page" to start detection.', completedEmpty: "Scan completed, but no usable questions were recognized. Check page loading or try Current View.",
     failedEmpty: "The scan failed; this is not evidence that the page has no questions. Please retry.",
     incompleteEmpty: "Questions were detected but lost during refinement. Try Current View and review the page.",
+    filteredCandidateEmpty: "Potential questions were observed but rejected by the initial candidate filter. Try Current View or inspect the page.",
+    postprocessedEmpty: "Candidates were retained during scanning but removed by postprocessing. Try Current View and inspect the page.",
     detectingEmpty: "Detecting questions…", filterEmpty: "No questions match this filter.",
   },
   zh: {
@@ -42,6 +44,8 @@ export const CANDIDATE_WORKSPACE_COPY = {
     notStarted: "先用“当前屏”或“整页扫描”开始识别。", completedEmpty: "扫描已完成，但未识别到可用题目；可能是页面未加载完成或网站结构暂不兼容。",
     failedEmpty: "扫描过程中发生错误，未能完成识别；不能据此判断页面没有题目，请重试。",
     incompleteEmpty: "扫描曾发现候选，但精修阶段未保留题目。请尝试“当前屏”识别并检查原页面。",
+    filteredCandidateEmpty: "页面曾出现候选题目，但初筛未能保留。请尝试“当前屏”识别并检查原页面。",
+    postprocessedEmpty: "扫描曾保留候选题目，但后处理未能保留。请尝试“当前屏”识别并检查原页面。",
     detectingEmpty: "正在识别题目…", filterEmpty: "当前筛选条件下没有题目。",
   },
 } as const;

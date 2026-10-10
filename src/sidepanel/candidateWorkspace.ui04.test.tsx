@@ -56,6 +56,10 @@ describe("UI-04 candidate workspace behavior", () => {
     expect(screen.getByRole("status")).toHaveTextContent("扫描过程中发生错误");
     rerender(<CandidateEmptyState lang="zh" phase="incomplete" />);
     expect(screen.getByRole("status")).toHaveTextContent("精修阶段未保留题目");
+    rerender(<CandidateEmptyState lang="zh" phase="incomplete" outcome="filtered_empty" />);
+    expect(screen.getByRole("status")).toHaveTextContent("初筛未能保留");
+    rerender(<CandidateEmptyState lang="zh" phase="incomplete" outcome="postprocess_empty" />);
+    expect(screen.getByRole("status")).toHaveTextContent("后处理未能保留");
     rerender(<CandidateEmptyState lang="en" phase="completed" filteredEmpty />);
     expect(screen.getByRole("status")).toHaveTextContent("No questions match");
   });
