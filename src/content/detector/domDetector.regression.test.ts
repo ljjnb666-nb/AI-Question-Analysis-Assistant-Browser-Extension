@@ -48,7 +48,7 @@ describe("domDetector regressions", () => {
     Object.defineProperty(card, "innerText", { configurable: true, value:
       "哪种品德心理结构与积极情绪体验有关？（ ） A. 道德认识 B. 道德情感 C. 道德意志 D. 道德行为" });
     const blocks = detectCandidatesInViewport();
-    console.info("[RC03B-R6 diagnosis]", JSON.stringify({ previews: blocks.map((block) => block.previewText), structured: extractStructuredQuestionText(card), original: card.innerText }));
+    expect(extractStructuredQuestionText(card)).toContain("品德心理结构");
     expect(blocks.some((block) => block.previewText.includes("品德心理结构"))).toBe(true);
     expect(blocks.some((block) => block.previewText.includes("A.") && block.previewText.includes("D."))).toBe(true);
   });
