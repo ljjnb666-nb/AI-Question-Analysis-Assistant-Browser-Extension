@@ -238,3 +238,45 @@ describe("PHASE14D_02 explicit HTTP credential redaction", () => {
     expect(new URL(logs[0].data?.url as string).searchParams.get("auth_code")).toBe("[REDACTED]");
   });
 });
+
+describe("PHASE14D_01 error-log deletion consistency", () => {
+  it("serializes clear behind a parked older persistence write", async () => {
+    // Drain any previous tests' queued storage work before installing the gate.
+    await loadErrorLogs();
+    let persistedWriteStarted!: () => void;
+    let releasePersistedWrite!: () => void;
+    const writeStarted = new Promise<void>((resolve) => { persistedWriteStarted = resolve; });
+    const writeGate = new Promise<void>((resolve) => { releasePersistedWrite = resolve; });
+    let parkNextSet = true;
+    vi.mocked(chrome.storage.local.set).mockImplementation(async (items) => {
+      if (parkNextSet && Array.isArray(items.errorLog)) {
+        parkNextSet = false;
+        persistedWriteStarted();
+        await writeGate;
+      }
+      localStorageData = { ...localStorageData, ...items };
+    });
+
+    logError("old queued error", new Error("old entry"));
+    await writeStarted;
+    clearErrorLogs();
+    releasePersistedWrite();
+
+    // loadErrorLogs is serialized through the exact same queue and provides
+    // a deterministic completion fence. The cleared entry must not resurrect.
+    expect(await loadErrorLogs()).toEqual([]);
+    expect(localStorageData.errorLog).toBeUndefined();
+    expect(getErrorLogs()).toEqual([]);
+  });
+
+  it("retains only logs committed after a clear, even with queued pre-clear writes", async () => {
+    await loadErrorLogs();
+    logError("before clear");
+    clearErrorLogs();
+    logError("after clear");
+    const logs = await loadErrorLogs();
+    expect(logs.map((entry) => entry.message)).toEqual(["after clear"]);
+    expect(getErrorLogs().map((entry) => entry.message)).toEqual(["after clear"]);
+    expect(JSON.stringify(localStorageData.errorLog)).not.toContain("before clear");
+  });
+});
