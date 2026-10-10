@@ -169,6 +169,8 @@ export interface StartFullPageDetectMsg extends BaseMessage {
 
 export interface FullPageDetectProgressMsg extends BaseMessage {
   type: "FULL_PAGE_DETECT_PROGRESS";
+  observedCandidates?: number;
+  retainedCandidates?: number;
   /** Immutable run identity of corresponding START. */
   generationId?: string;
   progress: number;
@@ -177,8 +179,20 @@ export interface FullPageDetectProgressMsg extends BaseMessage {
   currentStep: number;
 }
 
+export type FullPageDetectOutcome = "completed" | "no_candidates" | "refinement_empty" | "failed";
+export type FullPageDetectFailureStage = "scanning" | "refining" | "publishing";
+export interface FullPageDetectDiagnostics {
+  observedCandidates: number;
+  retainedCandidates: number;
+  postprocessedCandidates: number;
+  refinedCandidates: number;
+}
+
 export interface FullPageDetectDoneMsg extends BaseMessage {
   type: "FULL_PAGE_DETECT_DONE";
+  outcome?: FullPageDetectOutcome;
+  failureStage?: FullPageDetectFailureStage;
+  diagnostics?: FullPageDetectDiagnostics;
   /** Run generation for exact owner cleanup; omitted by legacy content scripts. */
   generationId?: string;
   candidates: QuestionBlock[];

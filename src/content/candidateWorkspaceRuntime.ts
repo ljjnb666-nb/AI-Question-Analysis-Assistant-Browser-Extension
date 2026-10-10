@@ -1,4 +1,4 @@
-import type { AutoSolveProgressMsg, CandidateSnapshot, CandidateWorkspaceSnapshot, FullPageDetectProgressMsg, ParseStatus, QuestionBlock } from "@/shared/types";
+import type { AutoSolveProgressMsg, CandidateSnapshot, CandidateWorkspaceSnapshot, FullPageDetectProgressMsg, FullPageDetectDoneMsg, ParseStatus, QuestionBlock } from "@/shared/types";
 import { sanitizeQuestionBlockForRuntimeMessage, sanitizeQuestionBlockForSerialization } from "@/shared/utils/mediaSerialization";
 
 export function normalizeCandidateStatus(status: string | undefined): ParseStatus {
@@ -124,11 +124,18 @@ export function createCandidateWorkspaceRuntime(options: {
           if (!state.fullPage.running) return false;
           state = { ...state, fullPage: { running: true, progress: message as unknown as FullPageDetectProgressMsg } };
           break;
-        case "FULL_PAGE_DETECT_DONE":
+        case "FULL_PAGE_DETECT_DONE": {
           if (!state.fullPage.running) return false; // cancellation fences late completion
-          state = { ...state, detection: { phase: "completed", mode: "fullpage" },
-            candidates: projectCandidateSnapshots((message.candidates as QuestionBlock[]) ?? [], new Map()), fullPage: { running: false, progress: null } };
+          const done = message as unknown as FullPageDetectDoneMsg;
+          const phase = done.outcome === "failed" ? "failed"
+            : done.outcome === "refinement_empty" ? "incomplete" : "completed";
+          state = { ...state, detection: { phase, mode: "fullpage",
+            ...(done.outcome ? { outcome: done.outcome } : {}),
+            ...(done.failureStage ? { failureStage: done.failureStage } : {}),
+            ...(done.diagnostics ? { diagnostics: done.diagnostics } : {}) },
+            candidates: projectCandidateSnapshots(done.candidates ?? [], new Map()), fullPage: { running: false, progress: null } };
           break;
+        }
         case "AUTO_SOLVE_PROGRESS": {
           const progress = message as unknown as AutoSolveProgressMsg;
           state = { ...state, autoSolve: { running: progress.running, progress: { ...progress, currentBlock: progress.currentBlock ? sanitizeQuestionBlockForSerialization(progress.currentBlock) : undefined } } };

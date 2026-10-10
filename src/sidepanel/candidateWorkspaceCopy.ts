@@ -17,7 +17,9 @@ export const CANDIDATE_WORKSPACE_COPY = {
     extractionFailed: "A safe structured answer could not be extracted; filling is unavailable.",
     retryVision: "Retry with Vision", showDetails: "View explanation", hideDetails: "Hide explanation",
     showQuestion: "Show full question", hideQuestion: "Collapse question",
-    notStarted: 'Use "Current View" or "Full Page" to start detection.', completedEmpty: "Detection finished. No questions were found.",
+    notStarted: 'Use "Current View" or "Full Page" to start detection.', completedEmpty: "Scan completed, but no usable questions were recognized. Check page loading or try Current View.",
+    failedEmpty: "The scan failed; this is not evidence that the page has no questions. Please retry.",
+    incompleteEmpty: "Questions were detected but lost during refinement. Try Current View and review the page.",
     detectingEmpty: "Detecting questions…", filterEmpty: "No questions match this filter.",
   },
   zh: {
@@ -37,7 +39,9 @@ export const CANDIDATE_WORKSPACE_COPY = {
     extractionFailed: "未提取到可安全填写的结构化答案，暂不可填写。",
     retryVision: "视觉重试", showDetails: "查看解析", hideDetails: "收起解析",
     showQuestion: "展开完整题干", hideQuestion: "收起题干",
-    notStarted: "先用“当前屏”或“整页扫描”开始识别。", completedEmpty: "识别已完成，未找到题目。",
+    notStarted: "先用“当前屏”或“整页扫描”开始识别。", completedEmpty: "扫描已完成，但未识别到可用题目；可能是页面未加载完成或网站结构暂不兼容。",
+    failedEmpty: "扫描过程中发生错误，未能完成识别；不能据此判断页面没有题目，请重试。",
+    incompleteEmpty: "扫描曾发现候选，但精修阶段未保留题目。请尝试“当前屏”识别并检查原页面。",
     detectingEmpty: "正在识别题目…", filterEmpty: "当前筛选条件下没有题目。",
   },
 } as const;

@@ -51,6 +51,8 @@ export interface ScanProgress {
   found: number;
   currentStep: number;
   totalScrollSteps: number;
+  observedCandidates?: number;
+  retainedCandidates?: number;
 }
 
 /**
@@ -81,6 +83,7 @@ export async function detectCandidatesFullPage(
   activeScan = scan;
   const isCurrent = () => activeScan === scan && !scan.cancelled && scan.eligible();
   const allBlocks: QuestionBlock[] = [];
+  let observedCandidates = 0;
   let originalTop = 0;
   let originalLeft = 0;
 
@@ -127,6 +130,7 @@ export async function detectCandidatesFullPage(
         viewportBlocks = detectCandidatesInViewport();
       }
       if (!isCurrent()) break;
+      observedCandidates += viewportBlocks.length;
       for (const block of viewportBlocks) {
         const absoluteBlock = toAbsoluteCoords(block, root);
         const normalizedPreview = normalizePreviewText(absoluteBlock.previewText);
@@ -141,6 +145,8 @@ export async function detectCandidatesFullPage(
         found: allBlocks.length,
         currentStep: step,
         totalScrollSteps: totalSteps,
+        observedCandidates,
+        retainedCandidates: allBlocks.length,
       });
       // User handlers may synchronously CANCEL or change the route.
       if (!isCurrent()) break;

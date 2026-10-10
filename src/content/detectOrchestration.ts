@@ -15,6 +15,8 @@ type FullPageProgress = {
   found: number;
   currentStep: number;
   totalScrollSteps: number;
+  observedCandidates?: number;
+  retainedCandidates?: number;
 };
 
 type FullPageDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], statusMap: Map<string, CandidateStatus>) => void }> = {
@@ -106,8 +108,15 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
     totalScrollSteps: 1,
   });
 
+  let failureStage: "scanning" | "refining" | "publishing" = "scanning";
+  let observedCandidates = 0;
+  let retainedCandidates = 0;
+  let postprocessedCandidates = 0;
+  let refinedCandidates = 0;
   try {
     const roughCandidates = await deps.detectCandidatesFullPage((p) => {
+      if (typeof p.observedCandidates === "number") observedCandidates = p.observedCandidates;
+      if (typeof p.retainedCandidates === "number") retainedCandidates = p.retainedCandidates;
       if (!isCurrentRoute()) return;
       deps.safeRuntimeSendMessage({
         type: "FULL_PAGE_DETECT_PROGRESS",
@@ -115,6 +124,8 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
         found: p.found,
         currentStep: p.currentStep,
         totalScrollSteps: p.totalScrollSteps,
+        observedCandidates,
+        retainedCandidates,
       });
     }, isCurrentRoute);
     if (!isCurrentRoute()) {
@@ -122,11 +133,15 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
       deps.clearRouteOwnedState?.();
       return null;
     }
+    postprocessedCandidates = roughCandidates.length;
+    failureStage = "refining";
     const candidates = await deps.refineFullPageCandidatesViaManualPipeline(roughCandidates);
+    refinedCandidates = candidates.length;
     if (!isCurrentRoute()) {
       deps.clearRouteOwnedState?.();
       return null;
     }
+    failureStage = "publishing";
     const scrollRoot = deps.resolveFullPageScrollRoot();
     const lastFullPageLayoutKey = deps.getFullPageLayoutKey(scrollRoot);
 
@@ -160,6 +175,8 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
       type: "FULL_PAGE_DETECT_DONE",
       candidates,
       totalFound: candidates.length,
+      outcome: candidates.length ? "completed" : postprocessedCandidates ? "refinement_empty" : "no_candidates",
+      diagnostics: { observedCandidates, retainedCandidates, postprocessedCandidates, refinedCandidates },
     });
 
     return { ...state, highlightLayer };
@@ -171,6 +188,9 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
       type: "FULL_PAGE_DETECT_DONE",
       candidates: [],
       totalFound: 0,
+      outcome: "failed",
+      failureStage,
+      diagnostics: { observedCandidates, retainedCandidates, postprocessedCandidates, refinedCandidates },
     });
     return {
       activeCandidates: [],

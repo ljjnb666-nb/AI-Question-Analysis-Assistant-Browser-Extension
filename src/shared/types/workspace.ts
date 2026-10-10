@@ -1,7 +1,7 @@
 import type { CandidateSnapshot } from "./ui";
-import type { AutoSolveProgressMsg, FullPageDetectProgressMsg } from "./messages";
+import type { AutoSolveProgressMsg, FullPageDetectProgressMsg, FullPageDetectOutcome, FullPageDetectFailureStage, FullPageDetectDiagnostics } from "./messages";
 
-export type DetectionPhase = "never_started" | "detecting" | "completed";
+export type DetectionPhase = "never_started" | "detecting" | "completed" | "failed" | "incomplete";
 export interface WorkspaceMetadata {
   protocolVersion: 1;
   runtimeInstanceId: string;
@@ -12,7 +12,8 @@ export interface WorkspaceMetadata {
   originUrl: string;
 }
 export interface CandidateWorkspaceSnapshot extends WorkspaceMetadata {
-  detection: { phase: DetectionPhase; mode: "viewport" | "fullpage" | null; requestId?: string };
+  detection: { phase: DetectionPhase; mode: "viewport" | "fullpage" | null; requestId?: string;
+    outcome?: FullPageDetectOutcome; failureStage?: FullPageDetectFailureStage; diagnostics?: FullPageDetectDiagnostics };
   candidates: CandidateSnapshot[];
   autoSolve: { running: boolean; progress: AutoSolveProgressMsg | null };
   fullPage: { running: boolean; progress: FullPageDetectProgressMsg | null };

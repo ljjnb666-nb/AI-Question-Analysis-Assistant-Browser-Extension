@@ -65,6 +65,23 @@ describe("UI-04A content snapshot authority", () => {
     runtime.dispose();
     expect(send.mock.calls[send.mock.calls.length - 1]?.[0].snapshot.seq).toBeGreaterThan(seq);
   });
+  it("RC03B-R9 keeps failed scan distinct from completed-empty and fences canceled outcomes", () => {
+    const { runtime, read } = setup();
+    runtime.beginDetection("fullpage");
+    runtime.observe({ type: "FULL_PAGE_DETECT_DONE", outcome: "failed", failureStage: "refining",
+      diagnostics: { observedCandidates: 3, retainedCandidates: 2, postprocessedCandidates: 1, refinedCandidates: 0 }, candidates: [], totalFound: 0 });
+    expect(read().detection).toMatchObject({ phase: "failed", mode: "fullpage", outcome: "failed", failureStage: "refining" });
+    expect(read().detection.diagnostics?.postprocessedCandidates).toBe(1);
+    runtime.beginDetection("fullpage");
+    runtime.observe({ type: "FULL_PAGE_DETECT_DONE", outcome: "refinement_empty", candidates: [], totalFound: 0 });
+    expect(read().detection.phase).toBe("incomplete");
+    runtime.beginDetection("fullpage");
+    runtime.cancelFullPage();
+    const canceled = read();
+    expect(runtime.observe({ type: "FULL_PAGE_DETECT_DONE", outcome: "failed", candidates: [] })).toBe(false);
+    expect(read()).toEqual(canceled);
+  });
+
   it("UI04A-SCAN cancellation/completion fence old progress and clear ephemeral counters", () => {
     const { runtime, read } = setup();
     runtime.beginDetection("fullpage");
