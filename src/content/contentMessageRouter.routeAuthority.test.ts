@@ -34,6 +34,16 @@ afterEach(() => {
   window.history.replaceState({}, "", originalUrl);
 });
 
+describe("RC-PILOT-03A-03 untagged Popup concurrency gate", () => {
+  it("rejects a legacy START when another Surface owns the content detector", () => {
+    const deps = makeDeps();
+    deps.handleAutoDetect.mockReturnValueOnce(false);
+    const reply = vi.fn();
+    expect(handleContentMessage({ type: "START_AUTO_DETECT" }, reply, deps)).toBe(false);
+    expect(reply).toHaveBeenCalledWith({ ok: false, error: "WORK_ALREADY_RUNNING" });
+  });
+});
+
 describe("content message route authority", () => {
   it("ROUTE-PRE-FILL-1 rejects the candidate URL after navigation before Fill is handled", () => {
     const expectedUrl = new URL("/assignment/1", originalUrl).href;
