@@ -82,7 +82,12 @@ export function buildPreviewTextForBbox(el: Element, bbox: BoundingBox, fallback
     if (restored !== original && restored.length <= 900
       && !/A[.、:)：].*B[.、:)：].*C[.、:)：].*D[.、:)：]/.test(compact)) {
       const sourceRect = sourceNode.getBoundingClientRect();
-      if (sourceRect.width >= 2 && sourceRect.height >= 2 && bboxIntersectsRect(bbox, sourceRect)) {
+      // Merely intersecting the source is insufficient: a small candidate
+      // region must not inherit choices from outside its own bbox.
+      if (sourceRect.width >= 2 && sourceRect.height >= 2
+        && sourceRect.left >= bbox.x - 2 && sourceRect.top >= bbox.y - 2
+        && sourceRect.right <= bbox.x + bbox.width + 2
+        && sourceRect.bottom <= bbox.y + bbox.height + 2) {
         return sanitizePreviewText(restored).slice(0, 420);
       }
     }

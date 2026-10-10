@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { detectCandidatesInViewport } from "./domDetector";
+import { extractReadableNodeText, extractStructuredQuestionText } from "./domStructuredText";
+import { buildPreviewTextForBbox } from "./domDetectorPreview";
 
 function setRect(el: Element, rect: { left: number; top: number; width: number; height: number }) {
   Object.defineProperty(el, "getBoundingClientRect", {
@@ -55,6 +57,44 @@ describe("domDetector regressions", () => {
     expect(publicCard?.previewText).toContain("B.");
     expect(publicCard?.previewText).toContain("C.");
     expect(publicCard?.previewText).toContain("D.");
+  });
+
+
+  it("RC03B-R4 preserves semantic image text when raw detached choices are present", () => {
+    document.body.innerHTML = `
+      <article class="question-item" id="rich-detached-card">
+        <div class="question-content">观察下图的电路，哪种参数能够保持稳定？（ ）<img alt="语义图像关键值" /></div>
+        <ul><li>A 电阻</li><li>B 电容</li><li>C 电感</li><li>D 电压</li></ul>
+      </article>
+    `;
+    const card = document.getElementById("rich-detached-card")!;
+    Object.defineProperty(card, "innerText", { configurable: true, value:
+      "观察下图的电路，哪种参数能够保持稳定？（ ）\\nA\\n电阻\\nB\\n电容\\nC\\n电感\\nD\\n电压" });
+    // The raw-text fallback must not erase the IMG alt evidence already
+    // collected by the semantic structured-text path.
+    expect(extractStructuredQuestionText(card)).toContain("语义图像关键值");
+    expect(extractReadableNodeText(card)).toContain("语义图像关键值");
+  });
+
+  it("RC03B-R5 does not replace a stem-only bbox with off-bbox ABCD options", () => {
+    document.body.innerHTML = `
+      <article class="question-item" id="partial-detached-card">
+        <p id="partial-stem">凡是符合自己维护的道德观念时会产生积极情绪，这属于哪种品德心理结构？（ ）</p>
+        <ul><li>A 道德认识</li><li>B 道德情感</li><li>C 道德意志</li><li>D 道德行为</li></ul>
+      </article>
+    `;
+    const card = document.getElementById("partial-detached-card")!;
+    const stemNode = document.getElementById("partial-stem")!;
+    Object.defineProperty(card, "innerText", { configurable: true, value:
+      "凡是符合自己维护的道德观念时会产生积极情绪，这属于哪种品德心理结构？（ ）\\nA\\n道德认识\\nB\\n道德情感\\nC\\n道德意志\\nD\\n道德行为" });
+    setRect(card, { left: 80, top: 100, width: 800, height: 420 });
+    setRect(stemNode, { left: 90, top: 112, width: 680, height: 30 });
+    const preview = buildPreviewTextForBbox(
+      card, { x: 80, y: 100, width: 800, height: 65 }, "fallback",
+    );
+    expect(preview).toContain("道德观念");
+    expect(preview).not.toContain("A.");
+    expect(preview).not.toContain("B.");
   });
 
   it("keeps leading tables that belong to the same math single-choice question", () => {

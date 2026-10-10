@@ -88,13 +88,9 @@ if (isHtmlElementNode(node)) {
     }
 
     if (node.matches(".question-item,.questionBox,.base-question-component")) {
-      const structured = extractStructuredQuestionText(node);
-      const original = node.innerText || "";
-      const restored = recoverDetachedChoiceLabels(original);
-      // Prefer complete layout evidence only when ordinary flattened
-      // extraction lost all standard A./B./C./D. labels.
-      return restored !== original && !/A[.、:)：].*B[.、:)：].*C[.、:)：].*D[.、:)：]/.test(structured)
-        ? normalizeText(restored) : structured;
+      // The structured extractor owns the only detached-choice fallback.
+      // A second raw-innerText fallback here would erase semantic media text.
+      return extractStructuredQuestionText(node);
     }
 
     if (node.matches(".questionContent,.qeustion-content")) {
@@ -167,7 +163,13 @@ push(isHtmlElementNode(container) ? ((container.innerText || container.textConte
   if (isHtmlElementNode(container)) {
     const original = container.innerText || "";
     const restored = recoverDetachedChoiceLabels(original);
-    if (restored !== original && !/A[.、:)：].*B[.、:)：].*C[.、:)：].*D[.、:)：]/.test(structured)) {
+    // Plain innerText has no image alt text, math semantics or table structure.
+    // Do not let a label recovery silently downgrade rich question evidence.
+    const hasRichSemanticNodes = !!container.querySelector(
+      "img,svg,math,mjx-container,.MathJax,.katex,embed,canvas,table",
+    );
+    if (restored !== original && !hasRichSemanticNodes
+      && !/A[.、:)：].*B[.、:)：].*C[.、:)：].*D[.、:)：]/.test(structured)) {
       return normalizeText(restored);
     }
   }
