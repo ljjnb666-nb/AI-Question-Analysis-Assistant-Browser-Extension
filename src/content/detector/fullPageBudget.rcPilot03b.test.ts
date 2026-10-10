@@ -25,7 +25,8 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
     Object.defineProperty(document.body, "scrollHeight", { configurable: true, get: () => pageHeight });
     Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, get: () => pageHeight });
-    scrollTo = vi.spyOn(window, "scrollTo").mockImplementation((options: ScrollToOptions) => {
+    scrollTo = vi.spyOn(window, "scrollTo").mockImplementation((...args: unknown[]) => {
+      const options = args[0] as ScrollToOptions;
       top = Math.min(Math.max(0, options.top ?? top), Math.max(0, pageHeight - 600));
     });
   });
