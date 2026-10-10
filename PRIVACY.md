@@ -20,6 +20,16 @@ Registration, verification, and sign-in use the configured account service indep
 
 Turning analytics off does not disable account requests or delete an account. This release does not add account deletion or a general account retention period; account data follows the existing account-service lifecycle.
 
+## Temporary popup registration progress
+
+The browser extension's action popup is destroyed when it loses focus (for example, when a user switches to a mail inbox to read a verification code). To resume this flow, the popup may keep **only** the entered email address, the fact that the account backend successfully accepted a code-send request for that exact address, the backend URL, and the code-expiry/resend deadlines in `chrome.storage.session`. This is extension session memory, separate from `chrome.storage.local`, account auth credentials, and optional analytics.
+
+- Passwords, verification-code digits, and authentication tokens are **never** written to this registration draft. Users must reenter passwords and code digits after a popup is recreated.
+- The draft is only a convenience hint; it **does not grant authenticated access**. The backend remains authoritative for code validity, registration, and login.
+- The restored code-input step expires at the server-provided code deadline and is discarded if the email or backend changes. Stale draft data older than 30 minutes is not restored.
+- A successful sign-in/registration, explicit logout, or clearing the email removes the draft through the normal workflow. The 30-minute rule is a **logical restoration TTL, not a guaranteed physical deletion timer**: an untouched session-storage record can remain in extension session memory until a subsequent cleanup or browser session termination.
+- If session storage is unavailable, the extension reports that registration progress cannot be saved; users can instead keep the registration UI open in a separate extension tab.
+
 ## AI providers
 
 When you parse a question, the question text and, when needed, images may be sent to the AI provider and endpoint selected in Settings. The provider API key is used for those provider requests. Provider requests are separate from analytics and are not sent to the extension's analytics backend. The provider's own privacy and data policies apply to that traffic.

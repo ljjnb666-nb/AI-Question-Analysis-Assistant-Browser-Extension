@@ -919,3 +919,65 @@ test("AUTH_UI_34_LOGOUT_IMMEDIATE_LOCAL_FAIL_CLOSED logout drops local authority
     await closeExtensionContext(context);
   }
 });
+
+ 
+// ---------------------------------------------------------------------------
+// RC_PILOT_01 — a real extension popup is destroyed on blur. The authorized
+// server's email and send metadata survive reopening, but sensitive form
+// fields NEVER survive and changing backend invalidates the code field.
+// ---------------------------------------------------------------------------
+test("RC_PILOT_01_POPUP_REGISTRATION_RESUME after email-tab switch restores safe progress only", async () => {
+  test.setTimeout(120_000);
+  const context = await launchExtensionContext();
+  try {
+    const extensionId = await resolveExtensionId(context);
+    const popup = await openPopupAuthForm(context, extensionId, mailBackend.baseUrl);
+    const email = `rc-pilot-popup+${Date.now()}@example.com`;
+    const password = ["pilot-password", Math.random().toString(36).slice(2)].join("-");
+    const code = "123456";
+
+    await popup.getByPlaceholder(/(Email|邮箱)/).fill(email);
+    await popup.getByPlaceholder(/(Password|密码)/).fill(password);
+    await popup.getByRole("button", { name: /^(Send Code|发送验证码)$/ }).click();
+    await expect(popup.getByText(/(验证码已发送|Verification code sent)/)).toBeVisible({ timeout: 25_000 });
+    const group = popup.getByRole("group", { name: /^(验证码|Verification Code)$/ });
+    await expect(group).toBeVisible();
+    await group.locator("input").first().fill(code);
+
+    const sessionDraft = await popup.evaluate(async () => {
+      const key = "quizSolver:popupRegistrationDraft:v1";
+      const api = (globalThis as unknown as {
+        chrome: { storage: { session: { get: (key: string) => Promise<Record<string, unknown>> } } };
+      }).chrome;
+      const value = await api.storage.session.get(key);
+      return JSON.stringify(value[key]);
+    });
+    expect(sessionDraft).toContain(email);
+    expect(sessionDraft).not.toContain(password);
+    expect(sessionDraft).not.toContain(code);
+
+    // Simulates clicking away to Mailpit: the action popup is physically
+    // destroyed. The new page runs a completely fresh React controller.
+    await popup.close();
+    const reopened = await context.newPage();
+    await reopened.goto(POPUP_URL(extensionId));
+    await expect(reopened.getByPlaceholder(/(Email|邮箱)/)).toHaveValue(email, { timeout: 15_000 });
+    await expect(reopened.getByRole("group", { name: /^(验证码|Verification Code)$/ })).toBeVisible({ timeout: 15_000 });
+    await expect(reopened.getByRole("button", { name: /\d+s/ })).toBeVisible();
+    await expect(reopened.getByPlaceholder(/(Password|密码)/)).toHaveValue("");
+    const restoredDigits = await reopened.getByRole("group", { name: /^(验证码|Verification Code)$/ })
+      .locator("input").evaluateAll((nodes) => nodes.map((node) => (node as HTMLInputElement).value));
+    expect(restoredDigits.every((digit) => digit === "")).toBe(true);
+
+    // Progress is not allowed to claim a code is valid for a different server.
+    const otherBackend = await getClosedPortBaseUrl();
+    await reopened.close();
+    await seedExtensionSettings(context, extensionId, { analyticsBaseUrl: otherBackend });
+    const changed = await context.newPage();
+    await changed.goto(POPUP_URL(extensionId));
+    await expect(changed.getByPlaceholder(/(Email|邮箱)/)).toHaveValue(email, { timeout: 15_000 });
+    await expect(changed.getByRole("group", { name: /^(验证码|Verification Code)$/ })).toHaveCount(0, { timeout: 15_000 });
+  } finally {
+    await closeExtensionContext(context);
+  }
+});
