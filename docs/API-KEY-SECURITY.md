@@ -102,3 +102,21 @@ These are per-entry budgets, not a total storage byte ceiling or a promise
 that Chrome's initial legacy storage read is allocation-free. Pretty-printed
 exports may use additional whitespace. Unknown free-form secrets are not
 guaranteed to be recognized by the credential sanitizer.
+
+
+## Phase 14D-05 · Aggregate log storage and export budget
+
+In addition to the 100-entry count and 32 KiB compact-JSON per-entry
+limits, the logger retains only a **newest contiguous suffix** whose
+entire **pretty-printed JSON export** fits within **256 KiB UTF-8**.
+The same selected records are used for in-memory logs, FIFO-serialized
+local persistence, sanitized historical loads and JSON exports. Oldest
+entries are evicted first, with no partial unredacted truncation.
+Ordinary small logs remain unaffected, and the earlier user-requested
+clear ordering is unchanged.
+
+This limit applies **after Chrome returns historical data**. Chrome's
+initial `storage.local.get` cannot avoid deserializing the old value,
+and hostile getter/proxy execution or transient construction memory
+is not strictly bounded by this policy. This is a final retained-output
+budget, not a proof of total CPU or initial-storage-read memory limits.

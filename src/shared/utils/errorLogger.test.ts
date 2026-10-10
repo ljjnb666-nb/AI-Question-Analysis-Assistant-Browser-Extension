@@ -416,3 +416,79 @@ describe("PHASE14D_04 per-entry error-log resource budgets", () => {
     expect(JSON.stringify(entry)).not.toContain(credential);
   });
 });
+
+
+describe("PHASE14D_05 aggregate log storage, memory and export byte budgets", () => {
+  const MAX_TOTAL_BYTES = 256 * 1024;
+  const byteLength = (value: string): number => new TextEncoder().encode(value).byteLength;
+
+  it("compacts large historical storage to the newest contiguous suffix before returning or exporting", async () => {
+    await loadErrorLogs(); // queue fence for beforeEach deletion
+    const secret = ["historical", "aggregate", "credential"].join("-");
+    localStorageData.errorLog = Array.from({ length: 140 }, (_unused, index) => ({
+      level: "error",
+      message: "legacy-" + index + ":" + "x".repeat(6000),
+      timestamp: index,
+      data: { url: "https://provider.example.test/problem?token=" + secret + "&mode=test" },
+    }));
+
+    const loaded = await loadErrorLogs();
+    expect(loaded.length).toBeGreaterThan(0);
+    expect(loaded.length).toBeLessThan(100);
+    expect(loaded[loaded.length - 1].message).toContain("legacy-139:");
+    const firstIndex = 140 - loaded.length;
+    expect(loaded.map((entry) => Number(entry.message.slice(7, entry.message.indexOf(":"))))).toEqual(
+      Array.from({ length: loaded.length }, (_unused, i) => firstIndex + i),
+    );
+    const stored = localStorageData.errorLog as Array<{ message: string }>;
+    expect(stored.map((entry) => entry.message)).toEqual(loaded.map((entry) => entry.message));
+    const pretty = await exportErrorLogs();
+    expect(byteLength(pretty)).toBeLessThanOrEqual(MAX_TOTAL_BYTES);
+    expect(byteLength(JSON.stringify(stored))).toBeLessThanOrEqual(MAX_TOTAL_BYTES);
+    expect(JSON.parse(pretty)).toHaveLength(loaded.length);
+    for (const text of [JSON.stringify(stored), pretty, JSON.stringify(loaded)]) {
+      expect(text).not.toContain(secret);
+      expect(text).not.toContain("legacy-0:");
+    }
+    expect(new URL((loaded[0].data?.url as string)).searchParams.get("token")).toBe("[REDACTED]");
+  });
+
+  it("enforces the same aggregate budget on live memory, queued persistence and export", async () => {
+    await loadErrorLogs();
+    const secret = ["new", "aggregate", "secret"].join("-");
+    for (let i = 0; i < 75; i++) {
+      logError("recent-" + i + ":" + "z".repeat(6000), undefined, "aggregate", {
+        url: "https://api.example.test/fail?token=" + secret,
+      });
+    }
+    const memory = getErrorLogs();
+    const durable = await loadErrorLogs(); // serializes behind every accepted write
+    const exported = await exportErrorLogs();
+    expect(memory.length).toBeGreaterThan(0);
+    expect(memory.length).toBeLessThan(75);
+    expect(memory[memory.length - 1].message).toContain("recent-74:");
+    expect(durable.map((x) => x.message)).toEqual(memory.map((x) => x.message));
+    expect(JSON.parse(exported)).toHaveLength(durable.length);
+    expect(byteLength(exported)).toBeLessThanOrEqual(MAX_TOTAL_BYTES);
+    expect(byteLength(JSON.stringify(memory, null, 2))).toBeLessThanOrEqual(MAX_TOTAL_BYTES);
+    expect(byteLength(JSON.stringify(localStorageData.errorLog, null, 2))).toBeLessThanOrEqual(MAX_TOTAL_BYTES);
+    for (const text of [JSON.stringify(memory), JSON.stringify(durable), exported, JSON.stringify(localStorageData.errorLog)]) {
+      expect(text).not.toContain(secret);
+      expect(text).not.toContain("recent-0:");
+    }
+  });
+
+  it("preserves small warn/info/error diagnostics and queued clear ordering", async () => {
+    await loadErrorLogs();
+    logWarn("normal warning", "small");
+    logInfo("normal info", "small");
+    logError("before-clear");
+    expect(getErrorLogs().map((entry) => entry.message)).toEqual(["normal warning", "normal info", "before-clear"]);
+    clearErrorLogs();
+    logError("after-clear", undefined, "small");
+    const committed = await loadErrorLogs();
+    expect(committed.map((entry) => entry.message)).toEqual(["after-clear"]);
+    expect(getErrorLogs().map((entry) => entry.message)).toEqual(["after-clear"]);
+    expect(JSON.parse(await exportErrorLogs()).map((entry: { message: string }) => entry.message)).toEqual(["after-clear"]);
+  });
+});

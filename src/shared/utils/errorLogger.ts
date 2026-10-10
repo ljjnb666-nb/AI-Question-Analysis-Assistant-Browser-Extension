@@ -20,6 +20,9 @@ const MAX_LOG_SIZE = 100;
 // Fail-closed budgets for current and historical error-log entries.
 const MAX_LOG_STRING_CHARS = 8 * 1024;
 const MAX_LOG_ENTRY_BYTES = 32 * 1024;
+// Total budget applies to the actual indented JSON export, and therefore
+// also bounds compact local storage and retained in-memory entries.
+const MAX_LOG_TOTAL_EXPORT_BYTES = 256 * 1024;
 const MAX_LOG_VALUE_DEPTH = 10;
 const MAX_LOG_VALUE_NODES = 512;
 const MAX_LOG_COLLECTION_ITEMS = 64;
@@ -296,6 +299,32 @@ function sanitizeLogEntry(entry: ErrorLogEntry): ErrorLogEntry {
   }
 }
 
+/**
+ * Keep a contiguous, newest-first suffix while the complete pretty-printed
+ * JSON export stays within the aggregate UTF-8 byte budget. This function
+ * receives only sanitized per-entry-budgeted records; legacy raw data must be
+ * sanitized first. Never skip a too-large newer entry to resurrect older ones.
+ */
+function retainLogsWithinTotalBudget(entries: ErrorLogEntry[]): ErrorLogEntry[] {
+  const newestFirst: ErrorLogEntry[] = [];
+  // For a nonempty JSON array: "[\n" + item + (",\n" + item)* + "\n]".
+  let exportBytes = 4;
+  const encoder = new TextEncoder();
+  const firstIndex = Math.max(0, entries.length - MAX_LOG_SIZE);
+  for (let index = entries.length - 1; index >= firstIndex; index--) {
+    const entry = entries[index];
+    // Rendering a single-element array gives the exact indentation level of
+    // each element in the multi-entry export. Remove "[\n" and "\n]".
+    const single = JSON.stringify([entry], null, 2);
+    const entryBytes = encoder.encode(single.slice(2, -2)).byteLength;
+    const separatorBytes = newestFirst.length === 0 ? 0 : 2;
+    if (exportBytes + separatorBytes + entryBytes > MAX_LOG_TOTAL_EXPORT_BYTES) break;
+    newestFirst.push(entry);
+    exportBytes += separatorBytes + entryBytes;
+  }
+  return newestFirst.reverse();
+}
+
 function enqueuePersist(task: () => Promise<void>): Promise<void> {
   const writeTask = persistQueue.catch(() => undefined).then(task);
   persistQueue = writeTask;
@@ -327,9 +356,7 @@ export function logError(
   });
 
   ERROR_LOG.push(entry);
-  if (ERROR_LOG.length > MAX_LOG_SIZE) {
-    ERROR_LOG.shift();
-  }
+  ERROR_LOG.splice(0, ERROR_LOG.length, ...retainLogsWithinTotalBudget(ERROR_LOG));
 
   // Console output for development
   if (process.env.NODE_ENV !== "production") {
@@ -357,9 +384,7 @@ export function logWarn(
   });
 
   ERROR_LOG.push(entry);
-  if (ERROR_LOG.length > MAX_LOG_SIZE) {
-    ERROR_LOG.shift();
-  }
+  ERROR_LOG.splice(0, ERROR_LOG.length, ...retainLogsWithinTotalBudget(ERROR_LOG));
 
   if (process.env.NODE_ENV !== "production") {
     console.warn(`[${entry.context || "Warning"}] ${entry.message}`, entry.data);
@@ -383,9 +408,7 @@ export function logInfo(
   });
 
   ERROR_LOG.push(entry);
-  if (ERROR_LOG.length > MAX_LOG_SIZE) {
-    ERROR_LOG.shift();
-  }
+  ERROR_LOG.splice(0, ERROR_LOG.length, ...retainLogsWithinTotalBudget(ERROR_LOG));
 
   if (process.env.NODE_ENV !== "production") {
     console.info(`[${entry.context || "Info"}] ${entry.message}`, entry.data);
@@ -430,7 +453,7 @@ async function persistErrorLog(entry: ErrorLogEntry): Promise<void> {
       const log = Array.isArray(stored)
         ? stored.slice(-(MAX_LOG_SIZE - 1)).map((item) => sanitizeLogEntry(item as ErrorLogEntry))
         : [];
-      const updated = [...log, sanitizeLogEntry(entry)];
+      const updated = retainLogsWithinTotalBudget([...log, sanitizeLogEntry(entry)]);
       await chrome.storage.local.set({ errorLog: updated });
     } catch (err) {
       if (isExtensionContextInvalidatedError(err)) return;
@@ -450,9 +473,11 @@ export async function loadErrorLogs(): Promise<ErrorLogEntry[]> {
       const stored = result["errorLog"];
       // Apply the same retention contract as new writes before sanitizing
       // legacy entries and compact storage before exporting any of them.
-      logs = Array.isArray(stored)
-        ? stored.slice(-MAX_LOG_SIZE).map((item) => sanitizeLogEntry(item as ErrorLogEntry))
-        : [];
+      logs = retainLogsWithinTotalBudget(
+        Array.isArray(stored)
+          ? stored.slice(-MAX_LOG_SIZE).map((item) => sanitizeLogEntry(item as ErrorLogEntry))
+          : [],
+      );
       // This also scrubs entries written by older versions before they can be exported.
       if (logs.length > 0) await chrome.storage.local.set({ errorLog: logs });
     });
