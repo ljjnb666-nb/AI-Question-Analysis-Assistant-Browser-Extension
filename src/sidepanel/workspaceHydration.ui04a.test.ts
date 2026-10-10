@@ -123,7 +123,7 @@ describe("UI-04A Side Panel opening fence", () => {
     const opening = h.c.sync();
     await vi.waitFor(() => expect(h.request).toHaveBeenCalledOnce());
     h.event(fixture({ seq: 5 }), 9);
-    h.event(fixture({ originUrl: "https://quiz.example/elsewhere", seq: 6 }));
+    h.event(fixture({ originUrl: "https://quiz.example/elsewhere", seq: 6 }), 9);
     h.response.resolve(null);
     await opening;
     expect(h.last()?.[0]).toBe("runtime_unavailable");
