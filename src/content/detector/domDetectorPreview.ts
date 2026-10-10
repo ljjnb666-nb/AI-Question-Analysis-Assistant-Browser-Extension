@@ -4,6 +4,7 @@ import {
   extractReadableNodeText,
 } from "./domStructuredText";
 import { normalizeText, sanitizePreviewText } from "./domText";
+import { recoverDetachedChoiceLabels } from "./detachedChoiceLabels";
 
 export function getElementReadableText(el: Element): string {
   if (
@@ -19,7 +20,7 @@ isHtmlElementNode(    el) &&
   const raw =isHtmlElementNode( el)
     ? (el.innerText || el.textContent || "")
     : (el.textContent || "");
-  return normalizeText(raw);
+  return normalizeText(recoverDetachedChoiceLabels(raw));
 }
 
 export function buildPreviewText(el: Element, fallbackText: string): string {
@@ -72,6 +73,20 @@ export function buildPreviewTextForBbox(el: Element, bbox: BoundingBox, fallback
 
   const merged = mergePreviewEntries(entries);
   const compact = sanitizePreviewText(merged);
+  // Flattening leaf-level rectangles can erase the visual line breaks that
+  // separated A/B/C/D. If the OWN candidate source still retains one verified
+  // quartet, use it rather than declaring an otherwise visible question empty.
+  if (isHtmlElementNode(sourceNode)) {
+    const original = sourceNode.innerText || "";
+    const restored = recoverDetachedChoiceLabels(original);
+    if (restored !== original && restored.length <= 900
+      && !/A[.、:)：][\\s\\S]*B[.、:)：][\\s\\S]*C[.、:)：][\\s\\S]*D[.、:)：]/.test(compact)) {
+      const sourceRect = sourceNode.getBoundingClientRect();
+      if (sourceRect.width >= 2 && sourceRect.height >= 2 && bboxIntersectsRect(bbox, sourceRect)) {
+        return sanitizePreviewText(restored).slice(0, 420);
+      }
+    }
+  }
   if (compact.length >= 20) return compact.slice(0, 420);
 if (isHtmlElementNode(sourceNode)) {
     const sourceRect = sourceNode.getBoundingClientRect();
