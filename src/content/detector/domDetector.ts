@@ -175,7 +175,10 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
     }
   }
 
-  if (!preferDirectCardMode) {
+  // An unrelated or not-yet-visible direct-card shell must not suppress
+  // valid question cards or the generic candidate detector.
+  const hasAcceptedDirectCard = preferDirectCardMode && grouped.size > 0;
+  if (!hasAcceptedDirectCard) {
     if (pintiaQuestionListBlocks.length > 0) {
       return filterFragmentBlocks(deduplicateBlocks(pintiaQuestionListBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
     }
@@ -189,66 +192,75 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
   }
 
   const elements = collectCandidateElements();
-  for (const el of elements) {
-    if (preferDirectCardMode) break;
-    if (isExtensionUiElement(el)) continue;
-    if (hasStructuredContainers && !isInsideAnyContainer(el, structuredContainers)) continue;
-    if (hasStructuredContainers && structuredContainers.some((container) => container !== el && el.contains(container))) continue;
-    const rawRect = el.getBoundingClientRect();
-    const rect = applyRightCutToRect(rawRect, hostRightCutX);
-    if (!rect) continue;
-    if (!inViewport(rect, vw, vh)) continue;
-    if (rect.width < 60 || rect.height < 16) continue;
-    if (rect.width * rect.height > viewportArea * 0.75) continue;
+  if (!hasAcceptedDirectCard) {
+    // First honor structural boundaries. If they yield ZERO candidates,
+    // recover only credible independent question stems from outside the
+    // unrelated structure. Never let menu-like A/B/C/D alone gain authority.
+    for (const enforceStructuredBoundary of hasStructuredContainers ? [true, false] : [false]) {
+      for (const el of elements) {
+        if (isExtensionUiElement(el)) continue;
+        if (enforceStructuredBoundary && !isInsideAnyContainer(el, structuredContainers)) continue;
+        if (enforceStructuredBoundary && structuredContainers.some((container) => container !== el && el.contains(container))) continue;
+        const rawRect = el.getBoundingClientRect();
+        const rect = applyRightCutToRect(rawRect, hostRightCutX);
+        if (!rect) continue;
+        if (!inViewport(rect, vw, vh)) continue;
+        if (rect.width < 60 || rect.height < 16) continue;
+        if (rect.width * rect.height > viewportArea * 0.75) continue;
 
-    const text = getElementReadableText(el);
-    if (!text || text.length < 8 || text.length > 2500) continue;
-    if (isLikelyControlPanelText(text)) continue;
-    if (isLikelyNavigationElement(el, text)) continue;
-    const strongSignal = hasStrongQuestionSignal(text);
-    const contextLike = isLikelyQuestionContext(el);
-    if (!strongSignal && !contextLike) continue;
+        const text = getElementReadableText(el);
+        if (!text || text.length < 8 || text.length > 2500) continue;
+        if (isLikelyControlPanelText(text)) continue;
+        if (hasStructuredContainers && !enforceStructuredBoundary
+          && !/(?:[?？]|下列|哪项|正确的是|错误的是|属于|不属于|^\s*(?:第\s*\d{1,3}\s*题|\d{1,3}[.、)）]))/.test(text)) continue;
+        if (isLikelyNavigationElement(el, text)) continue;
+        const strongSignal = hasStrongQuestionSignal(text);
+        const contextLike = isLikelyQuestionContext(el);
+        if (!strongSignal && !contextLike) continue;
 
-    const score = scoreElement(el, text);
-    if (score.confidence < 0.35) continue;
+        const score = scoreElement(el, text);
+        if (score.confidence < 0.35) continue;
 
-    let candidateBbox = applyRightCutToBbox(refineCandidateRect(el, rect, vw, vh), hostRightCutX);
-    let previewText = buildPreviewTextForBbox(el, candidateBbox, text);
-    const previewType = inferQuestionType(previewText || text);
-    const candidateType = previewType !== "unknown" ? previewType : score.type;
-    candidateBbox = refineBboxForDetectedType(el, candidateBbox, candidateType, vw, vh);
-    previewText = sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), candidateType);
-    if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
+        let candidateBbox = applyRightCutToBbox(refineCandidateRect(el, rect, vw, vh), hostRightCutX);
+        let previewText = buildPreviewTextForBbox(el, candidateBbox, text);
+        const previewType = inferQuestionType(previewText || text);
+        const candidateType = previewType !== "unknown" ? previewType : score.type;
+        candidateBbox = refineBboxForDetectedType(el, candidateBbox, candidateType, vw, vh);
+        previewText = sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), candidateType);
+        if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
 
-    const candidate = attachDetectedQuestionIdentity({
-      id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      bbox: candidateBbox,
-      previewText: previewText.slice(0, 420),
-      hasImage: score.hasImage,
-      questionImageUrl: pickQuestionImageFromElement(el) ?? undefined,
-      questionTypeGuess: candidateType,
-      confidence: score.confidence,
-      source: "auto_dom",
-      identitySourceText: text,
-      runtimeOwnerKey: getGroupId(el),
-      boundary: boundaryFromRawRect(rawRect, vh),
-    }, el, { identityText: text });
+        const candidate = attachDetectedQuestionIdentity({
+          id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          bbox: candidateBbox,
+          previewText: previewText.slice(0, 420),
+          hasImage: score.hasImage,
+          questionImageUrl: pickQuestionImageFromElement(el) ?? undefined,
+          questionTypeGuess: candidateType,
+          confidence: score.confidence,
+          source: "auto_dom",
+          identitySourceText: text,
+          runtimeOwnerKey: getGroupId(el),
+          boundary: boundaryFromRawRect(rawRect, vh),
+        }, el, { identityText: text });
 
-    const gid = getGroupId(el);
-    const rank = completenessScore(candidate.previewText, candidateType, score.confidence);
-    const prev = groupRank.get(gid) ?? -Infinity;
-    if (rank > prev) {
-      groupRank.set(gid, rank);
-      grouped.set(gid, candidate);
+        const gid = getGroupId(el);
+        const rank = completenessScore(candidate.previewText, candidateType, score.confidence);
+        const prev = groupRank.get(gid) ?? -Infinity;
+        if (rank > prev) {
+          groupRank.set(gid, rank);
+          grouped.set(gid, candidate);
+        }
+      }
+      if (grouped.size > 0) break;
     }
   }
 
   const blocks = [...grouped.values()];
 
   // Hard isolation for card-structured pages:
-  // when direct-card mode is active, return card candidates only.
+  // when an actual direct-card candidate was accepted, return those only.
   // This prevents cross-question merging/fragment filtering side-effects.
-  if (preferDirectCardMode && blocks.length > 0) {
+  if (hasAcceptedDirectCard && blocks.length > 0) {
     return blocks.sort((a, b) => a.bbox.y - b.bbox.y).map(withQuestionCompleteness);
   }
 
