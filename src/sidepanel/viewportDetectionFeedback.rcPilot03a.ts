@@ -54,8 +54,8 @@ export function viewportDetectionSnapshotFeedback(
       const reasonEn = topReason && topReason.n > 0
         ? `Main rejection reason: ${topReason.en} (${topReason.n}).` : "No usable question candidate was formed.";
       return userFeedback("warning", lang === "en"
-        ? `The detector probed ${probes.probedElements} top-document DOM element(s) but retained zero questions. ${reasonEn} Check whether the page has loaded or is supported.`
-        : `当前屏检测器探测了 ${probes.probedElements} 个顶层 DOM 元素，但保留题目数为 0。${reasonZh}请检查页面加载状态或题目布局。`,
+        ? `The detector performed ${probes.probedElements} top-document DOM candidate probe(s), but retained zero questions. ${reasonEn} Check whether the page has loaded or is supported.`
+        : `当前屏检测器进行了 ${probes.probedElements} 次顶层 DOM 候选探测，但保留题目数为 0。${reasonZh}请检查页面加载状态或题目布局。`,
         { code: "VIEWPORT_DETECT_FILTERED_EMPTY" });
     }
     return userFeedback(
