@@ -58,6 +58,39 @@ describe("Koolearn isolated DOM card structural choice recovery", () => {
     expect(diagnostics.acceptedCandidates).toBeGreaterThan(0);
   });
 
+  it("R4 assigns one candidate per nested structural card, never its enclosing list", () => {
+    document.body.innerHTML = `<main><section data-list>
+      <div data-wrapper>${card()}</div>
+      <div data-wrapper>${card("下列哪一种课堂教学活动能够更充分体现学生主动学习与合作探究？")}</div>
+    </section></main>`;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 960 });
+    const boxes = Array.from(document.querySelectorAll("[data-card]"));
+    const rect = (top: number) => ({
+      x: 523, y: top, left: 523, top, right: 1213,
+      bottom: top + 216, width: 690, height: 216,
+    });
+    boxes.forEach((box, index) => {
+      const top = 140 + index * 320;
+      Object.defineProperty(box, "getBoundingClientRect", { configurable: true, value: () => rect(top) });
+      box.querySelectorAll("*").forEach((node, i) => {
+        const childTop = top + 8 + (i % 16) * 8;
+        Object.defineProperty(node, "getBoundingClientRect", { configurable: true,
+          value: () => ({
+            ...rect(childTop), x: 535, left: 535, width: 660, height: 16,
+            right: 1195, bottom: childTop + 16,
+          }),
+        });
+      });
+    });
+    const diagnostics = createDomCandidateDiagnostics();
+    const found = detectCandidatesInViewport(diagnostics);
+    expect(found.filter(x => x.previewText.includes("品德心理结构"))).toHaveLength(1);
+    expect(found.filter(x => x.previewText.includes("课堂教学活动"))).toHaveLength(1);
+    expect(found).toHaveLength(2);
+    expect(new Set(found.map(x => x.runtimeOwnerKey)).size).toBe(2);
+  });
+
   it("never merges four choices across two independent question cards", () => {
     document.body.innerHTML = `<section id="list">${card()}${card("下列哪一种课堂教学活动能够更充分体现学生主动学习与合作探究？")}</section>`;
     const list = document.getElementById("list")!;
