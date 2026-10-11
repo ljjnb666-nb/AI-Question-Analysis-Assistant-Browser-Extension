@@ -137,6 +137,86 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it("R9A-01 recovers a late-mounted second viewport question without extra steps", async () => {
+    pageHeight = 1800;
+    const initial = {
+      id: "first-card", bbox: { x: 40, y: 160, width: 680, height: 300 },
+      previewText: "下列哪种方式属于合作学习？ A. 分组讨论 B. 个人抄写 C. 回避任务 D. 机械重复",
+      questionTypeGuess: "single_choice" as const, confidence: 0.91,
+      source: "auto_dom" as const, hasImage: false,
+    };
+    const late = {
+      ...initial, id: "late-card", bbox: { x: 40, y: 160, width: 680, height: 300 },
+      previewText: "关于课堂管理的正确说法是什么？ A. 明确规则 B. 忽略需求 C. 取消反馈 D. 随意变更",
+    };
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      if (top === 0) return [initial];
+      return top === 600 && document.querySelector("[data-r9a-late]") ? [late] : [];
+    });
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage(p => progress.push(p));
+    setTimeout(() => {
+      const card = document.createElement("article");
+      card.setAttribute("data-r9a-late", "");
+      document.querySelector("main")!.append(card);
+    }, 750); // After step 2 enters its 650ms late-mount window.
+    await vi.runAllTimersAsync();
+    const result = await scan;
+    expect(result).toHaveLength(2);
+    expect(result.map(r => r.previewText)).toEqual(expect.arrayContaining([
+      expect.stringContaining("合作学习"), expect.stringContaining("课堂管理"),
+    ]));
+    expect(progress.map(p => p.currentStep)).toEqual([1, 2, 3]);
+    expect(progress.every(p => p.totalScrollSteps === 3 && p.currentStep <= 3)).toBe(true);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(4);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("R9A-02 STOP fences a later viewport mutation and forbids stale progress/restore", async () => {
+    pageHeight = 1800;
+    const initial = {
+      id: "first-card", bbox: { x: 40, y: 160, width: 680, height: 300 },
+      previewText: "下列哪种行为属于有效沟通？ A. 主动倾听 B. 打断他人 C. 忽略反馈 D. 拒绝讨论",
+      questionTypeGuess: "single_choice" as const, confidence: 0.91,
+      source: "auto_dom" as const, hasImage: false,
+    };
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() =>
+      top === 0 ? [initial] : []);
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage(p => progress.push(p));
+    await vi.advanceTimersByTimeAsync(650); // second viewport is waiting
+    expect(progress.map(p => p.currentStep)).toEqual([1]);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(2);
+    cancelFullPageScan();
+    document.querySelector("main")!.append(document.createElement("article"));
+    await vi.runAllTimersAsync();
+    expect(await scan).toHaveLength(1);
+    expect(progress.map(p => p.currentStep)).toEqual([1]);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(2);
+    expect(scrollTo).toHaveBeenCalledTimes(2); // initial and step 2; no restore
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("R9A-03 later readiness stays bounded when all 15 scan steps remain empty", async () => {
+    pageHeight = 9000;
+    let probes = 0;
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      probes++;
+      if (probes === 1) pageHeight = 120_000;
+      return [];
+    });
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage(p => progress.push(p));
+    setTimeout(() => document.querySelector("main")!.append(document.createElement("article")), 500);
+    setTimeout(() => document.querySelector("main")!.append(document.createElement("section")), 1450);
+    await vi.runAllTimersAsync();
+    expect(await scan).toEqual([]);
+    expect(progress.map(p => p.currentStep)).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
+    expect(progress.every(p => p.totalScrollSteps === 15 && p.currentStep <= 15)).toBe(true);
+    expect(probes).toBe(17); // 15 real steps + at most two bounded same-step rechecks
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("R13D preserves an accepted long choice question when its option D is after preview truncation", async () => {
     pageHeight = 600;
     const question = {
