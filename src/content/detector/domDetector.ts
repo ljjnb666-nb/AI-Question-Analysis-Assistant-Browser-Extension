@@ -1013,7 +1013,10 @@ function isLikelyNavigationElement(el: Element, text: string): boolean {
   const tag = el.tagName.toLowerCase();
   if (["nav", "header", "footer", "aside"].includes(tag)) return true;
   const linkCount = el.querySelectorAll("a").length;
-  if (linkCount >= 6 && !hasStrongQuestionSignal(text)) return true;
+  // A navigation menu may literally contain A/B/C/D link captions. Do
+  // not promote those into a question just because markers raise its score.
+  // Explicit question-card ownership is the only exception.
+  if (linkCount >= 6 && !el.closest(".question-item,.questionBox,.base-question-component,.q-detail")) return true;
   return false;
 }
 
