@@ -93,7 +93,10 @@ describe("UI-04A Side Panel opening fence", () => {
     const newest = fixture({ runtimeInstanceId: "tab-8-runtime", runtimeGeneration: 1, seq: 1 });
     h.request.mockResolvedValueOnce({ ok: true, snapshot: newest });
     h.switchTab(8, newest.originUrl); // same URL, DIFFERENT Tab
-    await vi.waitFor(() => expect(h.last()?.[0]).toBe("ready") && expect(h.last()?.[2].tabId).toBe(8));
+    await vi.waitFor(() => {
+      expect(h.last()?.[0]).toBe("ready");
+      expect(h.last()?.[2].tabId).toBe(8);
+    });
     expect(h.last()?.[1].runtimeInstanceId).toBe("tab-8-runtime");
     const count = h.publish.mock.calls.length;
     h.event(fixture({ seq: 999, runtimeInstanceId: "old-tab-runtime", runtimeGeneration: 10 }), 7);
