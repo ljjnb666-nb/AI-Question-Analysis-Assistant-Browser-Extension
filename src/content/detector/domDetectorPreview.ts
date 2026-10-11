@@ -36,9 +36,10 @@ export function buildPreviewText(el: Element, fallbackText: string): string {
     .filter((s) => !/^(答案\s*[:：]|查看解析|收藏|试题篮|难度\s*[:：])/.test(s));
 
   const compact = normalizeText(pieces.join(" "));
-  return compact.length >= 20 ? compact : fallbackText.slice(0, 420);
+  return compact.length >= 20 ? compact : fallbackText;
 }
 
+/** Validate the full question text inside this bbox, then truncate only the emitted preview. */
 export function buildPreviewTextForBbox(el: Element, bbox: BoundingBox, fallbackText: string): string {
   const bodyLike = el.querySelector(".card-body,.q-body,.question-body,.stem,article,section");
   const sourceNode = bodyLike ?? el;
@@ -88,21 +89,21 @@ export function buildPreviewTextForBbox(el: Element, bbox: BoundingBox, fallback
         && sourceRect.left >= bbox.x - 2 && sourceRect.top >= bbox.y - 2
         && sourceRect.right <= bbox.x + bbox.width + 2
         && sourceRect.bottom <= bbox.y + bbox.height + 2) {
-        return sanitizePreviewText(restored).slice(0, 420);
+        return sanitizePreviewText(restored);
       }
     }
   }
-  if (compact.length >= 20) return compact.slice(0, 420);
+  if (compact.length >= 20) return compact;
 if (isHtmlElementNode(sourceNode)) {
     const sourceRect = sourceNode.getBoundingClientRect();
     if (sourceRect.width >= 2 && sourceRect.height >= 2 && bboxIntersectsRect(bbox, sourceRect)) {
       const sourceText = sanitizePreviewText(extractReadableNodeText(sourceNode));
       if (sourceText.length >= 20 && !isLikelyControlPanelText(sourceText) && !isLikelyActionText(sourceText)) {
-        return sourceText.slice(0, 420);
+        return sourceText;
       }
     }
   }
-  return sanitizePreviewText(buildPreviewText(el, fallbackText)).slice(0, 420);
+  return sanitizePreviewText(buildPreviewText(el, fallbackText));
 }
 
 function mergePreviewEntries(entries: Array<{ top: number; left: number; text: string }>): string {

@@ -86,6 +86,31 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(result[0].id).toMatch(/^fullpage-/);
   });
 
+  it("R8A-05 sends immutable numeric-only DOM counts and STOP never publishes another scan step", async () => {
+    pageHeight = 9000;
+    vi.mocked(detectCandidatesInViewport).mockImplementation((d) => {
+      if (d) {
+        d.probedElements += 3;
+        d.rejected.completeness += 2;
+        d.acceptedCandidates += 1;
+      }
+      return [];
+    });
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => {
+      progress.push(p);
+      cancelFullPageScan();
+    });
+    await vi.runAllTimersAsync();
+    expect(await scan).toEqual([]);
+    expect(progress).toHaveLength(1);
+    expect(progress[0].domDiagnostics).toMatchObject({
+      probedElements: 3, acceptedCandidates: 1, rejected: { completeness: 2 },
+    });
+    expect(JSON.stringify(progress[0].domDiagnostics)).not.toContain("Public question page fixture");
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("RC03B-R3 CANCEL during readiness recheck cannot revive old scan authority", async () => {
     document.body.setAttribute("aria-busy", "true");
     const scan = detectCandidatesFullPage(() => undefined);

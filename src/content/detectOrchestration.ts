@@ -1,4 +1,4 @@
-import type { QuestionBlock } from "@/shared/types";
+import type { QuestionBlock, DomCandidateDiagnostics } from "@/shared/types";
 import type { ScanScrollRoot } from "./detector/fullPageDetector";
 import { CandidateRootAggregation } from "./candidateRootAggregation";
 import { projectCandidateSnapshots } from "./candidateWorkspaceRuntime";
@@ -17,6 +17,7 @@ type FullPageProgress = {
   totalScrollSteps: number;
   observedCandidates?: number;
   retainedCandidates?: number;
+  domDiagnostics?: DomCandidateDiagnostics;
 };
 
 type FullPageDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], statusMap: Map<string, CandidateStatus>) => void }> = {
@@ -119,12 +120,14 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
   let failureStage: "scanning" | "refining" | "publishing" = "scanning";
   let observedCandidates = 0;
   let retainedCandidates = 0;
+  let domDiagnostics: DomCandidateDiagnostics | undefined;
   let postprocessedCandidates = 0;
   let refinedCandidates = 0;
   try {
     const roughCandidates = await deps.detectCandidatesFullPage((p) => {
       if (typeof p.observedCandidates === "number") observedCandidates = p.observedCandidates;
       if (typeof p.retainedCandidates === "number") retainedCandidates = p.retainedCandidates;
+      if (p.domDiagnostics) domDiagnostics = { ...p.domDiagnostics, rejected: { ...p.domDiagnostics.rejected } };
       if (!isCurrentRoute()) return;
       deps.safeRuntimeSendMessage({
         type: "FULL_PAGE_DETECT_PROGRESS",
@@ -134,6 +137,7 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
         totalScrollSteps: p.totalScrollSteps,
         observedCandidates,
         retainedCandidates,
+        ...(domDiagnostics ? { domDiagnostics } : {}),
       });
     }, isCurrentRoute);
     if (!isCurrentRoute()) {
@@ -190,7 +194,8 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
         : postprocessedCandidates ? "refinement_empty"
         : retainedCandidates ? "postprocess_empty"
         : observedCandidates ? "filtered_empty" : "no_candidates",
-      diagnostics: { observedCandidates, retainedCandidates, postprocessedCandidates, refinedCandidates },
+      diagnostics: { observedCandidates, retainedCandidates, postprocessedCandidates, refinedCandidates,
+        ...(domDiagnostics ? { domDiagnostics } : {}) },
     });
 
     return { ...state, highlightLayer };
@@ -212,7 +217,8 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
       totalFound: 0,
       outcome: "failed",
       failureStage,
-      diagnostics: { observedCandidates, retainedCandidates, postprocessedCandidates, refinedCandidates },
+      diagnostics: { observedCandidates, retainedCandidates, postprocessedCandidates, refinedCandidates,
+        ...(domDiagnostics ? { domDiagnostics } : {}) },
     });
     return failedResult;
   }

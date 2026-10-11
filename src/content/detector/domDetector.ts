@@ -6,7 +6,7 @@ import { bboxIntersectsRect, isExtensionUiElement, isHtmlElementNode, isLikelyAc
  * - Filters control-panel/navigation blocks
  */
 
-import type { QuestionBlock, QuestionType, BoundingBox, QuestionDisplaySegment } from "@/shared/types";
+import type { QuestionBlock, QuestionType, BoundingBox, QuestionDisplaySegment, DomCandidateDiagnostics } from "@/shared/types";
 import { logWarn } from "@/shared/utils/errorLogger";
 import {
   refineBboxForDetectedType as refineBboxForDetectedTypeCore,
@@ -96,7 +96,21 @@ export function detectCandidatesAcrossRoots(): QuestionBlock[] {
   return merged.sort((a, b) => a.bbox.y - b.bbox.y);
 }
 
-export function detectCandidatesInViewport(): QuestionBlock[] {
+/** Numeric-only diagnostics; each viewport may be probed again after a bounded readiness retry. */
+export function createDomCandidateDiagnostics(): DomCandidateDiagnostics {
+  return { probedElements: 0, acceptedCandidates: 0,
+    rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0 } };
+}
+
+export function detectCandidatesInViewport(diagnostics?: DomCandidateDiagnostics): QuestionBlock[] {
+  const probe = () => { if (diagnostics) diagnostics.probedElements++; };
+  const reject = (reason: keyof DomCandidateDiagnostics["rejected"]) => {
+    if (diagnostics) diagnostics.rejected[reason]++;
+  };
+  const finish = (blocks: QuestionBlock[]) => {
+    if (diagnostics) diagnostics.acceptedCandidates += blocks.length;
+    return blocks;
+  };
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const viewportArea = Math.max(1, vw * vh);
@@ -129,19 +143,18 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
   const preferDirectCardMode = directCardBodies.length >= 1;
   for (const [directIndex, el] of directCardBodies.entries()) {
     if (isExtensionUiElement(el)) continue;
+    probe();
     const structuredHost = el.querySelector(".question-item, .questionBox, .base-question-component");
     const rectSource =(isHtmlElementNode(structuredHost) ? structuredHost : el) as HTMLElement;
     const rawRect = rectSource.getBoundingClientRect();
     const rect = applyRightCutToRect(rawRect, hostRightCutX);
-    if (!rect) continue;
-    if (!inViewport(rect, vw, vh)) continue;
-    if (rect.width < 80 || rect.height < 16) continue;
+    if (!rect || !inViewport(rect, vw, vh) || rect.width < 80 || rect.height < 16) { reject("geometry"); continue; }
 
     const text = structuredHost
       ? extractStructuredQuestionText(structuredHost)
       : getElementReadableText(el);
-    if (!text || text.length < 10) continue;
-    if (isLikelyControlPanelText(text)) continue;
+    if (!text || text.length < 10) { reject("text"); continue; }
+    if (isLikelyControlPanelText(text)) { reject("controls"); continue; }
 
     let candidateBbox = applyRightCutToBbox(refineCandidateRect(rectSource, rect, vw, vh), hostRightCutX);
     let previewText = buildPreviewTextForBbox(el, candidateBbox, text);
@@ -150,7 +163,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
     previewText = structuredHost
       ? sanitizePreviewTextByType(text, guessed)
       : sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), guessed);
-    if (!isLikelyCompleteQuestionText(previewText, guessed)) continue;
+    if (!isLikelyCompleteQuestionText(previewText, guessed)) { reject("completeness"); continue; }
     const candidate = attachDetectedQuestionIdentity({
       id: `auto-direct-${Date.now()}-${directIndex}-${Math.random().toString(36).slice(2, 8)}`,
       bbox: candidateBbox,
@@ -180,14 +193,15 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
   const hasAcceptedDirectCard = preferDirectCardMode && grouped.size > 0;
   if (!hasAcceptedDirectCard) {
     if (pintiaQuestionListBlocks.length > 0) {
-      return filterFragmentBlocks(deduplicateBlocks(pintiaQuestionListBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
+      return finish(filterFragmentBlocks(deduplicateBlocks(pintiaQuestionListBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness));
     }
     const stableContainerBlocks = buildStableStructuredContainerCandidates(stableQuestionCards, hostRightCutX, vw, vh);
+    if (diagnostics) diagnostics.probedElements += stableQuestionCards.length;
     if (stableContainerBlocks.length > 0) {
-      return filterFragmentBlocks(deduplicateBlocks(stableContainerBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
+      return finish(filterFragmentBlocks(deduplicateBlocks(stableContainerBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness));
     }
     if (pintiaCodeProblemBlocks.length > 0 && !hasStructuredContainers) {
-      return filterFragmentBlocks(deduplicateBlocks(pintiaCodeProblemBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
+      return finish(filterFragmentBlocks(deduplicateBlocks(pintiaCodeProblemBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness));
     }
   }
 
@@ -201,25 +215,24 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
         if (isExtensionUiElement(el)) continue;
         if (enforceStructuredBoundary && !isInsideAnyContainer(el, structuredContainers)) continue;
         if (enforceStructuredBoundary && structuredContainers.some((container) => container !== el && el.contains(container))) continue;
+        probe();
         const rawRect = el.getBoundingClientRect();
         const rect = applyRightCutToRect(rawRect, hostRightCutX);
-        if (!rect) continue;
-        if (!inViewport(rect, vw, vh)) continue;
-        if (rect.width < 60 || rect.height < 16) continue;
-        if (rect.width * rect.height > viewportArea * 0.75) continue;
+        if (!rect || !inViewport(rect, vw, vh) || rect.width < 60 || rect.height < 16
+          || rect.width * rect.height > viewportArea * 0.75) { reject("geometry"); continue; }
 
         const text = getElementReadableText(el);
-        if (!text || text.length < 8 || text.length > 2500) continue;
-        if (isLikelyControlPanelText(text)) continue;
+        if (!text || text.length < 8 || text.length > 2500) { reject("text"); continue; }
+        if (isLikelyControlPanelText(text)) { reject("controls"); continue; }
         if (hasStructuredContainers && !enforceStructuredBoundary
-          && !/(?:[?？]|下列|哪项|正确的是|错误的是|属于|不属于|^\s*(?:第\s*\d{1,3}\s*题|\d{1,3}[.、)）]))/.test(text)) continue;
-        if (isLikelyNavigationElement(el, text)) continue;
+          && !/(?:[?？]|下列|哪项|正确的是|错误的是|属于|不属于|^\s*(?:第\s*\d{1,3}\s*题|\d{1,3}[.、)）]))/.test(text)) { reject("signal"); continue; }
+        if (isLikelyNavigationElement(el, text)) { reject("navigation"); continue; }
         const strongSignal = hasStrongQuestionSignal(text);
         const contextLike = isLikelyQuestionContext(el);
-        if (!strongSignal && !contextLike) continue;
+        if (!strongSignal && !contextLike) { reject("signal"); continue; }
 
         const score = scoreElement(el, text);
-        if (score.confidence < 0.35) continue;
+        if (score.confidence < 0.35) { reject("confidence"); continue; }
 
         let candidateBbox = applyRightCutToBbox(refineCandidateRect(el, rect, vw, vh), hostRightCutX);
         let previewText = buildPreviewTextForBbox(el, candidateBbox, text);
@@ -227,7 +240,7 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
         const candidateType = previewType !== "unknown" ? previewType : score.type;
         candidateBbox = refineBboxForDetectedType(el, candidateBbox, candidateType, vw, vh);
         previewText = sanitizePreviewTextByType(buildPreviewTextForBbox(el, candidateBbox, text), candidateType);
-        if (!isLikelyCompleteQuestionText(previewText, candidateType)) continue;
+        if (!isLikelyCompleteQuestionText(previewText, candidateType)) { reject("completeness"); continue; }
 
         const candidate = attachDetectedQuestionIdentity({
           id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -261,11 +274,11 @@ export function detectCandidatesInViewport(): QuestionBlock[] {
   // when an actual direct-card candidate was accepted, return those only.
   // This prevents cross-question merging/fragment filtering side-effects.
   if (hasAcceptedDirectCard && blocks.length > 0) {
-    return blocks.sort((a, b) => a.bbox.y - b.bbox.y).map(withQuestionCompleteness);
+    return finish(blocks.sort((a, b) => a.bbox.y - b.bbox.y).map(withQuestionCompleteness));
   }
 
   const merged = mergeAdjacentQuestionBlocks(deduplicateBlocks(blocks).sort((a, b) => a.bbox.y - b.bbox.y));
-  return filterFragmentBlocks(merged).map(withQuestionCompleteness);
+  return finish(filterFragmentBlocks(merged).map(withQuestionCompleteness));
 }
 
 function buildStableStructuredContainerCandidates(
