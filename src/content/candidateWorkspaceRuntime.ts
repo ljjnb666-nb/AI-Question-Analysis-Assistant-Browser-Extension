@@ -1,4 +1,4 @@
-import type { AutoSolveProgressMsg, CandidateSnapshot, CandidateWorkspaceSnapshot, FullPageDetectProgressMsg, FullPageDetectDoneMsg, ParseStatus, QuestionBlock } from "@/shared/types";
+import type { AutoSolveProgressMsg, CandidateSnapshot, CandidateWorkspaceSnapshot, FullPageDetectProgressMsg, FullPageDetectDoneMsg, DomCandidateDiagnostics, ParseStatus, QuestionBlock } from "@/shared/types";
 import { sanitizeQuestionBlockForRuntimeMessage, sanitizeQuestionBlockForSerialization } from "@/shared/utils/mediaSerialization";
 
 export function normalizeCandidateStatus(status: string | undefined): ParseStatus {
