@@ -97,7 +97,7 @@ describe("RC-PILOT-03A current-screen verified feedback", () => {
     const payload = runtime.snapshot(origin.url);
     const feedback = viewportDetectionSnapshotFeedback("zh", origin, payload, id);
     expect(feedback.code).toBe("VIEWPORT_DETECT_FILTERED_EMPTY");
-    expect(feedback.message).toContain("探测了 8 个");
+    expect(feedback.message).toContain("进行了 8 次");
     expect(feedback.message).toContain("题目完整性（6 次）");
     expect(feedback.message).not.toContain(origin.url);
     // A different request ID cannot inherit this run's numeric counts.
