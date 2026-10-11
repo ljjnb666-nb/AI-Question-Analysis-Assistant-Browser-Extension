@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import type { QuestionBlock } from "@/shared/types";
 import { DEFAULT_ANALYTICS_BASE_URL } from "@/shared/constants/analytics";
 import { loadSettings, saveSettings } from "@/shared/utils/storage";
 import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
 import { getConnectionTestNotConfiguredMessage } from "@/shared/ai/parseResultAuthority";
 import { mapUserFacingError, userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
-import { parseQuestion } from "@/shared/utils/parseRouter";
+import { runCommittedAIConnectionProbe } from "./runCommittedAIConnectionProbe";
+import { AIConnectionCommandError } from "@/shared/utils/aiConnectionClient";
 import { getProvider } from "@/shared/ai/providers";
 import { logEvent } from "@/shared/utils/analytics";
 import { getAuthText } from "@/shared/auth/authText";
@@ -417,7 +417,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       validatedReceipt.validationGeneration === activeMetadata.validation.generation)
   );
 
-  const isCommittedValidated = Boolean(isAuthorityAvailable && activeMetadata && (isReceiptMatch || isPersistedValidationMatch));
+  // An in-session receipt is only a coherence hint; only the persisted background
+  // revision-bound record grants Ready, including after reload/cross-surface refresh.
+  const isCommittedValidated = Boolean(isAuthorityAvailable && activeMetadata && isPersistedValidationMatch && (!validatedReceipt || isReceiptMatch));
 
   // In editor, validation is invalidated if connection draft is dirty (provider/model/key/url/protocol changed)
   const isValidated = useMemo(() => {
@@ -653,54 +655,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         setCommittedTestResult(warningFeedback);
         return;
       }
-      const testBlock: QuestionBlock = {
-        id: "test",
-        bbox: { x: 0, y: 0, width: 100, height: 50 },
-        previewText: "1+1=? A.1 B.2 C.3 D.4",
-        hasImage: false,
-        questionTypeGuess: "single_choice",
-        confidence: 1,
-        source: "manual_capture",
-      };
-      const result = await parseQuestion(testBlock, { preferredRoute: "text", language: lang });
-      const afterMeta = await getAIConnectionActiveMetadata().catch(() => null);
-      if (!afterMeta) {
-        setValidatedReceipt(null);
-        setActiveMetadata(null);
-        const feedback = userFeedback(
-          "warning",
-          isEn ? "Configuration changed during test. Please re-test." : "测试期间配置已发生变化，请重新测试。",
-          { code: "CONFIGURATION_CHANGED" }
-        );
-        setCommittedTestResult(feedback);
-        setTestResult(feedback);
-        return;
-      }
-
-      const isGenerationMatch =
-        beforeMeta.validation?.generation === undefined ||
-        afterMeta.validation?.generation === undefined ||
-        beforeMeta.validation.generation === afterMeta.validation.generation;
-
-      const isAuthorityMatch =
-        beforeMeta.id === afterMeta.id &&
-        beforeMeta.connectionRevision === afterMeta.connectionRevision &&
-        (beforeMeta.credentialRevision ?? 0) === (afterMeta.credentialRevision ?? 0) &&
-        isGenerationMatch;
-
-      if (!isAuthorityMatch) {
-        setValidatedReceipt(null);
-        setActiveMetadata(afterMeta);
-        const feedback = userFeedback(
-          "warning",
-          isEn ? "Configuration changed during test. Please re-test." : "测试期间配置已发生变化，请重新测试。",
-          { code: "CONFIGURATION_CHANGED" }
-        );
-        setCommittedTestResult(feedback);
-        setTestResult(feedback);
-        return;
-      }
-
+      const { result, metadata: afterMeta } = await runCommittedAIConnectionProbe(beforeMeta, lang);
       setActiveMetadata(afterMeta);
       setValidatedReceipt({
         connectionId: afterMeta.id,
@@ -731,7 +686,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       setCommittedTestResult(feedback);
       setTestResult(feedback);
     } catch (error) {
-      const feedback = mapUserFacingError(error, isEn ? "en" : "zh", { context: "connection-test" });
+      const feedback = error instanceof AIConnectionCommandError && error.code === "AI_CONNECTION_VALIDATION_STALE"
+        ? userFeedback("warning", isEn ? "Configuration changed during test. Please re-test." : "测试期间配置已发生变化，请重新测试。", { code: "CONFIGURATION_CHANGED" })
+        : mapUserFacingError(error, isEn ? "en" : "zh", { context: "connection-test" });
       setCommittedTestResult(feedback);
       setTestResult(feedback);
     } finally {
@@ -773,54 +730,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         setTestResult(userFeedback("warning", getConnectionTestNotConfiguredMessage(isEn ? "en" : "zh"), { code: readiness.code }));
         return;
       }
-      const testBlock: QuestionBlock = {
-        id: "test",
-        bbox: { x: 0, y: 0, width: 100, height: 50 },
-        previewText: "1+1=? A.1 B.2 C.3 D.4",
-        hasImage: false,
-        questionTypeGuess: "single_choice",
-        confidence: 1,
-        source: "manual_capture",
-      };
-      const result = await parseQuestion(testBlock, { preferredRoute: "text", language: lang });
-      const afterMeta = await getAIConnectionActiveMetadata().catch(() => null);
-      if (!afterMeta) {
-        setValidatedReceipt(null);
-        setActiveMetadata(null);
-        const feedback = userFeedback(
-          "warning",
-          isEn ? "Configuration changed during test. Please re-test." : "测试期间配置已发生变化，请重新测试。",
-          { code: "CONFIGURATION_CHANGED" }
-        );
-        setTestResult(feedback);
-        setCommittedTestResult(feedback);
-        return;
-      }
-
-      const isGenerationMatch =
-        beforeMeta.validation?.generation === undefined ||
-        afterMeta.validation?.generation === undefined ||
-        beforeMeta.validation.generation === afterMeta.validation.generation;
-
-      const isAuthorityMatch =
-        beforeMeta.id === afterMeta.id &&
-        beforeMeta.connectionRevision === afterMeta.connectionRevision &&
-        (beforeMeta.credentialRevision ?? 0) === (afterMeta.credentialRevision ?? 0) &&
-        isGenerationMatch;
-
-      if (!isAuthorityMatch) {
-        setValidatedReceipt(null);
-        setActiveMetadata(afterMeta);
-        const feedback = userFeedback(
-          "warning",
-          isEn ? "Configuration changed during test. Please re-test." : "测试期间配置已发生变化，请重新测试。",
-          { code: "CONFIGURATION_CHANGED" }
-        );
-        setTestResult(feedback);
-        setCommittedTestResult(feedback);
-        return;
-      }
-
+      const { result, metadata: afterMeta } = await runCommittedAIConnectionProbe(beforeMeta, lang);
       setActiveMetadata(afterMeta);
       setValidatedReceipt({
         connectionId: afterMeta.id,
@@ -851,7 +761,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       setTestResult(feedback);
       setCommittedTestResult(feedback);
     } catch (error) {
-      const feedback = mapUserFacingError(error, isEn ? "en" : "zh", { context: "connection-test" });
+      const feedback = error instanceof AIConnectionCommandError && error.code === "AI_CONNECTION_VALIDATION_STALE"
+        ? userFeedback("warning", isEn ? "Configuration changed during test. Please re-test." : "测试期间配置已发生变化，请重新测试。", { code: "CONFIGURATION_CHANGED" })
+        : mapUserFacingError(error, isEn ? "en" : "zh", { context: "connection-test" });
       setTestResult(feedback);
     } finally {
       setTestingTarget("none");
