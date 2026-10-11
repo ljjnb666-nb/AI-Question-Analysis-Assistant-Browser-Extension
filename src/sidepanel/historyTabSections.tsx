@@ -103,6 +103,12 @@ export const HistoryRecordCard: React.FC<{
         </div>
       ) : null}
 
+      {entry.result.warning ? (
+        <div role="status" style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(245, 158, 11, 0.35)", color: "#fde68a", background: "rgba(120, 53, 15, 0.22)", fontSize: 12, lineHeight: 1.55 }}>
+          {entry.result.warning}
+        </div>
+      ) : null}
+
       <HistoryQuestionContent
         blankView={blankView}
         dtype={dtype}
