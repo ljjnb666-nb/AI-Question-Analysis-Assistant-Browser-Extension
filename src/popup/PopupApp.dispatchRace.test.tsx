@@ -12,6 +12,8 @@ vi.mock("@/shared/utils/analytics", () => ({ logEvent: vi.fn() }));
 const sentRuntimeMessages: string[] = [];
 const sentTabTargets: Array<{ tabId: number; type: string }> = [];
 const sentStartGenerations: Array<string | undefined> = [];
+const sentViewportRequests: Array<{ tabId: number; requestId?: string; expectedUrl?: string }> = [];
+let viewportReplyOverride: ((requestId: string | undefined) => Promise<unknown>) | null = null;
 
 vi.mock("@/shared/utils/messaging", () => ({
   sendToActiveTab: vi.fn(async (message: { type: string }) => {
@@ -20,10 +22,14 @@ vi.mock("@/shared/utils/messaging", () => ({
   }),
   // The popup dispatches long-running work straight to the recorded owner
   // tab; keep that channel observable too.
-  sendToTabWithBootstrap: vi.fn(async (tabId: number, message: { type: string; generationId?: string }) => {
+  sendToTabWithBootstrap: vi.fn(async (tabId: number, message: { type: string; generationId?: string; requestId?: string; expectedUrl?: string }) => {
     sentRuntimeMessages.push(message.type);
     sentTabTargets.push({ tabId, type: message.type });
     sentStartGenerations.push(message.generationId);
+    if (message.type === "START_AUTO_DETECT") {
+      sentViewportRequests.push({ tabId, requestId: message.requestId, expectedUrl: message.expectedUrl });
+      return viewportReplyOverride ? viewportReplyOverride(message.requestId) : { ok: true, requestId: message.requestId };
+    }
     return {};
   }),
   isInjectablePageUrl: (url: string | undefined) => /^https?:/i.test(String(url || "")),
@@ -87,6 +93,7 @@ const sessionApi = {
   },
   tabs: {
     query: vi.fn(async () => [{ id: 5, windowId: 1, url: "https://quiz.example.com/exam", active: true }]),
+    get: vi.fn(async () => ({ id: 5, windowId: 1, url: "https://quiz.example.com/exam", active: true })),
     sendMessage: vi.fn(async () => ({})),
   },
   sidePanel: { open: vi.fn(() => deferredSidePanelOpen ?? Promise.resolve()) },
@@ -128,6 +135,9 @@ beforeEach(async () => {
   sentRuntimeMessages.length = 0;
   sentTabTargets.length = 0;
   sentStartGenerations.length = 0;
+  sentViewportRequests.length = 0;
+  viewportReplyOverride = null;
+  vi.spyOn(window, "close").mockImplementation(() => undefined);
   store.clear();
   sessionStore.clear();
   storageListeners.length = 0;
@@ -196,6 +206,71 @@ describe("PopupApp protected dispatch authority", () => {
     });
 
     await waitFor(() => expect(sentRuntimeMessages).toEqual(["START_AUTO_DETECT"]), { timeout: 10_000 });
+    expect(sentTabTargets).toEqual([{ tabId: 5, type: "START_AUTO_DETECT" }]);
+    expect(sentViewportRequests).toHaveLength(1);
+    expect(sentViewportRequests[0]).toMatchObject({
+      tabId: 5, expectedUrl: "https://quiz.example.com/exam",
+    });
+    expect(sentViewportRequests[0]?.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27,}$/);
+    expect(window.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("RC03A_R5_POPUP_ACK_ONLY never closes on a transport ACK without exact completion", async () => {
+    viewportReplyOverride = async () => ({ ok: true });
+    render(<PopupApp />);
+    await screen.findByText(/当前屏识别|Detect Current View/);
+    fireEvent.click(screen.getByText(/当前屏识别|Detect Current View/));
+    await waitFor(() => expect(screen.getByText(/识别失败或结果未获确认/)).toBeInTheDocument());
+    expect(window.close).not.toHaveBeenCalled();
+    expect(sentViewportRequests).toHaveLength(1);
+  });
+
+  it("RC03A_R5_POPUP_BUSY reports an existing cross-surface run without false success", async () => {
+    viewportReplyOverride = async requestId => ({ ok: false, requestId, error: "WORK_ALREADY_RUNNING" });
+    render(<PopupApp />);
+    await screen.findByText(/当前屏识别|Detect Current View/);
+    fireEvent.click(screen.getByText(/当前屏识别|Detect Current View/));
+    await waitFor(() => expect(screen.getByText(/已有识别任务正在运行/)).toBeInTheDocument());
+    expect(window.close).not.toHaveBeenCalled();
+  });
+
+  it("RC03A_R5_POPUP_REQUEST_MISMATCH rejects a successful reply from an older request", async () => {
+    viewportReplyOverride = async () => ({ ok: true, requestId: "18aabcde-0ee2-4e98-8e12-48fdce879013" });
+    render(<PopupApp />);
+    await screen.findByText(/当前屏识别|Detect Current View/);
+    fireEvent.click(screen.getByText(/当前屏识别|Detect Current View/));
+    await waitFor(() => expect(screen.getByText(/识别失败或结果未获确认/)).toBeInTheDocument());
+    expect(window.close).not.toHaveBeenCalled();
+  });
+
+  it("RC03A_R5_POPUP_ROUTE_SWITCH rejects a successful but wrong-document completion", async () => {
+    const chromeMock = (globalThis as unknown as { chrome: { tabs: {
+      get: ReturnType<typeof vi.fn>
+    } } }).chrome;
+    chromeMock.tabs.get.mockResolvedValueOnce({
+      id: 5, url: "https://quiz.example.com/changed", active: true,
+    });
+    render(<PopupApp />);
+    await screen.findByText(/当前屏识别|Detect Current View/);
+    fireEvent.click(screen.getByText(/当前屏识别|Detect Current View/));
+    await waitFor(() => expect(screen.getByText(/页面或识别任务已变化/)).toBeInTheDocument());
+    expect(window.close).not.toHaveBeenCalled();
+  });
+
+  it("RC03A_R5_POPUP_IN_FLIGHT waits for terminal completion and does not dispatch twice", async () => {
+    let release!: (value: unknown) => void;
+    viewportReplyOverride = async () => new Promise(resolve => { release = resolve; });
+    render(<PopupApp />);
+    await screen.findByText(/当前屏识别|Detect Current View/);
+    fireEvent.click(screen.getByText(/当前屏识别|Detect Current View/));
+    await waitFor(() => expect(sentViewportRequests).toHaveLength(1));
+    expect(window.close).not.toHaveBeenCalled();
+    expect(sentViewportRequests[0]?.requestId).toBeTruthy();
+    await act(async () => {
+      release({ ok: true, requestId: sentViewportRequests[0]?.requestId });
+    });
+    await waitFor(() => expect(window.close).toHaveBeenCalledTimes(1));
+    expect(sentViewportRequests).toHaveLength(1);
   });
 });
 
