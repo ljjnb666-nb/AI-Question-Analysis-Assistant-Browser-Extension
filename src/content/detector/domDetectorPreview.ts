@@ -82,10 +82,11 @@ export function buildPreviewTextForBbox(el: Element, bbox: BoundingBox, fallback
   if (isHtmlElementNode(sourceNode)) {
     const original = sourceNode.innerText || "";
     const lineRecovered = recoverDetachedChoiceLabels(original);
-    const restored = lineRecovered !== original ? lineRecovered : recoverStructuralChoiceLabels(sourceNode);
+    const structuralHost = recoverStructuralChoiceLabels(sourceNode) ? sourceNode : el;
+    const restored = lineRecovered !== original ? lineRecovered : recoverStructuralChoiceLabels(structuralHost);
     if (restored && restored !== original && restored.length <= 900
       && !/A[.、:)：].*B[.、:)：].*C[.、:)：].*D[.、:)：]/.test(compact)) {
-      const sourceRect = sourceNode.getBoundingClientRect();
+      const sourceRect = (lineRecovered !== original ? sourceNode : structuralHost).getBoundingClientRect();
       // Merely intersecting the source is insufficient: a small candidate
       // region must not inherit choices from outside its own bbox.
       if (sourceRect.width >= 2 && sourceRect.height >= 2
