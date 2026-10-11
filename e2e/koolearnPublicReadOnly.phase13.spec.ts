@@ -179,6 +179,13 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     );
     const diagnostic = workspace.snapshot?.detection.diagnostics?.domDiagnostics;
     const candidateCount = workspace.snapshot?.candidates.length ?? 0;
+    // Non-zero alone is not sufficient: a menu false positive must not
+    // certify Koolearn. Demand a real question stem with owned A/B/C/D.
+    const completeQuestionCandidates = workspace.snapshot?.candidates.filter(({ block }) => {
+      const preview = block.previewText;
+      return preview.includes("品德心理结构")
+        && /A[.、:)：][\\s\\S]+B[.、:)：][\\s\\S]+C[.、:)：][\\s\\S]+D[.、:)：]/.test(preview);
+    }).length ?? 0;
     const evidence = {
       schemaVersion: 1, siteId: "koolearn-public-list", authority: "live-public-readonly",
       httpStatus: statusCode, contentReady: ready,
@@ -186,7 +193,7 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
       requestMatched: workspace.snapshot?.detection.requestId === REQUEST_ID,
       phase: workspace.snapshot?.detection.phase ?? null,
       mode: workspace.snapshot?.detection.mode ?? null,
-      candidateCount, numericProbe: diagnostic ?? null, structure,
+      candidateCount, completeQuestionCandidates, numericProbe: diagnostic ?? null, structure,
       previewDigests: workspace.snapshot?.candidates.map(c => sourceHash(c.block.previewText)) ?? [],
       interactions: after.interactions, submissions: after.submissions,
     };
@@ -195,7 +202,7 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     // Logs and evidence contain only numeric counts and one-way hashes, no question text.
     console.info("KOOLEARN_DIAG " + JSON.stringify({
       siteId: evidence.siteId, outcome: candidateCount > 0 ? "CANDIDATES_PRESENT" : "ZERO_CANDIDATES",
-      candidateCount, numericProbe: diagnostic ?? null, structure, interactions: after.interactions,
+      candidateCount, completeQuestionCandidates, numericProbe: diagnostic ?? null, structure, interactions: after.interactions,
       submissions: after.submissions,
     }));
 
@@ -209,6 +216,8 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     // A real non-zero candidate is the criterion. A mere successful ACK or
     // diagnostic with zero candidates is NOT a site-compatibility PASS.
     expect(candidateCount, "KOOLEARN_ZERO_CANDIDATES: inspect the numeric-only evidence artifact")
+      .toBeGreaterThan(0);
+    expect(completeQuestionCandidates, "KOOLEARN_CHOICES_NOT_STRUCTURED: candidates must contain a true stem and A/B/C/D")
       .toBeGreaterThan(0);
   } finally {
     await closeExtensionContext(context);
