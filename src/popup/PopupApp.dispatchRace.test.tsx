@@ -137,6 +137,9 @@ import { readProtectedWorkOwners } from "@/shared/auth/protectedWorkOwner";
 import { awaitViewportCommand } from "@/shared/ui/viewportDetectionTimeout";
 
 beforeEach(async () => {
+  // window.close is spied on per-test; restoring avoids nested spies and
+  // cross-case call leakage between terminal-success and ACK-failure tests.
+  vi.restoreAllMocks();
   vi.resetModules();
   installSettingsMessaging();
   sentRuntimeMessages.length = 0;
@@ -225,7 +228,7 @@ describe("PopupApp protected dispatch authority", () => {
       tabId: 5, expectedUrl: "https://quiz.example.com/exam",
     });
     expect(sentViewportRequests[0]?.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27,}$/);
-    expect(window.close).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(window.close).toHaveBeenCalledTimes(1));
   });
 
   it("RC03A_R5_POPUP_ACK_ONLY never closes on a transport ACK without exact completion", async () => {
@@ -296,7 +299,9 @@ describe("PopupApp protected dispatch authority", () => {
     const trigger = screen.getByText(/当前屏识别|Detect Current View/);
     fireEvent.click(trigger);
     fireEvent.click(trigger);
-    expect(chrome.sidePanel.open).toHaveBeenCalledTimes(1);
+    // chrome.tabs.query is asynchronous; observe the open call after that
+    // microtask, before releasing its deliberately pending promise.
+    await waitFor(() => expect(chrome.sidePanel.open).toHaveBeenCalledTimes(1));
     expect(sentViewportRequests).toHaveLength(0);
     await act(async () => { deferredSidePanelOpen?.(); deferredSidePanelOpen = null; });
     await waitFor(() => expect(sentViewportRequests).toHaveLength(1));
