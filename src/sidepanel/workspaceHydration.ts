@@ -184,6 +184,12 @@ export function createWorkspaceHydration(options: Options) {
         || payload.snapshot.originUrl !== captured.url || payload.snapshot.disposed
         || retiredRuntimes.has(payload.snapshot.runtimeInstanceId)) return fail(t, response == null);
       const s = payload.snapshot;
+      // The wake event is only a trigger, not permission for an older
+      // runtime to regain Ready if the authoritative read races with it.
+      // Ordinary navigation/manual sync keep their separate source rules.
+      if (automaticRecoveryAttempted && previouslyObserved?.originUrl === captured.url
+        && s.runtimeInstanceId !== previouslyObserved.runtimeInstanceId
+        && s.runtimeGeneration <= previouslyObserved.runtimeGeneration) return fail(t);
       // A retry/navigation read also shares the previously observed high-water
       // mark. Clearing the opening buffer must never revive an older same-runtime tuple.
       if (observed?.runtimeInstanceId === s.runtimeInstanceId && observed.originUrl === captured.url) {
@@ -240,6 +246,11 @@ export function createWorkspaceHydration(options: Options) {
         || retiredRuntimes.has(s.runtimeInstanceId)) return;
       if (origin && origin.tabId !== tabId) return;
       if (applied && s.runtimeInstanceId !== applied.runtimeInstanceId && s.runtimeGeneration < applied.runtimeGeneration) return;
+      // Once transport has failed, a delayed older instance must not replace
+      // the previously observed generation and initiate the only wake read.
+      if (!applied && recoveryEligible && observed?.originUrl === s.originUrl
+        && s.runtimeInstanceId !== observed.runtimeInstanceId
+        && s.runtimeGeneration <= observed.runtimeGeneration) return;
       if (observed?.runtimeInstanceId === s.runtimeInstanceId && (s.routeEpoch < observed.routeEpoch
         || s.routeEpoch === observed.routeEpoch && s.seq <= observed.seq)) return;
       if (origin) observed = s;

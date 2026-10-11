@@ -220,6 +220,49 @@ describe("UI-04A Side Panel opening fence", () => {
     expect(h.last()).toEqual(["idle"]);
   });
 
+
+  it("RC03D-R2E rejects an older runtime wake event without spending its recovery attempt", async () => {
+    const h = harness();
+    const first = h.c.sync();
+    h.response.resolve({ ok: true, snapshot: fixture({ runtimeInstanceId: "current", runtimeGeneration: 3, seq: 20 }) });
+    await first;
+    h.request.mockResolvedValueOnce(null);
+    await h.c.sync();
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+    h.event(fixture({ runtimeInstanceId: "stale", runtimeGeneration: 2, seq: 999 }));
+    await Promise.resolve();
+    expect(h.request).toHaveBeenCalledTimes(2);
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+
+    const fresh = fixture({ runtimeInstanceId: "current", runtimeGeneration: 3, seq: 21 });
+    h.request.mockResolvedValueOnce({ ok: true, snapshot: fresh });
+    h.event(fresh);
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("ready"));
+    expect(h.request).toHaveBeenCalledTimes(3);
+    expect(h.last()?.[1].runtimeInstanceId).toBe("current");
+  });
+
+  it("RC03D-R2F rejects an older runtime authority reply after a newer wake event", async () => {
+    const h = harness();
+    const first = h.c.sync();
+    h.response.resolve({ ok: true, snapshot: fixture({ runtimeInstanceId: "current", runtimeGeneration: 2, seq: 20 }) });
+    await first;
+    h.request.mockResolvedValueOnce(null);
+    await h.c.sync();
+    const priorReady = h.publish.mock.calls.filter(([status]) => status === "ready").length;
+
+    h.request.mockResolvedValueOnce({ ok: true, snapshot: fixture({
+      runtimeInstanceId: "obsolete", runtimeGeneration: 1, seq: 999,
+    }) });
+    h.event(fixture({ runtimeInstanceId: "replacement", runtimeGeneration: 3, seq: 1 }));
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("runtime_unavailable"));
+    expect(h.publish.mock.calls.filter(([status]) => status === "ready")).toHaveLength(priorReady);
+    h.event(fixture({ runtimeInstanceId: "replacement", runtimeGeneration: 3, seq: 2 }));
+    await Promise.resolve();
+    expect(h.request).toHaveBeenCalledTimes(3); // No unbounded loop on failure.
+  });
+
   it("RC03D-B1 rehydrates using a same-origin live snapshot when the transport request fails", async () => {
     const h = harness();
     const opening = h.c.sync();
