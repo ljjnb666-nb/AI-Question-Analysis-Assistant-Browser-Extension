@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { recoverStructuralChoiceLabels } from "./structuralChoiceLabels";
-import { getElementReadableText } from "./domDetectorPreview";
+import { getElementReadableText, buildPreviewTextForBbox } from "./domDetectorPreview";
+import { detectCandidatesInViewport, createDomCandidateDiagnostics } from "./domDetector";
 import { countOptionMarkersInText, inferQuestionType } from "./domText";
 import { isLikelyCompleteQuestionText } from "./domDetectorPostprocess";
 
@@ -32,6 +33,29 @@ describe("Koolearn isolated DOM card structural choice recovery", () => {
     expect(inferQuestionType(out)).toBe("single_choice");
     expect(isLikelyCompleteQuestionText(out, "single_choice")).toBe(true);
     expect(getElementReadableText(el)).toContain("D. 道德行为");
+  });
+
+  it("admits a visible complete real-style card through the full viewport detector", () => {
+    document.body.innerHTML = card();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 960 });
+    const host = document.querySelector("[data-card]")!;
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, right: left + width, bottom: top + height,
+        x: left, y: top, width, height });
+    Object.defineProperty(host, "getBoundingClientRect", { configurable: true,
+      value: () => rect(523, 372, 690, 216) });
+    host.querySelectorAll("*").forEach((el, index) => Object.defineProperty(el, "getBoundingClientRect", {
+      configurable: true, value: () => rect(535, 385 + index * 8, 660, 20),
+    }));
+    const bbox = { x: 523, y: 372, width: 690, height: 216 };
+    const recovered = buildPreviewTextForBbox(host, bbox, host.textContent ?? "");
+    expect(recovered).toContain("A. 道德认识");
+    expect(recovered).toContain("D. 道德行为");
+    const diagnostics = createDomCandidateDiagnostics();
+    const candidates = detectCandidatesInViewport(diagnostics);
+    expect(candidates.some(c => c.previewText.includes("D. 道德行为"))).toBe(true);
+    expect(diagnostics.acceptedCandidates).toBeGreaterThan(0);
   });
 
   it("never merges four choices across two independent question cards", () => {
