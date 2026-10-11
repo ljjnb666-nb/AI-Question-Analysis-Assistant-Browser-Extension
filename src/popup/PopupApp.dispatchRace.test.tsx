@@ -306,6 +306,9 @@ describe("PopupApp protected dispatch authority", () => {
     await act(async () => { deferredSidePanelOpen?.(); deferredSidePanelOpen = null; });
     await waitFor(() => expect(sentViewportRequests).toHaveLength(1));
     expect(sentRuntimeMessages).toEqual(["START_AUTO_DETECT"]);
+    // Drain this test's own terminal continuation before the next test spies
+    // on window.close. An unawaited close contaminates later assertions.
+    await waitFor(() => expect(window.close).toHaveBeenCalledTimes(1));
   });
 
   it("RC03A_R5_POPUP_IN_FLIGHT waits for terminal completion and does not dispatch twice", async () => {
