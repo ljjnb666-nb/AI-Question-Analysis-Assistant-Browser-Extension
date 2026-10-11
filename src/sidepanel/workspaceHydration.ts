@@ -70,15 +70,23 @@ export function createWorkspaceHydration(options: Options) {
   let applied: CandidateWorkspaceSnapshot | undefined;
   let observed: CandidateWorkspaceSnapshot | undefined;
   let inFlight = false;
+  // One automatic re-read per transport-unavailable episode; only a new,
+  // validated same-origin content event can trigger it. The event never
+  // directly grants a rendered workspace or protected-work authority.
+  let recoveryEligible = false;
+  let automaticRecoveryAttempted = false;
   let buffered: Array<{ snapshot: CandidateWorkspaceSnapshot; tabId: number }> = [];
   const retiredRuntimes = new Set<string>();
   const authenticated = () => options.isAuthenticated();
   const validTicket = (t: number) => t === ticket && authenticated();
-  const fail = (t: number) => {
+  const fail = (t: number, transientTransportLoss = false) => {
     if (!validTicket(t)) return;
     inFlight = false;
     applied = undefined;
     buffered = [];
+    // Protocol/schema failures, auth loss and navigation must NEVER
+    // promote an event into a new attempt; require explicit user retry.
+    recoveryEligible = transientTransportLoss && Boolean(origin);
     options.publish("runtime_unavailable", undefined, origin);
   };
   function apply(s: CandidateWorkspaceSnapshot) {
@@ -86,6 +94,8 @@ export function createWorkspaceHydration(options: Options) {
     if (applied && (s.runtimeInstanceId !== applied.runtimeInstanceId || s.routeEpoch < applied.routeEpoch
       || s.routeEpoch === applied.routeEpoch && s.seq <= applied.seq)) return;
     applied = s;
+    recoveryEligible = false;
+    automaticRecoveryAttempted = false;
     if (observed && observed.runtimeInstanceId !== s.runtimeInstanceId) retiredRuntimes.add(observed.runtimeInstanceId);
     observed = s;
     options.publish("ready", s, origin);
@@ -94,6 +104,7 @@ export function createWorkspaceHydration(options: Options) {
     const t = ++ticket;
     if (!authenticated()) return;
     inFlight = true;
+    recoveryEligible = false;
     buffered = [];
     applied = undefined;
     let previouslyObserved = observed;
@@ -171,7 +182,7 @@ export function createWorkspaceHydration(options: Options) {
       const payload = response as { ok?: boolean; snapshot?: unknown } | null;
       if (!payload?.ok || !isWorkspaceSnapshot(payload.snapshot)
         || payload.snapshot.originUrl !== captured.url || payload.snapshot.disposed
-        || retiredRuntimes.has(payload.snapshot.runtimeInstanceId)) return fail(t);
+        || retiredRuntimes.has(payload.snapshot.runtimeInstanceId)) return fail(t, response == null);
       const s = payload.snapshot;
       // A retry/navigation read also shares the previously observed high-water
       // mark. Clearing the opening buffer must never revive an older same-runtime tuple.
@@ -199,10 +210,16 @@ export function createWorkspaceHydration(options: Options) {
   return {
     // User retry must recapture the selected page. The previous origin may
     // have disappeared while the panel showed "暂时不可用".
-    sync: () => sync(),
+    sync: () => {
+      // A user-initiated retry starts a fresh bounded recovery episode.
+      automaticRecoveryAttempted = false;
+      return sync();
+    },
     invalidate() {
       ++ticket;
       inFlight = false;
+      recoveryEligible = false;
+      automaticRecoveryAttempted = false;
       origin = undefined;
       applied = undefined;
       observed = undefined;
@@ -240,7 +257,18 @@ export function createWorkspaceHydration(options: Options) {
         if (buffered.length > 32) buffered.shift();
         return;
       }
-      if (!applied) return; // Unavailable never unlocks itself from an unsolicited event.
+      if (!applied) {
+        // A live, valid same-main-frame update after a transport loss may
+        // trigger ONE new authenticated snapshot read. The event itself can
+        // never restore Ready; it has no authority to supply candidates.
+        if (recoveryEligible && !automaticRecoveryAttempted && !s.disposed
+          && origin?.tabId === tabId && origin.url === s.originUrl) {
+          automaticRecoveryAttempted = true;
+          recoveryEligible = false;
+          void sync(tabId);
+        }
+        return;
+      }
       if (s.runtimeInstanceId !== applied.runtimeInstanceId || s.disposed) {
         retiredRuntimes.add(applied.runtimeInstanceId);
         void sync(tabId);

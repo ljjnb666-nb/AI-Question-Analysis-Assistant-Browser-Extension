@@ -150,6 +150,76 @@ describe("UI-04A Side Panel opening fence", () => {
     expect(h.last()?.[0]).toBe("runtime_unavailable");
     expect(h.publish.mock.calls.some(([status]) => status === "ready")).toBe(false);
   });
+  it("RC03D-R2A a fresh same-origin event triggers ONE authority re-read after transport loss, not direct Ready", async () => {
+    const h = harness();
+    const opening = h.c.sync();
+    h.response.resolve(null);
+    await opening;
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+    const delayedRead = deferred<unknown>();
+    h.request.mockImplementationOnce(() => delayedRead.promise);
+    const live = fixture({ seq: 5, fullPage: { running: true, progress: null } });
+    h.event(live);
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(2));
+    // A content event only requests a new read. It cannot render a candidate
+    // or reconstruct an owner until the authenticated read resolves.
+    expect(h.last()?.[0]).toBe("syncing");
+    delayedRead.resolve({ ok: true, snapshot: live });
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("ready"));
+    expect(h.last()?.[1].fullPage.running).toBe(true);
+    expect(h.last()?.[2].tabId).toBe(7);
+  });
+
+  it("RC03D-R2B repeated events after an unsuccessful auto-read cannot create unbounded requests", async () => {
+    const h = harness();
+    const opening = h.c.sync();
+    h.response.resolve(null);
+    await opening;
+    h.request.mockResolvedValueOnce(null);
+    h.event(fixture({ seq: 5 }));
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("runtime_unavailable"));
+    h.event(fixture({ seq: 6 }));
+    h.event(fixture({ seq: 7 }));
+    await Promise.resolve();
+    expect(h.request).toHaveBeenCalledTimes(2);
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+    h.request.mockResolvedValueOnce({ ok: true, snapshot: fixture({ seq: 10 }) });
+    await h.c.sync(); // Explicit user retry restores normal bounded operation.
+    expect(h.last()?.[0]).toBe("ready");
+    expect(h.request).toHaveBeenCalledTimes(3);
+  });
+
+  it("RC03D-R2C invalid domain payload cannot auto-recover from a later valid event", async () => {
+    const h = harness();
+    const opening = h.c.sync();
+    h.response.resolve({ ok: true, snapshot: { ...fixture(), protocolVersion: 999 } });
+    await opening;
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+    h.event(fixture({ seq: 15 }));
+    await Promise.resolve();
+    expect(h.request).toHaveBeenCalledOnce();
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+  });
+
+  it("RC03D-R2D unrelated tab, subframe, disposed event and auth loss never auto-recover", async () => {
+    const h = harness();
+    const opening = h.c.sync();
+    h.response.resolve(null);
+    await opening;
+    h.event(fixture({ seq: 4 }), 9);
+    h.c.observe({ type: "CANDIDATE_WORKSPACE_UPDATED", snapshot: fixture({ seq: 5 }) },
+      { tab: { id: 7, url: "https://quiz.example/exam" }, frameId: 1 } as chrome.runtime.MessageSender);
+    h.event(fixture({ seq: 6, disposed: true }));
+    await Promise.resolve();
+    expect(h.request).toHaveBeenCalledOnce();
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+    h.authLoss();
+    h.event(fixture({ seq: 7 }));
+    expect(h.request).toHaveBeenCalledOnce();
+    expect(h.last()).toEqual(["idle"]);
+  });
+
   it("RC03D-B1 rehydrates using a same-origin live snapshot when the transport request fails", async () => {
     const h = harness();
     const opening = h.c.sync();
