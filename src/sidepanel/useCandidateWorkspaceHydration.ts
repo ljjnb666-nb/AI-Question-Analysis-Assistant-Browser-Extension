@@ -19,9 +19,11 @@ export function useCandidateWorkspaceHydration(session: Session, publish: (statu
     const onUpdated = (tabId: number, change: chrome.tabs.TabChangeInfo) => {
       if (change.url || change.status === "loading") controller.navigation(tabId);
     };
+    const onActivated = (info: { tabId: number }) => controller.activated(info.tabId);
     // Register first, including for an already-authenticated mount.
     chrome.runtime.onMessage.addListener(onMessage);
     chrome.tabs?.onUpdated?.addListener(onUpdated);
+    chrome.tabs?.onActivated?.addListener(onActivated);
     let authorized = false;
     const reconcile = () => {
       if (!isAuthenticated()) {
@@ -38,6 +40,7 @@ export function useCandidateWorkspaceHydration(session: Session, publish: (statu
       unsubscribe();
       chrome.runtime.onMessage.removeListener(onMessage);
       chrome.tabs?.onUpdated?.removeListener(onUpdated);
+      chrome.tabs?.onActivated?.removeListener(onActivated);
       controller.invalidate();
       ref.current = null;
     };

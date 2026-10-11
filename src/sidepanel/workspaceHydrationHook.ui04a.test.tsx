@@ -11,6 +11,7 @@ import { deriveSidePanelWorkspaceStatus } from "./sidePanelWorkspaceState";
 
 const listeners = new Set<(message: Record<string, unknown>, sender: chrome.runtime.MessageSender) => void>();
 const sessionListeners = new Set<() => void>();
+const tabActivatedListeners = new Set<(info: { tabId: number }) => void>();
 const sessionStore: Record<string, unknown> = {};
 let auth = "authenticated";
 let runtime: ReturnType<typeof createCandidateWorkspaceRuntime>;
@@ -21,12 +22,14 @@ const session = { getState: () => ({ status: auth }), subscribe: (fn: () => void
 const publishLive = (message: unknown) => { for (const listener of listeners) listener(message as Record<string, unknown>, { tab: { id: 7, url }, frameId: 0 } as chrome.runtime.MessageSender); };
 
 beforeEach(() => {
-  listeners.clear(); sessionListeners.clear(); order.length = 0; auth = "authenticated"; response = null;
+  listeners.clear(); sessionListeners.clear(); tabActivatedListeners.clear(); order.length = 0; auth = "authenticated"; response = null;
   for (const key of Object.keys(sessionStore)) delete sessionStore[key];
   runtime = createCandidateWorkspaceRuntime({ url: () => url, send: publishLive, runtimeInstanceId: "hook-runtime", runtimeGeneration: 1 });
   vi.stubGlobal("chrome", {
     runtime: { onMessage: { addListener: (fn: typeof publishLive) => { order.push("listener"); listeners.add(fn); }, removeListener: (fn: typeof publishLive) => listeners.delete(fn) } },
     tabs: { query: async () => { order.push("origin"); return [{ id: 7, url, active: true }]; }, get: async (id: number) => ({ id, url }),
+      onActivated: { addListener: (fn: (info: { tabId: number }) => void) => tabActivatedListeners.add(fn),
+        removeListener: (fn: (info: { tabId: number }) => void) => tabActivatedListeners.delete(fn) },
       sendMessage: (_tabId: number, message: { type: string; expectedUrl: string }, callback: (value: unknown) => void) => {
         order.push(message.type);
         if (response) void response.then(callback);
@@ -57,6 +60,23 @@ describe("UI-04A real hydration hook/reducer contract", () => {
     expect(screen.getByTestId("running")).toHaveTextContent("true");
     expect(screen.getByTestId("status")).toHaveTextContent("solving");
   });
+  it("RC03D-C4 activation is wired through the real hook; auth loss prevents any further read", async () => {
+    const view = render(<Workspace />);
+    await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"));
+    expect(tabActivatedListeners.size).toBe(1);
+    const before = order.filter(x => x === "GET_CANDIDATE_WORKSPACE_SNAPSHOT").length;
+    await act(async () => { for (const fn of tabActivatedListeners) fn({ tabId: 8 }); });
+    await waitFor(() => expect(order.filter(x => x === "GET_CANDIDATE_WORKSPACE_SNAPSHOT").length).toBe(before + 1));
+    await act(async () => { auth = "unauthenticated"; for (const fn of sessionListeners) fn(); });
+    for (const fn of tabActivatedListeners) fn({ tabId: 9 });
+    expect(screen.getByTestId("hydration")).toHaveTextContent("idle");
+    const after = order.filter(x => x === "GET_CANDIDATE_WORKSPACE_SNAPSHOT").length;
+    await Promise.resolve();
+    expect(order.filter(x => x === "GET_CANDIDATE_WORKSPACE_SNAPSHOT").length).toBe(after);
+    view.unmount();
+    expect(tabActivatedListeners.size).toBe(0);
+  });
+
   it("UI04A-02 opening restores completed-empty through the real hook and reducer", async () => {
     runtime.beginDetection("viewport"); runtime.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [] });
     render(<Workspace />);

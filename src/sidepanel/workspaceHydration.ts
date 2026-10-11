@@ -96,12 +96,27 @@ export function createWorkspaceHydration(options: Options) {
     inFlight = true;
     buffered = [];
     applied = undefined;
-    const previouslyObserved = observed;
+    let previouslyObserved = observed;
     options.publish("syncing", undefined, origin);
     try {
       const captured = boundTabId != null ? await options.readOrigin(boundTabId) : await options.resolveOrigin();
       if (!validTicket(t)) return;
-      if (!captured || !/^https?:\/\//i.test(captured.url)) return fail(t);
+      if (!captured || !/^https?:\/\//i.test(captured.url)) {
+        // A missing/restricted newly selected Tab must not retain the old
+        // Tab as an implicit authority for the next manual recovery.
+        origin = undefined;
+        observed = undefined;
+        retiredRuntimes.clear();
+        return fail(t);
+      }
+      if (origin?.tabId !== undefined && origin.tabId !== captured.tabId) {
+        // Two documents may have identical URLs and independent runtime
+        // generations. Never compare new Tab snapshots against the old Tab's
+        // event high-water mark or retired-runtime cache.
+        observed = undefined;
+        previouslyObserved = undefined;
+        retiredRuntimes.clear();
+      }
       origin = captured;
       const before = await options.readOrigin(captured.tabId);
       if (!validTicket(t)) return;
@@ -182,7 +197,15 @@ export function createWorkspaceHydration(options: Options) {
     } catch { fail(t); }
   }
   return {
-    sync: () => sync(origin?.tabId),
+    // User retry must recapture the selected page. The previous origin may
+    // have disappeared while the panel showed "暂时不可用".
+    sync: () => sync(),
+    /** Chrome tab activation is an explicit, bounded target handoff. */
+    activated(tabId: number) {
+      if (!authenticated() || origin?.tabId === tabId) return;
+      // Old protected owner identity is not transferred by workspace hydration.
+      void sync(tabId);
+    },
     invalidate() {
       ++ticket;
       inFlight = false;

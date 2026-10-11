@@ -19,6 +19,8 @@ function harness(initial = fixture()) {
   const request = vi.fn(() => response.promise);
   const c = createWorkspaceHydration({ isAuthenticated: () => authenticated, resolveOrigin: async () => origin, readOrigin: async () => origin, request, publish });
   return { c, response, publish, request, origin: () => origin!, authLoss: () => { authenticated = false; c.invalidate(); }, route: (url: string) => { origin = { tabId: 7, url }; }, missing: () => { origin = null; },
+    switchTab: (tabId: number, url: string) => { origin = { tabId, url }; c.activated(tabId); },
+    selectTab: (tabId: number, url: string) => { origin = { tabId, url }; },
     event: (s: CandidateWorkspaceSnapshot, tabId = 7) => c.observe({ type: "CANDIDATE_WORKSPACE_UPDATED", snapshot: s }, { tab: { id: tabId, url: s.originUrl }, frameId: 0 } as chrome.runtime.MessageSender),
     last: () => publish.mock.calls[publish.mock.calls.length - 1] };
 }
@@ -82,6 +84,47 @@ describe("UI-04A Side Panel opening fence", () => {
     h.event(fixture({ seq: 999 }));
     expect(h.last()?.[1]?.runtimeInstanceId).toBe("r2");
   });
+  it("RC03D-C1 tab activation replaces previous same-URL workspace without cross-tab high-water leakage", async () => {
+    const h = harness();
+    const first = h.c.sync();
+    h.response.resolve({ ok: true, snapshot: fixture({ runtimeInstanceId: "old-tab-runtime", runtimeGeneration: 9, seq: 50 }) });
+    await first;
+    expect(h.last()?.[2].tabId).toBe(7);
+    const newest = fixture({ runtimeInstanceId: "tab-8-runtime", runtimeGeneration: 1, seq: 1 });
+    h.request.mockResolvedValueOnce({ ok: true, snapshot: newest });
+    h.switchTab(8, newest.originUrl); // same URL, DIFFERENT Tab
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("ready") && expect(h.last()?.[2].tabId).toBe(8));
+    expect(h.last()?.[1].runtimeInstanceId).toBe("tab-8-runtime");
+    const count = h.publish.mock.calls.length;
+    h.event(fixture({ seq: 999, runtimeInstanceId: "old-tab-runtime", runtimeGeneration: 10 }), 7);
+    expect(h.publish).toHaveBeenCalledTimes(count);
+    expect(h.last()?.[2].tabId).toBe(8);
+  });
+
+  it("RC03D-C2 Retry after unavailable selects a different active Tab instead of pinning previous Tab", async () => {
+    const h = harness();
+    const first = h.c.sync();
+    h.response.resolve(null);
+    await first;
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+    const next = fixture({ runtimeInstanceId: "new-tab", seq: 1 });
+    h.selectTab(8, next.originUrl);
+    h.request.mockResolvedValueOnce({ ok: true, snapshot: next });
+    await h.c.sync();
+    expect(h.last()?.[0]).toBe("ready");
+    expect(h.last()?.[2].tabId).toBe(8);
+    expect(h.last()?.[1].runtimeInstanceId).toBe("new-tab");
+  });
+
+  it("RC03D-C3 authentication loss blocks tab activation and never requests a snapshot", async () => {
+    const h = harness();
+    h.authLoss();
+    h.switchTab(8, "https://quiz.example/exam");
+    await Promise.resolve();
+    expect(h.request).not.toHaveBeenCalled();
+    expect(h.last()).toEqual(["idle"]);
+  });
+
   it("UI04A-09 isolates Tab B from Tab A's protected candidates and progress", async () => {
     const h = harness(); const opening = h.c.sync();
     h.response.resolve({ ok: true, snapshot: fixture() }); await opening;
