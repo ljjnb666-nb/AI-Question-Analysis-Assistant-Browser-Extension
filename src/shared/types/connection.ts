@@ -85,6 +85,8 @@ export interface ValidationRecord {
   status: ValidationStatus;
   /** Monotonic generation counter for in-flight validation attempts. */
   generation: number;
+  /** Timestamp of a background-owned in-flight test, for orphan recovery. */
+  testingSince?: number;
   validatedConnectionRevision?: number;
   validatedCredentialRevision?: number;
   validatedAt?: number;

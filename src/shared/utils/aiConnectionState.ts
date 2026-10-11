@@ -127,6 +127,7 @@ function isValidationRecord(value: unknown): value is ValidationRecord {
   if (!isPlainObject(value)) return false;
   if (!(VALIDATION_STATUSES as readonly string[]).includes(value.status as ValidationStatus)) return false;
   if (!isInteger(value.generation, 0)) return false;
+  if (value.testingSince !== undefined && !isFiniteNumber(value.testingSince)) return false;
   if (value.validatedConnectionRevision !== undefined && !isInteger(value.validatedConnectionRevision, 1)) return false;
   if (value.validatedCredentialRevision !== undefined && !isInteger(value.validatedCredentialRevision, 1)) return false;
   if (value.validatedAt !== undefined && !isFiniteNumber(value.validatedAt)) return false;

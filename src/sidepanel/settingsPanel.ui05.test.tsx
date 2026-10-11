@@ -68,6 +68,16 @@ vi.mock("@/shared/utils/aiConnectionClient", () => ({
   updateActiveAIConnection: vi.fn(),
   getAIConnectionActiveMetadata: vi.fn(),
   ensureAIConnectionAuthorityReady: vi.fn().mockResolvedValue({ ok: true }),
+  AIConnectionCommandError: class extends Error {
+    constructor(readonly code: string) {
+      super(code);
+      this.name = "AIConnectionCommandError";
+    }
+  },
+}));
+
+vi.mock("./runCommittedAIConnectionProbe", () => ({
+  runCommittedAIConnectionProbe: vi.fn(),
 }));
 
 vi.mock("@/shared/utils/aiSolvePreferences", () => ({
@@ -75,6 +85,8 @@ vi.mock("@/shared/utils/aiSolvePreferences", () => ({
 }));
 
 import { parseQuestion } from "@/shared/utils/parseRouter";
+import { runCommittedAIConnectionProbe } from "./runCommittedAIConnectionProbe";
+import { AIConnectionCommandError } from "@/shared/utils/aiConnectionClient";
 import { getAIConnectionActiveMetadata, getAIConnectionEditorView, updateActiveAIConnection } from "@/shared/utils/aiConnectionClient";
 import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
 import { SettingsTab } from "./settingsPanel";
@@ -157,6 +169,32 @@ function setupConnectionMock(
     } as any;
   });
   vi.mocked(getAIConnectionReadiness).mockResolvedValue({ ready: true });
+  // Settings UI receives only a background-authorized persisted metadata result.
+  vi.mocked(runCommittedAIConnectionProbe).mockImplementation(async (before, lang) => {
+    const result = await parseQuestion({
+      id: "test", bbox: { x: 0, y: 0, width: 100, height: 50 },
+      previewText: "1+1=? A.1 B.2 C.3 D.4",
+      hasImage: false, questionTypeGuess: "single_choice",
+      confidence: 1, source: "manual_capture",
+    }, { preferredRoute: "text", language: lang });
+    const current = await getAIConnectionActiveMetadata();
+    if (!current || current.id !== before.id ||
+        current.connectionRevision !== before.connectionRevision ||
+        (current.credentialRevision ?? 0) !== (before.credentialRevision ?? 0)) {
+      throw new AIConnectionCommandError("AI_CONNECTION_VALIDATION_STALE");
+    }
+    const metadata = {
+      ...current,
+      validation: {
+        status: "validated", generation: (current.validation?.generation ?? 0) + 1,
+        validatedConnectionRevision: current.connectionRevision,
+        ...(current.credentialRevision ? { validatedCredentialRevision: current.credentialRevision } : {}),
+        validatedAt: Date.now(),
+      },
+    };
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue(metadata as any);
+    return { result, metadata } as any;
+  });
 }
 
 describe("UI-05: Settings & First-Run Integration Tests", () => {
@@ -1512,7 +1550,7 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
     // Perform real connection test from Home
     fireEvent.click(screen.getByTestId("home-test-connection-btn"));
 
-    // Real test success yields fresh metadata + ephemeral validatedReceipt -> Home Ready!
+    // Real test success yields background-persisted revision-bound metadata -> Home Ready!
     await waitFor(() => {
       expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
       expect(screen.getByText("AI 配置已就绪")).toBeInTheDocument();
@@ -1538,7 +1576,7 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
     expect(screen.getByTestId("settings-home-view")).not.toHaveAttribute("hidden");
     const summaryCardAfterReturn = screen.getByTestId("settings-home-summary-card");
     expect(within(summaryCardAfterReturn).getByText("Anthropic (Claude)")).toBeInTheDocument();
-    // Home still shows Ready (ephemeral receipt was NOT destroyed by draft changes)
+    // Home still shows Ready (committed validation survives unsaved draft changes)
     expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument();
     expect(screen.getByText("AI 配置已就绪")).toBeInTheDocument();
 

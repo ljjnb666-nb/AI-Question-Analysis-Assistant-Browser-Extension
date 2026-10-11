@@ -101,6 +101,28 @@ describe("RC-PILOT-03C single-writer validation lease", () => {
     }
     expect(JSON.stringify(state())).toBe(before);
   });
+  it("03C-08 an interrupted test expires on authority read and old success is rejected", async () => {
+    const ticket = await begin();
+    const raw = structuredClone(state());
+    raw.connections[id].validation.testingSince = Date.now() - 120_001;
+    memory.store.set("aiConnectionState", raw);
+    expect(await send({ type: "AI_CONNECTION_GET_ACTIVE_METADATA" })).toMatchObject({
+      ok: true, metadata: { validation: { status: "failed", generation: ticket.generation, errorCode: "AI_CONNECTION_TEST_INTERRUPTED" } },
+    });
+    expect(await finish(ticket, "success")).toEqual({ ok: false, code: "AI_CONNECTION_VALIDATION_STALE" });
+    expect(state().connections[id].validation.status).toBe("failed");
+    const newTicket = await begin();
+    expect(newTicket.generation).toBe(ticket.generation + 1);
+    expect(await finish(newTicket, "success")).toMatchObject({ ok: true });
+  });
+  it("03C-09 active test survives fresh GET without unnecessary state revision or generation changes", async () => {
+    const ticket = await begin();
+    const before = JSON.stringify(state());
+    const result = await send({ type: "AI_CONNECTION_GET_ACTIVE_METADATA" });
+    expect(result).toMatchObject({ ok: true, metadata: { validation: { status: "testing", generation: ticket.generation } } });
+    expect(JSON.stringify(state())).toBe(before);
+  });
+
   it("03C-07 missing credential prevents beginning test for key-required provider", async () => {
     const initial = structuredClone(state());
     initial.connections[id].presetId = "deepseek";

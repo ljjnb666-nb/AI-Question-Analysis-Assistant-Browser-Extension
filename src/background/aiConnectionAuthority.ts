@@ -243,6 +243,24 @@ function validateTicket(raw: unknown): asserts raw is AIConnectionValidationTick
   }
 }
 
+const MAX_VALIDATION_LEASE_MS = 120_000;
+
+/** A crashed or closed sidepanel must not leave persisted "testing" forever. */
+async function expireOrphanedValidation(): Promise<void> {
+  await updateAIConnectionState((state) => {
+    const c = state.activeConnectionId ? state.connections[state.activeConnectionId] : undefined;
+    if (!c || c.validation.status !== "testing") return null;
+    const since = c.validation.testingSince;
+    const age = since === undefined ? Infinity : Date.now() - since;
+    if (age >= 0 && age < MAX_VALIDATION_LEASE_MS) return null;
+    c.validation = {
+      status: "failed", generation: c.validation.generation,
+      errorCode: "AI_CONNECTION_TEST_INTERRUPTED",
+    };
+    return state;
+  });
+}
+
 /** The background alone creates and commits a persisted validation lease. */
 async function beginValidation(): Promise<AIConnectionValidationTicket> {
   let ticket: AIConnectionValidationTicket | null = null;
@@ -254,7 +272,7 @@ async function beginValidation(): Promise<AIConnectionValidationTicket> {
     }
     const credential = c.credentialRef ? state.credentials[c.credentialRef] : undefined;
     const generation = c.validation.generation + 1;
-    c.validation = { status: "testing", generation };
+    c.validation = { status: "testing", generation, testingSince: Date.now() };
     ticket = { connectionId: c.id, connectionRevision: c.connectionRevision, credentialRevision: credential?.revision ?? 0, generation };
     return state;
   });
@@ -267,7 +285,10 @@ async function finishValidation(ticket: AIConnectionValidationTicket, outcome: "
     const credential = c?.credentialRef ? state.credentials[c.credentialRef] : undefined;
     if (!c || c.id !== ticket.connectionId || c.connectionRevision !== ticket.connectionRevision ||
       (credential?.revision ?? 0) !== ticket.credentialRevision ||
-      c.validation.status !== "testing" || c.validation.generation !== ticket.generation) {
+      c.validation.status !== "testing" || c.validation.generation !== ticket.generation ||
+      c.validation.testingSince === undefined ||
+      Date.now() - c.validation.testingSince < 0 ||
+      Date.now() - c.validation.testingSince >= MAX_VALIDATION_LEASE_MS) {
       throw new AuthorityError("AI_CONNECTION_VALIDATION_STALE");
     }
     c.validation = outcome === "success"
@@ -317,6 +338,9 @@ export async function handleAIConnectionCommand(
       }
     }
     const initialized = await ensureAIConnectionAuthorityInitialized();
+    if (input.type === "AI_CONNECTION_GET_ACTIVE_METADATA" || input.type === "AI_CONNECTION_GET_EDITOR_VIEW") {
+      await expireOrphanedValidation();
+    }
     if (input.type === "AI_CONNECTION_UPDATE_ACTIVE")
       await updateActiveConnection(input.patch as AIConnectionUpdatePatch);
     const validationTicket = input.type === "AI_CONNECTION_BEGIN_VALIDATION" ? await beginValidation() : undefined;
