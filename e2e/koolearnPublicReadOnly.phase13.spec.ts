@@ -174,6 +174,58 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
       };
     };
 
+    // Link workspace results to their own DOM cards by geometry, rather
+    // than falsely declaring different questions duplicates when a common
+    // phrase occurs in several question stems. Only counts/boolean evidence
+    // are persisted; original DOM and question text never enter the artifact.
+    const cardOwnership = await page.evaluate((candidateBoxes: Array<{
+      bbox?: { x: number; y: number; width: number; height: number };
+      previewText: string;
+    }>) => {
+      const normalize = (text: string) => text.replace(/\\s+/g, " ").trim();
+      const cards = Array.from(document.querySelectorAll("div,article,section,li"))
+        .filter((el) => {
+          const raw = el.textContent ?? "";
+          if (raw.length < 35 || raw.length > 550 || el.querySelectorAll("a").length > 2) return false;
+          const markers = Array.from(el.querySelectorAll("span,div,p,li,b,strong,em,i,label"))
+            .filter(node => node.childElementCount === 0
+              && /^[A-D]$/.test((node.textContent ?? "").trim())
+              && !node.closest("a,button,nav,header,footer,aside"));
+          if (markers.map(node => (node.textContent ?? "").trim()).join("") !== "ABCD") return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width >= 60 && rect.height >= 40
+            && rect.bottom > 0 && rect.top < innerHeight;
+        });
+      const leafCards = cards.filter(card =>
+        !cards.some(inner => inner !== card && card.contains(inner)));
+      return {
+        cardCount: leafCards.length,
+        owners: candidateBoxes.map(({ bbox, previewText }) => {
+          if (!bbox) return { index: -1, overlap: 0, stemMatch: false };
+          let index = -1, best = 0;
+          for (let i = 0; i < leafCards.length; i++) {
+            const rect = leafCards[i]!.getBoundingClientRect();
+            const width = Math.max(0, Math.min(rect.right, bbox.x + bbox.width) - Math.max(rect.left, bbox.x));
+            const height = Math.max(0, Math.min(rect.bottom, bbox.y + bbox.height) - Math.max(rect.top, bbox.y));
+            const overlap = width * height / Math.max(1, bbox.width * bbox.height);
+            if (overlap > best) { best = overlap; index = i; }
+          }
+          const card = leafCards[index];
+          if (!card || best < 0.5) return { index: -1, overlap: Math.round(best * 100), stemMatch: false };
+          const markers = Array.from(card.querySelectorAll("span,div,p,li,b,strong,em,i,label"))
+            .filter(node => node.childElementCount === 0 && /^[A-D]$/.test((node.textContent ?? "").trim()));
+          const range = document.createRange();
+          range.selectNodeContents(card);
+          range.setEndBefore(markers[0]!);
+          const stem = normalize(range.toString());
+          const stemMatch = stem.length >= 18 && normalize(previewText).includes(stem.slice(0, 18));
+          return { index, overlap: Math.round(best * 100), stemMatch };
+        }),
+      };
+    }, workspace.snapshot?.candidates.map(({ block }) => ({
+      bbox: block.bbox, previewText: block.previewText,
+    })) ?? []);
+
     const after = await page.evaluate(() =>
       (window as unknown as { __qsLiveWrites: {
         submissions: number; interactions: number;
@@ -207,7 +259,7 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
       phase: workspace.snapshot?.detection.phase ?? null,
       mode: workspace.snapshot?.detection.mode ?? null,
       candidateCount, completeQuestionCandidates, numericProbe: diagnostic ?? null, structure,
-      anchorCandidateShapes,
+      anchorCandidateShapes, cardOwnership,
       previewDigests: workspace.snapshot?.candidates.map(c => sourceHash(c.block.previewText)) ?? [],
       interactions: after.interactions, submissions: after.submissions,
     };
@@ -217,7 +269,7 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     console.info("KOOLEARN_DIAG " + JSON.stringify({
       siteId: evidence.siteId, outcome: candidateCount > 0 ? "CANDIDATES_PRESENT" : "ZERO_CANDIDATES",
       candidateCount, completeQuestionCandidates, numericProbe: diagnostic ?? null, structure,
-      anchorCandidateShapes, interactions: after.interactions,
+      anchorCandidateShapes, cardOwnership, interactions: after.interactions,
       submissions: after.submissions,
     }));
 
@@ -232,11 +284,14 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     // diagnostic with zero candidates is NOT a site-compatibility PASS.
     expect(candidateCount, "KOOLEARN_ZERO_CANDIDATES: inspect the numeric-only evidence artifact")
       .toBeGreaterThan(0);
-    // This anchored stem belongs to one bounded public question card.
-    // Multiple previews with this same stem are duplicate ownership,
-    // even when the preview hashes differ due to framing or extras.
-    expect(completeQuestionCandidates, "KOOLEARN_DUPLICATE_ANCHORED_CARD: one DOM question must have one candidate")
-      .toBe(1);
+    expect(completeQuestionCandidates, "KOOLEARN_CHOICES_NOT_STRUCTURED: first public question must be legible")
+      .toBeGreaterThan(0);
+    expect(cardOwnership.owners.every(owner => owner.index >= 0 && owner.overlap >= 50),
+      "KOOLEARN_CARD_OWNERSHIP_MISSING: every candidate must belong to one visible bounded card").toBe(true);
+    expect(new Set(cardOwnership.owners.map(owner => owner.index)).size,
+      "KOOLEARN_CARD_DUPLICATION: two candidates may not claim the same card").toBe(candidateCount);
+    expect(cardOwnership.owners.every(owner => owner.stemMatch),
+      "KOOLEARN_PREVIEW_OWNERSHIP_MISMATCH: preview must contain its own card stem").toBe(true);
   } finally {
     await closeExtensionContext(context);
   }
