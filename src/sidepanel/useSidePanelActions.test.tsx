@@ -516,7 +516,7 @@ describe("useSidePanelActions authority gate", () => {
         const { result, unmount } = renderHook(() => useSidePanelActions(options));
         const running = result.current.handleDetect();
         await vi.waitFor(() => expect(sentMessages).toHaveLength(1));
-        expect(lastFeedback?.code).toBe("VIEWPORT_DETECT_STARTING");
+        expect(lastFeedback).toMatchObject({ code: "VIEWPORT_DETECT_STARTING" });
         origin = transition === "navigated" ? { tabId: 7, url: "https://quiz.example.com/next" } : undefined;
         release();
         await running;
