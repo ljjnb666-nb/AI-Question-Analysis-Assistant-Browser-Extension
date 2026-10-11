@@ -51,6 +51,36 @@ function Workspace() {
 }
 
 describe("UI-04A real hydration hook/reducer contract", () => {
+  it("RC03D-R2B7 hook recovers after an eventless MV3 transport loss without granting work", async () => {
+    let sends = 0;
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    Object.assign(chrome, { scripting: { executeScript: vi.fn(async () => { throw new Error("receiver asleep"); }) } });
+    // The first *two* requests are receiver failures: one bootstrap retry
+    // inside requestWorkspaceSnapshot. No content event is ever emitted.
+    (chrome.tabs as unknown as { sendMessage: (tabId: number, message: { expectedUrl: string },
+      callback: (response: unknown) => void) => void }).sendMessage = (_id, message, callback) => {
+      sends++;
+      if (sends <= 2) {
+        Object.assign(chrome.runtime, { lastError: { message: "Could not establish connection. Receiving end does not exist." } });
+        callback(undefined);
+        Reflect.deleteProperty(chrome.runtime, "lastError");
+      } else {
+        callback(runtime.snapshot(message.expectedUrl));
+      }
+    };
+    try {
+      render(<Workspace />);
+      await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("runtime_unavailable"));
+      expect(sends).toBe(2);
+      expect(screen.getByTestId("running")).toHaveTextContent("false");
+      await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"), { timeout: 4500 });
+      expect(sends).toBe(3);
+      expect(screen.getByTestId("running")).toHaveTextContent("false");
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   it("UI04A-03 listener is installed before origin resolution and snapshot dispatch", async () => {
     runtime.setAutoSolveRunning(true);
     render(<Workspace />);
