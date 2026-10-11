@@ -9,7 +9,7 @@ vi.mock("gsap", () => ({
 vi.mock("@gsap/react", () => ({ useGSAP: vi.fn() }));
 vi.mock("@/shared/utils/analytics", () => ({ logEvent: vi.fn() }));
 vi.mock("@/shared/ui/viewportDetectionTimeout", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@/shared/ui/viewportDetectionTimeout")>();
+  const real = await importOriginal<{ awaitViewportCommand: typeof awaitViewportCommand }>();
   return { ...real, awaitViewportCommand: vi.fn(real.awaitViewportCommand) };
 });
 
@@ -147,7 +147,7 @@ beforeEach(async () => {
   viewportGuard = undefined;
   vi.mocked(awaitViewportCommand).mockImplementation(
     (operation, timeoutMs, onTimeout) =>
-      vi.importActual<typeof import("@/shared/ui/viewportDetectionTimeout")>("@/shared/ui/viewportDetectionTimeout")
+      vi.importActual<{ awaitViewportCommand: typeof awaitViewportCommand }>("@/shared/ui/viewportDetectionTimeout")
         .then(real => real.awaitViewportCommand(operation, timeoutMs, onTimeout)),
   );
   vi.spyOn(window, "close").mockImplementation(() => undefined);
