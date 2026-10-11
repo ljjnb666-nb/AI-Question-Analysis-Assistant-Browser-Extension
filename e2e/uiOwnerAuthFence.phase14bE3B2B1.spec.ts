@@ -16,23 +16,37 @@ declare const chrome: {
   storage: { session: { get: (key: null) => Promise<Record<string, unknown>> } };
 };
 
-function testPage(): string {
+// Each repeat runs the same production browser/login/STOP lifecycle against
+// a slightly different real scrolling geometry. The normal CI (repeat 0)
+// preserves its existing fixture exactly; no fake clocks or test-only
+// production hooks can make a false-running scan pass.
+const scanFixtureVariants = [
+  { viewportHeight: 640, fillerHeight: 2_000_000 },
+  { viewportHeight: 720, fillerHeight: 1_500_000 },
+  { viewportHeight: 600, fillerHeight: 1_250_000 },
+  { viewportHeight: 680, fillerHeight: 1_800_000 },
+  { viewportHeight: 760, fillerHeight: 1_600_000 },
+  { viewportHeight: 640, fillerHeight: 1_300_000 },
+] as const;
+type ScanFixtureVariant = typeof scanFixtureVariants[number];
+
+function testPage(variant: ScanFixtureVariant): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>E3B02B UI run owner</title></head>
   <body style="margin:0"><form id="trap" method="post" action="/__trap_submit">
   <input id="answer" name="answer" autocomplete="off"><button type="submit">Submit</button></form>
   <!-- A real, question-bearing scroll root is essential: a tall BODY alone
        does not guarantee the detector has a stable scroll lease in CI. -->
-  <main id="scan-pane" style="overflow-y:auto;height:640px;width:min(900px,96vw);">
+  <main id="scan-pane" style="overflow-y:auto;height:${variant.viewportHeight}px;width:min(900px,96vw);">
     <section class="question-item"><h2>What is two plus two?</h2>
       <p>A. 3 &nbsp; B. 4 &nbsp; C. 5 &nbsp; D. 6</p></section>
-    <div style="height:2000000px"></div>
+    <div style="height:${variant.fillerHeight}px"></div>
   </main>
   <script>window.__submitEvents=0;document.getElementById('trap').addEventListener('submit',e=>{
     e.preventDefault();window.__submitEvents++;
   });</script></body></html>`;
 }
 
-async function serverFixture(): Promise<{ origin: string; submissions: () => number; close: () => Promise<void> }> {
+async function serverFixture(variant: ScanFixtureVariant): Promise<{ origin: string; submissions: () => number; close: () => Promise<void> }> {
   let submissions = 0;
   const server = http.createServer((request, response) => {
     const route = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
@@ -43,7 +57,7 @@ async function serverFixture(): Promise<{ origin: string; submissions: () => num
       return;
     }
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    response.end(testPage());
+    response.end(testPage(variant));
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -105,8 +119,12 @@ async function scanPane(exam: Page): Promise<{ top: number; scrollHeight: number
 
 test("@phase14b-e3b2b1 UI_START genuine owner survives account switch without stale STOP authority", async () => {
   test.setTimeout(160_000);
+  const variationIndex = test.info().repeatEachIndex;
+  const scanVariant = scanFixtureVariants[variationIndex % scanFixtureVariants.length];
+  // Numeric fixture-only evidence; account IDs, tokens and page text are never logged.
+  console.log(`I121_SOAK_VARIANT repeat=${variationIndex} viewport=${scanVariant.viewportHeight} filler=${scanVariant.fillerHeight}`);
   const backend = await startTestAnalyticsBackend();
-  const probe = await serverFixture();
+  const probe = await serverFixture(scanVariant);
   let context: BrowserContext | undefined;
   try {
     const first = await backend.registerAccount("e3b2b1-user-first");
