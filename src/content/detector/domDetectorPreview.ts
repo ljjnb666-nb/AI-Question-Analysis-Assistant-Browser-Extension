@@ -5,6 +5,7 @@ import {
 } from "./domStructuredText";
 import { normalizeText, sanitizePreviewText } from "./domText";
 import { recoverDetachedChoiceLabels } from "./detachedChoiceLabels";
+import { recoverStructuralChoiceLabels } from "./structuralChoiceLabels";
 
 export function getElementReadableText(el: Element): string {
   if (
@@ -20,7 +21,8 @@ isHtmlElementNode(    el) &&
   const raw =isHtmlElementNode( el)
     ? (el.innerText || el.textContent || "")
     : (el.textContent || "");
-  return normalizeText(recoverDetachedChoiceLabels(raw));
+  const lineRecovered = recoverDetachedChoiceLabels(raw);
+  return normalizeText(lineRecovered !== raw ? lineRecovered : recoverStructuralChoiceLabels(el) ?? raw);
 }
 
 export function buildPreviewText(el: Element, fallbackText: string): string {
@@ -79,10 +81,12 @@ export function buildPreviewTextForBbox(el: Element, bbox: BoundingBox, fallback
   // quartet, use it rather than declaring an otherwise visible question empty.
   if (isHtmlElementNode(sourceNode)) {
     const original = sourceNode.innerText || "";
-    const restored = recoverDetachedChoiceLabels(original);
-    if (restored !== original && restored.length <= 900
+    const lineRecovered = recoverDetachedChoiceLabels(original);
+    const structuralHost = recoverStructuralChoiceLabels(sourceNode) ? sourceNode : el;
+    const restored = lineRecovered !== original ? lineRecovered : recoverStructuralChoiceLabels(structuralHost);
+    if (restored && restored !== original && restored.length <= 900
       && !/A[.、:)：].*B[.、:)：].*C[.、:)：].*D[.、:)：]/.test(compact)) {
-      const sourceRect = sourceNode.getBoundingClientRect();
+      const sourceRect = (lineRecovered !== original ? sourceNode : structuralHost).getBoundingClientRect();
       // Merely intersecting the source is insufficient: a small candidate
       // region must not inherit choices from outside its own bbox.
       if (sourceRect.width >= 2 && sourceRect.height >= 2
