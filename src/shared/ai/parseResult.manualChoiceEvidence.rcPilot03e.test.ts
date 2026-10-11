@@ -63,6 +63,14 @@ describe("RC-PILOT-03E R1 manual screenshot choice evidence", () => {
     expect(result.warning ?? "").not.toContain("截图选项未完整识别");
   });
 
+  it("accepts an actual A label immediately following question punctuation", () => {
+    const text = "1+1等于多少？A.1 B.2 C.3 D.4";
+    expect(hasCompleteLabeledManualChoiceOptions(text)).toBe(true);
+    const result = buildResult(manualBlock, "vision", modelChoice(text));
+    expect(result.answer).toBe("B");
+    expect(result.confidence).toBe(0.98);
+  });
+
   it("does not accept DOM preview fallback as image evidence", () => {
     const result = buildResult(
       { ...manualBlock, previewText: "哪项是道德情感？ A. 认识 B. 情感 C. 意志 D. 行为" },
