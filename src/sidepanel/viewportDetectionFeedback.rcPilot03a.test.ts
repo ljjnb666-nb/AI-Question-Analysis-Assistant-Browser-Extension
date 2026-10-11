@@ -86,6 +86,38 @@ describe("RC-PILOT-03A current-screen verified feedback", () => {
       .toBe("VIEWPORT_DETECT_RESULT_UNCONFIRMED");
   });
 
+  it("R2 identifies DOM candidate rejection evidence without exposing page text", () => {
+    const id = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    const runtime = createCandidateWorkspaceRuntime({ url: () => origin.url, send: vi.fn() });
+    runtime.beginDetection("viewport", id);
+    runtime.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [], domDiagnostics: {
+      probedElements: 8, acceptedCandidates: 0,
+      rejected: { geometry: 1, text: 0, controls: 0, navigation: 0, signal: 1, confidence: 0, completeness: 6 },
+    } });
+    const payload = runtime.snapshot(origin.url);
+    const feedback = viewportDetectionSnapshotFeedback("zh", origin, payload, id);
+    expect(feedback.code).toBe("VIEWPORT_DETECT_FILTERED_EMPTY");
+    expect(feedback.message).toContain("探测了 8 个");
+    expect(feedback.message).toContain("题目完整性（6 次）");
+    expect(feedback.message).not.toContain(origin.url);
+    // A different request ID cannot inherit this run's numeric counts.
+    expect(viewportDetectionSnapshotFeedback("zh", origin, payload,
+      "18aabcde-0ee2-4e98-8e12-48fdce879013").code).toBe("VIEWPORT_DETECT_RESULT_UNCONFIRMED");
+  });
+
+  it("R2 distinguishes no DOM probes from filtered DOM probes without claiming no questions on page", () => {
+    const runtime = createCandidateWorkspaceRuntime({ url: () => origin.url, send: vi.fn() });
+    runtime.beginDetection("viewport");
+    runtime.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [], domDiagnostics: {
+      probedElements: 0, acceptedCandidates: 0,
+      rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0 },
+    } });
+    const value = viewportDetectionSnapshotFeedback("zh", origin, runtime.snapshot(origin.url));
+    expect(value.code).toBe("VIEWPORT_DETECT_NO_PROBES");
+    expect(value.message).toContain("可能尚未就绪");
+    expect(value.message).not.toContain("页面没有题目");
+  });
+
   it("keeps English-language feedback readable without displaying machine status codes", () => {
     const value = viewportDetectionSnapshotFeedback("en", origin, snapshot(1));
     expect(value.message).toContain("1 candidate question");
