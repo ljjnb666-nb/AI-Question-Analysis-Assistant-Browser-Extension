@@ -43,6 +43,12 @@ const KNOWN_POPUP_RECOVERY_CODES = new Set([
   "AUTHORITY_LOST",
   "PAGE_INJECTION_FAILED",
   "DISPATCH_FAILED",
+  "WORK_ALREADY_RUNNING",
+  "STALE_VIEWPORT_ORIGIN",
+  "VIEWPORT_RESULT_NOT_CURRENT",
+  "VIEWPORT_DETECT_FAILED",
+  "INVALID_VIEWPORT_REQUEST",
+  "VIEWPORT_RESPONSE_UNCONFIRMED",
 ]);
 
 function extractKnownErrorCode(err: unknown): string | null {
@@ -316,6 +322,26 @@ export const PopupApp: React.FC = () => {
             : { type: messageType },
           isAuthenticatedNow,
         );
+      } else if (messageType === "START_AUTO_DETECT") {
+        // Popup must use the SAME exact-origin, terminal request protocol
+        // as Side Panel. Legacy START returns an ACK before DOM detection;
+        // closing the Popup on that ACK hides failures and zero-result runs.
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id || !isInjectablePageUrl(tab.url)) throw new Error("PAGE_INJECTION_FAILED");
+        const expectedUrl = tab.url!;
+        const requestId = crypto.randomUUID();
+        const response = await sendToTabWithBootstrap<{
+          ok?: boolean; requestId?: string; error?: string;
+        }>(tab.id, { type: "START_AUTO_DETECT", requestId, expectedUrl }, isAuthenticatedNow);
+        if (!isAuthenticatedNow()) throw new Error("AUTHORITY_LOST");
+        const currentTab = await chrome.tabs.get(tab.id);
+        if (!isAuthenticatedNow()) throw new Error("AUTHORITY_LOST");
+        if (currentTab.url !== expectedUrl) throw new Error("STALE_VIEWPORT_ORIGIN");
+        if (!response?.ok || response.requestId !== requestId) {
+          const code = response?.error && KNOWN_POPUP_RECOVERY_CODES.has(response.error)
+            ? response.error : "VIEWPORT_RESPONSE_UNCONFIRMED";
+          throw new Error(code);
+        }
       } else {
         await sendToActiveTab({ type: messageType }, isAuthenticatedNow);
       }
@@ -330,7 +356,27 @@ export const PopupApp: React.FC = () => {
       }
       const rawMsg = err instanceof Error ? err.message : String(err || "");
       const knownCode = extractKnownErrorCode(err) || "DISPATCH_FAILED";
-      if (
+      if (messageType === "START_AUTO_DETECT" && [
+        "WORK_ALREADY_RUNNING", "STALE_VIEWPORT_ORIGIN", "VIEWPORT_RESULT_NOT_CURRENT",
+        "VIEWPORT_DETECT_FAILED", "INVALID_VIEWPORT_REQUEST", "VIEWPORT_RESPONSE_UNCONFIRMED",
+      ].includes(knownCode)) {
+        const busy = knownCode === "WORK_ALREADY_RUNNING";
+        const stale = knownCode === "STALE_VIEWPORT_ORIGIN" || knownCode === "VIEWPORT_RESULT_NOT_CURRENT";
+        setFeedback(userFeedback(busy || stale ? "warning" : "error",
+          busy
+            ? lang === "en"
+              ? "A current-screen detection is already running on this page. Wait for it to finish."
+              : "当前页面已有识别任务正在运行，请等待结束后重试。"
+            : stale
+              ? lang === "en"
+                ? "The page or detection run changed; the old result was ignored."
+                : "页面或识别任务已变化，旧结果已忽略，请重新同步工作区。"
+              : lang === "en"
+                ? "Current-screen detection failed or was not confirmed. Check the page and retry."
+                : "当前屏识别失败或结果未获确认，请检查页面并重试。",
+          { code: knownCode, technicalDetail: rawMsg },
+        ));
+      } else if (
         knownCode === "STALE_QUESTION_REVISION" ||
         knownCode === "STALE_ROOT_CONTEXT" ||
         knownCode === "PARTIAL_MUTATION_UNPROVABLE"
