@@ -161,8 +161,17 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       const metaAfter = await getAIConnectionActiveMetadata().catch(() => null);
       if (disposed || generation !== authorityRefreshGenerationRef.current) return;
 
-      // Apply metadata: use metaAfter if available, else metaBefore
-      const effectiveMeta = metaAfter ?? metaBefore;
+      // A second metadata read is the coherence witness. If it failed,
+      // metaBefore is historical evidence, NOT a confirmed current authority.
+      // Never grant persisted validation Ready from a lone earlier snapshot.
+      if (!metaAfter) {
+        setActiveMetadata(null);
+        setIsConnectionAuthorityAvailable(false);
+        setIsEditorAvailable(false);
+        setStoredSnapshot(null);
+        return;
+      }
+      const effectiveMeta = metaAfter;
       setActiveMetadata(effectiveMeta);
       setIsConnectionAuthorityAvailable(true);
 
@@ -288,7 +297,19 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             const metaAfter = await getAIConnectionActiveMetadata().catch(() => null);
             if (generation !== authorityRefreshGenerationRef.current) return;
 
-            const effectiveMeta = metaAfter ?? metaBefore;
+            // Fail closed on a lost coherence witness, even if the first
+            // read carried an apparently validated older configuration.
+            if (!metaAfter) {
+              setActiveMetadata(null);
+              setIsConnectionAuthorityAvailable(false);
+              setIsEditorAvailable(false);
+              setStoredSnapshot(null);
+              setApiKey("");
+              setIsCredentialCleared(false);
+              setTestResult(null);
+              return;
+            }
+            const effectiveMeta = metaAfter;
             setActiveMetadata(effectiveMeta);
             setIsConnectionAuthorityAvailable(true);
 

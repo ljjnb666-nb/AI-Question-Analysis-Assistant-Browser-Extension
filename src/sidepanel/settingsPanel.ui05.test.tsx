@@ -1393,6 +1393,68 @@ describe("UI-05 Review Fix 02: Explicit Regressions (Section 10)", () => {
     expect(screen.getByText("已保存（待测试）")).toBeInTheDocument();
   });
 
+  it("RC03C-R2A1 failed second metadata read cannot use earlier validated state on mount", async () => {
+    setupConnectionMock({ presetId: "anthropic", hasCredential: true });
+    const readyMeta = {
+      id: "conn-anthropic", presetId: "anthropic", selectedModelId: "claude-opus-4.8",
+      connectionRevision: 3, credentialRevision: 1, hasCredential: true,
+      validation: {
+        status: "validated", generation: 2,
+        validatedConnectionRevision: 3, validatedCredentialRevision: 1,
+      },
+    } as any;
+    vi.mocked(getAIConnectionActiveMetadata)
+      .mockResolvedValueOnce(readyMeta)
+      .mockResolvedValueOnce(null as any);
+
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(getAIConnectionActiveMetadata).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "false");
+      expect(screen.getByTestId("settings-home-summary-card")).toHaveTextContent("AI 连接不可用");
+    });
+    expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+    fireEvent.click(screen.getByTestId("home-edit-connection-btn"));
+    expect(screen.getByTestId("settings-editor-unavailable-notice")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeDisabled();
+  });
+
+  it("RC03C-R2A2 failed second metadata read after storage change revokes old Ready", async () => {
+    setupConnectionMock({ presetId: "anthropic", hasCredential: true });
+    const readyMeta = {
+      id: "conn-anthropic", presetId: "anthropic", selectedModelId: "claude-opus-4.8",
+      connectionRevision: 3, credentialRevision: 1, hasCredential: true,
+      validation: {
+        status: "validated", generation: 2,
+        validatedConnectionRevision: 3, validatedCredentialRevision: 1,
+      },
+    } as any;
+    vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue(readyMeta);
+    render(<SettingsTab lang="zh" onLanguageChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId("settings-ready-banner")).toBeInTheDocument());
+
+    const before = vi.mocked(getAIConnectionActiveMetadata).mock.calls.length;
+    vi.mocked(getAIConnectionActiveMetadata)
+      .mockResolvedValueOnce(readyMeta)
+      .mockResolvedValueOnce(null as any);
+    const listeners = vi.mocked(chrome.storage.onChanged.addListener).mock.calls.map(([fn]) => fn);
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ aiConnectionState: { oldValue: {}, newValue: {} } as any }, "local");
+      }
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(getAIConnectionActiveMetadata).mock.calls.length).toBeGreaterThanOrEqual(before + 2);
+      expect(screen.getByTestId("settings-panel")).toHaveAttribute("data-ready", "false");
+      expect(screen.getByTestId("settings-home-summary-card")).toHaveTextContent("AI 连接不可用");
+    });
+    expect(screen.queryByTestId("settings-ready-banner")).toBeNull();
+    fireEvent.click(screen.getByTestId("home-edit-connection-btn"));
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeDisabled();
+  });
+
   it("PERSISTED_VALIDATION_REVISION_BOUND: matching persisted validation revisions reloads Ready", async () => {
     vi.mocked(getAIConnectionActiveMetadata).mockResolvedValue({
       id: "conn-anthropic",
