@@ -11,6 +11,14 @@ const PUBLIC_URL = "https://www.koolearn.com/shiti/tk-4-28-0-0-1.html";
 const REQUEST_ID = "18aabcde-0ee2-4e98-8e12-48fdce879012";
 const sourceHash = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 
+declare const chrome: {
+  tabs: {
+    query: (query: Record<string, never>) => Promise<Array<{ id?: number; url?: string }>>;
+    sendMessage: (tabId: number, message: unknown) => Promise<unknown>;
+  };
+  scripting: { executeScript: (options: { target: { tabId: number }; files: string[] }) => Promise<unknown> };
+};
+
 type PublicDiagnostic = {
   probedElements: number;
   acceptedCandidates: number;
@@ -93,10 +101,10 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
       target: { tabId: id }, files: ["content/content-main.js"],
     }), tabId);
 
-    const reply = await worker.evaluate(async ({ id, expectedUrl }) =>
+    const reply = await worker.evaluate(async ({ id, expectedUrl, requestId }) =>
       chrome.tabs.sendMessage(id, {
-        type: "START_AUTO_DETECT", requestId: REQUEST_ID, expectedUrl,
-      }), { id: tabId, expectedUrl: actualUrl });
+        type: "START_AUTO_DETECT", requestId, expectedUrl,
+      }), { id: tabId, expectedUrl: actualUrl, requestId: REQUEST_ID });
     expect(reply).toMatchObject({ ok: true, requestId: REQUEST_ID });
 
     const workspace = await worker.evaluate(async ({ id, expectedUrl }) =>
