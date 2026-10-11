@@ -1,4 +1,4 @@
-import type { QuestionBlock } from "@/shared/types";
+import type { QuestionBlock, DomCandidateDiagnostics } from "@/shared/types";
 import type { HighlightLayer } from "./highlight/HighlightLayer";
 import {
   handleAutoDetect as handleAutoDetectCore,
@@ -20,13 +20,13 @@ type DetectSessionDeps = {
     currentStep: number;
     totalScrollSteps: number;
   }) => void) => Promise<QuestionBlock[]>;
-  detectCandidatesInViewport: () => QuestionBlock[];
+  detectCandidatesInViewport: (diagnostics?: DomCandidateDiagnostics) => QuestionBlock[];
   destroyHighlightLayer: () => void;
   getFullPageLayoutKey: (scrollRoot: ScanScrollRoot) => string;
   isFullPageScanRunning: () => boolean;
   isRuntimeCurrent?: () => boolean;
   logEvent: (event: "auto_detect_started" | "auto_detect_candidates_found" | "auto_detect_candidate_selected", data?: Record<string, unknown>) => void;
-  notifySidePanel: (candidates: QuestionBlock[]) => void;
+  notifySidePanel: (candidates: QuestionBlock[], diagnostics?: DomCandidateDiagnostics) => void;
   refreshFullPageHighlightsAfterLayoutChange: () => void;
   refreshLayoutResizeObservation: () => void;
   refineFullPageCandidatesViaManualPipeline: (candidates: QuestionBlock[]) => Promise<QuestionBlock[]>;
@@ -45,11 +45,12 @@ type DetectSessionDeps = {
 export function notifyDetectedCandidates(
   candidates: QuestionBlock[],
   deps: Pick<DetectSessionDeps, "candidateStatusMap" | "safeRuntimeSendMessage">,
+  diagnostics?: DomCandidateDiagnostics,
 ): void {
   notifySidePanelCore(candidates, {
     candidateStatusMap: deps.candidateStatusMap,
     safeRuntimeSendMessage: deps.safeRuntimeSendMessage,
-  });
+  }, diagnostics);
 }
 
 /**
