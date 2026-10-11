@@ -13,7 +13,13 @@ export function useCandidateWorkspaceHydration(session: Session, publish: (statu
   useEffect(() => {
     const isAuthenticated = () => session.getState().status === "authenticated";
     const controller = createWorkspaceHydration({ isAuthenticated, resolveOrigin: resolveWorkspaceOrigin, readOrigin: readWorkspaceOrigin,
-      request: (origin) => requestWorkspaceSnapshot(origin, isAuthenticated), publish });
+      request: (origin) => requestWorkspaceSnapshot(origin, isAuthenticated), publish,
+      // Passive SidePanel wake: exactly one read after a transient transport
+      // failure, even if a sleeping MV3 runtime emits no subsequent event.
+      scheduleWake: (wake) => {
+        const timeout = setTimeout(wake, 1500);
+        return () => clearTimeout(timeout);
+      } });
     ref.current = controller;
     const onMessage = (msg: Record<string, unknown>, sender: chrome.runtime.MessageSender) => controller.observe(msg, sender);
     const onUpdated = (tabId: number, change: chrome.tabs.TabChangeInfo) => {
