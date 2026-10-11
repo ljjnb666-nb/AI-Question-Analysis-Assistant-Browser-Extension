@@ -35,7 +35,7 @@ describe("Koolearn isolated DOM card structural choice recovery", () => {
   });
 
   it("never merges four choices across two independent question cards", () => {
-    document.body.innerHTML = `<section id="list">${card()}${card("下列哪一种活动更体现主动学习？")}</section>`;
+    document.body.innerHTML = `<section id="list">${card()}${card("下列哪一种课堂教学活动能够更充分体现学生主动学习与合作探究？")}</section>`;
     const list = document.getElementById("list")!;
     expect(recoverStructuralChoiceLabels(list)).toBeNull();
     expect(Array.from(list.querySelectorAll("[data-card]"))
