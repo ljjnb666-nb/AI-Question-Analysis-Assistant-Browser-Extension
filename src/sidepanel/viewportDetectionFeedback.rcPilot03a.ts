@@ -31,6 +31,33 @@ export function viewportDetectionSnapshotFeedback(
 
   const count = snapshot.candidates.length;
   if (count === 0) {
+    const probes = snapshot.detection.diagnostics?.domDiagnostics;
+    if (probes) {
+      // Numeric-only, content-owned evidence; diagnostics cannot establish
+      // that the page contains no questions or that OCR would find none.
+      if (probes.probedElements === 0) {
+        return userFeedback("warning", lang === "en"
+          ? "No top-document question containers were probed. The page may still be loading or use an unsupported layout."
+          : "当前屏未探测到顶层 DOM 题目候选容器。页面可能尚未就绪，或布局暂不受支持。",
+          { code: "VIEWPORT_DETECT_NO_PROBES" });
+      }
+      const reasons = [
+        ["geometry", "位置或尺寸", "geometry"], ["text", "文本长度", "text"],
+        ["controls", "页面控件", "controls"], ["navigation", "导航元素", "navigation"],
+        ["signal", "题目信号", "question signal"], ["confidence", "置信度", "confidence"],
+        ["completeness", "题目完整性", "question completeness"],
+      ] as const;
+      const topReason = reasons.map(([key, zh, en]) => ({ n: probes.rejected[key], zh, en }))
+        .sort((a, b) => b.n - a.n)[0];
+      const reasonZh = topReason && topReason.n > 0
+        ? `主要拒绝原因：${topReason.zh}（${topReason.n} 次）。` : "尚未形成可用题目候选。";
+      const reasonEn = topReason && topReason.n > 0
+        ? `Main rejection reason: ${topReason.en} (${topReason.n}).` : "No usable question candidate was formed.";
+      return userFeedback("warning", lang === "en"
+        ? `The detector probed ${probes.probedElements} top-document DOM element(s) but retained zero questions. ${reasonEn} Check whether the page has loaded or is supported.`
+        : `当前屏检测器探测了 ${probes.probedElements} 个顶层 DOM 元素，但保留题目数为 0。${reasonZh}请检查页面加载状态或题目布局。`,
+        { code: "VIEWPORT_DETECT_FILTERED_EMPTY" });
+    }
     return userFeedback(
       "warning",
       lang === "en"
