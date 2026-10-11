@@ -124,7 +124,10 @@ export function createWorkspaceHydration(options: Options) {
     observed = s;
     options.publish("ready", s, origin);
   }
-  async function sync(boundTabId?: number, expectedUrl?: string) {
+  // One additional authoritative read is permitted when a competing, newer
+  // runtime event overtakes the snapshot reply. Never recursively chase an
+  // unstable receiver: a second conflict fails closed until user retry.
+  async function sync(boundTabId?: number, expectedUrl?: string, remainingReconciliations = 1) {
     const t = ++ticket;
     clearScheduledWake();
     if (!authenticated()) return;
@@ -227,8 +230,12 @@ export function createWorkspaceHydration(options: Options) {
       // never an arbitrary event/snapshot choice. Retire the stale response instance.
       if (matching.some((e) => e.snapshot.runtimeInstanceId !== s.runtimeInstanceId
         && e.snapshot.runtimeGeneration >= s.runtimeGeneration && !retiredRuntimes.has(e.snapshot.runtimeInstanceId))) {
+        // This read is no longer authoritative relative to the observed
+        // runtime. Retire it, but permit at most ONE follow-up read across
+        // this entire sync chain, not a fresh retry budget per recursion.
+        if (remainingReconciliations === 0) return fail(t);
         retiredRuntimes.add(s.runtimeInstanceId);
-        void sync(captured.tabId);
+        void sync(captured.tabId, captured.url, remainingReconciliations - 1);
         return;
       }
       inFlight = false;

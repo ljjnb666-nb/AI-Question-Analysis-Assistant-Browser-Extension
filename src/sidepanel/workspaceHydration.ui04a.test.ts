@@ -371,6 +371,70 @@ describe("UI-04A Side Panel opening fence", () => {
     expect(h.request).toHaveBeenCalledTimes(3); // No unbounded loop on failure.
   });
 
+  it("RC03D-R2C1 a newer runtime event permits just one authoritative reconciliation", async () => {
+    const h = harness();
+    const first = h.c.sync();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(1));
+    h.event(fixture({ runtimeInstanceId: "new", runtimeGeneration: 3, seq: 4 }));
+    h.request.mockResolvedValueOnce({
+      ok: true, snapshot: fixture({ runtimeInstanceId: "new", runtimeGeneration: 3, seq: 5 }),
+    });
+    h.response.resolve({
+      ok: true, snapshot: fixture({ runtimeInstanceId: "old", runtimeGeneration: 1, seq: 99 }),
+    });
+    await first;
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("ready"));
+    expect(h.request).toHaveBeenCalledTimes(2);
+    expect(h.last()?.[1].runtimeInstanceId).toBe("new");
+    const count = h.publish.mock.calls.length;
+    h.event(fixture({ runtimeInstanceId: "old", runtimeGeneration: 9, seq: 200 }));
+    expect(h.publish).toHaveBeenCalledTimes(count);
+  });
+
+  it("RC03D-R2C2 successive distinct stale replies fail closed after one re-read", async () => {
+    const h = harness(fixture(), true);
+    const first = h.c.sync();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(1));
+    h.event(fixture({ runtimeInstanceId: "new", runtimeGeneration: 5, seq: 1 }));
+    h.request.mockResolvedValueOnce({
+      ok: true, snapshot: fixture({ runtimeInstanceId: "old-2", runtimeGeneration: 2, seq: 999 }),
+    });
+    h.response.resolve({
+      ok: true, snapshot: fixture({ runtimeInstanceId: "old-1", runtimeGeneration: 1, seq: 999 }),
+    });
+    await first;
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("runtime_unavailable"));
+    expect(h.request).toHaveBeenCalledTimes(2);
+    expect(h.hasWake()).toBe(false); // Conflicting valid replies are not transport-null.
+    expect(h.publish.mock.calls.some(([status, snapshot]) => status === "ready"
+      && (snapshot?.runtimeInstanceId === "old-1" || snapshot?.runtimeInstanceId === "old-2"))).toBe(false);
+    h.event(fixture({ runtimeInstanceId: "new", runtimeGeneration: 5, seq: 2 }));
+    await Promise.resolve();
+    expect(h.request).toHaveBeenCalledTimes(2);
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+  });
+
+  it("RC03D-R2C3 explicit retry after bounded conflict can restore current runtime", async () => {
+    const h = harness();
+    const first = h.c.sync();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(1));
+    h.event(fixture({ runtimeInstanceId: "new", runtimeGeneration: 5, seq: 1 }));
+    h.request.mockResolvedValueOnce({
+      ok: true, snapshot: fixture({ runtimeInstanceId: "old-2", runtimeGeneration: 2, seq: 1 }),
+    });
+    h.response.resolve({
+      ok: true, snapshot: fixture({ runtimeInstanceId: "old-1", runtimeGeneration: 1, seq: 1 }),
+    });
+    await first;
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("runtime_unavailable"));
+    const fresh = fixture({ runtimeInstanceId: "new", runtimeGeneration: 5, seq: 2 });
+    h.request.mockResolvedValueOnce({ ok: true, snapshot: fresh });
+    await h.c.sync();
+    expect(h.last()?.[0]).toBe("ready");
+    expect(h.last()?.[1].runtimeInstanceId).toBe("new");
+    expect(h.request).toHaveBeenCalledTimes(3);
+  });
+
   it("RC03D-B1 rehydrates using a same-origin live snapshot when the transport request fails", async () => {
     const h = harness();
     const opening = h.c.sync();
