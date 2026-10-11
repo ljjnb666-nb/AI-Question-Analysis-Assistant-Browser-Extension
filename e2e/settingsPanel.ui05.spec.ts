@@ -143,6 +143,20 @@ test.describe("UI-05: Visual Evidence & First-Run Redesign Screenshots", () => {
     await capture(page, "ui05-validation-success.png");
   });
 
+  test("ui05-validation-persists-across-reload", async ({ page }) => {
+    await open(page, "validation-success", "zh", 360);
+    const testBtn = page.locator('[data-testid="settings-editor-view"]').getByRole("button", { name: /连接测试|测试配置/ });
+    await testBtn.click();
+    await expect(page.locator('[data-test-tone="success"]')).toBeVisible();
+    // Synthetic provider transport was actually invoked and FINISH committed;
+    // visual Ready must derive from persisted validation after full page reload.
+    await page.reload();
+    await expect(page.locator('[data-testid="settings-editor-view"]')).toBeVisible();
+    await page.locator('[data-testid="nav-editor-done-to-home"]').click();
+    await expect(page.locator('[data-testid="settings-ready-banner"]')).toBeVisible();
+    await expect(page.getByText("已保存（待测试）")).toHaveCount(0);
+  });
+
   test("ui05-validation-error.png", async ({ page }) => {
     await open(page, "validation-error", "zh", 360);
     const testBtn = page.locator('[data-testid="settings-editor-view"]').getByRole("button", { name: /连接测试|测试配置/ });

@@ -108,6 +108,62 @@ Object.assign(globalThis, {
             },
           };
         }
+        if (msg.type === "AI_CONNECTION_BEGIN_VALIDATION" || msg.type === "AI_CONNECTION_FINISH_VALIDATION") {
+          const store = initialStore.aiConnectionState as any;
+          const connection = store?.connections?.[store.activeConnectionId];
+          if (!connection) return { ok: false, code: "AI_ACTIVE_CONNECTION_MISSING" };
+          const credential = connection.credentialRef ? store.credentials?.[connection.credentialRef] : undefined;
+          const credentialRevision = credential?.revision ?? 0;
+          if (msg.type === "AI_CONNECTION_BEGIN_VALIDATION") {
+            if (connection.authScheme.kind !== "none" && !credential) {
+              return { ok: false, code: "AI_CONNECTION_NOT_CONFIGURED" };
+            }
+            const generation = connection.validation.generation + 1;
+            connection.validation = { status: "testing", generation, testingSince: Date.now() };
+            return {
+              ok: true,
+              validationTicket: {
+                connectionId: connection.id,
+                connectionRevision: connection.connectionRevision,
+                credentialRevision,
+                generation,
+              },
+            };
+          }
+          const ticket = msg.ticket;
+          if (!ticket || ticket.connectionId !== connection.id ||
+              ticket.connectionRevision !== connection.connectionRevision ||
+              ticket.credentialRevision !== credentialRevision ||
+              ticket.generation !== connection.validation.generation ||
+              connection.validation.status !== "testing") {
+            return { ok: false, code: "AI_CONNECTION_VALIDATION_STALE" };
+          }
+          connection.validation = msg.outcome === "success"
+            ? {
+                status: "validated", generation: ticket.generation,
+                validatedConnectionRevision: ticket.connectionRevision,
+                ...(credentialRevision ? { validatedCredentialRevision: credentialRevision } : {}),
+                validatedAt: Date.now(),
+              }
+            : { status: "failed", generation: ticket.generation, errorCode: "AI_CONNECTION_TEST_FAILED" };
+          return {
+            ok: true,
+            metadata: {
+              id: connection.id,
+              name: connection.name,
+              presetId: connection.presetId,
+              providerId: connection.presetId,
+              selectedModelId: connection.selectedModelId,
+              endpointOverride: connection.endpointOverride ?? null,
+              protocol: connection.protocolOverride ?? "anthropic_messages",
+              authScheme: connection.authScheme,
+              connectionRevision: connection.connectionRevision,
+              credentialRevision,
+              hasCredential: Boolean(credential),
+              validation: connection.validation,
+            },
+          };
+        }
         if (msg.type === "AI_CONNECTION_UPDATE_ACTIVE") {
           const patch = msg.patch;
           const connState = initialStore.aiConnectionState as any;
