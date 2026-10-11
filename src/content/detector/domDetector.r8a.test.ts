@@ -29,8 +29,12 @@ describe("RC03B-R8A DOM admission and numeric diagnostics", () => {
   it("R8A-01 retains a complete long question whose D option is after char 420", () => {
     const lead = "根据教育教学评价案例，下列哪一项体现正确的课程设计原则？";
     const background = "课堂教师针对实际教学情境进行了具体的学习反馈记录与观察分析。".repeat(14);
-    stageDom('<div id="r8a-card"><p>' + lead + '</p><p>' + background +
-      '</p><p>A. 体现学生主体地位</p><p>B. 只考虑课程分数</p>' +
+    // Keep each leaf below the extraction limit (320), while the complete
+    // question body extends beyond the 420-character display preview.
+    const parts = background.match(/.{1,180}/gu) || [];
+    stageDom('<div id="r8a-card"><p>' + lead + '</p>' +
+      parts.map(part => '<p>' + part + '</p>').join('') +
+      '<p>A. 体现学生主体地位</p><p>B. 只考虑课程分数</p>' +
       '<p>C. 取消教学评价</p><p>D. 根据学习效果调整课程</p></div>');
     const card = document.getElementById("r8a-card")!;
     const full = buildPreviewTextForBbox(card, { x: 90, y: 95, width: 800, height: 640 }, card.textContent || "");
