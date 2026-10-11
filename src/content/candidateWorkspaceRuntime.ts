@@ -116,10 +116,21 @@ export function createCandidateWorkspaceRuntime(options: {
       if (state.disposed) return false;
       ensureRoute();
       switch (message.type) {
-        case "AUTO_DETECT_RESULT_READY":
-          state = { ...state, candidates: message.candidates as CandidateSnapshot[],
-            detection: { ...state.detection, phase: "completed", mode: state.detection.mode ?? "viewport" } };
+        case "AUTO_DETECT_RESULT_READY": {
+          const candidates = message.candidates as CandidateSnapshot[];
+          const diagnostic = message.domDiagnostics as DomCandidateDiagnostics | undefined;
+          // The optional diagnostic is emitted only at the detector's owning
+          // boundary. It never grants authority from a legacy transport ACK.
+          const counts = diagnostic && state.detection.mode === "viewport"
+            ? { observedCandidates: diagnostic.acceptedCandidates, retainedCandidates: candidates.length,
+              postprocessedCandidates: candidates.length, refinedCandidates: candidates.length,
+              domDiagnostics: diagnostic }
+            : undefined;
+          state = { ...state, candidates,
+            detection: { ...state.detection, phase: "completed", mode: state.detection.mode ?? "viewport",
+              ...(counts ? { diagnostics: counts } : {}) } };
           break;
+        }
         case "FULL_PAGE_DETECT_PROGRESS":
           if (!state.fullPage.running) return false;
           state = { ...state, fullPage: { running: true, progress: message as unknown as FullPageDetectProgressMsg } };
