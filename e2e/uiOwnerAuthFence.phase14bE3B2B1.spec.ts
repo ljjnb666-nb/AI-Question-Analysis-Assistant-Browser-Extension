@@ -20,9 +20,13 @@ function testPage(): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>E3B02B UI run owner</title></head>
   <body style="margin:0"><form id="trap" method="post" action="/__trap_submit">
   <input id="answer" name="answer" autocomplete="off"><button type="submit">Submit</button></form>
-  <section class="question-item"><h2>What is two plus two?</h2>
-  <p>A. 3 &nbsp; B. 4 &nbsp; C. 5</p></section>
-  <div style="height:2000000px"></div>
+  <!-- A real, question-bearing scroll root is essential: a tall BODY alone
+       does not guarantee the detector has a stable scroll lease in CI. -->
+  <main id="scan-pane" style="overflow-y:auto;height:640px;width:min(900px,96vw);">
+    <section class="question-item"><h2>What is two plus two?</h2>
+      <p>A. 3 &nbsp; B. 4 &nbsp; C. 5 &nbsp; D. 6</p></section>
+    <div style="height:2000000px"></div>
+  </main>
   <script>window.__submitEvents=0;document.getElementById('trap').addEventListener('submit',e=>{
     e.preventDefault();window.__submitEvents++;
   });</script></body></html>`;
@@ -92,6 +96,13 @@ async function clickScan(panel: Page): Promise<void> {
     .getByRole("button", { name: /^(整页扫描|Full Page)$/ }).click();
 }
 
+/** Fixture-owned proof of scan progress, not a sleep or test-only production hook. */
+async function scanPane(exam: Page): Promise<{ top: number; scrollHeight: number; clientHeight: number }> {
+  return exam.locator("#scan-pane").evaluate(el => ({
+    top: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight,
+  }));
+}
+
 test("@phase14b-e3b2b1 UI_START genuine owner survives account switch without stale STOP authority", async () => {
   test.setTimeout(160_000);
   const backend = await startTestAnalyticsBackend();
@@ -107,6 +118,12 @@ test("@phase14b-e3b2b1 UI_START genuine owner survives account switch without st
     // Only one HTTP tab exists: workspace target resolution is unambiguous.
     const exam = await context.newPage();
     await exam.goto(url);
+    // The production detector selects this question-bearing overflow root.
+    // 2M px gives it the documented 200-step bounded scan, rather than an
+    // unspecified body/window scroller that can finish before UI_START checks.
+    const fixture = await scanPane(exam);
+    expect(fixture.clientHeight).toBeGreaterThanOrEqual(600);
+    expect(fixture.scrollHeight - fixture.clientHeight).toBeGreaterThan(120_000);
     const tabId = await tabIdFor(worker, url);
     await seedExtensionSettings(context, extensionId, {
       analyticsBaseUrl: backend.baseUrl, userId: first.userId,
@@ -165,6 +182,17 @@ test("@phase14b-e3b2b1 UI_START genuine owner survives account switch without st
       .toEqual({ ok: false, error: "STALE_WORK_GENERATION" });
     await expect.poll(async () => (await snapshot(worker, tabId, url)).snapshot?.fullPage?.running,
       { timeout: 10_000 }).toBe(true);
+    expect(await leaseIds(worker, tabId)).toContain(newGeneration);
+    // A genuine RUNNING state must also produce advancing scroll work; merely
+    // writing a generation key or seeing a transient flag is not sufficient.
+    await expect.poll(async () => (await scanPane(exam)).top, { timeout: 10_000 })
+      .toBeGreaterThan(0);
+    const beforeStaleStopTop = (await scanPane(exam)).top;
+    expect(await staleStop(worker, tabId, oldGeneration))
+      .toEqual({ ok: false, error: "STALE_WORK_GENERATION" });
+    await expect.poll(async () => (await scanPane(exam)).top, { timeout: 10_000 })
+      .toBeGreaterThan(beforeStaleStopTop);
+    expect((await snapshot(worker, tabId, url)).snapshot?.fullPage?.running).toBe(true);
     expect(await leaseIds(worker, tabId)).toContain(newGeneration);
 
     // Real UI cancels the new run and removes its exact owner identity.
