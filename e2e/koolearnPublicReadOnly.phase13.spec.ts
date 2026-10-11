@@ -184,7 +184,7 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     const completeQuestionCandidates = workspace.snapshot?.candidates.filter(({ block }) => {
       const preview = block.previewText;
       return preview.includes("品德心理结构")
-        && /A[.、:)：][\\s\\S]+B[.、:)：][\\s\\S]+C[.、:)：][\\s\\S]+D[.、:)：]/.test(preview);
+        && /A[.、:)：].+B[.、:)：].+C[.、:)：].+D[.、:)：]/.test(preview);
     }).length ?? 0;
     const evidence = {
       schemaVersion: 1, siteId: "koolearn-public-list", authority: "live-public-readonly",
