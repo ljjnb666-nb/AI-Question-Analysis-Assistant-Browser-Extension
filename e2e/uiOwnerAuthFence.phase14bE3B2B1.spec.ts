@@ -230,3 +230,71 @@ test("@phase14b-e3b2b1 UI_START genuine owner survives account switch without st
     await backend.close();
   }
 });
+
+
+test("@rc03d-r3 real Side Panel close/reopen rehydrates the live scan without stealing its owner", async () => {
+  test.setTimeout(140_000);
+  const backend = await startTestAnalyticsBackend();
+  const probe = await serverFixture(scanFixtureVariants[0]);
+  let context: BrowserContext | undefined;
+  try {
+    const account = await backend.registerAccount("rc03d-r3-panel-reopen");
+    context = await launchExtensionContext();
+    const extensionId = await resolveExtensionId(context);
+    const worker = await workerFor(context);
+    const url = probe.origin + "/exam";
+    const exam = await context.newPage();
+    await exam.goto(url);
+    const fixture = await scanPane(exam);
+    expect(fixture.scrollHeight - fixture.clientHeight).toBeGreaterThan(120_000);
+    const tabId = await tabIdFor(worker, url);
+    await seedExtensionSettings(context, extensionId, {
+      analyticsBaseUrl: backend.baseUrl, userId: account.userId,
+      userEmail: account.email, authToken: account.authToken,
+    });
+
+    const panel = await context.newPage();
+    await panel.goto(`chrome-extension://${extensionId}/sidepanel/sidepanel.html`);
+    await expect(panel.locator("[data-candidate-workspace]")).toBeVisible({ timeout: 25_000 });
+    await clickScan(panel);
+    await expect.poll(() => leaseIds(worker, tabId), { timeout: 10_000 }).toHaveLength(1);
+    const [generation] = await leaseIds(worker, tabId);
+    await expect.poll(async () => (await snapshot(worker, tabId, url)).snapshot?.fullPage?.running,
+      { timeout: 10_000 }).toBe(true);
+    await expect.poll(async () => (await scanPane(exam)).top, { timeout: 10_000 })
+      .toBeGreaterThan(0);
+
+    // Close only the UI document: the authenticated content runtime and its
+    // protected-work owner must not be resurrected or replaced by a new panel.
+    await panel.close();
+    const reopened = await context.newPage();
+    await reopened.goto(`chrome-extension://${extensionId}/sidepanel/sidepanel.html`);
+    await expect(reopened.locator("[data-candidate-workspace]")).toBeVisible({ timeout: 25_000 });
+    await expect(reopened.getByRole("group", { name: /^(候选题目操作|Candidate actions)$/ })
+      .getByRole("button", { name: /^(取消扫描|Cancel scan)$/ })).toBeVisible({ timeout: 15_000 });
+    expect(await leaseIds(worker, tabId)).toEqual([generation]);
+    const before = (await scanPane(exam)).top;
+    await expect.poll(async () => (await scanPane(exam)).top, { timeout: 10_000 })
+      .toBeGreaterThan(before);
+    expect((await snapshot(worker, tabId, url)).snapshot?.fullPage?.running).toBe(true);
+    // Old or invented generations have no right to STOP the surviving run.
+    expect(await staleStop(worker, tabId, "18aabcde-0ee2-4e98-8e12-48fdce879999"))
+      .toEqual({ ok: false, error: "STALE_WORK_GENERATION" });
+
+    // Only the reopened panel's REAL cancel control may stop this exact run.
+    await reopened.getByRole("group", { name: /^(候选题目操作|Candidate actions)$/ })
+      .getByRole("button", { name: /^(取消扫描|Cancel scan)$/ }).click();
+    await expect.poll(async () => (await leaseIds(worker, tabId)).includes(generation),
+      { timeout: 15_000 }).toBe(false);
+    expect(await staleStop(worker, tabId, generation))
+      .toEqual({ ok: false, error: "STALE_WORK_GENERATION" });
+
+    expect(await exam.locator("#answer").inputValue()).toBe("");
+    expect(await exam.evaluate(() => (window as unknown as Window & { __submitEvents: number }).__submitEvents)).toBe(0);
+    expect(probe.submissions()).toBe(0);
+  } finally {
+    if (context) await closeExtensionContext(context);
+    await probe.close();
+    await backend.close();
+  }
+});
