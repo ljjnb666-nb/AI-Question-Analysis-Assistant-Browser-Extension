@@ -120,6 +120,10 @@ export async function detectCandidatesFullPage(
       : 1;
     let step = 0;
     let previousTop: number | null = null;
+    // At most ONE later empty-viewport readiness window per scan, in
+    // addition to the existing first-viewport window. Never multiply the
+    // advertised scroll budget by repeated SPA polling.
+    let laterViewportReadinessUsed = false;
     while (isCurrent() && step < totalSteps) {
       const metrics = getScrollMetrics(root);
       // A scroll trap or fixed-position container must not repeatedly parse
@@ -127,18 +131,18 @@ export async function detectCandidatesFullPage(
       if (previousTop !== null && metrics.scrollTop <= previousTop) break;
 
       let viewportBlocks = detectCandidatesInViewport(domDiagnostics);
-      // An explicit loading/busy marker at the first viewport means an empty
-      // result may be premature. Revisit this SAME scroll position once after
-      // a bounded delay. This is not another scroll step, and it must never
-      // extend the immutable scan budget or bypass STOP / route ownership.
-      if (step === 0 && viewportBlocks.length === 0) {
+      // A delayed question mount may occur on a later scroll position too.
+      // The first empty viewport retains its existing bounded readiness
+      // window. Only the FIRST later empty viewport may use another window.
+      // Neither window consumes an extra scroll step or bypasses STOP/route.
+      if (viewportBlocks.length === 0 && (step === 0 || !laterViewportReadinessUsed)) {
+        if (step > 0) laterViewportReadinessUsed = true;
         if (isPageContentPending()) {
           await pause(650);
           if (!isCurrent()) break;
           viewportBlocks = detectCandidatesInViewport(domDiagnostics);
-        } else if (await observeUnmarkedFirstViewportMutation(650)) {
-          // An SPA can mount its question DOM without any loading attribute.
-          // One same-position recheck only; never increase the scroll budget.
+        } else if (await observeUnmarkedViewportMutation(650)) {
+          // Wait only for DOM presence changes, not question text or URLs.
           if (!isCurrent()) break;
           viewportBlocks = detectCandidatesInViewport(domDiagnostics);
         }
@@ -205,12 +209,12 @@ function isPageContentPending(): boolean {
 }
 
 /**
- * A first empty SPA viewport may not expose aria-busy or a loading element.
+ * An empty SPA viewport may not expose aria-busy or a loading element.
  * Observe only DOM presence changes for a bounded interval; never collect
  * text, identifiers, or URLs, and always disconnect after the lease window.
  * Extension overlay churn must not manufacture a page-readiness signal.
  */
-async function observeUnmarkedFirstViewportMutation(ms: number): Promise<boolean> {
+async function observeUnmarkedViewportMutation(ms: number): Promise<boolean> {
   if (!document.body || typeof MutationObserver === "undefined") return false;
   let changed = false;
   const observer = new MutationObserver((records) => {
