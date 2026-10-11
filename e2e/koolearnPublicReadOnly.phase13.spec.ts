@@ -168,7 +168,9 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
         originUrl: string;
         detection: { phase: string; mode: string; requestId?: string;
           diagnostics?: { domDiagnostics?: PublicDiagnostic } };
-        candidates: Array<{ block: { previewText: string } }>;
+        candidates: Array<{ block: { previewText: string; bbox?: {
+          x: number; y: number; width: number; height: number
+        }; runtimeOwnerKey?: string; identity?: { stableId?: string } } }>;
       };
     };
 
@@ -181,6 +183,17 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     const candidateCount = workspace.snapshot?.candidates.length ?? 0;
     // Non-zero alone is not sufficient: a menu false positive must not
     // certify Koolearn. Demand a real question stem with owned A/B/C/D.
+    const anchoredCandidateBlocks = workspace.snapshot?.candidates.filter(({ block }) => {
+      const preview = block.previewText;
+      return preview.includes("品德心理结构")
+        && /A[.、:)：].+B[.、:)：].+C[.、:)：].+D[.、:)：]/.test(preview);
+    }) ?? [];
+    const anchorCandidateShapes = anchoredCandidateBlocks.slice(0, 8).map(({ block }) => ({
+      bbox: block.bbox ?? null,
+      previewLength: block.previewText.length,
+      ownerDigest: block.runtimeOwnerKey ? sourceHash(block.runtimeOwnerKey) : null,
+      identityDigest: block.identity?.stableId ? sourceHash(block.identity.stableId) : null,
+    }));
     const completeQuestionCandidates = workspace.snapshot?.candidates.filter(({ block }) => {
       const preview = block.previewText;
       return preview.includes("品德心理结构")
@@ -194,6 +207,7 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
       phase: workspace.snapshot?.detection.phase ?? null,
       mode: workspace.snapshot?.detection.mode ?? null,
       candidateCount, completeQuestionCandidates, numericProbe: diagnostic ?? null, structure,
+      anchorCandidateShapes,
       previewDigests: workspace.snapshot?.candidates.map(c => sourceHash(c.block.previewText)) ?? [],
       interactions: after.interactions, submissions: after.submissions,
     };
@@ -202,7 +216,8 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     // Logs and evidence contain only numeric counts and one-way hashes, no question text.
     console.info("KOOLEARN_DIAG " + JSON.stringify({
       siteId: evidence.siteId, outcome: candidateCount > 0 ? "CANDIDATES_PRESENT" : "ZERO_CANDIDATES",
-      candidateCount, completeQuestionCandidates, numericProbe: diagnostic ?? null, structure, interactions: after.interactions,
+      candidateCount, completeQuestionCandidates, numericProbe: diagnostic ?? null, structure,
+      anchorCandidateShapes, interactions: after.interactions,
       submissions: after.submissions,
     }));
 
