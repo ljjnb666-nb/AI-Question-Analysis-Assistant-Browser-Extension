@@ -100,13 +100,15 @@ export function createWorkspaceHydration(options: Options) {
     // MV3 receivers may wake without emitting a workspace event. One timer
     // is allowed per episode, never a poll loop. The captured ticket makes
     // a late callback inert after manual sync, navigation, or unmount.
-    if (recoveryEligible && !automaticRecoveryAttempted && options.scheduleWake) {
+    if (recoveryEligible && !automaticRecoveryAttempted && options.scheduleWake && origin) {
+      const wakeOrigin = origin;
       cancelScheduledWake = options.scheduleWake(() => {
         cancelScheduledWake = undefined;
-        if (!validTicket(t) || !recoveryEligible || automaticRecoveryAttempted || inFlight || !origin) return;
+        if (!validTicket(t) || !recoveryEligible || automaticRecoveryAttempted || inFlight
+          || origin?.tabId !== wakeOrigin.tabId || origin.url !== wakeOrigin.url) return;
         automaticRecoveryAttempted = true;
         recoveryEligible = false;
-        void sync(origin.tabId);
+        void sync(wakeOrigin.tabId, wakeOrigin.url);
       });
     }
   };
@@ -122,7 +124,7 @@ export function createWorkspaceHydration(options: Options) {
     observed = s;
     options.publish("ready", s, origin);
   }
-  async function sync(boundTabId?: number) {
+  async function sync(boundTabId?: number, expectedUrl?: string) {
     const t = ++ticket;
     clearScheduledWake();
     if (!authenticated()) return;
@@ -135,6 +137,9 @@ export function createWorkspaceHydration(options: Options) {
     try {
       const captured = boundTabId != null ? await options.readOrigin(boundTabId) : await options.resolveOrigin();
       if (!validTicket(t)) return;
+      // A passive wake must not adopt a new document URL as its own authority.
+      // Only explicit user retry or the established navigation path may rebind.
+      if (expectedUrl !== undefined && captured?.url !== expectedUrl) return fail(t);
       if (!captured || !/^https?:\/\//i.test(captured.url)) {
         // A missing/restricted newly selected Tab must not retain the old
         // Tab as an implicit authority for the next manual recovery.
