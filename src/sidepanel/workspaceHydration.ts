@@ -200,12 +200,6 @@ export function createWorkspaceHydration(options: Options) {
     // User retry must recapture the selected page. The previous origin may
     // have disappeared while the panel showed "暂时不可用".
     sync: () => sync(),
-    /** Chrome tab activation is an explicit, bounded target handoff. */
-    activated(tabId: number) {
-      if (!authenticated() || origin?.tabId === tabId) return;
-      // Old protected owner identity is not transferred by workspace hydration.
-      void sync(tabId);
-    },
     invalidate() {
       ++ticket;
       inFlight = false;

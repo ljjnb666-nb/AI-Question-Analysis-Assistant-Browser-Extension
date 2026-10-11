@@ -60,21 +60,18 @@ describe("UI-04A real hydration hook/reducer contract", () => {
     expect(screen.getByTestId("running")).toHaveTextContent("true");
     expect(screen.getByTestId("status")).toHaveTextContent("solving");
   });
-  it("RC03D-C4 activation is wired through the real hook; auth loss prevents any further read", async () => {
+  it("RC03D-C4 tab activation alone NEVER silently moves a live workspace owner", async () => {
     const view = render(<Workspace />);
     await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"));
-    expect(tabActivatedListeners.size).toBe(1);
     const before = order.filter(x => x === "GET_CANDIDATE_WORKSPACE_SNAPSHOT").length;
-    await act(async () => { for (const fn of tabActivatedListeners) fn({ tabId: 8 }); });
-    await waitFor(() => expect(order.filter(x => x === "GET_CANDIDATE_WORKSPACE_SNAPSHOT").length).toBe(before + 1));
-    await act(async () => { auth = "unauthenticated"; for (const fn of sessionListeners) fn(); });
-    for (const fn of tabActivatedListeners) fn({ tabId: 9 });
-    expect(screen.getByTestId("hydration")).toHaveTextContent("idle");
-    const after = order.filter(x => x === "GET_CANDIDATE_WORKSPACE_SNAPSHOT").length;
-    await Promise.resolve();
-    expect(order.filter(x => x === "GET_CANDIDATE_WORKSPACE_SNAPSHOT").length).toBe(after);
-    view.unmount();
+    // Existing autofill/scan remains bound to its captured origin even if
+    // another Tab is activated: only explicit Retry may select a new source.
     expect(tabActivatedListeners.size).toBe(0);
+    expect(screen.getByTestId("hydration")).toHaveTextContent("ready");
+    expect(order.filter(x => x === "GET_CANDIDATE_WORKSPACE_SNAPSHOT").length).toBe(before);
+    await act(async () => { auth = "unauthenticated"; for (const fn of sessionListeners) fn(); });
+    expect(screen.getByTestId("hydration")).toHaveTextContent("idle");
+    view.unmount();
   });
 
   it("UI04A-02 opening restores completed-empty through the real hook and reducer", async () => {
