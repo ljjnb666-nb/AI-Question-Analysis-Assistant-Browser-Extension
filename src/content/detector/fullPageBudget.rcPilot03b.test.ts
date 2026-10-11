@@ -68,6 +68,75 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+
+  it("R8B-01 retries an unmarked SPA mount once without adding a scroll step", async () => {
+    pageHeight = 600;
+    const question = {
+      id: "spa-mounted-question", bbox: { x: 40, y: 140, width: 680, height: 310 },
+      previewText: "下列哪一种学习方式更主动？ A. 探索讨论 B. 被动抄写 C. 放弃练习 D. 忽略反馈",
+      questionTypeGuess: "single_choice" as const, confidence: 0.9,
+      source: "auto_dom" as const, hasImage: false,
+    };
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() =>
+      document.querySelector("[data-spa-ready]") ? [question] : []);
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    setTimeout(() => {
+      const mounted = document.createElement("div");
+      mounted.setAttribute("data-spa-ready", "");
+      document.querySelector("main")!.append(mounted);
+    }, 450); // Between initial 300ms scroll pause and bounded 650ms readiness window.
+    await vi.runAllTimersAsync();
+    const result = await scan;
+    expect(result).toHaveLength(1);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(2);
+    expect(progress.map((p) => p.currentStep)).toEqual([1]);
+    expect(progress[0].totalScrollSteps).toBe(1);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("R8B-02 does not re-probe a genuinely unchanged first viewport", async () => {
+    pageHeight = 600;
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.runAllTimersAsync();
+    expect(await scan).toEqual([]);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(1);
+    expect(progress.map((p) => p.currentStep)).toEqual([1]);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("R8B-03 ignores extension UI mutations as SPA readiness evidence", async () => {
+    pageHeight = 600;
+    const scan = detectCandidatesFullPage(() => undefined);
+    setTimeout(() => {
+      const overlay = document.createElement("div");
+      overlay.id = "qs-floating-host";
+      document.body.append(overlay);
+      overlay.append(document.createElement("span"));
+    }, 450);
+    await vi.runAllTimersAsync();
+    expect(await scan).toEqual([]);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(1);
+  });
+
+  it("R8B-04 STOP during an unmarked SPA mutation window fences retry and progress", async () => {
+    pageHeight = 600;
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.advanceTimersByTimeAsync(350);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(1);
+    cancelFullPageScan();
+    const mounted = document.createElement("div");
+    mounted.setAttribute("data-spa-ready", "");
+    document.body.append(mounted);
+    await vi.runAllTimersAsync();
+    expect(await scan).toEqual([]);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(1);
+    expect(progress).toHaveLength(0);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("R13D preserves an accepted long choice question when its option D is after preview truncation", async () => {
     pageHeight = 600;
     const question = {

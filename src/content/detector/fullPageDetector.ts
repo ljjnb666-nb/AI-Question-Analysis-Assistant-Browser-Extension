@@ -7,7 +7,7 @@
 
 import type { QuestionBlock, DomCandidateDiagnostics } from "@/shared/types";
 import { detectCandidatesInViewport } from "./domDetector";
-import { isLikelyControlPanelText } from "./domDetectorShared";
+import { isExtensionUiElement, isLikelyControlPanelText } from "./domDetectorShared";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -131,10 +131,17 @@ export async function detectCandidatesFullPage(
       // result may be premature. Revisit this SAME scroll position once after
       // a bounded delay. This is not another scroll step, and it must never
       // extend the immutable scan budget or bypass STOP / route ownership.
-      if (step === 0 && viewportBlocks.length === 0 && isPageContentPending()) {
-        await pause(650);
-        if (!isCurrent()) break;
-        viewportBlocks = detectCandidatesInViewport(domDiagnostics);
+      if (step === 0 && viewportBlocks.length === 0) {
+        if (isPageContentPending()) {
+          await pause(650);
+          if (!isCurrent()) break;
+          viewportBlocks = detectCandidatesInViewport(domDiagnostics);
+        } else if (await observeUnmarkedFirstViewportMutation(650)) {
+          // An SPA can mount its question DOM without any loading attribute.
+          // One same-position recheck only; never increase the scroll budget.
+          if (!isCurrent()) break;
+          viewportBlocks = detectCandidatesInViewport(domDiagnostics);
+        }
       }
       if (!isCurrent()) break;
       observedCandidates += viewportBlocks.length;
@@ -195,6 +202,41 @@ function isPageContentPending(): boolean {
     'body[aria-busy="true"],main[aria-busy="true"],[data-loading="true"],' +
     '[role="progressbar"],[class*="skeleton"],[class*="loading-spinner"]',
   );
+}
+
+/**
+ * A first empty SPA viewport may not expose aria-busy or a loading element.
+ * Observe only DOM presence changes for a bounded interval; never collect
+ * text, identifiers, or URLs, and always disconnect after the lease window.
+ * Extension overlay churn must not manufacture a page-readiness signal.
+ */
+async function observeUnmarkedFirstViewportMutation(ms: number): Promise<boolean> {
+  if (!document.body || typeof MutationObserver === "undefined") return false;
+  let changed = false;
+  const observer = new MutationObserver((records) => {
+    if (changed) return;
+    for (const record of records) {
+      const nodes = record.type === "childList"
+        ? [...record.addedNodes, ...record.removedNodes]
+        : [record.target];
+      for (const node of nodes) {
+        const element = node.nodeType === Node.ELEMENT_NODE
+          ? node as Element
+          : node.parentElement;
+        if (element && !isExtensionUiElement(element)) {
+          changed = true;
+          return;
+        }
+      }
+    }
+  });
+  observer.observe(document.body, { childList: true, characterData: true, subtree: true });
+  try {
+    await pause(ms);
+  } finally {
+    observer.disconnect();
+  }
+  return changed;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
