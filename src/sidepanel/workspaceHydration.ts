@@ -124,7 +124,10 @@ export function createWorkspaceHydration(options: Options) {
     observed = s;
     options.publish("ready", s, origin);
   }
-  async function sync(boundTabId?: number, expectedUrl?: string) {
+  // One additional authoritative read is permitted when a competing, newer
+  // runtime event overtakes the snapshot reply. Never recursively chase an
+  // unstable receiver: a second conflict fails closed until user retry.
+  async function sync(boundTabId?: number, expectedUrl?: string, remainingReconciliations = 1) {
     const t = ++ticket;
     clearScheduledWake();
     if (!authenticated()) return;
@@ -212,6 +215,13 @@ export function createWorkspaceHydration(options: Options) {
         || payload.snapshot.originUrl !== captured.url || payload.snapshot.disposed
         || retiredRuntimes.has(payload.snapshot.runtimeInstanceId)) return fail(t, response == null);
       const s = payload.snapshot;
+      // The only conflict re-read must still honor the newer runtime
+      // observed before it began. Its opening buffer was cleared, so a
+      // different stale receiver must not become Ready just because no
+      // SECOND live event arrived during the follow-up request.
+      if (remainingReconciliations === 0 && previouslyObserved?.originUrl === captured.url
+        && s.runtimeInstanceId !== previouslyObserved.runtimeInstanceId
+        && s.runtimeGeneration <= previouslyObserved.runtimeGeneration) return fail(t);
       // The wake event is only a trigger, not permission for an older
       // runtime to regain Ready if the authoritative read races with it.
       // Ordinary navigation/manual sync keep their separate source rules.
@@ -227,8 +237,12 @@ export function createWorkspaceHydration(options: Options) {
       // never an arbitrary event/snapshot choice. Retire the stale response instance.
       if (matching.some((e) => e.snapshot.runtimeInstanceId !== s.runtimeInstanceId
         && e.snapshot.runtimeGeneration >= s.runtimeGeneration && !retiredRuntimes.has(e.snapshot.runtimeInstanceId))) {
+        // This read is no longer authoritative relative to the observed
+        // runtime. Retire it, but permit at most ONE follow-up read across
+        // this entire sync chain, not a fresh retry budget per recursion.
+        if (remainingReconciliations === 0) return fail(t);
         retiredRuntimes.add(s.runtimeInstanceId);
-        void sync(captured.tabId);
+        void sync(captured.tabId, captured.url, remainingReconciliations - 1);
         return;
       }
       inFlight = false;
