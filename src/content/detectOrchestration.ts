@@ -2,6 +2,7 @@ import type { QuestionBlock, DomCandidateDiagnostics } from "@/shared/types";
 import type { ScanScrollRoot } from "./detector/fullPageDetector";
 import { CandidateRootAggregation } from "./candidateRootAggregation";
 import { projectCandidateSnapshots } from "./candidateWorkspaceRuntime";
+import { createDomCandidateDiagnostics } from "./detector/domDetector";
 
 type CandidateStatus = { status: string; selected: boolean };
 
@@ -61,8 +62,8 @@ type ViewportDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], st
   destroyHighlightLayer: () => void;
   stopSpaWatch: () => void;
   candidateStatusMap: Map<string, CandidateStatus>;
-  detectCandidatesInViewport: () => QuestionBlock[];
-  notifySidePanel: (candidates: QuestionBlock[]) => void;
+  detectCandidatesInViewport: (diagnostics?: DomCandidateDiagnostics) => QuestionBlock[];
+  notifySidePanel: (candidates: QuestionBlock[], diagnostics?: DomCandidateDiagnostics) => void;
   createHighlightLayer: (options: {
     onSelect: (blockId: string, selected: boolean) => void;
   }) => TLayer;
@@ -73,9 +74,13 @@ type ViewportDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], st
 export function notifySidePanel(
   candidates: QuestionBlock[],
   deps: NotifySidePanelDeps,
+  domDiagnostics?: DomCandidateDiagnostics,
 ): void {
   const enriched = projectCandidateSnapshots(candidates, deps.candidateStatusMap);
-  deps.safeRuntimeSendMessage({ type: "AUTO_DETECT_RESULT_READY", candidates: enriched });
+  // Diagnostics are numeric-only and attached to the FIRST content-owned
+  // result of the current viewport request; SPA refreshes cannot invent them.
+  deps.safeRuntimeSendMessage({ type: "AUTO_DETECT_RESULT_READY", candidates: enriched,
+    ...(domDiagnostics ? { domDiagnostics: { ...domDiagnostics, rejected: { ...domDiagnostics.rejected } } } : {}) });
 }
 
 export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: QuestionBlock[], statusMap: Map<string, CandidateStatus>) => void }>(
@@ -248,9 +253,10 @@ export function handleAutoDetect<TLayer extends { setBlocks: (blocks: QuestionBl
   deps.stopSpaWatch();
   deps.candidateStatusMap.clear();
 
-  const candidates = deps.detectCandidatesInViewport();
+  const domDiagnostics = createDomCandidateDiagnostics();
+  const candidates = deps.detectCandidatesInViewport(domDiagnostics);
   deps.logEvent("auto_detect_candidates_found", { count: candidates.length });
-  deps.notifySidePanel(candidates);
+  deps.notifySidePanel(candidates, domDiagnostics);
   if (candidates.length === 0) {
     return {
       activeCandidates: candidates,
