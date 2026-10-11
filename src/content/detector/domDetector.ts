@@ -1013,10 +1013,18 @@ function isLikelyNavigationElement(el: Element, text: string): boolean {
   const tag = el.tagName.toLowerCase();
   if (["nav", "header", "footer", "aside"].includes(tag)) return true;
   const linkCount = el.querySelectorAll("a").length;
-  // A navigation menu may literally contain A/B/C/D link captions. Do
-  // not promote those into a question just because markers raise its score.
-  // Explicit question-card ownership is the only exception.
-  if (linkCount >= 6 && !el.closest(".question-item,.questionBox,.base-question-component,.q-detail")) return true;
+  if (linkCount >= 6) {
+    // A/B/C/D labels in a link directory are not sufficient question evidence.
+    // Do not exempt nested menus merely because they live inside a question card.
+    const marker = `${el.id} ${String((el as HTMLElement).className || "")}`.toLowerCase();
+    if (/(?:nav|menu|toolbar|catalog|sidebar|breadcrumb)/.test(marker)) return true;
+    const explicitQuestionHost = !!el.closest(".question-item,.questionBox,.base-question-component,.q-detail");
+    // Linked answer choices are also valid on sites using custom card names.
+    // Require BOTH a question-owned context and an actual stem signal.
+    const credibleQuestionHost = isLikelyQuestionContext(el)
+      && /[?？]|下列|哪项|正确的是|错误的是|第\s*\d{1,3}\s*题/.test(text);
+    if (!explicitQuestionHost && !credibleQuestionHost) return true;
+  }
   return false;
 }
 

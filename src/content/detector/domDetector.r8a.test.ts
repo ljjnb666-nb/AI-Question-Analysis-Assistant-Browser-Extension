@@ -84,4 +84,28 @@ describe("RC03B-R8A DOM admission and numeric diagnostics", () => {
     expect(json).not.toContain("r8a-card");
     expect(Object.values(diag.rejected).every(x => Number.isSafeInteger(x) && x >= 0)).toBe(true);
   });
+
+  it("R8A-09 preserves a genuine question card with six linked choices/actions", () => {
+    stageDom('<div id="r8a-card" class="question-card"><p>下列哪一项能体现学生主动学习的特征？</p>' +
+      '<a href="#a"><span>A. 主动提出问题</span></a><a href="#b"><span>B. 机械抄写笔记</span></a>' +
+      '<a href="#c"><span>C. 完全依赖教师</span></a><a href="#d"><span>D. 拒绝自主探索</span></a>' +
+      '<a href="#help"><span>解题提示</span></a><a href="#source"><span>来源</span></a></div>');
+    const diag = createDomCandidateDiagnostics();
+    const candidates = detectCandidatesInViewport(diag);
+    expect(candidates.some(x => x.previewText.includes("主动学习") && x.previewText.includes("D."))).toBe(true);
+    expect(diag.acceptedCandidates).toBeGreaterThan(0);
+  });
+
+  it("R8A-10 does not promote a nested menu just because it has a question-card ancestor", () => {
+    stageDom('<div id="r8a-card" class="q-detail"><div class="jump-menu">' +
+      '<a href="#a">A. 新闻</a><a href="#b">B. 课程</a><a href="#c">C. 公告</a>' +
+      '<a href="#d">D. 分类</a><a href="#e">学习首页</a>' +
+      '<a href="#f">资讯</a><a href="#g">目录</a></div>' +
+      '<p>下列哪一种教学方式强调主动探索与合作学习？</p>' +
+      '<p>A. 合作探究</p><p>B. 被动抄写</p><p>C. 重复背诵</p><p>D. 完全忽略反馈</p></div>');
+    const diag = createDomCandidateDiagnostics();
+    detectCandidatesInViewport(diag);
+    expect(diag.rejected.navigation).toBeGreaterThan(0);
+  });
+
 });

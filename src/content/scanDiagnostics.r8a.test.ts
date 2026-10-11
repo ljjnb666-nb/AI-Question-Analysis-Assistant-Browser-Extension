@@ -73,4 +73,26 @@ describe("R8A diagnostics preserve workspace authority and privacy", () => {
     expect(runtime.snapshot(location.href).snapshot).toEqual(canceled);
     expect(canceled.seq).toBeGreaterThan(before.seq);
   });
+
+  it("R8A-11 rejects extra diagnostic fields that could smuggle raw page content", () => {
+    const runtime = createCandidateWorkspaceRuntime({ url: () => location.href, send: vi.fn() });
+    runtime.beginDetection("fullpage");
+    runtime.observe({ type: "FULL_PAGE_DETECT_DONE", candidates: [], totalFound: 0, outcome: "no_candidates",
+      diagnostics: { observedCandidates: 0, retainedCandidates: 0, postprocessedCandidates: 0, refinedCandidates: 0,
+        domDiagnostics: diagnostic() } });
+    const snapshot = runtime.snapshot(location.href).snapshot!;
+    expect(isWorkspaceSnapshot(snapshot)).toBe(true);
+    const topLeak = structuredClone(snapshot);
+    Object.assign(topLeak.detection.diagnostics!.domDiagnostics!, { questionBody: "private question text" });
+    expect(isWorkspaceSnapshot(topLeak)).toBe(false);
+    const reasonLeak = structuredClone(snapshot);
+    Object.assign(reasonLeak.detection.diagnostics!.domDiagnostics!.rejected, { rawDomId: "private-dom-id" });
+    expect(isWorkspaceSnapshot(reasonLeak)).toBe(false);
+    const progressLeak = structuredClone(snapshot);
+    progressLeak.fullPage.progress = { progress: 1, found: 0, currentStep: 1, totalScrollSteps: 2,
+      domDiagnostics: { ...diagnostic(), rejected: { ...diagnostic().rejected, extra: "private page" } },
+    } as typeof progressLeak.fullPage.progress;
+    expect(isWorkspaceSnapshot(progressLeak)).toBe(false);
+  });
+
 });

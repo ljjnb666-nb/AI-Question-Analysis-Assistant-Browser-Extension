@@ -30,11 +30,19 @@ export function isWorkspaceSnapshot(value: unknown): value is CandidateWorkspace
 /** Fail closed on malformed, negative or noninteger DOM diagnostic counts. */
 function isDomCandidateDiagnostics(value: unknown): value is DomCandidateDiagnostics {
   if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
   const d = value as DomCandidateDiagnostics;
+  const rejectionKeys = ["geometry", "text", "controls", "navigation", "signal", "confidence", "completeness"] as const;
+  const ownKeysExactly = (obj: object, keys: readonly string[]) => {
+    const own = Object.keys(obj);
+    return own.length === keys.length && own.every((key) => keys.includes(key));
+  };
   const count = (x: unknown) => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
-  return count(d.probedElements) && count(d.acceptedCandidates)
-    && !!d.rejected && (["geometry", "text", "controls", "navigation", "signal", "confidence", "completeness"] as const)
-      .every((key) => count(d.rejected[key]));
+  return ownKeysExactly(d, ["probedElements", "acceptedCandidates", "rejected"])
+    && count(d.probedElements) && count(d.acceptedCandidates)
+    && !!d.rejected && typeof d.rejected === "object" && !Array.isArray(d.rejected)
+    && ownKeysExactly(d.rejected, rejectionKeys)
+    && rejectionKeys.every((key) => count(d.rejected[key]));
 }
 
 function validProgress(value: unknown, kind: "auto" | "scan"): boolean {
