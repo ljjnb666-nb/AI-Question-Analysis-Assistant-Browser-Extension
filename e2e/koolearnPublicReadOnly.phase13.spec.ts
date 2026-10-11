@@ -217,8 +217,11 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     // diagnostic with zero candidates is NOT a site-compatibility PASS.
     expect(candidateCount, "KOOLEARN_ZERO_CANDIDATES: inspect the numeric-only evidence artifact")
       .toBeGreaterThan(0);
-    expect(completeQuestionCandidates, "KOOLEARN_CHOICES_NOT_STRUCTURED: candidates must contain a true stem and A/B/C/D")
-      .toBeGreaterThan(0);
+    // This anchored stem belongs to one bounded public question card.
+    // Multiple previews with this same stem are duplicate ownership,
+    // even when the preview hashes differ due to framing or extras.
+    expect(completeQuestionCandidates, "KOOLEARN_DUPLICATE_ANCHORED_CARD: one DOM question must have one candidate")
+      .toBe(1);
   } finally {
     await closeExtensionContext(context);
   }
