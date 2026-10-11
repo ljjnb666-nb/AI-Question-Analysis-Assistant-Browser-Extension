@@ -215,6 +215,13 @@ export function createWorkspaceHydration(options: Options) {
         || payload.snapshot.originUrl !== captured.url || payload.snapshot.disposed
         || retiredRuntimes.has(payload.snapshot.runtimeInstanceId)) return fail(t, response == null);
       const s = payload.snapshot;
+      // The only conflict re-read must still honor the newer runtime
+      // observed before it began. Its opening buffer was cleared, so a
+      // different stale receiver must not become Ready just because no
+      // SECOND live event arrived during the follow-up request.
+      if (remainingReconciliations === 0 && previouslyObserved?.originUrl === captured.url
+        && s.runtimeInstanceId !== previouslyObserved.runtimeInstanceId
+        && s.runtimeGeneration <= previouslyObserved.runtimeGeneration) return fail(t);
       // The wake event is only a trigger, not permission for an older
       // runtime to regain Ready if the authoritative read races with it.
       // Ordinary navigation/manual sync keep their separate source rules.
