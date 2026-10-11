@@ -61,6 +61,8 @@ type Options = {
   readOrigin: (tabId: number) => Promise<CandidateOrigin | null>;
   request: (origin: CandidateOrigin) => Promise<unknown>;
   publish: (status: WorkspaceHydrationStatus, snapshot?: CandidateWorkspaceSnapshot, origin?: CandidateOrigin) => void;
+  /** One optional, cancellable delay; the callback can ONLY initiate a new read. */
+  scheduleWake?: (wake: () => void) => () => void;
 };
 
 /** Rendering authority for ONE origin. Never reads or mutates protected owner storage. */
@@ -75,25 +77,45 @@ export function createWorkspaceHydration(options: Options) {
   // directly grants a rendered workspace or protected-work authority.
   let recoveryEligible = false;
   let automaticRecoveryAttempted = false;
+  let cancelScheduledWake: (() => void) | undefined;
+  const clearScheduledWake = () => {
+    const cancel = cancelScheduledWake;
+    cancelScheduledWake = undefined;
+    cancel?.();
+  };
   let buffered: Array<{ snapshot: CandidateWorkspaceSnapshot; tabId: number }> = [];
   const retiredRuntimes = new Set<string>();
   const authenticated = () => options.isAuthenticated();
   const validTicket = (t: number) => t === ticket && authenticated();
   const fail = (t: number, transientTransportLoss = false) => {
     if (!validTicket(t)) return;
+    clearScheduledWake();
     inFlight = false;
     applied = undefined;
     buffered = [];
-    // Protocol/schema failures, auth loss and navigation must NEVER
-    // promote an event into a new attempt; require explicit user retry.
+    // Only a confirmed transport loss permits a fresh wake read. Domain
+    // rejection, schema failure, auth loss and navigation all fail closed.
     recoveryEligible = transientTransportLoss && Boolean(origin);
     options.publish("runtime_unavailable", undefined, origin);
+    // MV3 receivers may wake without emitting a workspace event. One timer
+    // is allowed per episode, never a poll loop. The captured ticket makes
+    // a late callback inert after manual sync, navigation, or unmount.
+    if (recoveryEligible && !automaticRecoveryAttempted && options.scheduleWake) {
+      cancelScheduledWake = options.scheduleWake(() => {
+        cancelScheduledWake = undefined;
+        if (!validTicket(t) || !recoveryEligible || automaticRecoveryAttempted || inFlight || !origin) return;
+        automaticRecoveryAttempted = true;
+        recoveryEligible = false;
+        void sync(origin.tabId);
+      });
+    }
   };
   function apply(s: CandidateWorkspaceSnapshot) {
     if (!authenticated() || !origin || s.originUrl !== origin.url || s.disposed) return;
     if (applied && (s.runtimeInstanceId !== applied.runtimeInstanceId || s.routeEpoch < applied.routeEpoch
       || s.routeEpoch === applied.routeEpoch && s.seq <= applied.seq)) return;
     applied = s;
+    clearScheduledWake();
     recoveryEligible = false;
     automaticRecoveryAttempted = false;
     if (observed && observed.runtimeInstanceId !== s.runtimeInstanceId) retiredRuntimes.add(observed.runtimeInstanceId);
@@ -102,6 +124,7 @@ export function createWorkspaceHydration(options: Options) {
   }
   async function sync(boundTabId?: number) {
     const t = ++ticket;
+    clearScheduledWake();
     if (!authenticated()) return;
     inFlight = true;
     recoveryEligible = false;
@@ -223,6 +246,7 @@ export function createWorkspaceHydration(options: Options) {
     },
     invalidate() {
       ++ticket;
+      clearScheduledWake();
       inFlight = false;
       recoveryEligible = false;
       automaticRecoveryAttempted = false;

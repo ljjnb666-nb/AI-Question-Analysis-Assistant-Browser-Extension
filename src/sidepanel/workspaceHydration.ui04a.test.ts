@@ -11,14 +11,20 @@ function fixture(overrides: Partial<CandidateWorkspaceSnapshot> = {}): Candidate
   const runtime = createCandidateWorkspaceRuntime({ url: () => "https://quiz.example/exam", send: vi.fn(), runtimeInstanceId: "r1", runtimeGeneration: 1 });
   return { ...runtime.snapshot("https://quiz.example/exam").snapshot!, ...overrides };
 }
-function harness(initial = fixture()) {
+function harness(initial = fixture(), withWake = false) {
   let authenticated = true;
   let origin: CandidateOrigin | null = { tabId: 7, url: initial.originUrl };
   const response = deferred<unknown>();
   const publish = vi.fn();
   const request = vi.fn(() => response.promise);
-  const c = createWorkspaceHydration({ isAuthenticated: () => authenticated, resolveOrigin: async () => origin, readOrigin: async () => origin, request, publish });
-  return { c, response, publish, request, origin: () => origin!, authLoss: () => { authenticated = false; c.invalidate(); }, route: (url: string) => { origin = { tabId: 7, url }; }, missing: () => { origin = null; },
+  let wake: (() => void) | undefined;
+  const scheduleWake = withWake ? (cb: () => void) => {
+    wake = cb;
+    return () => { if (wake === cb) wake = undefined; };
+  } : undefined;
+  const c = createWorkspaceHydration({ isAuthenticated: () => authenticated, resolveOrigin: async () => origin, readOrigin: async () => origin, request, publish, scheduleWake });
+  return { c, response, publish, request, hasWake: () => Boolean(wake), fireWake: () => { const cb = wake; wake = undefined; cb?.(); },
+    origin: () => origin!, authLoss: () => { authenticated = false; c.invalidate(); }, route: (url: string) => { origin = { tabId: 7, url }; }, missing: () => { origin = null; },
     selectTab: (tabId: number, url: string) => { origin = { tabId, url }; },
     event: (s: CandidateWorkspaceSnapshot, tabId = 7) => c.observe({ type: "CANDIDATE_WORKSPACE_UPDATED", snapshot: s }, { tab: { id: tabId, url: s.originUrl }, frameId: 0 } as chrome.runtime.MessageSender),
     last: () => publish.mock.calls[publish.mock.calls.length - 1] };
@@ -150,6 +156,108 @@ describe("UI-04A Side Panel opening fence", () => {
     expect(h.last()?.[0]).toBe("runtime_unavailable");
     expect(h.publish.mock.calls.some(([status]) => status === "ready")).toBe(false);
   });
+
+  it("RC03D-R2B1 eventless MV3 wake performs exactly one authenticated authority read", async () => {
+    const h = harness(fixture(), true);
+    const opening = h.c.sync();
+    h.response.resolve(null);
+    await opening;
+    expect(h.last()?.[0]).toBe("runtime_unavailable");
+    expect(h.hasWake()).toBe(true);
+    const response = deferred<unknown>();
+    h.request.mockImplementationOnce(() => response.promise);
+    h.fireWake();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(2));
+    expect(h.hasWake()).toBe(false);
+    expect(h.last()?.[0]).toBe("syncing");
+    const fresh = fixture({ seq: 5 });
+    response.resolve({ ok: true, snapshot: fresh });
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("ready"));
+    expect(h.last()?.[1].seq).toBe(5);
+    expect(h.last()?.[2].tabId).toBe(7);
+    h.fireWake();
+    expect(h.request).toHaveBeenCalledTimes(2);
+  });
+
+  it("RC03D-R2B2 second transport loss exhausts passive wake until explicit retry", async () => {
+    const h = harness(fixture(), true);
+    const opening = h.c.sync();
+    h.response.resolve(null);
+    await opening;
+    h.request.mockResolvedValueOnce(null);
+    h.fireWake();
+    await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("runtime_unavailable"));
+    expect(h.hasWake()).toBe(false);
+    h.event(fixture({ seq: 8 }));
+    await Promise.resolve();
+    expect(h.request).toHaveBeenCalledTimes(2);
+    h.request.mockResolvedValueOnce({ ok: true, snapshot: fixture({ seq: 9 }) });
+    await h.c.sync();
+    expect(h.last()?.[0]).toBe("ready");
+    expect(h.request).toHaveBeenCalledTimes(3);
+  });
+
+  it("RC03D-R2B3 auth loss, invalidate and manual retry cancel stale callbacks", async () => {
+    const h = harness(fixture(), true);
+    const opening = h.c.sync();
+    h.response.resolve(null);
+    await opening;
+    expect(h.hasWake()).toBe(true);
+    h.authLoss();
+    expect(h.hasWake()).toBe(false);
+    h.fireWake();
+    expect(h.request).toHaveBeenCalledTimes(1);
+    expect(h.last()).toEqual(["idle"]);
+
+    const h2 = harness(fixture(), true);
+    const opening2 = h2.c.sync();
+    h2.response.resolve(null);
+    await opening2;
+    h2.request.mockResolvedValueOnce({ ok: true, snapshot: fixture({ seq: 12 }) });
+    await h2.c.sync();
+    expect(h2.hasWake()).toBe(false);
+    h2.fireWake();
+    expect(h2.request).toHaveBeenCalledTimes(2);
+  });
+
+  it("RC03D-R2B4 invalid payload never arms eventless wake", async () => {
+    for (const invalid of [{ ok: false }, { ok: true, snapshot: { ...fixture(), protocolVersion: 999 } }]) {
+      const h = harness(fixture(), true);
+      const opening = h.c.sync();
+      h.response.resolve(invalid);
+      await opening;
+      expect(h.last()?.[0]).toBe("runtime_unavailable");
+      expect(h.hasWake()).toBe(false);
+    }
+  });
+
+  it("RC03D-R2B5 live-event recovery preempts its scheduled passive wake", async () => {
+    const h = harness(fixture(), true);
+    const opening = h.c.sync();
+    h.response.resolve(null);
+    await opening;
+    const fresh = fixture({ seq: 6 });
+    h.request.mockResolvedValueOnce({ ok: true, snapshot: fresh });
+    h.event(fresh);
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("ready"));
+    expect(h.hasWake()).toBe(false);
+    h.fireWake();
+    expect(h.request).toHaveBeenCalledTimes(2);
+  });
+
+  it("RC03D-R2B6 passive wake revalidates the original URL and cannot switch Tab", async () => {
+    const h = harness(fixture(), true);
+    const opening = h.c.sync();
+    h.response.resolve(null);
+    await opening;
+    h.route("https://quiz.example/changed");
+    h.fireWake();
+    await vi.waitFor(() => expect(h.last()?.[0]).toBe("runtime_unavailable"));
+    expect(h.request).toHaveBeenCalledTimes(1);
+    expect(h.hasWake()).toBe(false);
+  });
+
   it("RC03D-R2A a fresh same-origin event triggers ONE authority re-read after transport loss, not direct Ready", async () => {
     const h = harness();
     const opening = h.c.sync();
