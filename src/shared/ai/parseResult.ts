@@ -178,11 +178,13 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
   // fill authority based on a guessed label or optionSelections alone.
   const manualChoiceWithoutEvidence =
     block.source === "manual_capture" &&
+    Boolean(block.imageDataUrl) &&
     !codeProblemLikely &&
     !judgeQuestionLikely &&
     (questionType === "single_choice" || questionType === "multi_choice" ||
       ((parsed.questionType === "single_choice" || parsed.questionType === "multi_choice") && isOptionLetterSet(answer))) &&
-    !hasCompleteLabeledManualChoiceOptions(recognizedText);
+    (!hasCompleteLabeledManualChoiceOptions(parsedRecognized) ||
+      !hasCompleteLabeledManualChoiceOptions(recognizedText));
   if (manualChoiceWithoutEvidence) {
     const tentativeAnswer = isOptionLetterSet(answer) ? answer : "";
     answer = "需人工确认";
