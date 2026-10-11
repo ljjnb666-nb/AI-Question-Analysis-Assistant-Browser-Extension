@@ -496,7 +496,7 @@ describe("useSidePanelActions authority gate", () => {
         ...chrome,
         tabs: { ...chrome.tabs, get: vi.fn(async () => ({ id: 7, url: originalUrl } as chrome.tabs.Tab)) },
       });
-      let release = () => undefined;
+      let release: () => void = () => {};
       vi.mocked(sendProtectedTabMessageWithBootstrap).mockImplementationOnce(async (tabId, message) => {
         sentMessages.push({ tabId, type: message.type });
         await new Promise<void>(resolve => { release = resolve; });
@@ -543,7 +543,7 @@ describe("useSidePanelActions authority gate", () => {
       ...chrome,
       tabs: { ...chrome.tabs, get: vi.fn(async () => ({ id: 7, url: oldUrl } as chrome.tabs.Tab)) },
     });
-    let release = () => undefined;
+    let release: () => void = () => {};
     vi.mocked(sendProtectedTabMessageWithBootstrap).mockImplementationOnce(async (tabId, message) => {
       sentMessages.push({ tabId, type: message.type });
       await new Promise<void>(resolve => { release = resolve; });
