@@ -43,6 +43,7 @@ import {
   withQuestionCompleteness,
 } from "./domDetectorPostprocess";
 import { buildPreviewText, buildPreviewTextForBbox, getElementReadableText } from "./domDetectorPreview";
+import { recoverStructuralChoiceLabels } from "./structuralChoiceLabels";
 import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "./domDetectorVisual";
 import { classifyViewportBoundary } from "./questionBoundary";
 import { startQuestionRevisionWatch } from "../revision/questionRevisionWatch";
@@ -234,7 +235,15 @@ export function detectCandidatesInViewport(diagnostics?: DomCandidateDiagnostics
         const score = scoreElement(el, text);
         if (score.confidence < 0.35) { reject("confidence"); continue; }
 
-        let candidateBbox = applyRightCutToBbox(refineCandidateRect(el, rect, vw, vh), hostRightCutX);
+        // Once a single bounded card proves four independent owned labels,
+        // keep its *full visible card* as the preview authority. Clustering
+        // only the stem's text rect would silently clip out valid options.
+        // This exception is not available to page shells, menus or mixed cards.
+        const hasOwnedChoiceStructure = recoverStructuralChoiceLabels(el) !== null;
+        let candidateBbox = applyRightCutToBbox(
+          hasOwnedChoiceStructure ? clampRect(rect, vw, vh) : refineCandidateRect(el, rect, vw, vh),
+          hostRightCutX,
+        );
         let previewText = buildPreviewTextForBbox(el, candidateBbox, text);
         const previewType = inferQuestionType(previewText || text);
         const candidateType = previewType !== "unknown" ? previewType : score.type;
