@@ -715,7 +715,7 @@ function shouldFallbackToPreview(recognizedText: string, previewText: string): b
  */
 export function hasCompleteLabeledManualChoiceOptions(text: string): boolean {
   const matches = Array.from(String(text || "").matchAll(
-    /(?:^|\s)([A-D])[.\):：、]\s*(\S[\s\S]*?)(?=(?:\s+[A-D][.\):：、]\s*\S)|$)/g,
+    /(?:^|[\s？?。:：；;])([A-D])[.\):：、]\s*(\S[\s\S]*?)(?=(?:\s+[A-D][.\):：、]\s*\S)|$)/g,
   ));
   if (matches.map((match) => match[1]).join("") !== "ABCD") return false;
   return matches.every((match) => {
