@@ -130,13 +130,9 @@ export function detectCandidatesInViewport(diagnostics?: DomCandidateDiagnostics
   const groupRank = new Map<string, number>();
   const ownerKeyMap = new WeakMap<Element, string>();
   let ownerCounter = 0;
-  // Resolved after candidate collection. Each bounded, complete structural
-  // card has one authoritative DOM owner, regardless of nested candidate nodes.
-  let structuralOwnedCards: Element[] = [];
 
   const getGroupId = (el: Element): string => {
-    const container = structuralOwnedCards.find(card => card === el || card.contains(el))
-      ?? findQuestionContainer(el) ?? el;
+    const container = findQuestionContainer(el) ?? el;
     const existing = ownerKeyMap.get(container);
     if (existing) return existing;
     const id = `owner-${++ownerCounter}`;
@@ -211,17 +207,6 @@ export function detectCandidatesInViewport(diagnostics?: DomCandidateDiagnostics
   }
 
   const elements = collectCandidateElements();
-  // Only the innermost structurally complete, visible single-question cards
-  // own a question. A surrounding page/list shell can never create a second
-  // candidate for the same owned card. This is evidence-based, not a
-  // site-specific CSS selector, preview string, or global threshold change.
-  const ownedCardCandidates = elements.filter(el => {
-    if (isExtensionUiElement(el)) return false;
-    const rect = el.getBoundingClientRect();
-    return inViewport(rect, vw, vh) && recoverStructuralChoiceLabels(el) !== null;
-  });
-  structuralOwnedCards = ownedCardCandidates.filter(card =>
-    !ownedCardCandidates.some(inner => inner !== card && card.contains(inner)));
   if (!hasAcceptedDirectCard) {
     // First honor structural boundaries. If they yield ZERO candidates,
     // recover only credible independent question stems from outside the
@@ -229,9 +214,6 @@ export function detectCandidatesInViewport(diagnostics?: DomCandidateDiagnostics
     for (const enforceStructuredBoundary of hasStructuredContainers ? [true, false] : [false]) {
       for (const el of elements) {
         if (isExtensionUiElement(el)) continue;
-        // Ancestors of independently complete cards are aggregates, not
-        // standalone questions. Do not splice their text into another owner.
-        if (structuralOwnedCards.some(card => card !== el && el.contains(card))) continue;
         if (enforceStructuredBoundary && !isInsideAnyContainer(el, structuredContainers)) continue;
         if (enforceStructuredBoundary && structuredContainers.some((container) => container !== el && el.contains(container))) continue;
         probe();
@@ -284,8 +266,7 @@ export function detectCandidatesInViewport(diagnostics?: DomCandidateDiagnostics
         }, el, { identityText: text });
 
         const gid = getGroupId(el);
-        const rank = completenessScore(candidate.previewText, candidateType, score.confidence)
-          + (structuralOwnedCards.includes(el) ? 20 : 0);
+        const rank = completenessScore(candidate.previewText, candidateType, score.confidence);
         const prev = groupRank.get(gid) ?? -Infinity;
         if (rank > prev) {
           groupRank.set(gid, rank);
