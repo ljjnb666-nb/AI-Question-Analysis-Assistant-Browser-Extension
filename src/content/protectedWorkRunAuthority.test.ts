@@ -63,11 +63,19 @@ describe("Phase14B-02C-C runtime STOP/CANCEL generation authority", () => {
     expect(a.isCurrent("autoSolve", lease)).toBe(false);
     expect(a.isOwner("autoSolve", lease)).toBe(true);
     expect(a.revoke("autoSolve", oldId)).toBe(false);
-    expect(a.begin("autoSolve", newId)).toBeNull();
-    a.finish("autoSolve", lease);
+    // Owner has already been cancelled. The new authenticated generation
+    // must not be blocked by the prior promise's still-pending finally.
+    expect(a.begin("autoSolve", oldId)).toBeNull();
+    expect(a.begin("autoSolve")).toBeNull();
     const current = a.begin("autoSolve", newId)!;
+    expect(current).toBeGreaterThan(lease);
     expect(a.isCurrent("autoSolve", lease)).toBe(false);
     expect(a.isCurrent("autoSolve", current)).toBe(true);
+    a.finish("autoSolve", lease);
+    expect(a.isCurrent("autoSolve", current)).toBe(true);
+    expect(a.canStop("autoSolve", oldId)).toBe(false);
+    expect(a.canStop("autoSolve", newId)).toBe(true);
+    expect(a.begin("autoSolve", newId)).toBeNull();
   });
 
   it("P14B02C_E1_02 route reset and old finally preserve newer owner", () => {
@@ -80,6 +88,45 @@ describe("Phase14B-02C-C runtime STOP/CANCEL generation authority", () => {
     expect(a.isCurrent("autoSolve", old)).toBe(false);
     expect(a.isOwner("autoSolve", old)).toBe(false);
     expect(a.isCurrent("autoSolve", current)).toBe(true);
+  });
+
+  it("I121-01 slow cleanup does not prevent a new tagged UI run after exact STOP", () => {
+    const authority = createProtectedWorkRunAuthority();
+    const old = authority.begin("fullPage", oldId)!;
+    expect(authority.revoke("fullPage", oldId)).toBe(true);
+    const next = authority.begin("fullPage", newId)!;
+    expect(authority.isCurrent("fullPage", next)).toBe(true);
+    expect(authority.canStop("fullPage", oldId)).toBe(false);
+    expect(authority.revoke("fullPage", oldId)).toBe(false);
+    authority.finish("fullPage", old); // Old async completion races with new START
+    expect(authority.isOwner("fullPage", next)).toBe(true);
+    expect(authority.isCurrent("fullPage", next)).toBe(true);
+    authority.finish("fullPage", next);
+    expect(authority.isOwner("fullPage", next)).toBe(false);
+  });
+
+  it("I121-02 live, duplicate, same-id, and legacy STARTs are not replacements", () => {
+    const authority = createProtectedWorkRunAuthority();
+    const old = authority.begin("fullPage", oldId)!;
+    expect(authority.begin("fullPage", newId)).toBeNull();
+    expect(authority.begin("fullPage", oldId)).toBeNull();
+    expect(authority.revoke("fullPage", oldId)).toBe(true);
+    expect(authority.begin("fullPage", oldId)).toBeNull();
+    expect(authority.begin("fullPage")).toBeNull();
+    const next = authority.begin("fullPage", newId)!;
+    expect(authority.begin("fullPage", oldId)).toBeNull();
+    expect(authority.begin("fullPage", newId)).toBeNull();
+    authority.finish("fullPage", old);
+    expect(authority.isCurrent("fullPage", next)).toBe(true);
+  });
+
+  it("I121-03 legacy untagged cancellation cannot be bypassed by another legacy START", () => {
+    const authority = createProtectedWorkRunAuthority();
+    const old = authority.begin("fullPage")!;
+    expect(authority.revoke("fullPage")).toBe(true);
+    expect(authority.begin("fullPage")).toBeNull();
+    authority.finish("fullPage", old);
+    expect(authority.begin("fullPage")).toBeGreaterThan(old);
   });
 
   it("P14B02C_STOP_09 old legacy finally after route reset cannot clear new legacy run", () => {
@@ -102,10 +149,22 @@ describe("Phase14B-02C-C runtime STOP/CANCEL generation authority", () => {
     expect(a.isCurrent("fullPage", first)).toBe(true);
     expect(a.revoke("fullPage", oldId)).toBe(true);
     expect(a.isCurrent("fullPage", first)).toBe(false);
-    // The old async task still owns START until it actually exits.
-    expect(a.begin("fullPage", newId)).toBeNull();
-    a.finish("fullPage", first);
+    // STOP already revoked execution authority, even while old finally
+    // is pending. A fresh tagged START must not be rejected as still running.
+    expect(a.begin("fullPage", oldId)).toBeNull();
+    expect(a.begin("fullPage")).toBeNull();
     const next = a.begin("fullPage", newId)!;
+    expect(next).toBeGreaterThan(first);
     expect(a.isCurrent("fullPage", next)).toBe(true);
+    expect(a.revoke("fullPage", oldId)).toBe(false);
+    a.finish("fullPage", first);
+    expect(a.isCurrent("fullPage", next)).toBe(true);
+    expect(a.canStop("fullPage", newId)).toBe(true);
+    expect(a.begin("fullPage", oldId)).toBeNull();
+    expect(a.begin("fullPage", newId)).toBeNull();
+    expect(a.revoke("fullPage", newId)).toBe(true);
+    expect(a.isCurrent("fullPage", next)).toBe(false);
+    a.finish("fullPage", next);
+    expect(a.canStop("fullPage", newId)).toBe(false);
   });
 });
