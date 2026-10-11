@@ -146,6 +146,11 @@ Object.assign(globalThis, {
                 validatedAt: Date.now(),
               }
             : { status: "failed", generation: ticket.generation, errorCode: "AI_CONNECTION_TEST_FAILED" };
+          // Persist only the non-secret validation evidence in this synthetic
+          // visual fixture so a real page reload models chrome.storage.local.
+          if (state === "validation-success" && msg.outcome === "success") {
+            sessionStorage.setItem("ui05.fixture.persistedValidation", JSON.stringify(connection.validation));
+          }
           return {
             ok: true,
             metadata: {
@@ -406,6 +411,14 @@ async function initAndMount() {
         : {},
     },
   });
+
+  if (state === "validation-success") {
+    const committed = sessionStorage.getItem("ui05.fixture.persistedValidation");
+    if (committed) {
+      const stored = initialStore.aiConnectionState as any;
+      stored.connections[stored.activeConnectionId].validation = JSON.parse(committed);
+    }
+  }
 
   createRoot(document.getElementById("root")!).render(<Fixture />);
 }
