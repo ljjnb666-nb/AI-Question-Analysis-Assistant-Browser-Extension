@@ -182,7 +182,7 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
       bbox?: { x: number; y: number; width: number; height: number };
       previewText: string;
     }>) => {
-      const normalize = (text: string) => text.replace(/\\s+/g, " ").trim();
+      const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
       const cards = Array.from(document.querySelectorAll("div,article,section,li"))
         .filter((el) => {
           const raw = el.textContent ?? "";
