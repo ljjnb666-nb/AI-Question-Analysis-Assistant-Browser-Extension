@@ -89,7 +89,7 @@ describe("R8A diagnostics preserve workspace authority and privacy", () => {
     Object.assign(reasonLeak.detection.diagnostics!.domDiagnostics!.rejected, { rawDomId: "private-dom-id" });
     expect(isWorkspaceSnapshot(reasonLeak)).toBe(false);
     const progressLeak = structuredClone(snapshot);
-    progressLeak.fullPage.progress = { progress: 1, found: 0, currentStep: 1, totalScrollSteps: 2,
+    progressLeak.fullPage.progress = { type: "FULL_PAGE_DETECT_PROGRESS", progress: 1, found: 0, currentStep: 1, totalScrollSteps: 2,
       domDiagnostics: { ...diagnostic(), rejected: { ...diagnostic().rejected, extra: "private page" } },
     } as typeof progressLeak.fullPage.progress;
     expect(isWorkspaceSnapshot(progressLeak)).toBe(false);
