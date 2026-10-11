@@ -8,12 +8,17 @@ vi.mock("gsap", () => ({
 }));
 vi.mock("@gsap/react", () => ({ useGSAP: vi.fn() }));
 vi.mock("@/shared/utils/analytics", () => ({ logEvent: vi.fn() }));
+vi.mock("@/shared/ui/viewportDetectionTimeout", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/shared/ui/viewportDetectionTimeout")>();
+  return { ...real, awaitViewportCommand: vi.fn(real.awaitViewportCommand) };
+});
 
 const sentRuntimeMessages: string[] = [];
 const sentTabTargets: Array<{ tabId: number; type: string }> = [];
 const sentStartGenerations: Array<string | undefined> = [];
 const sentViewportRequests: Array<{ tabId: number; requestId?: string; expectedUrl?: string }> = [];
 let viewportReplyOverride: ((requestId: string | undefined) => Promise<unknown>) | null = null;
+let viewportGuard: (() => boolean) | undefined;
 
 vi.mock("@/shared/utils/messaging", () => ({
   sendToActiveTab: vi.fn(async (message: { type: string }) => {
@@ -22,11 +27,12 @@ vi.mock("@/shared/utils/messaging", () => ({
   }),
   // The popup dispatches long-running work straight to the recorded owner
   // tab; keep that channel observable too.
-  sendToTabWithBootstrap: vi.fn(async (tabId: number, message: { type: string; generationId?: string; requestId?: string; expectedUrl?: string }) => {
+  sendToTabWithBootstrap: vi.fn(async (tabId: number, message: { type: string; generationId?: string; requestId?: string; expectedUrl?: string }, guard?: () => boolean) => {
     sentRuntimeMessages.push(message.type);
     sentTabTargets.push({ tabId, type: message.type });
     sentStartGenerations.push(message.generationId);
     if (message.type === "START_AUTO_DETECT") {
+      viewportGuard = guard;
       sentViewportRequests.push({ tabId, requestId: message.requestId, expectedUrl: message.expectedUrl });
       return viewportReplyOverride ? viewportReplyOverride(message.requestId) : { ok: true, requestId: message.requestId };
     }
@@ -128,6 +134,7 @@ vi.stubGlobal("fetch", vi.fn(async (_url: string | URL, init?: { headers?: Recor
 import { PopupApp } from "./PopupApp";
 import { __resetStorageCacheForTests } from "@/shared/utils/storage";
 import { readProtectedWorkOwners } from "@/shared/auth/protectedWorkOwner";
+import { awaitViewportCommand } from "@/shared/ui/viewportDetectionTimeout";
 
 beforeEach(async () => {
   vi.resetModules();
@@ -137,6 +144,12 @@ beforeEach(async () => {
   sentStartGenerations.length = 0;
   sentViewportRequests.length = 0;
   viewportReplyOverride = null;
+  viewportGuard = undefined;
+  vi.mocked(awaitViewportCommand).mockImplementation(
+    (operation, timeoutMs, onTimeout) =>
+      vi.importActual<typeof import("@/shared/ui/viewportDetectionTimeout")>("@/shared/ui/viewportDetectionTimeout")
+        .then(real => real.awaitViewportCommand(operation, timeoutMs, onTimeout)),
+  );
   vi.spyOn(window, "close").mockImplementation(() => undefined);
   store.clear();
   sessionStore.clear();
@@ -255,6 +268,39 @@ describe("PopupApp protected dispatch authority", () => {
     fireEvent.click(screen.getByText(/当前屏识别|Detect Current View/));
     await waitFor(() => expect(screen.getByText(/页面或识别任务已变化/)).toBeInTheDocument());
     expect(window.close).not.toHaveBeenCalled();
+  });
+
+  it("RC03A_R6_POPUP_TIMEOUT does not close, cancel content, or accept a late completion", async () => {
+    let release!: (response: unknown) => void;
+    viewportReplyOverride = async () => new Promise(resolve => { release = resolve; });
+    vi.mocked(awaitViewportCommand).mockImplementationOnce(async (_operation, _timeout, onTimeout) => {
+      onTimeout?.();
+      return { timedOut: true };
+    });
+    render(<PopupApp />);
+    await screen.findByText(/当前屏识别|Detect Current View/);
+    fireEvent.click(screen.getByText(/当前屏识别|Detect Current View/));
+    await waitFor(() => expect(screen.getByText(/等待当前屏识别结果超时/)).toBeInTheDocument());
+    expect(sentViewportRequests).toHaveLength(1);
+    expect(viewportGuard?.()).toBe(false);
+    expect(window.close).not.toHaveBeenCalled();
+    await act(async () => { release({ ok: true, requestId: sentViewportRequests[0]?.requestId }); });
+    expect(window.close).not.toHaveBeenCalled();
+    expect(screen.getByText(/等待当前屏识别结果超时/)).toBeInTheDocument();
+  });
+
+  it("RC03A_R6_POPUP_DOUBLE_CLICK guards a pending panel-open without parallel dispatch", async () => {
+    queueSidePanelOpen();
+    render(<PopupApp />);
+    await screen.findByText(/当前屏识别|Detect Current View/);
+    const trigger = screen.getByText(/当前屏识别|Detect Current View/);
+    fireEvent.click(trigger);
+    fireEvent.click(trigger);
+    expect(chrome.sidePanel.open).toHaveBeenCalledTimes(1);
+    expect(sentViewportRequests).toHaveLength(0);
+    await act(async () => { deferredSidePanelOpen?.(); deferredSidePanelOpen = null; });
+    await waitFor(() => expect(sentViewportRequests).toHaveLength(1));
+    expect(sentRuntimeMessages).toEqual(["START_AUTO_DETECT"]);
   });
 
   it("RC03A_R5_POPUP_IN_FLIGHT waits for terminal completion and does not dispatch twice", async () => {
