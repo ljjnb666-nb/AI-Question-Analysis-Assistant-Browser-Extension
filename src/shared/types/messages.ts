@@ -123,6 +123,8 @@ export interface StartAutoDetectMsg extends BaseMessage {
 export interface AutoDetectResultReadyMsg extends BaseMessage {
   type: "AUTO_DETECT_RESULT_READY";
   candidates: CandidateSnapshot[];
+  /** Numeric-only probe evidence; absent for selection refresh / legacy events. */
+  domDiagnostics?: DomCandidateDiagnostics;
 }
 
 export interface HighlightCandidateMsg extends BaseMessage {

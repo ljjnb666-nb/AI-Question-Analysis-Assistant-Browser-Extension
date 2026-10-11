@@ -73,10 +73,10 @@ export function watchForPageChanges(
  * top document plus all registered same-origin frames and open shadow roots,
  * and dedupes runtime instances by root-scoped identity.
  */
-export function detectCandidatesAcrossRoots(): QuestionBlock[] {
+export function detectCandidatesAcrossRoots(diagnostics?: DomCandidateDiagnostics): QuestionBlock[] {
   const registry = sharedRootRegistry();
   registry.reconcile(document);
-  const merged: QuestionBlock[] = [...detectCandidatesInViewport()];
+  const merged: QuestionBlock[] = [...detectCandidatesInViewport(diagnostics)];
   const seen = new Set(merged.map((block) => `${block.identity?.stableId ?? block.id}`));
   for (const root of registry.list()) {
     if (root.kind === "top-document") continue;

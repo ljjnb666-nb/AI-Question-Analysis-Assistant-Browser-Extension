@@ -1,4 +1,4 @@
-import type { QuestionBlock } from "@/shared/types";
+import type { QuestionBlock, DomCandidateDiagnostics } from "@/shared/types";
 import type { HighlightLayer } from "./highlight/HighlightLayer";
 import type { ScanScrollRoot } from "./detector/fullPageDetector";
 import { notifyDetectedCandidates, runAutoDetectSession, runFullPageDetectSession } from "./contentDetectionSession";
@@ -185,14 +185,14 @@ export function createContentDetectionBridge(deps: BridgeDeps) {
     }));
   }
 
-  function notifySidePanel(candidates: QuestionBlock[]) {
+  function notifySidePanel(candidates: QuestionBlock[], diagnostics?: DomCandidateDiagnostics) {
     if (!isRuntimeCurrent()) return;
     notifyDetectedCandidates(candidates, createNotifySidePanelDepsFactory({
       candidateStatusMap: deps.candidateStatusMap,
       safeRuntimeSendMessage: (message) => {
         if (isRuntimeCurrent()) deps.safeRuntimeSendMessage(message);
       },
-    }));
+    }), diagnostics);
   }
 
   return {
