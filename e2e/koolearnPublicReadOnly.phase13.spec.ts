@@ -67,6 +67,23 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     expect(["koolearn.com", "www.koolearn.com"]).toContain(parsed.hostname);
     expect(parsed.pathname).toBe("/shiti/tk-4-28-0-0-1.html");
 
+    // The public catalogue begins below a long topic-navigation sidebar.
+    // Bring the first real stem into the viewport before testing a
+    // *viewport* detector. Scrolling is read-only; no link or option click.
+    const stemVisible = await page.evaluate(() => {
+      const nodes = Array.from(document.querySelectorAll("p,div,li,span"));
+      const stem = nodes.find(node => {
+        const text = (node.textContent ?? "").trim();
+        return text.length >= 30 && text.length <= 450
+          && text.includes("凡是符合自己的认识或自己所维护的道德观念");
+      });
+      if (!stem) return false;
+      stem.scrollIntoView({ block: "center", inline: "nearest" });
+      return true;
+    });
+    expect(stemVisible, "KOOLEARN_PUBLIC_QUESTION_ANCHOR_NOT_FOUND").toBe(true);
+    await page.waitForTimeout(350);
+
     await page.evaluate(() => {
       (window as unknown as { __qsLiveWrites: { submissions: number; interactions: number } })
         .__qsLiveWrites = { submissions: 0, interactions: 0 };
