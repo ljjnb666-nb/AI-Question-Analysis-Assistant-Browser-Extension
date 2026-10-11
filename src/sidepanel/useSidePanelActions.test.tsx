@@ -4,6 +4,7 @@ import { renderHook } from "@testing-library/react";
 import type { DetectedCandidate } from "@/shared/types";
 import { DEFAULT_SETTINGS } from "@/shared/types";
 import { useSidePanelActions } from "./useSidePanelActions";
+import { userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
 
 const sentMessages: Array<{ tabId: number; type: string }> = [];
 
@@ -482,6 +483,93 @@ describe("useSidePanelActions authority gate", () => {
       code: "VIEWPORT_DETECT_ALREADY_RUNNING", tone: "warning",
       message: expect.stringContaining("已有识别任务正在运行"),
     }));
+  });
+
+  it.each(["navigated", "missing"] as const)(
+    "RC03A-R1 settles only its own starting feedback when the bound origin is %s",
+    async (transition) => {
+      const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+      authenticated = true;
+      const originalUrl = "https://quiz.example.com/page";
+      let origin: { tabId: number; url: string } | undefined = { tabId: 7, url: originalUrl };
+      vi.stubGlobal("chrome", {
+        ...chrome,
+        tabs: { ...chrome.tabs, get: vi.fn(async () => ({ id: 7, url: originalUrl } as chrome.tabs.Tab)) },
+      });
+      let release: () => void = () => {};
+      vi.mocked(sendProtectedTabMessageWithBootstrap).mockImplementationOnce(async (tabId, message) => {
+        sentMessages.push({ tabId, type: message.type });
+        await new Promise<void>(resolve => { release = resolve; });
+        return { ok: true, response: { ok: true, requestId: "old-request" } };
+      });
+      let lastFeedback: UserFeedback | null = null;
+      const setFillFeedback = vi.fn((next: React.SetStateAction<UserFeedback | null>) => {
+        lastFeedback = typeof next === "function" ? next(lastFeedback) : next;
+      });
+      const options = makeOptions({
+        isWorkspaceReadyNow: () => true,
+        getWorkspaceOrigin: () => origin,
+        setFillFeedback,
+        uiLang: "zh",
+      });
+      try {
+        const { result, unmount } = renderHook(() => useSidePanelActions(options));
+        const running = result.current.handleDetect();
+        await vi.waitFor(() => expect(sentMessages).toHaveLength(1));
+        expect(lastFeedback).toMatchObject({ code: "VIEWPORT_DETECT_STARTING" });
+        origin = transition === "navigated" ? { tabId: 7, url: "https://quiz.example.com/next" } : undefined;
+        release();
+        await running;
+        expect(lastFeedback).toMatchObject({
+          code: "VIEWPORT_DETECT_STALE_RUN", tone: "warning",
+          message: expect.stringContaining("页面已变化"),
+        });
+        expect(options.setCandidates).not.toHaveBeenCalled();
+        expect(options.setIsDetecting).not.toHaveBeenCalledWith(true);
+        expect(sentMessages).toEqual([{ tabId: 7, type: "START_AUTO_DETECT" }]);
+        unmount();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it("RC03A-R2 does not overwrite a newer feedback even when its code matches STARTING", async () => {
+    const { sendProtectedTabMessageWithBootstrap } = await import("./tabActions");
+    authenticated = true;
+    const oldUrl = "https://quiz.example.com/page";
+    let origin = { tabId: 7, url: oldUrl };
+    vi.stubGlobal("chrome", {
+      ...chrome,
+      tabs: { ...chrome.tabs, get: vi.fn(async () => ({ id: 7, url: oldUrl } as chrome.tabs.Tab)) },
+    });
+    let release: () => void = () => {};
+    vi.mocked(sendProtectedTabMessageWithBootstrap).mockImplementationOnce(async (tabId, message) => {
+      sentMessages.push({ tabId, type: message.type });
+      await new Promise<void>(resolve => { release = resolve; });
+      return { ok: true, response: { ok: true } };
+    });
+    let lastFeedback: UserFeedback | null = null;
+    const setFillFeedback = vi.fn((next: React.SetStateAction<UserFeedback | null>) => {
+      lastFeedback = typeof next === "function" ? next(lastFeedback) : next;
+    });
+    const options = makeOptions({ isWorkspaceReadyNow: () => true, getWorkspaceOrigin: () => origin, setFillFeedback, uiLang: "zh" });
+    try {
+      const { result, unmount } = renderHook(() => useSidePanelActions(options));
+      const running = result.current.handleDetect();
+      await vi.waitFor(() => expect(sentMessages).toHaveLength(1));
+      const newFeedback = userFeedback("info", "新页面发起的新识别", { code: "VIEWPORT_DETECT_STARTING" });
+      // A newer action has replaced the old callback's exact feedback lease.
+      lastFeedback = newFeedback;
+      origin = { tabId: 7, url: "https://quiz.example.com/next" };
+      release();
+      await running;
+      expect(lastFeedback).toBe(newFeedback);
+      expect(options.setCandidates).not.toHaveBeenCalled();
+      unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("RC03A-03 suppresses a duplicate click during unresolved tab authority lookup", async () => {
