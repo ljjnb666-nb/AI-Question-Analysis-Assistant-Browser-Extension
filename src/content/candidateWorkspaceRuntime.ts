@@ -128,7 +128,7 @@ export function createCandidateWorkspaceRuntime(options: {
           if (!state.fullPage.running) return false; // cancellation fences late completion
           const done = message as unknown as FullPageDetectDoneMsg;
           const phase = done.outcome === "failed" ? "failed"
-            : done.outcome === "refinement_empty" ? "incomplete" : "completed";
+            : ["filtered_empty", "postprocess_empty", "refinement_empty"].includes(done.outcome ?? "") ? "incomplete" : "completed";
           state = { ...state, detection: { phase, mode: "fullpage",
             ...(done.outcome ? { outcome: done.outcome } : {}),
             ...(done.failureStage ? { failureStage: done.failureStage } : {}),

@@ -89,6 +89,16 @@ export async function runFullPageDetectSession(
     candidateStatusMap: deps.candidateStatusMap,
     refreshLayoutResizeObservation: deps.refreshLayoutResizeObservation,
     safeRuntimeSendMessage: bindFullPageGeneration(deps.safeRuntimeSendMessage, generationId),
+    commitBeforeDone: (result) => {
+      if (!isRuntimeCurrent()) return;
+      deps.setActiveCandidates(result.activeCandidates);
+      deps.setActiveHighlightBlocks(result.activeHighlightBlocks);
+      deps.setActiveDetectMode(result.activeDetectMode);
+      deps.setLastFullPageLayoutKey(result.lastFullPageLayoutKey);
+      // The real factory returns HighlightLayer; orchestration's generic
+      // signature intentionally exposes only the setBlocks capability.
+      deps.setHighlightLayer(result.highlightLayer as HighlightLayer | null);
+    },
     detectCandidatesFullPage: deps.detectCandidatesFullPage,
     refineFullPageCandidatesViaManualPipeline: deps.refineFullPageCandidatesViaManualPipeline,
     resolveFullPageScrollRoot: deps.resolveFullPageScrollRoot,
@@ -97,15 +107,9 @@ export async function runFullPageDetectSession(
     refreshFullPageHighlightsAfterLayoutChange: deps.refreshFullPageHighlightsAfterLayoutChange,
     notifySidePanel: deps.notifySidePanel,
   });
-  if (!result || !isRuntimeCurrent()) {
-    result?.highlightLayer?.destroy();
-    return;
-  }
-  deps.setActiveCandidates(result.activeCandidates);
-  deps.setActiveHighlightBlocks(result.activeHighlightBlocks);
-  deps.setActiveDetectMode(result.activeDetectMode);
-  deps.setLastFullPageLayoutKey(result.lastFullPageLayoutKey);
-  deps.setHighlightLayer(result.highlightLayer);
+  // All active state has been committed synchronously BEFORE terminal DONE.
+  // Never replay a stale result here after another generation has started.
+  if (result && !isRuntimeCurrent()) (result.highlightLayer as HighlightLayer | null)?.destroy();
 }
 
 export async function runAutoDetectSession(deps: DetectSessionDeps): Promise<void> {

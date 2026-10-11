@@ -68,6 +68,24 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it("R13D preserves an accepted long choice question when its option D is after preview truncation", async () => {
+    pageHeight = 600;
+    const question = {
+      id: "long-choice", bbox: { x: 50, y: 150, width: 680, height: 310 },
+      previewText: "非常完整且很长的题干".repeat(43) + " A. 选项甲 B. 选项乙 C. 选项丙 D. 选项丁",
+      questionTypeGuess: "single_choice" as const, confidence: 0.94,
+      source: "auto_dom" as const, hasImage: false,
+    };
+    expect(question.previewText.length).toBeGreaterThan(420);
+    vi.mocked(detectCandidatesInViewport).mockReturnValue([question]);
+    const scan = detectCandidatesFullPage(() => undefined);
+    await vi.runAllTimersAsync();
+    const result = await scan;
+    expect(result).toHaveLength(1);
+    expect(result[0].previewText).toHaveLength(420);
+    expect(result[0].id).toMatch(/^fullpage-/);
+  });
+
   it("RC03B-R3 CANCEL during readiness recheck cannot revive old scan authority", async () => {
     document.body.setAttribute("aria-busy", "true");
     const scan = detectCandidatesFullPage(() => undefined);

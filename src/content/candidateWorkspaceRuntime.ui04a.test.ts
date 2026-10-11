@@ -82,6 +82,20 @@ describe("UI-04A content snapshot authority", () => {
     expect(read()).toEqual(canceled);
   });
 
+  it("R13E distinguishes both filtered and postprocess empty from a genuinely empty scan", () => {
+    const { runtime, read } = setup();
+    for (const outcome of ["filtered_empty", "postprocess_empty"] as const) {
+      runtime.beginDetection("fullpage");
+      expect(runtime.observe({ type: "FULL_PAGE_DETECT_DONE", outcome, candidates: [], totalFound: 0,
+        diagnostics: { observedCandidates: 2, retainedCandidates: outcome === "filtered_empty" ? 0 : 1,
+          postprocessedCandidates: 0, refinedCandidates: 0 } })).toBe(true);
+      expect(read().detection).toMatchObject({ phase: "incomplete", outcome, mode: "fullpage" });
+    }
+    runtime.beginDetection("fullpage");
+    runtime.observe({ type: "FULL_PAGE_DETECT_DONE", outcome: "no_candidates", candidates: [], totalFound: 0 });
+    expect(read().detection.phase).toBe("completed");
+  });
+
   it("UI04A-SCAN cancellation/completion fence old progress and clear ephemeral counters", () => {
     const { runtime, read } = setup();
     runtime.beginDetection("fullpage");
