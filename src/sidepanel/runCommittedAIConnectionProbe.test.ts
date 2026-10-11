@@ -5,10 +5,16 @@ import { beginAIConnectionValidation, finishAIConnectionValidation, AIConnection
 import type { ConnectionMetadata } from "@/shared/types/connection";
 
 vi.mock("@/shared/utils/parseRouter", () => ({ parseQuestion: vi.fn() }));
-vi.mock("@/shared/utils/aiConnectionClient", async (actual) => {
-  const original = await actual<typeof import("@/shared/utils/aiConnectionClient")>();
-  return { ...original, beginAIConnectionValidation: vi.fn(), finishAIConnectionValidation: vi.fn() };
-});
+vi.mock("@/shared/utils/aiConnectionClient", () => ({
+  beginAIConnectionValidation: vi.fn(),
+  finishAIConnectionValidation: vi.fn(),
+  AIConnectionCommandError: class extends Error {
+    constructor(readonly code: string) {
+      super(code);
+      this.name = "AIConnectionCommandError";
+    }
+  },
+}));
 const expected = {
   id: "conn-a", presetId: "anthropic", selectedModelId: "claude-test",
   connectionRevision: 3, credentialRevision: 2, hasCredential: true,
