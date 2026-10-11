@@ -36,6 +36,8 @@ chrome.runtime.onMessage.addListener((
     case "AI_CONNECTION_GET_ACTIVE_METADATA":
     case "AI_CONNECTION_GET_EDITOR_VIEW":
     case "AI_CONNECTION_UPDATE_ACTIVE":
+    case "AI_CONNECTION_BEGIN_VALIDATION":
+    case "AI_CONNECTION_FINISH_VALIDATION":
       void handleAIConnectionCommand(message, sender).then(sendResponse);
       return true;
     case "CAPTURE_TAB_SCREENSHOT":

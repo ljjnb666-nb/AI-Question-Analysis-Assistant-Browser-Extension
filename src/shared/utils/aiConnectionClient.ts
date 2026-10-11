@@ -2,6 +2,7 @@ import type {
   AIConnectionUpdatePatch,
   AIConnectionCommand,
   AIConnectionResponse,
+  AIConnectionValidationTicket,
 } from "../types/aiConnectionMessages";
 export class AIConnectionCommandError extends Error {
   constructor(readonly code: string) {
@@ -35,3 +36,13 @@ export async function getAIConnectionActiveMetadata() {
   return response.metadata;
 }
 
+
+/** Two-phase background-owned validation; never send credentials or response bodies. */
+export async function beginAIConnectionValidation(): Promise<AIConnectionValidationTicket> {
+  const response = await sendAIConnectionCommand({ type: "AI_CONNECTION_BEGIN_VALIDATION" });
+  if (!response.validationTicket) throw new AIConnectionCommandError("AI_CONNECTION_VALIDATION_NOT_STARTED");
+  return response.validationTicket;
+}
+export function finishAIConnectionValidation(ticket: AIConnectionValidationTicket, outcome: "success" | "failed") {
+  return sendAIConnectionCommand({ type: "AI_CONNECTION_FINISH_VALIDATION", ticket, outcome });
+}
