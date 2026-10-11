@@ -1,0 +1,93 @@
+name: I121 Cross-Account Stability Soak
+
+# Independent, opt-in validation. Branch push runs this workflow once for the
+# focused stability PR; after merge, workflow_dispatch is available on main.
+# The existing nine-job production CI and RC gate are not changed.
+on:
+  push:
+    branches:
+      - "fix/i121-stability-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cross_account_soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: "true"
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned GitHub ref 2026-10-11
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify source SHA
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          echo "EXPECTED_SHA=${GITHUB_SHA}"
+          echo "ACTUAL_SHA=${actual_sha}"
+          test "${actual_sha}" = "${GITHUB_SHA}"
+          echo "EXPECTED_SHA=${GITHUB_SHA}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "ACTUAL_SHA=${actual_sha}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4, pinned
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      - name: Use lockfile-compatible npm
+        run: npm install --global npm@11.6.2
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build and verify production extension
+        run: |
+          npm run build
+          npm run verify:artifact
+
+      - name: Install Playwright Chromium and Linux dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Six isolated real-browser lifecycles, zero retries
+        id: soak
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "I121_SOAK_EXPECTED_RUNS=6"
+          echo "I121_SOAK_RETRIES=0"
+          echo "I121_SOAK_WORKERS=1"
+          xvfb-run -a npx playwright test e2e/uiOwnerAuthFence.phase14bE3B2B1.spec.ts \
+            --repeat-each=6 --workers=1 --retries=0 --reporter=list 2>&1 | tee i121-soak.log
+
+      - name: Record independent stability evidence
+        if: always()
+        shell: bash
+        env:
+          SOAK_OUTCOME: ${{ steps.soak.outcome }}
+        run: |
+          echo "### I121 zero-retry stability soak" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Exact SHA: ${GITHUB_SHA}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Repeats: 6; workers: 1; retries: 0" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Outcome: ${SOAK_OUTCOME}" >> "${GITHUB_STEP_SUMMARY}"
+          if [[ -f i121-soak.log ]]; then
+            grep -E 'I121_SOAK_VARIANT|[0-9]+ (passed|failed|flaky)' i121-soak.log >> "${GITHUB_STEP_SUMMARY}" || true
+          fi
+
+      - name: Preserve logs and failure traces, including on errors
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4, pinned
+        with:
+          name: i121-soak-evidence-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            i121-soak.log
+            test-results/
+            playwright-report/
+          if-no-files-found: warn
+          retention-days: 30
