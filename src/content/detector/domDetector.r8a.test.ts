@@ -108,4 +108,17 @@ describe("RC03B-R8A DOM admission and numeric diagnostics", () => {
     expect(diag.rejected.navigation).toBeGreaterThan(0);
   });
 
+  it("R8A-12 never treats a multi-question linked list as a single card", () => {
+    stageDom('<div id="r8a-card" class="question-list">' +
+      '<p>第一题：下列哪种选择体现学习主动性？</p>' +
+      '<a href="#a1"><span>A. 主动学习</span></a><a href="#b1"><span>B. 被动等待</span></a>' +
+      '<a href="#c1"><span>C. 拒绝反馈</span></a><a href="#d1"><span>D. 放弃探索</span></a>' +
+      '<p>第二题：下列哪种选择属于学习反馈？</p>' +
+      '<a href="#a2"><span>A. 调整策略</span></a><a href="#b2"><span>B. 不做练习</span></a>' +
+      '<a href="#c2"><span>C. 忽略结果</span></a><a href="#d2"><span>D. 停止思考</span></a></div>');
+    const diag = createDomCandidateDiagnostics();
+    detectCandidatesInViewport(diag);
+    expect(diag.rejected.navigation).toBeGreaterThan(0);
+  });
+
 });

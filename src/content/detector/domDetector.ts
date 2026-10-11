@@ -1021,7 +1021,8 @@ function isLikelyNavigationElement(el: Element, text: string): boolean {
     const explicitQuestionHost = !!el.closest(".question-item,.questionBox,.base-question-component,.q-detail");
     // Linked answer choices are also valid on sites using custom card names.
     // Require BOTH a question-owned context and an actual stem signal.
-    const credibleQuestionHost = isLikelyQuestionContext(el)
+    const ownsQuestionCard = /(?:question|problem|exam|quiz|test|exercise)[-_]?(?:card|item|block|body)/.test(marker);
+    const credibleQuestionHost = ownsQuestionCard && isLikelyQuestionContext(el)
       && /[?？]|下列|哪项|正确的是|错误的是|第\s*\d{1,3}\s*题/.test(text);
     if (!explicitQuestionHost && !credibleQuestionHost) return true;
   }
