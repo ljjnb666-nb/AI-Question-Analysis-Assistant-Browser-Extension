@@ -43,7 +43,7 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
   if (questionType === "single_choice" && /[,，、/|]/.test(answer)) {
     questionType = "multi_choice";
   }
-  const confidence = typeof parsed.confidence === "number"
+  let confidence = typeof parsed.confidence === "number"
     ? Math.max(0, Math.min(1, parsed.confidence))
     : 0.8;
 
@@ -168,9 +168,33 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
   const finalWarning = (questionType === "single_choice" || questionType === "multi_choice") && answer === "需人工确认"
     ? [warning, "选择题未提取到稳定的结构化选项结论，需人工确认后再填写。"].filter(Boolean).join(" ")
     : warning;
-  const mergedWarning = codeProblemLikely && answer === "需人工确认"
+  let mergedWarning = codeProblemLikely && answer === "需人工确认"
     ? [finalWarning, "代码题未提取到可直接填写的代码答案，请查看详情或视觉重试。"].filter(Boolean).join(" ")
     : finalWarning;
+
+  // RC-PILOT-03E R1: a provider's selected letter is not evidence that the
+  // *screenshot* contained a reliably mapped set of A/B/C/D options.
+  // This gate is deliberately limited to manual capture and must not grant
+  // fill authority based on a guessed label or optionSelections alone.
+  const manualChoiceWithoutEvidence =
+    block.source === "manual_capture" &&
+    !codeProblemLikely &&
+    !judgeQuestionLikely &&
+    (questionType === "single_choice" || questionType === "multi_choice" ||
+      ((parsed.questionType === "single_choice" || parsed.questionType === "multi_choice") && isOptionLetterSet(answer))) &&
+    !hasCompleteLabeledManualChoiceOptions(recognizedText);
+  if (manualChoiceWithoutEvidence) {
+    const tentativeAnswer = isOptionLetterSet(answer) ? answer : "";
+    answer = "需人工确认";
+    optionSelections = undefined;
+    confidence = Math.min(confidence, 0.49);
+    mergedWarning = [
+      mergedWarning,
+      tentativeAnswer
+        ? `截图选项未完整识别为 A/B/C/D；模型推测 ${tentativeAnswer} 仅供人工复核，不可当作已核实的答案。`
+        : "截图选项未完整识别为 A/B/C/D；请人工核对截图后再决定答案。",
+    ].filter(Boolean).join(" ");
+  }
 
   return {
     blockId: block.id,
@@ -680,3 +704,20 @@ function shouldFallbackToPreview(recognizedText: string, previewText: string): b
 }
 
 
+
+/**
+ * Manual image choice evidence must contain four distinct, nonempty labeled
+ * options, in their original order. Unlabeled OCR words and the model's
+ * optionSelections cannot manufacture labels or establish a reliable mapping.
+ * This is an intentionally conservative *text* check, not image verification.
+ */
+export function hasCompleteLabeledManualChoiceOptions(text: string): boolean {
+  const matches = Array.from(String(text || "").matchAll(
+    /(?:^|\s)([A-D])[.\):：、]\s*(\S[\s\S]*?)(?=(?:\s+[A-D][.\):：、]\s*\S)|$)/g,
+  ));
+  if (matches.map((match) => match[1]).join("") !== "ABCD") return false;
+  return matches.every((match) => {
+    const value = (match[2] || "").trim();
+    return value.length > 0 && value.length <= 120;
+  });
+}

@@ -19,7 +19,7 @@ Rules:
 11) Do not output markdown, code fences, or extra text. JSON only.
 12) For code/programming questions, answer must be a single JSON string that contains only the final code to fill in.
 13) For code/programming questions, escape every newline as \\n, every backslash as \\\\, and every quote inside code as \\\".
-14) For code/programming questions, never put notes, numbered steps, or prose into answer.`;
+14) For code/programming questions, never put notes, numbered steps, or prose into answer.\n15) For image-based choice questions, transcribe the actual visible stem and each option into recognizedText with its original A./B./C./D. label and exact corresponding text, each on a separate line.\n16) Only transcribe an A-D label if it is visibly present in the source; do NOT invent labels for unlabelled words, infer labels from answer/optionSelections, or silently reorder options.\n17) If one or more labels or option texts cannot be read, preserve the visible text without guessing and explicitly warn that the option structure needs manual review.`;
 
 const TEXT_ROUTE_OPTION_ACCURACY_RULES = [
   "For multiple-choice questions, option mapping accuracy is critical.",
@@ -47,7 +47,7 @@ export function buildUserQuestionPrompt(block: QuestionBlock, route: RouteUsed, 
 
   const typeHint = inferQuestionTypeHint(block);
   const imagePriorityHint = (route === "vision" || route === "hybrid")
-    ? "Vision hint: prioritize the actual question image as primary source. Use text snippet only as auxiliary."
+    ? "Vision hint: prioritize the actual question image as primary source. Transcribe visible choice labels A/B/C/D and their exact option text in recognizedText, preserving their order and line breaks; never add labels not visible in the image. Use text snippet only as auxiliary."
     : "";
   const formulaHint = looksFormulaOrDiagramHeavy(questionText) || block.hasImage
     ? [
