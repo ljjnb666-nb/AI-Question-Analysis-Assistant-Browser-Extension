@@ -178,11 +178,28 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
     if (viewportDetectInFlight.current || !requireAuthenticatedAction()) return;
     viewportDetectInFlight.current = true;
     let dispatchedTab: chrome.tabs.Tab | null = null;
-    options.setFillFeedback(userFeedback(
+    // Keep exact object identity as the feedback lease: an old tab's
+    // completion must never overwrite a newer action's status, even if both
+    // happen to carry the same display code.
+    const startingFeedback = userFeedback(
       "info",
       options.uiLang === "en" ? "Starting current-screen detection…" : "正在启动当前屏识别…",
       { code: "VIEWPORT_DETECT_STARTING" },
-    ));
+    );
+    options.setFillFeedback(startingFeedback);
+    const reportSupersededViewport = () => {
+      // An invalidated login is owned by the auth screen, never by the
+      // superseded viewport request.
+      if (!options.isAuthenticatedNow()) return;
+      options.setFillFeedback(previous => previous === startingFeedback
+        ? userFeedback(
+          "warning",
+          options.uiLang === "en"
+            ? "The page changed during current-screen detection. The old result was ignored; sync the workspace before retrying."
+            : "当前屏识别期间页面已变化，旧结果已忽略。请重新同步工作区后重试。",
+          { code: "VIEWPORT_DETECT_STALE_RUN" },
+        ) : previous);
+    };
     try {
       const activeTab = await getActionTab();
       dispatchedTab = activeTab;
@@ -195,10 +212,10 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
         return;
       }
       // The captured tab and exact URL remain the dispatch authority.
-      if (!canDispatchToTab(activeTab)) return;
+      if (!canDispatchToTab(activeTab)) { reportSupersededViewport(); return; }
       const targetOrigin = options.getWorkspaceOrigin?.();
       if (options.getWorkspaceOrigin && (!targetOrigin || targetOrigin.tabId !== activeTab.id
-        || targetOrigin.url !== activeTab.url)) return;
+        || targetOrigin.url !== activeTab.url)) { reportSupersededViewport(); return; }
       const requestId = targetOrigin ? crypto.randomUUID() : undefined;
       let expired = false;
       const dispatch = await awaitViewportCommand(
@@ -214,7 +231,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
         VIEWPORT_COMMAND_TIMEOUT_MS,
         () => { expired = true; },
       );
-      if (!canDispatchToTab(activeTab)) return;
+      if (!canDispatchToTab(activeTab)) { reportSupersededViewport(); return; }
       if (dispatch.timedOut) {
         options.setFillFeedback(userFeedback(
           "warning",
@@ -255,6 +272,9 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       }
       const origin = options.getWorkspaceOrigin?.();
       if (!origin) {
+        // A workspace caller losing its origin is a superseded request,
+        // NOT a legacy unscoped detection and must never clear candidates.
+        if (options.getWorkspaceOrigin) { reportSupersededViewport(); return; }
         // Legacy non-workspace caller retains its previous state path.
         applyDetectState(resetDetectState());
         options.setFillFeedback(userFeedback(
@@ -264,13 +284,13 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
         ));
         return;
       }
-      if (origin.tabId !== activeTab.id || origin.url !== activeTab.url) return;
+      if (origin.tabId !== activeTab.id || origin.url !== activeTab.url) { reportSupersededViewport(); return; }
       // Only a content-owned, versioned snapshot can report a candidate count;
       // no legacy AUTO_DETECT_RESULT_READY payload is used as render authority.
       const snapshot = await requestWorkspaceSnapshot(origin, () => canDispatchToTab(activeTab));
-      if (!canDispatchToTab(activeTab)) return;
+      if (!canDispatchToTab(activeTab)) { reportSupersededViewport(); return; }
       const after = await readWorkspaceOrigin(origin.tabId).catch(() => null);
-      if (!canDispatchToTab(activeTab) || after?.url !== origin.url) return;
+      if (!canDispatchToTab(activeTab) || after?.url !== origin.url) { reportSupersededViewport(); return; }
       options.setFillFeedback(viewportDetectionSnapshotFeedback(options.uiLang, origin, snapshot, requestId));
     } catch (error) {
       // A delayed exception from a superseded route may not overwrite feedback
@@ -281,6 +301,7 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
         options.uiLang === "en" ? "Current-screen detection could not be confirmed. Retry after syncing the workspace." : "当前屏识别状态无法确认，请同步工作区后重试。",
         { code: "VIEWPORT_DETECT_DISPATCH_ERROR", technicalDetail: String(error) },
       ));
+      else reportSupersededViewport();
     } finally {
       viewportDetectInFlight.current = false;
     }
