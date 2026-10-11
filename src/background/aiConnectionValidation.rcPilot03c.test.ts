@@ -44,8 +44,9 @@ describe("RC-PILOT-03C single-writer validation lease", () => {
     const validation = state().connections[id].validation;
     expect(validation).toMatchObject({
       status: "validated", generation: 1,
-      validatedConnectionRevision: 1, validatedCredentialRevision: 0
+      validatedConnectionRevision: 1
     });
+    expect(validation.validatedCredentialRevision).toBeUndefined(); // Keyless provider: never persist invalid revision 0.
     expect(validation.validatedAt).toBeTypeOf("number");
     const read = await send({ type: "AI_CONNECTION_GET_ACTIVE_METADATA" });
     expect(read).toMatchObject({ ok: true, metadata: { validation } });

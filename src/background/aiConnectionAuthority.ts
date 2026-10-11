@@ -273,7 +273,8 @@ async function finishValidation(ticket: AIConnectionValidationTicket, outcome: "
     c.validation = outcome === "success"
       ? { status: "validated", generation: ticket.generation,
           validatedConnectionRevision: ticket.connectionRevision,
-          validatedCredentialRevision: ticket.credentialRevision, validatedAt: Date.now() }
+          ...(ticket.credentialRevision > 0 ? { validatedCredentialRevision: ticket.credentialRevision } : {}),
+          validatedAt: Date.now() }
       : { status: "failed", generation: ticket.generation, errorCode: "AI_CONNECTION_TEST_FAILED" };
     return state;
   });
