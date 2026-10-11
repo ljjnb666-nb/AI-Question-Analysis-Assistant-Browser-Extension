@@ -1,4 +1,4 @@
-import type { CandidateOrigin, CandidateWorkspaceSnapshot } from "@/shared/types";
+import type { CandidateOrigin, CandidateWorkspaceSnapshot, DomCandidateDiagnostics } from "@/shared/types";
 
 export type WorkspaceHydrationStatus = "idle" | "syncing" | "ready" | "runtime_unavailable";
 
@@ -16,7 +16,8 @@ export function isWorkspaceSnapshot(value: unknown): value is CandidateWorkspace
     && (s.detection.diagnostics === undefined || (count(s.detection.diagnostics.observedCandidates)
       && count(s.detection.diagnostics.retainedCandidates)
       && count(s.detection.diagnostics.postprocessedCandidates)
-      && count(s.detection.diagnostics.refinedCandidates)))
+      && count(s.detection.diagnostics.refinedCandidates)
+      && (s.detection.diagnostics.domDiagnostics === undefined || isDomCandidateDiagnostics(s.detection.diagnostics.domDiagnostics))))
     && [null, "viewport", "fullpage"].includes(s.detection.mode)
     && (s.detection.requestId === undefined || typeof s.detection.requestId === "string"
       && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(s.detection.requestId))
@@ -26,13 +27,32 @@ export function isWorkspaceSnapshot(value: unknown): value is CandidateWorkspace
     && !!s.fullPage && typeof s.fullPage.running === "boolean" && validProgress(s.fullPage.progress, "scan");
 }
 
+/** Fail closed on malformed, negative or noninteger DOM diagnostic counts. */
+function isDomCandidateDiagnostics(value: unknown): value is DomCandidateDiagnostics {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
+  const d = value as DomCandidateDiagnostics;
+  const rejectionKeys = ["geometry", "text", "controls", "navigation", "signal", "confidence", "completeness"] as const;
+  const ownKeysExactly = (obj: object, keys: readonly string[]) => {
+    const own = Object.keys(obj);
+    return own.length === keys.length && own.every((key) => keys.includes(key));
+  };
+  const count = (x: unknown) => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
+  return ownKeysExactly(d, ["probedElements", "acceptedCandidates", "rejected"])
+    && count(d.probedElements) && count(d.acceptedCandidates)
+    && !!d.rejected && typeof d.rejected === "object" && !Array.isArray(d.rejected)
+    && ownKeysExactly(d.rejected, rejectionKeys)
+    && rejectionKeys.every((key) => count(d.rejected[key]));
+}
+
 function validProgress(value: unknown, kind: "auto" | "scan"): boolean {
   if (value === null) return true;
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   const keys = kind === "auto" ? ["solved", "filled", "total", "current"] : ["progress", "found", "currentStep", "totalScrollSteps"];
   return keys.every((key) => typeof record[key] === "number" && Number.isFinite(record[key]) && (record[key] as number) >= 0)
-    && (kind !== "auto" || typeof record.running === "boolean");
+    && (kind !== "auto" || typeof record.running === "boolean")
+    && (kind !== "scan" || record.domDiagnostics === undefined || isDomCandidateDiagnostics(record.domDiagnostics));
 }
 
 type Options = {

@@ -167,10 +167,26 @@ export interface StartFullPageDetectMsg extends BaseMessage {
   generationId?: string;
 }
 
+/** Bounded numeric-only per-viewport DOM audit; never include question text, node IDs or URLs. */
+export interface DomCandidateDiagnostics {
+  probedElements: number;
+  acceptedCandidates: number;
+  rejected: {
+    geometry: number;
+    text: number;
+    controls: number;
+    navigation: number;
+    signal: number;
+    confidence: number;
+    completeness: number;
+  };
+}
+
 export interface FullPageDetectProgressMsg extends BaseMessage {
   type: "FULL_PAGE_DETECT_PROGRESS";
   observedCandidates?: number;
   retainedCandidates?: number;
+  domDiagnostics?: DomCandidateDiagnostics;
   /** Immutable run identity of corresponding START. */
   generationId?: string;
   progress: number;
@@ -186,6 +202,7 @@ export interface FullPageDetectDiagnostics {
   retainedCandidates: number;
   postprocessedCandidates: number;
   refinedCandidates: number;
+  domDiagnostics?: DomCandidateDiagnostics;
 }
 
 export interface FullPageDetectDoneMsg extends BaseMessage {

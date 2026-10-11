@@ -5,7 +5,7 @@
  * Reports progress to the side panel via chrome.runtime.sendMessage.
  */
 
-import type { QuestionBlock } from "@/shared/types";
+import type { QuestionBlock, DomCandidateDiagnostics } from "@/shared/types";
 import { detectCandidatesInViewport } from "./domDetector";
 import { isLikelyControlPanelText } from "./domDetectorShared";
 
@@ -53,6 +53,7 @@ export interface ScanProgress {
   totalScrollSteps: number;
   observedCandidates?: number;
   retainedCandidates?: number;
+  domDiagnostics?: DomCandidateDiagnostics;
 }
 
 /**
@@ -84,6 +85,12 @@ export async function detectCandidatesFullPage(
   const isCurrent = () => activeScan === scan && !scan.cancelled && scan.eligible();
   const allBlocks: QuestionBlock[] = [];
   let observedCandidates = 0;
+  // Numeric-only DOM probes; never carry page text or identifiers.
+  // Scoped to one scan lease including its bounded readiness recheck.
+  const domDiagnostics: DomCandidateDiagnostics = {
+    probedElements: 0, acceptedCandidates: 0,
+    rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0 },
+  };
   let originalTop = 0;
   let originalLeft = 0;
 
@@ -119,7 +126,7 @@ export async function detectCandidatesFullPage(
       // the same viewport while claiming forward progress.
       if (previousTop !== null && metrics.scrollTop <= previousTop) break;
 
-      let viewportBlocks = detectCandidatesInViewport();
+      let viewportBlocks = detectCandidatesInViewport(domDiagnostics);
       // An explicit loading/busy marker at the first viewport means an empty
       // result may be premature. Revisit this SAME scroll position once after
       // a bounded delay. This is not another scroll step, and it must never
@@ -127,7 +134,7 @@ export async function detectCandidatesFullPage(
       if (step === 0 && viewportBlocks.length === 0 && isPageContentPending()) {
         await pause(650);
         if (!isCurrent()) break;
-        viewportBlocks = detectCandidatesInViewport();
+        viewportBlocks = detectCandidatesInViewport(domDiagnostics);
       }
       if (!isCurrent()) break;
       observedCandidates += viewportBlocks.length;
@@ -147,6 +154,7 @@ export async function detectCandidatesFullPage(
         totalScrollSteps: totalSteps,
         observedCandidates,
         retainedCandidates: allBlocks.length,
+        domDiagnostics: { ...domDiagnostics, rejected: { ...domDiagnostics.rejected } },
       });
       // User handlers may synchronously CANCEL or change the route.
       if (!isCurrent()) break;
