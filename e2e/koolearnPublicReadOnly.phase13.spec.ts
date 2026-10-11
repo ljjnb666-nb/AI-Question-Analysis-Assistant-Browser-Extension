@@ -83,6 +83,42 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     });
     expect(stemVisible, "KOOLEARN_PUBLIC_QUESTION_ANCHOR_NOT_FOUND").toBe(true);
     await page.waitForTimeout(350);
+    // Privacy-preserving structural census of the public question's
+    // ancestor chain. No raw stem, option body, selector, or class name.
+    const structure = await page.evaluate(() => {
+      const stem = Array.from(document.querySelectorAll("p,div,li,span")).find(node => {
+        const t = (node.textContent ?? "").trim();
+        return t.length >= 30 && t.length <= 450
+          && t.includes("凡是符合自己的认识或自己所维护的道德观念");
+      });
+      const viewArea = Math.max(1, innerWidth * innerHeight);
+      const ancestors: Array<Record<string, number | boolean | string>> = [];
+      let node: Element | null = stem ?? null;
+      for (let depth = 0; depth < 7 && node; depth++, node = node.parentElement) {
+        const current: Element = node;
+        const rect = current.getBoundingClientRect();
+        const text = (current as HTMLElement).innerText || current.textContent || "";
+        const leafLabels = Array.from(current.querySelectorAll("span,div,p,li"))
+          .filter(el => el.childElementCount === 0)
+          .map(el => (el.textContent ?? "").trim());
+        const singles = Object.fromEntries("ABCD".split("")
+          .map(letter => [letter, leafLabels.filter(t => t === letter).length]));
+        ancestors.push({
+          depth, tag: current.tagName.toLowerCase(), children: current.childElementCount,
+          links: current.querySelectorAll("a").length, textLength: text.length,
+          x: Math.round(rect.left), y: Math.round(rect.top),
+          width: Math.round(rect.width), height: Math.round(rect.height),
+          areaPct: Math.round((rect.width * rect.height) / viewArea * 100),
+          visible: rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight,
+          questionLikeClass: /question|problem|item|exam|card/i.test(String((current as HTMLElement).className ?? "")),
+          lineBreaks: (text.match(/\\n/g) ?? []).length,
+          dottedChoices: (text.match(/[A-D][.、:)：]/g) ?? []).length,
+          leafA: singles.A ?? 0, leafB: singles.B ?? 0,
+          leafC: singles.C ?? 0, leafD: singles.D ?? 0,
+        });
+      }
+      return ancestors;
+    });
 
     await page.evaluate(() => {
       (window as unknown as { __qsLiveWrites: { submissions: number; interactions: number } })
@@ -150,7 +186,7 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
       requestMatched: workspace.snapshot?.detection.requestId === REQUEST_ID,
       phase: workspace.snapshot?.detection.phase ?? null,
       mode: workspace.snapshot?.detection.mode ?? null,
-      candidateCount, numericProbe: diagnostic ?? null,
+      candidateCount, numericProbe: diagnostic ?? null, structure,
       previewDigests: workspace.snapshot?.candidates.map(c => sourceHash(c.block.previewText)) ?? [],
       interactions: after.interactions, submissions: after.submissions,
     };
@@ -159,7 +195,7 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
     // Logs and evidence contain only numeric counts and one-way hashes, no question text.
     console.info("KOOLEARN_DIAG " + JSON.stringify({
       siteId: evidence.siteId, outcome: candidateCount > 0 ? "CANDIDATES_PRESENT" : "ZERO_CANDIDATES",
-      candidateCount, numericProbe: diagnostic ?? null, interactions: after.interactions,
+      candidateCount, numericProbe: diagnostic ?? null, structure, interactions: after.interactions,
       submissions: after.submissions,
     }));
 
