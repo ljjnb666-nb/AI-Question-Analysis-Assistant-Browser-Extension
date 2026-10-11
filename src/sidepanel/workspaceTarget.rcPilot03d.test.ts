@@ -51,13 +51,13 @@ describe("RC-PILOT-03D bounded workspace hydration transport retry", () => {
       authenticated = false;
       return { ok: false, error: "AUTHORITY_LOST" };
     });
-    expect(await requestWorkspaceSnapshot(origin, auth)).toBeNull();
+    expect(await requestWorkspaceSnapshot(origin, auth)).toEqual({ ok: false });
     expect(sent).toHaveBeenCalledOnce();
   });
 
   it("does not repeat an authority-loss or permission error even if the auth UI is stale", async () => {
     sent.mockResolvedValueOnce({ ok: false, error: "AUTHORITY_LOST" });
-    expect(await requestWorkspaceSnapshot(origin, auth)).toBeNull();
+    expect(await requestWorkspaceSnapshot(origin, auth)).toEqual({ ok: false });
     expect(sent).toHaveBeenCalledOnce();
   });
 
@@ -66,7 +66,7 @@ describe("RC-PILOT-03D bounded workspace hydration transport retry", () => {
       tabUrl = "https://quiz.example/other";
       return { ok: false, error: "Receiving end does not exist" };
     });
-    expect(await requestWorkspaceSnapshot(origin, auth)).toBeNull();
+    expect(await requestWorkspaceSnapshot(origin, auth)).toEqual({ ok: false });
     expect(sent).toHaveBeenCalledOnce();
   });
 
@@ -78,7 +78,7 @@ describe("RC-PILOT-03D bounded workspace hydration transport retry", () => {
 
   it("never dispatches to a content tab without a validated session", async () => {
     authenticated = false;
-    expect(await requestWorkspaceSnapshot(origin, auth)).toBeNull();
+    expect(await requestWorkspaceSnapshot(origin, auth)).toEqual({ ok: false });
     expect(sent).not.toHaveBeenCalled();
   });
 });

@@ -22,7 +22,7 @@ export async function readWorkspaceOrigin(tabId: number): Promise<CandidateOrigi
   return eligible(tab) && tab.url ? { tabId, url: tab.url } : null;
 }
 export async function requestWorkspaceSnapshot(origin: CandidateOrigin, isAuthenticated: () => boolean): Promise<WorkspaceSnapshotResponse | null> {
-  if (!isAuthenticated()) return null;
+  if (!isAuthenticated()) return { ok: false };
 
   // Every attempt is still the same authenticated, read-only snapshot request.
   // Retry at most once for a *quick transport failure*, e.g. an MV3 content
@@ -52,14 +52,20 @@ export async function requestWorkspaceSnapshot(origin: CandidateOrigin, isAuthen
   };
 
   const first = await requestOnce();
-  if (!isAuthenticated()) return null;
-  if (first.result?.ok) return first.result.response ?? null;
-  if (first.timedOut || !first.result || !shouldBootstrapContentScript(first.result.error)) return null;
+  // Null is reserved for transport loss/timeouts. A missing domain reply,
+  // non-receiver error or authorization loss is NOT a wake-recovery ticket.
+  if (!isAuthenticated()) return { ok: false };
+  if (first.result?.ok) return first.result.response ?? { ok: false };
+  if (first.timedOut || !first.result) return null;
+  if (!shouldBootstrapContentScript(first.result.error)) return { ok: false };
 
   // Revalidate the exact origin before any retry. Tab replacement/navigation,
   // auth loss and an invalid snapshot all fail closed without another send.
   const current = await readWorkspaceOrigin(origin.tabId);
-  if (!isAuthenticated() || current?.url !== origin.url) return null;
+  if (!isAuthenticated() || current?.url !== origin.url) return { ok: false };
   const second = await requestOnce();
-  return isAuthenticated() && second.result?.ok ? second.result.response ?? null : null;
+  if (!isAuthenticated()) return { ok: false };
+  if (second.result?.ok) return second.result.response ?? { ok: false };
+  return second.timedOut || !second.result || shouldBootstrapContentScript(second.result.error)
+    ? null : { ok: false };
 }

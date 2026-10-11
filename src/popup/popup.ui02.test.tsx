@@ -295,10 +295,18 @@ describe("UI-02 Popup Commercial View Integration", () => {
 
   it("UI02-P01: authenticated + configured provider enables Solve & Fill", async () => {
     render(<PopupApp />);
-    const solveBtn = await screen.findByRole("button", { name: /解析并填答|Solve & Fill/ });
-    expect(solveBtn).not.toBeDisabled();
-    expect(screen.getByText(/提交仍由你确认|Submission stays manual/)).toBeInTheDocument();
-    expect(screen.queryByText(/不会自动提交|No automatic submission/)).toBeNull();
+    // The primary command renders before async session, provider and active-tab
+    // gates settle. Wait for the actual authorized Ready state, not the button
+    // merely existing during the intentionally disabled transition.
+    await act(async () => {
+      await awaitSettingsMessagingIdle();
+    });
+    await waitFor(() => {
+      const solveBtn = screen.getByRole("button", { name: /解析并填答|Solve & Fill/ });
+      expect(solveBtn).not.toBeDisabled();
+      expect(screen.getByText(/提交仍由你确认|Submission stays manual/)).toBeInTheDocument();
+      expect(screen.queryByText(/不会自动提交|No automatic submission/)).toBeNull();
+    });
   });
 
   it("UI02-P02: authenticated with missing provider disables Solve & Fill and displays reason", async () => {
