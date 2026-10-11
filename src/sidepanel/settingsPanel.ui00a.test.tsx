@@ -154,6 +154,30 @@ describe("SettingsTab connection test safety (UI-00A, UI00A-10)", () => {
 });
 
 vi.mock("@/shared/utils/aiConnectionClient", () => ({
+  AIConnectionCommandError: class extends Error {
+    constructor(readonly code: string) {
+      super(code);
+      this.name = "AIConnectionCommandError";
+    }
+  },
+  beginAIConnectionValidation: vi.fn(async () => ({
+    connectionId: "conn-ui00a-test", connectionRevision: 1,
+    credentialRevision: connectionFixture.hasCredential ? 1 : 0, generation: 1,
+  })),
+  finishAIConnectionValidation: vi.fn(async (_ticket: unknown, outcome: "success" | "failed") => ({
+    ok: true,
+    metadata: {
+      id: "conn-ui00a-test", presetId: connectionFixture.presetId,
+      connectionRevision: 1,
+      credentialRevision: connectionFixture.hasCredential ? 1 : 0,
+      hasCredential: Boolean(connectionFixture.hasCredential),
+      selectedModelId: "claude-opus-4.8",
+      validation: outcome === "success"
+        ? { status: "validated", generation: 1, validatedConnectionRevision: 1,
+            ...(connectionFixture.hasCredential ? { validatedCredentialRevision: 1 } : {}) }
+        : { status: "failed", generation: 1, errorCode: "AI_CONNECTION_TEST_FAILED" },
+    },
+  })),
   getAIConnectionActiveMetadata: vi.fn(async () => ({
     id: "conn-ui00a-test",
     presetId: connectionFixture.presetId,

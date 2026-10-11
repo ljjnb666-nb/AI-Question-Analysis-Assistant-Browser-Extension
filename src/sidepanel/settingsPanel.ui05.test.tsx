@@ -68,6 +68,12 @@ vi.mock("@/shared/utils/aiConnectionClient", () => ({
   updateActiveAIConnection: vi.fn(),
   getAIConnectionActiveMetadata: vi.fn(),
   ensureAIConnectionAuthorityReady: vi.fn().mockResolvedValue({ ok: true }),
+  AIConnectionCommandError: class extends Error {
+    constructor(readonly code: string) {
+      super(code);
+      this.name = "AIConnectionCommandError";
+    }
+  },
 }));
 
 vi.mock("./runCommittedAIConnectionProbe", () => ({
