@@ -55,7 +55,8 @@ describe("Phase14B-02C-E2 Full Page scroll lease and cancellation", () => {
   it("E2_SCAN_02 STOP during later scroll pause does not restore original position", async () => {
     const progress = vi.fn();
     const run = detectCandidatesFullPage(progress);
-    await vi.advanceTimersByTimeAsync(300);
+    // First empty viewport now includes one bounded, marker-free SPA observation.
+    await vi.advanceTimersByTimeAsync(950);
     expect(progress).toHaveBeenCalledOnce();
     expect(scrollTo).toHaveBeenCalledTimes(2);
     cancelFullPageScan();
@@ -69,7 +70,8 @@ describe("Phase14B-02C-E2 Full Page scroll lease and cancellation", () => {
   it("E2_SCAN_03 cancellation inside progress callback prohibits next scroll", async () => {
     const progress = vi.fn(() => cancelFullPageScan());
     const run = detectCandidatesFullPage(progress);
-    await vi.advanceTimersByTimeAsync(300);
+    // 300ms first render pause + 650ms bounded unmarked SPA observation.
+    await vi.advanceTimersByTimeAsync(950);
     await run;
     expect(progress).toHaveBeenCalledOnce();
     expect(scrollTo).toHaveBeenCalledTimes(1);
