@@ -7,6 +7,7 @@ const manualBlock: QuestionBlock = {
   bbox: { x: 0, y: 0, width: 420, height: 280 },
   previewText: "下列关于德育过程的说法正确的是？ 道德认识 道德情感 道德意志 道德行为",
   hasImage: true,
+  imageDataUrl: "data:image/png;base64,AAAA",
   questionTypeGuess: "single_choice",
   confidence: 0.9,
   source: "manual_capture",
@@ -60,6 +61,29 @@ describe("RC-PILOT-03E R1 manual screenshot choice evidence", () => {
     expect(result.recognizedText).toContain("A. 道德认识");
     expect(result.recognizedText).toContain("D. 道德行为");
     expect(result.warning ?? "").not.toContain("截图选项未完整识别");
+  });
+
+  it("does not accept DOM preview fallback as image evidence", () => {
+    const result = buildResult(
+      { ...manualBlock, previewText: "哪项是道德情感？ A. 认识 B. 情感 C. 意志 D. 行为" },
+      "vision",
+      modelChoice("????????????????"),
+    );
+    expect(hasCompleteLabeledManualChoiceOptions(result.recognizedText)).toBe(true);
+    expect(result.answer).toBe("需人工确认");
+    expect(result.optionSelections).toBeUndefined();
+    expect(result.confidence).toBeLessThan(0.5);
+    expect(result.warning).toContain("截图选项未完整识别");
+  });
+
+  it("does not alter synthetic manual blocks without real screenshot payload", () => {
+    const result = buildResult(
+      { ...manualBlock, imageDataUrl: undefined },
+      "text",
+      modelChoice("题干无选项标签"),
+    );
+    expect(result.answer).toBe("B");
+    expect(result.confidence).toBe(0.98);
   });
 
   it("does not change non-manual DOM choice authority", () => {
