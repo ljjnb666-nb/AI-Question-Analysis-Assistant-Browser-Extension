@@ -111,7 +111,7 @@ test("@phase13 RC03A-R3 KOOLEARN_LIVE_READONLY_PROBE detects a real public quest
           areaPct: Math.round((rect.width * rect.height) / viewArea * 100),
           visible: rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight,
           questionLikeClass: /question|problem|item|exam|card/i.test(String((current as HTMLElement).className ?? "")),
-          lineBreaks: (text.match(/\\n/g) ?? []).length,
+          lineBreaks: text.split(String.fromCharCode(10)).length - 1,
           dottedChoices: (text.match(/[A-D][.、:)：]/g) ?? []).length,
           leafA: singles.A ?? 0, leafB: singles.B ?? 0,
           leafC: singles.C ?? 0, leafD: singles.D ?? 0,
