@@ -18,6 +18,7 @@ import { encryptValue } from "../shared/utils/encryption";
 import type {
   AIConnectionResponse,
   AIConnectionUpdatePatch,
+  AIConnectionValidationTicket,
 } from "../shared/types/aiConnectionMessages";
 
 class AuthorityError extends Error {
@@ -228,13 +229,64 @@ async function updateActiveConnection(
   });
 }
 
+/** Strict no-secret lease shape. */
+function validateTicket(raw: unknown): asserts raw is AIConnectionValidationTicket {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new AuthorityError("AI_CONNECTION_VALIDATION_PAYLOAD_INVALID");
+  const t = raw as Record<string, unknown>;
+  if (Object.keys(t).length !== 4 || Object.keys(t).some(
+    (key) => !["connectionId", "connectionRevision", "credentialRevision", "generation"].includes(key)
+  ) || typeof t.connectionId !== "string" || !t.connectionId ||
+    !Number.isSafeInteger(t.connectionRevision) || (t.connectionRevision as number) < 1 ||
+    !Number.isSafeInteger(t.credentialRevision) || (t.credentialRevision as number) < 0 ||
+    !Number.isSafeInteger(t.generation) || (t.generation as number) < 1) {
+    throw new AuthorityError("AI_CONNECTION_VALIDATION_PAYLOAD_INVALID");
+  }
+}
+
+/** The background alone creates and commits a persisted validation lease. */
+async function beginValidation(): Promise<AIConnectionValidationTicket> {
+  let ticket: AIConnectionValidationTicket | null = null;
+  await updateAIConnectionState((state) => {
+    const c = state.activeConnectionId ? state.connections[state.activeConnectionId] : undefined;
+    if (!c) throw new AuthorityError("AI_ACTIVE_CONNECTION_MISSING");
+    if (c.authScheme.kind !== "none" && (!c.credentialRef || !state.credentials[c.credentialRef])) {
+      throw new AuthorityError("AI_CONNECTION_NOT_CONFIGURED");
+    }
+    const credential = c.credentialRef ? state.credentials[c.credentialRef] : undefined;
+    const generation = c.validation.generation + 1;
+    c.validation = { status: "testing", generation };
+    ticket = { connectionId: c.id, connectionRevision: c.connectionRevision, credentialRevision: credential?.revision ?? 0, generation };
+    return state;
+  });
+  if (!ticket) throw new AuthorityError("AI_CONNECTION_VALIDATION_FAILED");
+  return ticket;
+}
+async function finishValidation(ticket: AIConnectionValidationTicket, outcome: "success" | "failed"): Promise<void> {
+  await updateAIConnectionState((state) => {
+    const c = state.activeConnectionId ? state.connections[state.activeConnectionId] : undefined;
+    const credential = c?.credentialRef ? state.credentials[c.credentialRef] : undefined;
+    if (!c || c.id !== ticket.connectionId || c.connectionRevision !== ticket.connectionRevision ||
+      (credential?.revision ?? 0) !== ticket.credentialRevision ||
+      c.validation.status !== "testing" || c.validation.generation !== ticket.generation) {
+      throw new AuthorityError("AI_CONNECTION_VALIDATION_STALE");
+    }
+    c.validation = outcome === "success"
+      ? { status: "validated", generation: ticket.generation,
+          validatedConnectionRevision: ticket.connectionRevision,
+          ...(ticket.credentialRevision > 0 ? { validatedCredentialRevision: ticket.credentialRevision } : {}),
+          validatedAt: Date.now() }
+      : { status: "failed", generation: ticket.generation, errorCode: "AI_CONNECTION_TEST_FAILED" };
+    return state;
+  });
+}
+
 /** Unknown/malformed messages and every failure get a non-secret response. */
 export async function handleAIConnectionCommand(
   message: unknown,
   sender: chrome.runtime.MessageSender,
 ): Promise<AIConnectionResponse> {
   try {
-    const input = message as { type?: unknown; patch?: unknown } | null;
+    const input = message as { type?: unknown; patch?: unknown; ticket?: unknown; outcome?: unknown } | null;
     if (
       !input ||
       ![
@@ -242,6 +294,8 @@ export async function handleAIConnectionCommand(
         "AI_CONNECTION_GET_ACTIVE_METADATA",
         "AI_CONNECTION_GET_EDITOR_VIEW",
         "AI_CONNECTION_UPDATE_ACTIVE",
+        "AI_CONNECTION_BEGIN_VALIDATION",
+        "AI_CONNECTION_FINISH_VALIDATION",
       ].includes(String(input.type))
     )
       throw new AuthorityError("AI_CONNECTION_COMMAND_UNKNOWN");
@@ -250,18 +304,25 @@ export async function handleAIConnectionCommand(
       Object.keys(input).some(
         (key) =>
           key !== "type" &&
-          !(
-            input.type === "AI_CONNECTION_UPDATE_ACTIVE" &&
-            key === "patch"
-          ),
+          !(input.type === "AI_CONNECTION_UPDATE_ACTIVE" && key === "patch") &&
+          !(input.type === "AI_CONNECTION_FINISH_VALIDATION" && (key === "ticket" || key === "outcome")),
       )
     )
       throw new AuthorityError("AI_CONNECTION_PAYLOAD_INVALID");
-    if (input.type === "AI_CONNECTION_UPDATE_ACTIVE")
-      validatePatch(input.patch);
+    if (input.type === "AI_CONNECTION_UPDATE_ACTIVE") validatePatch(input.patch);
+    if (input.type === "AI_CONNECTION_FINISH_VALIDATION") {
+      validateTicket(input.ticket);
+      if (input.outcome !== "success" && input.outcome !== "failed") {
+        throw new AuthorityError("AI_CONNECTION_VALIDATION_PAYLOAD_INVALID");
+      }
+    }
     const initialized = await ensureAIConnectionAuthorityInitialized();
     if (input.type === "AI_CONNECTION_UPDATE_ACTIVE")
       await updateActiveConnection(input.patch as AIConnectionUpdatePatch);
+    const validationTicket = input.type === "AI_CONNECTION_BEGIN_VALIDATION" ? await beginValidation() : undefined;
+    if (input.type === "AI_CONNECTION_FINISH_VALIDATION") {
+      await finishValidation(input.ticket as AIConnectionValidationTicket, input.outcome as "success" | "failed");
+    }
     const state = await loadAIConnectionState();
     if (!state) throw new AuthorityError("AI_CONNECTION_NOT_INITIALIZED");
     const connection = state.activeConnectionId
@@ -272,6 +333,7 @@ export async function handleAIConnectionCommand(
       initialized: true,
       migrated: initialized.migrated,
       revision: state.revision,
+      ...(validationTicket ? { validationTicket } : {}),
       metadata: input.type !== "AI_CONNECTION_GET_EDITOR_VIEW" && connection ? toConnectionMetadata(connection, state) : null,
       ...(input.type === "AI_CONNECTION_GET_EDITOR_VIEW" && connection ? { editorView: {
         presetId: connection.presetId, selectedModelId: connection.selectedModelId,
@@ -292,7 +354,9 @@ export async function handleAIConnectionCommand(
 
 function authorizeAICommand(type: unknown, sender: chrome.runtime.MessageSender): void {
   if (!sender || typeof sender.id !== "string" || sender.id !== chrome.runtime.id) throw new AuthorityError("AI_CONNECTION_SENDER_FORBIDDEN");
-  if (type !== "AI_CONNECTION_UPDATE_ACTIVE") return;
+  if (type !== "AI_CONNECTION_UPDATE_ACTIVE" &&
+      type !== "AI_CONNECTION_BEGIN_VALIDATION" &&
+      type !== "AI_CONNECTION_FINISH_VALIDATION") return;
   try {
     const page = new URL(sender.url ?? "");
     const own = new URL(chrome.runtime.getURL("/"));
