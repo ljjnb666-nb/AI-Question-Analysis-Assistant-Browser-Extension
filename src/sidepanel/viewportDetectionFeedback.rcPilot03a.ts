@@ -1,4 +1,4 @@
-import type { CandidateOrigin, WorkspaceSnapshotResponse } from "@/shared/types";
+import type { CandidateOrigin, DomCandidateDiagnostics, WorkspaceSnapshotResponse } from "@/shared/types";
 import { userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
 import { isWorkspaceSnapshot } from "./workspaceHydration";
 import type { UILang } from "./displayUtils";
@@ -30,8 +30,18 @@ export function viewportDetectionSnapshotFeedback(
   }
 
   const count = snapshot.candidates.length;
-  if (count === 0) {
-    const probes = snapshot.detection.diagnostics?.domDiagnostics;
+  if (count === 0) return viewportEmptyDiagnosticFeedback(lang, snapshot.detection.diagnostics?.domDiagnostics);
+  return userFeedback(
+    "success",
+    lang === "en"
+      ? `The workspace currently reports ${count} candidate question(s). Please review before parsing or filling.`
+      : `工作区当前识别到 ${count} 道候选题。请核对题目后再解析或填写。`,
+    { code: "VIEWPORT_DETECT_CANDIDATES" },
+  );
+}
+
+/** Numeric-only, reusable empty detection evidence for independently opened workspaces. */
+export function viewportEmptyDiagnosticFeedback(lang: UILang, probes?: DomCandidateDiagnostics): UserFeedback {
     if (probes) {
       // Numeric-only, content-owned evidence; diagnostics cannot establish
       // that the page contains no questions or that OCR would find none.
@@ -65,12 +75,4 @@ export function viewportDetectionSnapshotFeedback(
         : "当前屏未识别到可用题目。页面可能尚未加载完成，或题目布局暂不受支持。",
       { code: "VIEWPORT_DETECT_EMPTY" },
     );
-  }
-  return userFeedback(
-    "success",
-    lang === "en"
-      ? `The workspace currently reports ${count} candidate question(s). Please review before parsing or filling.`
-      : `工作区当前识别到 ${count} 道候选题。请核对题目后再解析或填写。`,
-    { code: "VIEWPORT_DETECT_CANDIDATES" },
-  );
 }
