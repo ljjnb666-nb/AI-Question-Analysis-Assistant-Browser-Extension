@@ -1,5 +1,5 @@
 import React from "react";
-import type { CandidateOrigin, DetectedCandidate, DetectionPhase, FullPageDetectOutcome } from "@/shared/types";
+import type { CandidateOrigin, DetectedCandidate, DetectionPhase, DomCandidateDiagnostics, FullPageDetectOutcome } from "@/shared/types";
 import type { AutoSolveProgressState, ScanProgressState } from "./sidepanelStateSync";
 import type { CandidateViewFilter } from "./sidepanelCandidateMetrics";
 import type { UILang } from "./displayUtils";
@@ -14,6 +14,8 @@ export const CandidatesTab: React.FC<{
   autoSolveProgress: AutoSolveProgressState;
   detectionPhase?: DetectionPhase;
   detectionOutcome?: FullPageDetectOutcome;
+  viewportEmpty?: boolean;
+  viewportEmptyDiagnostics?: DomCandidateDiagnostics;
   workspaceOrigin?: CandidateOrigin;
   candidateViewFilter: CandidateViewFilter;
   candidates: DetectedCandidate[];
@@ -71,7 +73,7 @@ export const CandidatesTab: React.FC<{
     <CandidateSummary lang={lang} counts={{ detected: candidates.length, selected: props.selectedCount, solved: props.doneCount, risky: props.riskyCount }} />
     <CandidateActionBar lang={lang} actions={actions} />
     <CandidateReviewToolbar lang={lang} filter={props.candidateViewFilter} onFilter={props.onCandidateFilterChange} onClear={props.onClearSelection} selectedCount={props.selectedCount} />
-    {filteredCandidates.length === 0 && <CandidateEmptyState lang={lang} phase={props.detectionPhase ?? (isDetecting || isFullPageScan ? "detecting" : "never_started")} outcome={props.detectionOutcome} filteredEmpty={candidates.length > 0} />}
+    {filteredCandidates.length === 0 && <CandidateEmptyState lang={lang} phase={props.detectionPhase ?? (isDetecting || isFullPageScan ? "detecting" : "never_started")} outcome={props.detectionOutcome} filteredEmpty={candidates.length > 0} viewportEmpty={props.viewportEmpty} viewportEmptyDiagnostics={props.viewportEmptyDiagnostics} />}
     <div style={{ display: "grid", gap: orbitSpacing[3], minWidth: 0 }}>
       {filteredCandidates.map(candidate => <CandidateWorkspaceCard key={candidate.block.id} index={indexById.get(candidate.block.id)!} cand={candidate}
         isExpanded={!!props.expandedIds[candidate.block.id]} active={candidate.block.id === activeId} lang={lang}
