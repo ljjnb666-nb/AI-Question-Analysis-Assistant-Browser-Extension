@@ -645,6 +645,62 @@ describe("domDetector regressions", () => {
     expect(displayText).toContain("函数接口定义");
   });
 
+  it("Issue102 R18 admits an oversized but structurally complete visible question card", () => {
+    document.body.innerHTML = `
+      <article id="tall-complete" class="question-item">
+        <p id="tall-stem">1. 实验室安全操作的下列要求中，哪项正确？</p>
+        <ul>
+          <li>A. 先确认实验装置的安全状态</li>
+          <li>B. 直接跳过设备校验步骤</li>
+          <li>C. 随意更改检测记录内容</li>
+          <li>D. 忽略实验过程中异常提示</li>
+        </ul>
+      </article>`;
+    const card = document.getElementById("tall-complete")!;
+    setRect(card, { left: 90, top: 100, width: 760, height: 2100 });
+    setRect(document.getElementById("tall-stem")!, { left: 110, top: 130, width: 720, height: 50 });
+    document.querySelectorAll("#tall-complete li").forEach((el, index) =>
+      setRect(el, { left: 110, top: 200 + index * 46, width: 710, height: 40 }));
+    // Only 800/2100 pixels are visible (<0.55), but the owned DOM quartet
+    // is complete and the question's stem is visible in the viewport.
+    const blocks = detectCandidatesInViewport();
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].previewText).toContain("实验室安全操作");
+    expect(blocks[0].previewText).toContain("D.");
+    expect(blocks[0].boundary?.clippedBottom).toBe(true);
+  });
+
+  it("Issue102 R18 still rejects an oversized card barely entering the bottom edge", () => {
+    document.body.innerHTML = `
+      <article id="tall-bottom" class="question-item">
+        <p>2. 科学实验过程中哪一项操作方式符合安全标准？</p>
+        <ul>
+          <li>A. 检查设备 B. 修改数据 C. 随意操作 D. 忽略警告</li>
+        </ul>
+      </article>`;
+    const card = document.getElementById("tall-bottom")!;
+    setRect(card, { left: 90, top: 875, width: 760, height: 2100 });
+    const children = card.querySelectorAll("p,li");
+    children.forEach((el, index) => setRect(el, { left: 110, top: 905 + index * 45, width: 720, height: 40 }));
+    expect(detectCandidatesInViewport()).toHaveLength(0);
+  });
+
+  it("Issue102 R18 does not turn an offscreen question tail into a new question", () => {
+    document.body.innerHTML = `
+      <article id="tall-clipped-top" class="question-item">
+        <p>3. 下列关于科学实验材料存储的措施，哪种操作正确？</p>
+        <ul>
+          <li>A. 及时归档</li><li>B. 删除原始数据</li>
+          <li>C. 忽略时间</li><li>D. 擅自修改</li>
+        </ul>
+      </article>`;
+    const card = document.getElementById("tall-clipped-top")!;
+    setRect(card, { left: 90, top: -800, width: 760, height: 2100 });
+    card.querySelectorAll("p,li").forEach((el, index) =>
+      setRect(el, { left: 110, top: -770 + index * 45, width: 720, height: 40 }));
+    expect(detectCandidatesInViewport()).toHaveLength(0);
+  });
+
   it("detects Pintia type/1 question list items without selecting the exam notice", () => {
     Object.defineProperty(window, "location", {
       configurable: true,

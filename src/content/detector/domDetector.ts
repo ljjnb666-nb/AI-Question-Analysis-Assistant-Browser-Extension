@@ -312,7 +312,7 @@ if (!isHtmlElementNode(hostContainer)) continue;
     if (!rect) continue;
     if (!inViewport(rect, vw, vh)) continue;
     if (rect.width < 240 || rect.height < 120) continue;
-    if (getVisibleVerticalRatio(rawRect, vh) < 0.55) continue;
+    if (!hasEnoughVisibleStructuredCardArea(rawRect, vh)) continue;
     if (isTopClippedQuestionTail(hostContainer, rawRect, vh)) continue;
 
     const readableText = extractStructuredQuestionText(hostContainer);
@@ -1192,6 +1192,16 @@ function getVisibleVerticalRatio(rect: DOMRect, vh: number): number {
   const visibleTop = Math.max(0, rect.top);
   const visibleBottom = Math.min(vh, rect.bottom);
   return Math.max(0, visibleBottom - visibleTop) / rect.height;
+}
+
+/** Long structured questions must not be dropped solely because the full DOM
+ * card is taller than the viewport. Still demand a substantial visible region,
+ * full structured question text, and the existing clipped-top-tail exclusion.
+ * A card barely entering the bottom of the screen is never authoritative. */
+function hasEnoughVisibleStructuredCardArea(rect: DOMRect, vh: number): boolean {
+  if (getVisibleVerticalRatio(rect, vh) >= 0.55) return true;
+  const visible = Math.max(0, Math.min(rect.bottom, vh) - Math.max(0, rect.top));
+  return rect.height > vh && visible >= Math.min(320, vh * 0.45);
 }
 
 function refineCandidateRect(el: Element, baseRect: DOMRect, vw: number, vh: number): BoundingBox {
