@@ -115,6 +115,36 @@ describe("RC03B R10 full-page terminal outcome and stage accounting", () => {
       diagnostics: { observedCandidates: 3, retainedCandidates: 2, postprocessedCandidates: 0 } });
   });
 
+  it("Issue102 R11 preserves discovered questions but marks actual partial coverage", async () => {
+    const { send, detect, deps } = setup();
+    const commitBeforeDone = vi.fn();
+    deps.commitBeforeDone = commitBeforeDone;
+    detect.mockImplementation(async (onProgress: (p: unknown) => void) => {
+      onProgress({ progress: 99, found: 1, currentStep: 15, totalScrollSteps: 15,
+        budgetExhausted: true, observedCandidates: 1, retainedCandidates: 1 });
+      return [sample()];
+    });
+    await handleFullPageDetect(deps);
+    expect(done(send)).toMatchObject({ outcome: "budget_exhausted", totalFound: 1,
+      candidates: [expect.objectContaining({ id: "q1" })],
+      diagnostics: { budgetExhausted: true, refinedCandidates: 1 } });
+    expect(commitBeforeDone).toHaveBeenCalledWith(expect.objectContaining({
+      activeCandidates: [expect.objectContaining({ id: "q1" })],
+    }));
+  });
+
+  it("Issue102 R11 preserves normal completed outcome for found questions without coverage warning", async () => {
+    const { send, detect, deps } = setup();
+    detect.mockImplementation(async (onProgress: (p: unknown) => void) => {
+      onProgress({ progress: 99, found: 1, currentStep: 15, totalScrollSteps: 15,
+        observedCandidates: 1, retainedCandidates: 1 });
+      return [sample()];
+    });
+    await handleFullPageDetect(deps);
+    expect(done(send)).toMatchObject({ outcome: "completed", totalFound: 1 });
+    expect(done(send)?.diagnostics).not.toHaveProperty("budgetExhausted");
+  });
+
   it("R13C synchronously commits the final content state before DONE is sent", async () => {
     const { send, detect, deps } = setup();
     detect.mockResolvedValue([sample()]);
