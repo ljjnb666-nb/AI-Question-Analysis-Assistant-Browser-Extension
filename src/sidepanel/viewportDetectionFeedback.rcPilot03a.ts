@@ -37,19 +37,22 @@ export function viewportDetectionSnapshotFeedback(
       lang === "en"
         ? "Current-screen detection failed. No verified question result was produced. Check the page and retry detection."
         : "当前屏识别已失败，本次未取得可信的题目结果。请检查页面后重新识别。",
-      { code: "VIEWPORT_DETECT_FAILED_CONFIRMED" },
+      { code: "VIEWPORT_DETECT_FAILED_CONFIRMED", viewportRequestId: snapshot.detection.requestId },
     );
   }
   if (snapshot.detection.phase !== "completed") return unconfirmed();
 
   const count = snapshot.candidates.length;
-  if (count === 0) return viewportEmptyDiagnosticFeedback(lang, snapshot.detection.diagnostics?.domDiagnostics);
+  if (count === 0) return {
+    ...viewportEmptyDiagnosticFeedback(lang, snapshot.detection.diagnostics?.domDiagnostics),
+    ...(snapshot.detection.requestId ? { viewportRequestId: snapshot.detection.requestId } : {}),
+  };
   return userFeedback(
     "success",
     lang === "en"
       ? `The workspace currently reports ${count} candidate question(s). Please review before parsing or filling.`
       : `工作区当前识别到 ${count} 道候选题。请核对题目后再解析或填写。`,
-    { code: "VIEWPORT_DETECT_CANDIDATES" },
+    { code: "VIEWPORT_DETECT_CANDIDATES", viewportRequestId: snapshot.detection.requestId },
   );
 }
 
