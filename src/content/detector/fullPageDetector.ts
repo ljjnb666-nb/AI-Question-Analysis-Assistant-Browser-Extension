@@ -453,8 +453,13 @@ function postProcessCandidates(blocks: QuestionBlock[]): QuestionBlock[] {
 }
 
 function isLikelySameQuestion(a: QuestionBlock, b: QuestionBlock): boolean {
-  if (overlapRatio(a.bbox, b.bbox) > OVERLAP_RATIO_THRESHOLD) return true;
+  const overlap = overlapRatio(a.bbox, b.bbox);
+  if (overlap > OVERLAP_RATIO_THRESHOLD) return true;
 
+  // Nearby question cards can share an entire reading stem or even identical
+  // answer text. Prefix/text similarity alone is not sufficient ownership
+  // evidence when their absolute rectangles do not substantially overlap.
+  if (overlap < 0.12) return false;
   const closeBy =
     Math.abs(a.bbox.x - b.bbox.x) < 140 &&
     Math.abs(a.bbox.y - b.bbox.y) < 260;
@@ -463,9 +468,7 @@ function isLikelySameQuestion(a: QuestionBlock, b: QuestionBlock): boolean {
   const ta = normalizePreviewText(a.previewText);
   const tb = normalizePreviewText(b.previewText);
   if (!ta || !tb) return false;
-
-  if (textFingerprint(ta) === textFingerprint(tb)) return true;
-  return textSimilarity(ta, tb) > 0.86;
+  return ta === tb || textSimilarity(ta, tb) > 0.86;
 }
 
 function candidateRank(block: QuestionBlock): number {
@@ -513,12 +516,6 @@ function isLikelyUsefulPreview(text: string, questionType: QuestionBlock["questi
   if (looksChoice && optionLike < 4) return false;
   if (looksChoice && !hasABCD && circledCount < 4) return false;
   return true;
-}
-
-function textFingerprint(text: string): string {
-  return text
-    .replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, "")
-    .slice(0, 96);
 }
 
 function textSimilarity(a: string, b: string): number {
