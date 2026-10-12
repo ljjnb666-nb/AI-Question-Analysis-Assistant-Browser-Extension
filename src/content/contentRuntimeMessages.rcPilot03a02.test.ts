@@ -78,14 +78,15 @@ describe("RC-PILOT-03A-02 current-screen request authority", () => {
     expect(f.workspace.snapshot(url).ok).toBe(false);
   });
 
-  it("maps thrown detection errors to a stable code and clears its own running phase", async () => {
+  it("maps thrown detection errors to a stable code and preserves a matching terminal failure", async () => {
     const f = fixture();
     f.options.handleAutoDetect = vi.fn(async (id?: string) => {
       f.workspace.beginDetection("viewport", id);
       throw new Error("sensitive selector failure");
     });
     expect((await f.call()).value).toEqual({ ok: false, requestId, error: "VIEWPORT_DETECT_FAILED" });
-    expect(f.workspace.snapshot(url).snapshot?.detection.phase).toBe("never_started");
+    expect(f.workspace.snapshot(url).snapshot?.detection).toEqual({ phase: "failed", mode: "viewport", requestId });
+    expect(f.workspace.snapshot(url).snapshot?.candidates).toEqual([]);
   });
 
   it("rolls back an already emitted candidate snapshot when a downstream render step fails", async () => {
@@ -98,8 +99,22 @@ describe("RC-PILOT-03A-02 current-screen request authority", () => {
       throw new Error("highlight rendering failed");
     });
     expect((await f.call()).value).toEqual({ ok: false, requestId, error: "VIEWPORT_DETECT_FAILED" });
-    expect(f.workspace.snapshot(url).snapshot?.detection.phase).toBe("never_started");
+    expect(f.workspace.snapshot(url).snapshot?.detection).toEqual({ phase: "failed", mode: "viewport", requestId });
     expect(f.workspace.snapshot(url).snapshot?.candidates).toEqual([]);
+  });
+
+  it("a failed request can be retried with a new UUID and safely completes", async () => {
+    const f = fixture();
+    let attempts = 0;
+    f.options.handleAutoDetect = vi.fn(async (id?: string) => {
+      f.workspace.beginDetection("viewport", id);
+      if (++attempts === 1) throw new Error("hidden site error");
+      f.workspace.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [] });
+    });
+    expect((await f.call(requestId)).value).toEqual({ ok: false, requestId, error: "VIEWPORT_DETECT_FAILED" });
+    expect(f.workspace.snapshot(url).snapshot?.detection).toEqual({ phase: "failed", mode: "viewport", requestId });
+    expect((await f.call(nextId)).value).toEqual({ ok: true, requestId: nextId });
+    expect(f.workspace.snapshot(url).snapshot?.detection).toEqual({ phase: "completed", mode: "viewport", requestId: nextId });
   });
 
   it("a failed older completion cannot clear an already completed newer request", async () => {
