@@ -107,7 +107,8 @@ describe("UI-04A content snapshot authority", () => {
     const { runtime, read } = setup();
     runtime.beginDetection("fullpage");
     expect(runtime.observe({ type: "FULL_PAGE_DETECT_DONE", outcome: "budget_exhausted",
-      candidates: projectCandidateSnapshots([question()], new Map()), totalFound: 1,
+      // FULL_PAGE_DETECT_DONE carries raw QuestionBlock[], not CandidateSnapshot[].
+      candidates: [question()], totalFound: 1,
       diagnostics: { observedCandidates: 1, retainedCandidates: 1, postprocessedCandidates: 1,
         refinedCandidates: 1, budgetExhausted: true } })).toBe(true);
     expect(read().detection).toMatchObject({ phase: "incomplete", mode: "fullpage",
