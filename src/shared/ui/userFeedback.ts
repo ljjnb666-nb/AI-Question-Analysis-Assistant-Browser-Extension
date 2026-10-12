@@ -15,6 +15,8 @@ export type UserFeedback = {
   message: string;
   code?: string;
   technicalDetail?: string;
+  /** Optional exact content-owned viewport request identity, never user-visible. */
+  viewportRequestId?: string;
 };
 
 export type FeedbackLang = "zh" | "en";
@@ -22,9 +24,10 @@ export type FeedbackLang = "zh" | "en";
 export function userFeedback(
   tone: UserFeedbackTone,
   message: string,
-  opts: { code?: string; technicalDetail?: string } = {},
+  opts: { code?: string; technicalDetail?: string; viewportRequestId?: string } = {},
 ): UserFeedback {
-  return { tone, message, code: opts.code, technicalDetail: opts.technicalDetail };
+  return { tone, message, code: opts.code, technicalDetail: opts.technicalDetail,
+    ...(opts.viewportRequestId ? { viewportRequestId: opts.viewportRequestId } : {}) };
 }
 
 export const AUTHORITY_LOST = "AUTHORITY_LOST" as const;

@@ -79,6 +79,25 @@ export type SidePanelAppAction = {
   [K in keyof SidePanelAppState]: ReducerAction<K>;
 }[keyof SidePanelAppState] | { type: "hydrateWorkspace"; status: WorkspaceHydrationStatus; snapshot?: CandidateWorkspaceSnapshot; origin?: CandidateOrigin };
 
+/** UI-only feedback lease: a content-owned exact-UUID terminal can retire a
+ * local wait timeout, but never a mismatched/untagged generation. An observed
+ * detecting/failed phase also invalidates a prior terminal candidate count.
+ * Neither case changes content work, its owner, or its candidate authority. */
+function reconcileViewportFeedback(
+  feedback: UserFeedback | null,
+  snapshot: CandidateWorkspaceSnapshot | undefined,
+): UserFeedback | null {
+  if (!feedback || !snapshot || snapshot.detection.mode !== "viewport") return feedback;
+  const { phase, requestId } = snapshot.detection;
+  if (feedback.code === "VIEWPORT_DETECT_TIMEOUT"
+    && feedback.viewportRequestId && feedback.viewportRequestId === requestId
+    && (phase === "completed" || phase === "failed")) return null;
+  if ((phase === "detecting" || phase === "failed")
+    && ["VIEWPORT_DETECT_CANDIDATES", "VIEWPORT_DETECT_EMPTY",
+      "VIEWPORT_DETECT_NO_PROBES", "VIEWPORT_DETECT_FILTERED_EMPTY"].includes(feedback.code ?? "")) return null;
+  return feedback;
+}
+
 export function sidePanelAppReducer(state: SidePanelAppState, action: SidePanelAppAction): SidePanelAppState {
   if (action.type === "hydrateWorkspace") {
     const s = action.snapshot;
@@ -101,7 +120,8 @@ export function sidePanelAppReducer(state: SidePanelAppState, action: SidePanelA
       scanProgress: s?.fullPage.running && s.fullPage.progress ? mapFullPageProgressMessage({ ...s.fullPage.progress }) : null,
       isAutoSolving: s?.autoSolve.running ?? false,
       autoSolveProgress: s?.autoSolve.progress ? mapAutoSolveProgressMessage({ ...s.autoSolve.progress }) : null,
-      fillFeedback: action.status === "ready" ? state.fillFeedback : null,
+      fillFeedback: action.status === "ready"
+        ? reconcileViewportFeedback(state.fillFeedback, s) : null,
     };
   }
   const previousValue = state[action.type];
