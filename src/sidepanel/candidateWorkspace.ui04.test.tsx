@@ -26,14 +26,18 @@ const items = () => [candidate("idle"), candidate("solved", { selected: true, st
   candidate("review", { status: "success", result: { ...result, blockId: "review", confidence: 0.61 } }),
   candidate("failed", { status: "error", error: "provider threw SECRET_TOKEN stack trace" })];
 
-function Workspace({ initial = items(), lang = "en", running = false }: { initial?: DetectedCandidate[]; lang?: "zh" | "en"; running?: boolean }) {
+function Workspace({ initial = items(), lang = "en", running = false, phase = "never_started", outcome }: {
+  initial?: DetectedCandidate[]; lang?: "zh" | "en"; running?: boolean;
+  phase?: React.ComponentProps<typeof CandidatesTab>["detectionPhase"];
+  outcome?: React.ComponentProps<typeof CandidatesTab>["detectionOutcome"];
+}) {
   const [candidates, setCandidates] = useState(initial);
   const [filter, setFilter] = useState<CandidateViewFilter>("all");
   const metrics = computeCandidateMetrics(candidates, filter, isRiskyCandidate);
   const noop = () => {};
   return <CandidatesTab {...metrics} candidates={candidates} candidateViewFilter={filter} expandedIds={{}} fillFeedback={null}
     isAutoSolving={running} isBatchFilling={false} isBatchParsing={false} isDetecting={false} isFullPageScan={false} isRetryingRisky={false}
-    autoSolveProgress={null} scanProgress={null} detectionPhase="never_started" lang={lang}
+    autoSolveProgress={null} scanProgress={null} detectionPhase={phase} detectionOutcome={outcome} lang={lang}
     onCandidateFilterChange={setFilter} onToggleCandidate={id => setCandidates(previous => previous.map(item => item.block.id === id ? { ...item, selected: !item.selected } : item))}
     onClearSelection={() => setCandidates(previous => previous.map(item => ({ ...item, selected: false })))}
     onBatchFill={noop} onBatchParse={noop} onCancelFullPage={noop} onDetect={noop} onFillCandidate={noop} onFlashCandidate={noop} onFullPageDetect={noop}
@@ -63,6 +67,31 @@ describe("UI-04 candidate workspace behavior", () => {
     rerender(<CandidateEmptyState lang="en" phase="completed" filteredEmpty />);
     expect(screen.getByRole("status")).toHaveTextContent("No questions match");
   });
+  it("Issue102 R11 displays Chinese incomplete-coverage warning while retaining found questions", () => {
+    render(<Workspace initial={[candidate("found")]} lang="zh" phase="incomplete" outcome="budget_exhausted" />);
+    const notice = screen.getByRole("status");
+    expect(notice).toHaveAttribute("data-scan-coverage", "partial");
+    expect(notice).toHaveTextContent("仅覆盖了部分页面");
+    expect(notice).toHaveTextContent("其他题目可能尚未扫描");
+    expect(articles().map(x => x.dataset.candidateId)).toEqual(["found"]);
+  });
+
+  it("Issue102 R11 keeps partial coverage visible even if candidate filters hide found questions", () => {
+    render(<Workspace initial={[candidate("found")]} phase="incomplete" outcome="budget_exhausted" />);
+    fireEvent.click(screen.getByRole("button", { name: "Selected" }));
+    // Filtering adds a separate empty-filter role=status: target only the coverage notice.
+    expect(screen.getByText(/Only part of this page was scanned/)).toHaveAttribute("data-scan-coverage", "partial");
+    expect(screen.getByText("No questions match this filter.")).toBeVisible();
+    expect(articles()).toHaveLength(0);
+  });
+
+  it("Issue102 R11 never claims partial coverage without content-owned incomplete outcome", () => {
+    const { rerender } = render(<Workspace initial={[candidate("found")]} phase="completed" outcome="completed" />);
+    expect(screen.queryByText(/Only part of this page was scanned/)).toBeNull();
+    rerender(<Workspace initial={[candidate("found")]} phase="incomplete" outcome="filtered_empty" />);
+    expect(screen.queryByText(/Only part of this page was scanned/)).toBeNull();
+  });
+
   it("UI04-02: cards render exactly the supplied authoritative candidates", () => {
     render(<Workspace />);
     expect(articles().map(item => item.getAttribute("data-candidate-id"))).toEqual(["idle", "solved", "review", "failed"]);

@@ -198,8 +198,10 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
       type: "FULL_PAGE_DETECT_DONE",
       candidates,
       totalFound: candidates.length,
-      outcome: candidates.length ? "completed"
-        : budgetExhausted ? "budget_exhausted"
+      // A nonempty candidate set does not imply page-wide coverage. Keep
+      // the found candidates, but report the content-owned partial scan.
+      outcome: budgetExhausted ? "budget_exhausted"
+        : candidates.length ? "completed"
         : postprocessedCandidates ? "refinement_empty"
         : retainedCandidates ? "postprocess_empty"
         : observedCandidates ? "filtered_empty" : "no_candidates",

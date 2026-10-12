@@ -103,6 +103,20 @@ describe("UI-04A content snapshot authority", () => {
     expect(read().detection.phase).toBe("completed");
   });
 
+  it("Issue102 R11 holds partial-coverage outcome and actual found candidates together", () => {
+    const { runtime, read } = setup();
+    runtime.beginDetection("fullpage");
+    expect(runtime.observe({ type: "FULL_PAGE_DETECT_DONE", outcome: "budget_exhausted",
+      // FULL_PAGE_DETECT_DONE carries raw QuestionBlock[], not CandidateSnapshot[].
+      candidates: [question()], totalFound: 1,
+      diagnostics: { observedCandidates: 1, retainedCandidates: 1, postprocessedCandidates: 1,
+        refinedCandidates: 1, budgetExhausted: true } })).toBe(true);
+    expect(read().detection).toMatchObject({ phase: "incomplete", mode: "fullpage",
+      outcome: "budget_exhausted", diagnostics: { budgetExhausted: true } });
+    expect(read().candidates.map(c => c.block.id)).toEqual(["q1"]);
+    expect(read().fullPage.running).toBe(false);
+  });
+
   it("UI04A-SCAN cancellation/completion fence old progress and clear ephemeral counters", () => {
     const { runtime, read } = setup();
     runtime.beginDetection("fullpage");
