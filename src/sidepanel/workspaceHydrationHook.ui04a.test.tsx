@@ -121,9 +121,9 @@ describe("UI-04A real hydration hook/reducer contract", () => {
     } });
     render(<Workspace />);
     await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"));
-    expect(screen.getByRole("status")).toHaveTextContent("进行了 8 次顶层 DOM");
-    expect(screen.getByRole("status")).toHaveTextContent("题目完整性（6 次）");
-    expect(screen.getByRole("status")).not.toHaveTextContent("页面没有题目");
+    expect(screen.getByText(/进行了 8 次顶层 DOM/)).toBeInTheDocument();
+    expect(screen.getByText(/题目完整性（6 次）/)).toBeInTheDocument();
+    expect(screen.queryByText(/页面没有题目/)).toBeNull();
     expect(screen.getByTestId("detection")).toHaveTextContent("completed");
   });
 
@@ -135,11 +135,11 @@ describe("UI-04A real hydration hook/reducer contract", () => {
     } });
     render(<Workspace />);
     await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"));
-    expect(screen.getByRole("status")).toHaveTextContent("未探测到顶层 DOM");
+    expect(screen.getByText(/未探测到顶层 DOM/)).toBeInTheDocument();
     await act(async () => { runtime.resetDetection(); });
     await waitFor(() => expect(screen.getByTestId("detection")).toHaveTextContent("never_started"));
-    expect(screen.getByRole("status")).toHaveTextContent("先用“当前屏”");
-    expect(screen.getByRole("status")).not.toHaveTextContent("未探测到顶层 DOM");
+    expect(screen.getByText(/先用“当前屏”/)).toBeInTheDocument();
+    expect(screen.queryByText(/未探测到顶层 DOM/)).toBeNull();
   });
 
   it("UI04A-10 pending snapshot shows runtime syncing, not authentication-server-unavailable or Ready", () => {
