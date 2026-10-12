@@ -238,7 +238,10 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
           options.uiLang === "en"
             ? "Current-screen detection timed out. The page may still be processing; wait or sync the workspace before retrying."
             : "当前屏识别等待超时，页面可能仍在处理。请稍候或同步工作区后重试。",
-          { code: "VIEWPORT_DETECT_TIMEOUT" },
+          // The 12-second UI timeout never cancels content work. Carry only
+          // this request's UUID so a later authoritative terminal can retire
+          // the warning without trusting another Surface or old generation.
+          { code: "VIEWPORT_DETECT_TIMEOUT", viewportRequestId: requestId },
         ));
         return;
       }
