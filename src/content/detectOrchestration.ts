@@ -198,8 +198,10 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
       type: "FULL_PAGE_DETECT_DONE",
       candidates,
       totalFound: candidates.length,
-      outcome: candidates.length ? "completed"
-        : budgetExhausted ? "budget_exhausted"
+      // Coverage is independent of valid candidate count. Preserve the
+      // candidates even when the live page still has unscanned content.
+      outcome: budgetExhausted ? "budget_exhausted"
+        : candidates.length ? "completed"
         : postprocessedCandidates ? "refinement_empty"
         : retainedCandidates ? "postprocess_empty"
         : observedCandidates ? "filtered_empty" : "no_candidates",
