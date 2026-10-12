@@ -50,11 +50,15 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
       source: "auto_dom" as const, hasImage: false,
     };
     let detects = 0;
+    const observedViewportTops: number[] = [];
     vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
       detects++;
+      observedViewportTops.push(top);
       if (detects === 1) return [];
       document.body.removeAttribute("aria-busy");
-      return [candidate];
+      // The card is located at document Y=150-460; after advancing to Y=600
+      // it cannot remain a viewport candidate. Do not fabricate a duplicate.
+      return top === 0 ? [candidate] : [];
     });
     const progress: ScanProgress[] = [];
     const scan = detectCandidatesFullPage((p) => progress.push(p));
@@ -63,6 +67,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(candidates).toHaveLength(1);
     expect(candidates[0]?.previewText).toContain("题型：单选题");
     expect(detects).toBe(3); // first empty, one same-position recheck, one next step
+    expect(observedViewportTops).toEqual([0, 0, 600]);
     expect(progress.map((p) => p.currentStep)).toEqual([1, 2]);
     expect(progress.every((p) => p.totalScrollSteps === 2)).toBe(true);
     expect(isFullPageScanRunning()).toBe(false);
