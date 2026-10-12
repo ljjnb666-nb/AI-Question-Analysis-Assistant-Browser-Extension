@@ -483,6 +483,80 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it("Issue102 R15 keeps adjacent questions sharing a 96-character reading stem", async () => {
+    pageHeight = 1200;
+    const material = "阅读实验记录，比较采样步骤并分析数据可靠性。".repeat(8);
+    const first = material + " 第一题：如何提高准确性？ A. 校准仪器 B. 省略校准 C. 随意修改 D. 丢弃样本";
+    const second = material + " 第二题：如何保存记录？ A. 擅自删除 B. 如实记录 C. 隐藏异常 D. 不写日期";
+    expect(material.length).toBeGreaterThan(96);
+    expect(first.slice(0, 96)).toBe(second.slice(0, 96));
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "near-reading-one", bbox: { x: 40, y: 130, width: 680, height: 130 },
+        previewText: first, questionTypeGuess: "single_choice",
+        confidence: 0.93, hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "near-reading-two", bbox: { x: 40, y: 365, width: 680, height: 130 },
+        previewText: second, questionTypeGuess: "single_choice",
+        confidence: 0.94, hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const progress: ScanProgress[] = [];
+    const run = detectCandidatesFullPage(p => progress.push(p));
+    await vi.runAllTimersAsync();
+    const candidates = await run;
+    expect(candidates).toHaveLength(2);
+    expect(candidates.map(c => c.previewText)).toEqual(expect.arrayContaining([first, second]));
+    expect(candidates.map(c => c.bbox.y)).toEqual([130, 365]);
+    expect(progress.map(p => p.currentStep)).toEqual([1, 2]);
+    expect(top).toBe(200);
+  });
+
+  it("Issue102 R15 preserves separate repeated questions with identical text", async () => {
+    pageHeight = 1200;
+    const text = "以下哪个选项符合校园实验室操作规范？ A. 操作前检查 B. 忽略异常 C. 强制跳过 D. 无视警告";
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "repeated-question-one", bbox: { x: 50, y: 140, width: 670, height: 135 },
+        previewText: text, questionTypeGuess: "single_choice",
+        confidence: 0.92, hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "repeated-question-two", bbox: { x: 50, y: 365, width: 670, height: 135 },
+        previewText: text, questionTypeGuess: "single_choice",
+        confidence: 0.92, hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const run = detectCandidatesFullPage(() => undefined);
+    await vi.runAllTimersAsync();
+    const candidates = await run;
+    expect(candidates).toHaveLength(2);
+    expect(candidates.map(c => c.bbox.y)).toEqual([140, 365]);
+    expect(top).toBe(200);
+  });
+
+  it("Issue102 R15 still merges the same overlapping candidate with minor geometry drift", async () => {
+    pageHeight = 1200;
+    const text = "下面哪种做法能保证实验安全？ A. 正确接地 B. 拆除护罩 C. 跳过预检 D. 忽略故障";
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "first-geometry", bbox: { x: 45, y: 160, width: 670, height: 260 },
+        previewText: text, questionTypeGuess: "single_choice",
+        confidence: 0.92, hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "shifted-geometry", bbox: { x: 45, y: 310, width: 670, height: 260 },
+        previewText: text, questionTypeGuess: "single_choice",
+        confidence: 0.94, hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const run = detectCandidatesFullPage(() => undefined);
+    await vi.runAllTimersAsync();
+    expect(await run).toHaveLength(1);
+    expect(top).toBe(200);
+  });
+
   it("preserves cancellation safety when the page grows during a run", async () => {
     vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
       pageHeight = 120_000;
