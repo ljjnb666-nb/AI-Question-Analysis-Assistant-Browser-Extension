@@ -67,6 +67,30 @@ describe("RC03B R10 full-page terminal outcome and stage accounting", () => {
     });
   });
 
+  it("R10B reports incomplete coverage when scan runs out of budget before page bottom", async () => {
+    const { send, detect, deps } = setup();
+    detect.mockImplementation(async (onProgress: (p: unknown) => void) => {
+      onProgress({ progress: 99, found: 0, currentStep: 15, totalScrollSteps: 15,
+        budgetExhausted: true, observedCandidates: 0, retainedCandidates: 0 });
+      return [];
+    });
+    await handleFullPageDetect(deps);
+    expect(done(send)).toMatchObject({ outcome: "budget_exhausted", totalFound: 0,
+      diagnostics: { budgetExhausted: true, observedCandidates: 0 } });
+  });
+
+  it("R10B does not claim incomplete coverage from a final step number alone", async () => {
+    const { send, detect, deps } = setup();
+    detect.mockImplementation(async (onProgress: (p: unknown) => void) => {
+      onProgress({ progress: 99, found: 0, currentStep: 15, totalScrollSteps: 15,
+        observedCandidates: 0, retainedCandidates: 0 });
+      return [];
+    });
+    await handleFullPageDetect(deps);
+    expect(done(send)).toMatchObject({ outcome: "no_candidates", totalFound: 0 });
+    expect((done(send)?.diagnostics as Record<string, unknown>)?.budgetExhausted).toBeUndefined();
+  });
+
   it("R13A reports initial filtering instead of no candidates when DOM saw raw candidates", async () => {
     const { send, detect, deps } = setup();
     detect.mockImplementation(async (onProgress: (p: unknown) => void) => {
