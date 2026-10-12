@@ -63,7 +63,10 @@ export function createContentRuntimeMessageListener(options: RegisterContentRunt
         return false;
       }
       const fail = (code: "VIEWPORT_DETECT_FAILED" | "VIEWPORT_RESULT_NOT_CURRENT") => {
-        if (code === "VIEWPORT_DETECT_FAILED") options.onViewportDetectError?.(requestId);
+        // An invalid terminal completion may leave its own generation stuck
+        // in detecting. The content-owned failure guard fences exact UUID,
+        // route and phase, so stale/older failures cannot clear newer work.
+        options.onViewportDetectError?.(requestId);
         sendResponse({ ok: false, requestId, error: code });
       };
       try {
