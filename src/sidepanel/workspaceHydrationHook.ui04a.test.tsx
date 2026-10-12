@@ -142,6 +142,23 @@ describe("UI-04A real hydration hook/reducer contract", () => {
     expect(screen.queryByText(/未探测到顶层 DOM/)).toBeNull();
   });
 
+  it("RC03A-R8 Popup-tagged failure hydrates as failed rather than never started or empty", async () => {
+    const id = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    runtime.beginDetection("viewport", id);
+    runtime.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [], domDiagnostics: {
+      probedElements: 2, acceptedCandidates: 0,
+      rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 2 },
+    } });
+    expect(runtime.failViewportDetection(id)).toBe(true);
+    expect(runtime.snapshot(url).snapshot?.detection).toEqual({ phase: "failed", mode: "viewport", requestId: id });
+    render(<Workspace />);
+    await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"));
+    expect(screen.getByTestId("detection")).toHaveTextContent("failed");
+    expect(screen.getByText(/扫描过程中发生错误/)).toBeInTheDocument();
+    expect(screen.queryByText(/进行了 2 次顶层 DOM/)).toBeNull();
+    expect(screen.queryByText(/先用“当前屏”/)).toBeNull();
+  });
+
   it("UI04A-10 pending snapshot shows runtime syncing, not authentication-server-unavailable or Ready", () => {
     response = new Promise(() => undefined);
     render(<Workspace />);
