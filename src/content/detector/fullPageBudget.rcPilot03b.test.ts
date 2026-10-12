@@ -289,7 +289,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(progress.every((p) => p.totalScrollSteps === 15 && p.currentStep <= p.totalScrollSteps)).toBe(true);
     expect(progress.every((p) => p.progress >= 0 && p.progress <= 99)).toBe(true);
     expect(progress.slice(0, -1).every((p) => p.budgetExhausted === undefined)).toBe(true);
-    expect(progress.at(-1)?.budgetExhausted).toBe(true);
+    expect(progress[progress.length - 1]?.budgetExhausted).toBe(true);
     expect(top).toBe(200); // a completed, current run still restores its scroll lease
     expect(isFullPageScanRunning()).toBe(false);
   });
