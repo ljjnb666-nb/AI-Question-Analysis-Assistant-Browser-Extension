@@ -557,6 +557,77 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(top).toBe(200);
   });
 
+  it("Issue102 R16 keeps two strongly overlapping question regions when their texts differ", async () => {
+    pageHeight = 1200;
+    const stem = "请阅读实验调查说明并依据内容完成以下选择题：".repeat(4);
+    const first = stem + " 第一题，记录步骤应选什么？ A. 校验 B. 随意 C. 忽视 D. 丢弃";
+    const second = stem + " 第二题，实验结果应如何保存？ A. 隐瞒 B. 造假 C. 原样留存 D. 删除";
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "large-reading-parent", bbox: { x: 40, y: 140, width: 690, height: 340 },
+        previewText: first, questionTypeGuess: "single_choice",
+        confidence: 0.91, hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "nested-reading-question", bbox: { x: 50, y: 160, width: 650, height: 300 },
+        previewText: second, questionTypeGuess: "single_choice",
+        confidence: 0.93, hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const run = detectCandidatesFullPage(() => undefined);
+    await vi.runAllTimersAsync();
+    const found = await run;
+    expect(found).toHaveLength(2);
+    expect(found.map(x => x.previewText)).toEqual(expect.arrayContaining([first, second]));
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R16 merges identical text despite strong bbox nesting", async () => {
+    pageHeight = 1200;
+    const text = "哪项操作能够保证校园实验规范？ A. 检查 B. 断线 C. 跳过 D. 忽略";
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "same-large", bbox: { x: 40, y: 140, width: 690, height: 340 },
+        previewText: text, questionTypeGuess: "single_choice",
+        confidence: 0.91, hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "same-nested", bbox: { x: 50, y: 160, width: 650, height: 300 },
+        previewText: text, questionTypeGuess: "single_choice",
+        confidence: 0.93, hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const run = detectCandidatesFullPage(() => undefined);
+    await vi.runAllTimersAsync();
+    expect(await run).toHaveLength(1);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R16 keeps dedup when strongly overlapping text varies only in whitespace", async () => {
+    pageHeight = 1200;
+    const plain = "校园实验中如何安全操作？ A. 先检查 B. 乱接线 C. 取消预检 D. 忽略故障";
+    const multiline = "校园实验中如何安全操作？  A. 先检查\n B. 乱接线  C. 取消预检\n D. 忽略故障";
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "same-first", bbox: { x: 40, y: 140, width: 690, height: 340 },
+        previewText: plain, questionTypeGuess: "single_choice",
+        confidence: 0.91, hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "same-second", bbox: { x: 50, y: 160, width: 650, height: 300 },
+        previewText: multiline, questionTypeGuess: "single_choice",
+        confidence: 0.93, hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const run = detectCandidatesFullPage(() => undefined);
+    await vi.runAllTimersAsync();
+    expect(await run).toHaveLength(1);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("preserves cancellation safety when the page grows during a run", async () => {
     vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
       pageHeight = 120_000;

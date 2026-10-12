@@ -454,21 +454,22 @@ function postProcessCandidates(blocks: QuestionBlock[]): QuestionBlock[] {
 
 function isLikelySameQuestion(a: QuestionBlock, b: QuestionBlock): boolean {
   const overlap = overlapRatio(a.bbox, b.bbox);
-  if (overlap > OVERLAP_RATIO_THRESHOLD) return true;
-
-  // Nearby question cards can share an entire reading stem or even identical
-  // answer text. Prefix/text similarity alone is not sufficient ownership
-  // evidence when their absolute rectangles do not substantially overlap.
+  // Geometry is a necessary but not sufficient identity signal. An enclosing
+  // reading-material card can overlap a distinct nested question almost
+  // entirely. Never discard one solely because overlap > 0.4.
   if (overlap < 0.12) return false;
-  const closeBy =
-    Math.abs(a.bbox.x - b.bbox.x) < 140 &&
-    Math.abs(a.bbox.y - b.bbox.y) < 260;
-  if (!closeBy) return false;
 
   const ta = normalizePreviewText(a.previewText);
   const tb = normalizePreviewText(b.previewText);
   if (!ta || !tb) return false;
-  return ta === tb || textSimilarity(ta, tb) > 0.86;
+  if (ta !== tb && textSimilarity(ta, tb) <= 0.86) return false;
+
+  // Strongly overlapping observations of the same text may be merged even
+  // when minor layout shifts move their top-left corner.
+  if (overlap > OVERLAP_RATIO_THRESHOLD) return true;
+  // Smaller overlaps still need proximity to prove the same candidate.
+  return Math.abs(a.bbox.x - b.bbox.x) < 140 &&
+    Math.abs(a.bbox.y - b.bbox.y) < 260;
 }
 
 function candidateRank(block: QuestionBlock): number {
