@@ -434,8 +434,8 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     const sharedMaterial = "阅读下面的材料，分析其中的实验步骤与观察记录。".repeat(8);
     const first = sharedMaterial + " 第一问：哪项准备正确？ A. 检查设备 B. 跳过检查 C. 忽略异常 D. 放弃记录";
     const second = sharedMaterial + " 第二问：哪项记录正确？ A. 随意删改 B. 保留原始数据 C. 混合样本 D. 忽略时间";
-    expect(first.replace(/[^\\u4e00-\\u9fa5A-Za-z0-9]/g, "").slice(0, 96))
-      .toBe(second.replace(/[^\\u4e00-\\u9fa5A-Za-z0-9]/g, "").slice(0, 96));
+    expect(sharedMaterial.length).toBeGreaterThan(96);
+    expect(first.slice(0, 96)).toBe(second.slice(0, 96));
     vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
       const previewText = top === 0 ? first : top === 1200 ? second : null;
       if (!previewText) return [];
