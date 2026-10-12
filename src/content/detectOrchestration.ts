@@ -20,6 +20,7 @@ type FullPageProgress = {
   retainedCandidates?: number;
   domDiagnostics?: DomCandidateDiagnostics;
   budgetExhausted?: boolean;
+  scrollStalled?: boolean;
 };
 
 type FullPageDetectDeps<TLayer extends { setBlocks: (blocks: QuestionBlock[], statusMap: Map<string, CandidateStatus>) => void }> = {
@@ -127,6 +128,7 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
   let observedCandidates = 0;
   let retainedCandidates = 0;
   let budgetExhausted = false;
+  let scrollStalled = false;
   let domDiagnostics: DomCandidateDiagnostics | undefined;
   let postprocessedCandidates = 0;
   let refinedCandidates = 0;
@@ -135,6 +137,7 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
       if (typeof p.observedCandidates === "number") observedCandidates = p.observedCandidates;
       if (typeof p.retainedCandidates === "number") retainedCandidates = p.retainedCandidates;
       if (p.budgetExhausted === true) budgetExhausted = true;
+      if (p.scrollStalled === true) scrollStalled = true;
       if (p.domDiagnostics) domDiagnostics = { ...p.domDiagnostics, rejected: { ...p.domDiagnostics.rejected } };
       if (!isCurrentRoute()) return;
       deps.safeRuntimeSendMessage({
@@ -200,13 +203,15 @@ export async function handleFullPageDetect<TLayer extends { setBlocks: (blocks: 
       totalFound: candidates.length,
       // Coverage is independent of valid candidate count. Preserve the
       // candidates even when the live page still has unscanned content.
-      outcome: budgetExhausted ? "budget_exhausted"
+      outcome: scrollStalled ? "scroll_stalled"
+        : budgetExhausted ? "budget_exhausted"
         : candidates.length ? "completed"
         : postprocessedCandidates ? "refinement_empty"
         : retainedCandidates ? "postprocess_empty"
         : observedCandidates ? "filtered_empty" : "no_candidates",
       diagnostics: { observedCandidates, retainedCandidates, postprocessedCandidates, refinedCandidates,
         ...(budgetExhausted ? { budgetExhausted: true } : {}),
+        ...(scrollStalled ? { scrollStalled: true } : {}),
         ...(domDiagnostics ? { domDiagnostics } : {}) },
     });
 

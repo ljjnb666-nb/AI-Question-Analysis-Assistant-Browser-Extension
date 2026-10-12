@@ -109,6 +109,32 @@ describe("RC03B R10 full-page terminal outcome and stage accounting", () => {
     }));
   });
 
+  it("Issue102 R12 reports blocked scroll as incomplete with zero candidates", async () => {
+    const { send, detect, deps } = setup();
+    detect.mockImplementation(async (onProgress: (p: unknown) => void) => {
+      onProgress({ progress: 7, found: 0, currentStep: 1, totalScrollSteps: 15,
+        scrollStalled: true, observedCandidates: 0, retainedCandidates: 0 });
+      return [];
+    });
+    await handleFullPageDetect(deps);
+    expect(done(send)).toMatchObject({ outcome: "scroll_stalled", totalFound: 0,
+      diagnostics: { scrollStalled: true, observedCandidates: 0 } });
+    expect((done(send)?.diagnostics as Record<string, unknown>)?.budgetExhausted).toBeUndefined();
+  });
+
+  it("Issue102 R12 keeps found questions when a scroll root stops advancing", async () => {
+    const { send, detect, deps } = setup();
+    detect.mockImplementation(async (onProgress: (p: unknown) => void) => {
+      onProgress({ progress: 7, found: 1, currentStep: 1, totalScrollSteps: 15,
+        scrollStalled: true, observedCandidates: 1, retainedCandidates: 1 });
+      return [sample()];
+    });
+    await handleFullPageDetect(deps);
+    expect(done(send)).toMatchObject({ outcome: "scroll_stalled", totalFound: 1,
+      candidates: [expect.objectContaining({ id: "q1" })],
+      diagnostics: { scrollStalled: true, refinedCandidates: 1 } });
+  });
+
   it("R13A reports initial filtering instead of no candidates when DOM saw raw candidates", async () => {
     const { send, detect, deps } = setup();
     detect.mockImplementation(async (onProgress: (p: unknown) => void) => {

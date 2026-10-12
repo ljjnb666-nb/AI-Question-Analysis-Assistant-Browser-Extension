@@ -197,7 +197,7 @@ export interface FullPageDetectProgressMsg extends BaseMessage {
   currentStep: number;
 }
 
-export type FullPageDetectOutcome = "completed" | "no_candidates" | "budget_exhausted" | "filtered_empty" | "postprocess_empty" | "refinement_empty" | "failed";
+export type FullPageDetectOutcome = "completed" | "no_candidates" | "budget_exhausted" | "scroll_stalled" | "filtered_empty" | "postprocess_empty" | "refinement_empty" | "failed";
 export type FullPageDetectFailureStage = "scanning" | "refining" | "publishing";
 export interface FullPageDetectDiagnostics {
   observedCandidates: number;
@@ -206,6 +206,8 @@ export interface FullPageDetectDiagnostics {
   refinedCandidates: number;
   /** Content-owned proof the original scan budget left page content unscanned. */
   budgetExhausted?: boolean;
+  /** The actual scroll root stopped advancing before reaching its bottom. */
+  scrollStalled?: boolean;
   domDiagnostics?: DomCandidateDiagnostics;
 }
 

@@ -73,6 +73,17 @@ describe("UI-04 candidate workspace behavior", () => {
     expect(articles()).toHaveLength(1);
     expect(articles()[0].dataset.candidateId).toBe("partial");
   });
+  it("Issue102 R12 displays blocked-scroll partial coverage while keeping candidates", () => {
+    const { container } = render(<Workspace initial={[candidate("blocked")]} lang="zh"
+      phase="incomplete" outcome="scroll_stalled" />);
+    expect(container.querySelector('[data-scan-coverage="partial"]')).toHaveTextContent("页面滚动未能继续推进");
+    expect(articles()).toHaveLength(1);
+  });
+  it("Issue102 R12 does not call a blocked 0-question scroll a complete page", () => {
+    render(<Workspace initial={[]} lang="zh" phase="incomplete" outcome="scroll_stalled" />);
+    expect(screen.getByRole("status")).toHaveTextContent("不代表整页无题");
+    expect(articles()).toHaveLength(0);
+  });
   it("Issue102 R11 does not warn when a scan with candidates completed fully", () => {
     const { container } = render(<Workspace initial={[candidate("complete")]} lang="en"
       phase="completed" outcome="completed" />);

@@ -320,11 +320,27 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     const scan = detectCandidatesFullPage((p) => progress.push(p));
     await vi.runAllTimersAsync();
     await scan;
-    expect(progress).toHaveLength(1);
+    expect(progress.map(p => p.currentStep)).toEqual([1, 1]); // terminal evidence is not a new scan step
     expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(1);
-    expect(progress[0].currentStep).toBe(1);
     expect(progress[0].totalScrollSteps).toBe(15);
-    expect(progress[0].budgetExhausted).toBeUndefined();
+    expect(progress[1].scrollStalled).toBe(true);
+    expect(progress[1].budgetExhausted).toBeUndefined();
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R12 preserves a recognized choice question even when scroll motion is blocked", async () => {
+    scrollTo.mockImplementation(() => undefined);
+    vi.mocked(detectCandidatesInViewport).mockReturnValue([{
+      id: "stalled-q", bbox: { x: 40, y: 170, width: 650, height: 300 },
+      previewText: "以下哪项属于正确的安全操作？ A. 先检查设备 B. 忽略警告 C. 跳过确认 D. 强制提交",
+      questionTypeGuess: "single_choice", confidence: 0.94, hasImage: false, source: "auto_dom",
+    }]);
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage(p => progress.push(p));
+    await vi.runAllTimersAsync();
+    expect(await scan).toHaveLength(1);
+    expect(progress.map(p => p.currentStep)).toEqual([1, 1]);
+    expect(progress[1]).toMatchObject({ scrollStalled: true, found: 1, totalScrollSteps: 15 });
     expect(isFullPageScanRunning()).toBe(false);
   });
 
