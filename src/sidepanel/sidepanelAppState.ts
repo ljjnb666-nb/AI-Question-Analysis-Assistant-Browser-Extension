@@ -21,6 +21,8 @@ export type SidePanelAppState = {
   /** Only validated, completed empty viewport snapshots can supply numeric diagnostics. */
   viewportEmpty: boolean;
   viewportEmptyDiagnostics: DomCandidateDiagnostics | undefined;
+  /** Last verified content-owned viewport terminal ID; never a transport ACK. */
+  viewportTerminalRequestId?: string;
   uiLang: UILang;
   /** Server-validated session status; never derived from local storage. */
   authStatus: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
@@ -50,6 +52,7 @@ export const initialSidePanelAppState: SidePanelAppState = {
   detectionOutcome: undefined,
   viewportEmpty: false,
   viewportEmptyDiagnostics: undefined,
+  viewportTerminalRequestId: undefined,
   uiLang: "zh",
   authStatus: "loading",
   isAuthenticated: false,
@@ -110,6 +113,12 @@ export function sidePanelAppReducer(state: SidePanelAppState, action: SidePanelA
     return { ...state, hydrationStatus: action.status, workspaceOrigin: action.origin,
       detectionPhase: s?.detection.phase ?? "never_started",
       detectionOutcome: s?.detection.outcome, candidates,
+      // Remember a terminal only for a ready snapshot from this exact URL.
+      // A late UI timeout after this hydration must not overwrite its status.
+      viewportTerminalRequestId: action.status === "ready" && s && action.origin?.url === s.originUrl
+        && s.detection.mode === "viewport"
+        && (s.detection.phase === "completed" || s.detection.phase === "failed")
+        ? s.detection.requestId : undefined,
       viewportEmpty: action.status === "ready" && s?.detection.mode === "viewport"
         && s.detection.phase === "completed" && s.candidates.length === 0,
       viewportEmptyDiagnostics: action.status === "ready" && s?.detection.mode === "viewport"
@@ -130,6 +139,14 @@ export function sidePanelAppReducer(state: SidePanelAppState, action: SidePanelA
       ? (action.updater as (value: typeof previousValue) => typeof previousValue)(previousValue)
       : action.updater;
 
+  // R11 closes the opposite ordering of R10: the authoritative terminal may
+  // be hydrated BEFORE the 12s UI wait resolves. Suppress only an exact-UUID
+  // late timeout, without a second read, polling, cancellation, or new START.
+  if (action.type === "fillFeedback" && state.hydrationStatus === "ready") {
+    const feedback = nextValue as UserFeedback | null;
+    if (feedback?.code === "VIEWPORT_DETECT_TIMEOUT" && feedback.viewportRequestId
+      && feedback.viewportRequestId === state.viewportTerminalRequestId) return state;
+  }
   if (Object.is(previousValue, nextValue)) return state;
   return { ...state, [action.type]: nextValue };
 }
