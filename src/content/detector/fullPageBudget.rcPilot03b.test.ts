@@ -628,6 +628,143 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it("Issue102 R17 keeps high-overlap correct/incorrect questions despite high Bigram similarity", async () => {
+    pageHeight = 1200;
+    const shared = "阅读下面的自然科学调查分析、实验原理、定量测量和安全操作材料，依据观察记录与统计结果选择合适的结论。".repeat(5);
+    const first = shared + "以下说法哪项正确？ A. 检查设备 B. 保持记录 C. 关注安全 D. 遵守规程";
+    const second = shared + "以下说法哪项错误？ A. 检查设备 B. 保持记录 C. 关注安全 D. 遵守规程";
+    expect(first).not.toBe(second);
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "correct-choice", bbox: { x: 40, y: 140, width: 690, height: 340 },
+        previewText: first, questionTypeGuess: "single_choice",
+        confidence: 0.95, hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "incorrect-choice", bbox: { x: 50, y: 160, width: 650, height: 300 },
+        previewText: second, questionTypeGuess: "single_choice",
+        confidence: 0.95, hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const progress: ScanProgress[] = [];
+    const run = detectCandidatesFullPage(p => progress.push(p));
+    await vi.runAllTimersAsync();
+    const blocks = await run;
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map(b => b.previewText)).toEqual(expect.arrayContaining([first, second]));
+    expect(progress.map(p => p.currentStep)).toEqual([1, 2]);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R17 retains distinct one-character option variants inside overlapping reading cards", async () => {
+    pageHeight = 1200;
+    const shared = "根据考试研究材料、实验设备检测记录和安全评价报告，分析下列装置的正确操作步骤。".repeat(5);
+    const first = shared + "应当如何操作？ A. 设备检查 B. 数据记录 C. 程序复核 D. 安全校验";
+    const second = shared + "应当如何操作？ A. 设备检查 B. 数据记录 C. 程序复核 D. 安全检验";
+    expect(first).not.toBe(second);
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "option-variant-one", bbox: { x: 40, y: 140, width: 690, height: 340 },
+        previewText: first, questionTypeGuess: "single_choice",
+        confidence: 0.94, hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "option-variant-two", bbox: { x: 50, y: 160, width: 650, height: 300 },
+        previewText: second, questionTypeGuess: "single_choice",
+        confidence: 0.94, hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const run = detectCandidatesFullPage(() => undefined);
+    await vi.runAllTimersAsync();
+    const blocks = await run;
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map(b => b.previewText)).toEqual(expect.arrayContaining([first, second]));
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R17 guards question differences beyond the DOM 420-character preview cap", async () => {
+    pageHeight = 1200;
+    const shared = "阅读材料并判断实验记录。 A. 检查 B. 记录 C. 审核 D. 报告 " +
+      "以下为同一阅读材料的背景数据、定量信息和操作说明。".repeat(25);
+    const first = shared + "以下陈述正确吗？";
+    const second = shared + "以下陈述错误吗？";
+    const publishedPreview = first.slice(0, 420);
+    expect(first.length).toBeGreaterThan(420);
+    expect(second.slice(0, 420)).toBe(publishedPreview);
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "long-first", bbox: { x: 40, y: 140, width: 690, height: 340 },
+        previewText: publishedPreview, identitySourceText: first,
+        questionTypeGuess: "single_choice", confidence: 0.95,
+        hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "long-second", bbox: { x: 50, y: 160, width: 650, height: 300 },
+        previewText: publishedPreview, identitySourceText: second,
+        questionTypeGuess: "single_choice", confidence: 0.95,
+        hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const run = detectCandidatesFullPage(() => undefined);
+    await vi.runAllTimersAsync();
+    const blocks = await run;
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map(b => b.identitySourceText)).toEqual(expect.arrayContaining([first, second]));
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R17 retains capped previews without comparable full source authority", async () => {
+    pageHeight = 1200;
+    const preview = "以下说法正确的是？ A. 检查 B. 记录 C. 审核 D. 报告 " +
+      "无可信完整题目身份时不得依据截断预览删除候选。".repeat(30);
+    const capped = preview.slice(0, 420);
+    expect(capped).toHaveLength(420);
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "missing-source", bbox: { x: 40, y: 140, width: 690, height: 340 },
+        previewText: capped, questionTypeGuess: "single_choice",
+        confidence: 0.95, hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "also-missing-source", bbox: { x: 50, y: 160, width: 650, height: 300 },
+        previewText: capped, questionTypeGuess: "single_choice",
+        confidence: 0.95, hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const run = detectCandidatesFullPage(() => undefined);
+    await vi.runAllTimersAsync();
+    expect(await run).toHaveLength(2);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R17 still deduplicates identical complete source despite capped preview", async () => {
+    pageHeight = 1200;
+    const full = "以下说法正确的是？ A. 检查 B. 记录 C. 审核 D. 报告 " +
+      "同一道长题卡在相邻采样视口中应只保留一份。".repeat(30);
+    const capped = full.slice(0, 420);
+    expect(full.length).toBeGreaterThan(420);
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "same-one", bbox: { x: 40, y: 140, width: 690, height: 340 },
+        previewText: capped, identitySourceText: full,
+        questionTypeGuess: "single_choice", confidence: 0.95,
+        hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "same-two", bbox: { x: 50, y: 160, width: 650, height: 300 },
+        previewText: capped, identitySourceText: full,
+        questionTypeGuess: "single_choice", confidence: 0.95,
+        hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const run = detectCandidatesFullPage(() => undefined);
+    await vi.runAllTimersAsync();
+    expect(await run).toHaveLength(1);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("preserves cancellation safety when the page grows during a run", async () => {
     vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
       pageHeight = 120_000;
