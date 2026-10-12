@@ -11,7 +11,7 @@ import { isExtensionUiElement, isLikelyControlPanelText } from "./domDetectorSha
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const SCROLL_STEP_PX = 600;         // px to scroll per step (slightly less than viewport)
+const SCROLL_STEP_PX = 600;         // maximum stride; a shorter scroll viewport must never be skipped
 const SCROLL_PAUSE_MS = 300;        // wait after each scroll for content to render
 const MAX_SCROLL_STEPS = 200;       // safety cap (~120,000px page max)
 const OVERLAP_RATIO_THRESHOLD = 0.4;
@@ -29,6 +29,13 @@ let activeScan: ActiveFullPageScan | null = null;
 
 function isWindowScrollRoot(scrollRoot: ScanScrollRoot): scrollRoot is Window {
   return scrollRoot === window;
+}
+
+/** Never advance beyond the viewport actually inspected on this scroll root. */
+function boundedScanStep(clientHeight: number): number {
+  return Number.isFinite(clientHeight)
+    ? Math.min(SCROLL_STEP_PX, Math.max(1, Math.floor(clientHeight)))
+    : 1;
 }
 
 export function isFullPageScanRunning(): boolean {
@@ -118,9 +125,13 @@ export async function detectCandidatesFullPage(
     // number of steps (only the unrelated 200-step safety cap applied).
     if (!isCurrent()) return [];
     const initialMetrics = getScrollMetrics(root);
+    // A fixed 600px stride can jump over all content between two sampled
+    // viewports when the browser/pane is shorter than 600px. Bind both the
+    // immutable budget and every actual scroll to the owning root's viewport.
+    const scanStepPx = boundedScanStep(initialMetrics.clientHeight);
     const initialDistance = initialMetrics.scrollHeight - initialMetrics.clientHeight;
     const totalSteps = Number.isFinite(initialDistance)
-      ? Math.min(Math.max(1, Math.ceil(Math.max(0, initialDistance) / SCROLL_STEP_PX) + 1), MAX_SCROLL_STEPS)
+      ? Math.min(Math.max(1, Math.ceil(Math.max(0, initialDistance) / scanStepPx) + 1), MAX_SCROLL_STEPS)
       : 1;
     let step = 0;
     let previousTop: number | null = null;
@@ -197,7 +208,9 @@ export async function detectCandidatesFullPage(
       if (step >= totalSteps) break;
 
       if (!isCurrent()) break;
-      const nextTop = Math.min(metrics.scrollTop + SCROLL_STEP_PX, metrics.scrollHeight);
+      // If the viewport shrinks during a run, shrink the stride as well.
+      // Keep the original totalSteps immutable; exhaustion then reports partial coverage.
+      const nextTop = Math.min(metrics.scrollTop + Math.min(scanStepPx, boundedScanStep(metrics.clientHeight)), metrics.scrollHeight);
       if (nextTop <= metrics.scrollTop) break;
       previousTop = metrics.scrollTop;
       setScrollPosition(root, nextTop, metrics.scrollLeft);

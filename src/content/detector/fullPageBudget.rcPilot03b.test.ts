@@ -344,6 +344,91 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it("Issue102 R13 detects a short-window question between old fixed 600px samples", async () => {
+    pageHeight = 1500;
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 320 });
+    scrollTo.mockImplementation((...args: unknown[]) => {
+      const options = args[0] as ScrollToOptions;
+      top = Math.min(Math.max(0, options.top ?? top), pageHeight - 320);
+    });
+    const visited: number[] = [];
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      visited.push(top);
+      // Absolute question at 420-480: outside both [0,320] and [600,920].
+      return top <= 420 && top + 320 >= 480 ? [{
+        id: "narrow-viewport-question", bbox: { x: 30, y: 150, width: 660, height: 60 },
+        previewText: "哪一个操作符合设备安全规范？ A. 上电前检查 B. 跳过检查 C. 关闭防护 D. 忽略告警",
+        questionTypeGuess: "single_choice", confidence: 0.94, hasImage: false, source: "auto_dom",
+      }] : [];
+    });
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage(p => progress.push(p));
+    await vi.runAllTimersAsync();
+    const result = await scan;
+    expect(result).toHaveLength(1);
+    expect(result[0].previewText).toContain("上电前检查");
+    expect(visited).toEqual([0, 320, 640, 960, 1180]);
+    expect(progress.map(p => p.currentStep)).toEqual([1, 2, 3, 4, 5]);
+    expect(progress.every(p => p.totalScrollSteps === 5 && p.budgetExhausted !== true)).toBe(true);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R13 bounds the stride using a nested question pane instead of window height", async () => {
+    pageHeight = 9000; // Window metrics must not govern the selected inner pane.
+    document.body.innerHTML = '<main id="paper-scroll-r13" style="overflow-y:auto;height:350px"></main>';
+    const pane = document.getElementById("paper-scroll-r13")!;
+    let paneTop = 90;
+    Object.defineProperty(pane, "scrollTop", { configurable: true, get: () => paneTop });
+    Object.defineProperty(pane, "clientHeight", { configurable: true, value: 350 });
+    Object.defineProperty(pane, "scrollHeight", { configurable: true, value: 1400 });
+    Object.defineProperty(pane, "getBoundingClientRect", { configurable: true,
+      value: () => ({ left: 20, top: 30, right: 820, bottom: 380, width: 800, height: 350 }) });
+    const paneScrollTo = vi.fn((options: ScrollToOptions) => {
+      paneTop = Math.min(Math.max(0, options.top ?? paneTop), 1050);
+    });
+    Object.defineProperty(pane, "scrollTo", { configurable: true, value: paneScrollTo });
+    const visited: number[] = [];
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      visited.push(paneTop);
+      return paneTop <= 440 && paneTop + 350 >= 490 ? [{
+        id: "inner-pane-question", bbox: { x: 45, y: 120, width: 680, height: 80 },
+        previewText: "选出正确的校园实验操作？ A. 记录步骤 B. 随意接线 C. 跳过验证 D. 忽略提示",
+        questionTypeGuess: "single_choice", confidence: 0.93, hasImage: false, source: "auto_dom",
+      }] : [];
+    });
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage(p => progress.push(p));
+    await vi.runAllTimersAsync();
+    expect(await scan).toHaveLength(1);
+    expect(visited).toEqual([0, 350, 700, 1050]);
+    expect(progress.every(p => p.totalScrollSteps === 4 && p.budgetExhausted !== true)).toBe(true);
+    expect(paneTop).toBe(90);
+    expect(scrollTo).not.toHaveBeenCalled(); // No writes to the wrong (window) scroll root.
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R13 keeps the original budget while shrinking scroll stride after resize", async () => {
+    pageHeight = 1800;
+    const visited: number[] = [];
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      visited.push(top);
+      if (visited.length === 1) {
+        Object.defineProperty(window, "innerHeight", { configurable: true, value: 240 });
+      }
+      return [];
+    });
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage(p => progress.push(p));
+    await vi.runAllTimersAsync();
+    expect(await scan).toEqual([]);
+    expect(visited).toEqual([0, 600, 840]); // Dynamic stride, never 0,600,1200.
+    expect(progress.map(p => p.currentStep)).toEqual([1, 2, 3]);
+    expect(progress.every(p => p.totalScrollSteps === 3)).toBe(true);
+    expect(progress[2].budgetExhausted).toBe(true); // Shrink reduced coverage, not authority.
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("preserves cancellation safety when the page grows during a run", async () => {
     vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
       pageHeight = 120_000;
