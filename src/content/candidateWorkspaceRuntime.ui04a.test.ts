@@ -117,6 +117,19 @@ describe("UI-04A content snapshot authority", () => {
     expect(read().fullPage.running).toBe(false);
   });
 
+  it("Issue102 R12 projects a stopped scroll as incomplete without losing candidates", () => {
+    const { runtime, read } = setup();
+    runtime.beginDetection("fullpage");
+    expect(runtime.observe({ type: "FULL_PAGE_DETECT_DONE", outcome: "scroll_stalled",
+      candidates: [question()], totalFound: 1,
+      diagnostics: { observedCandidates: 1, retainedCandidates: 1,
+        postprocessedCandidates: 1, refinedCandidates: 1, scrollStalled: true } })).toBe(true);
+    expect(read().detection).toMatchObject({ phase: "incomplete",
+      outcome: "scroll_stalled", diagnostics: { scrollStalled: true } });
+    expect(read().candidates).toHaveLength(1);
+    expect(read().fullPage.running).toBe(false);
+  });
+
   it("UI04A-SCAN cancellation/completion fence old progress and clear ephemeral counters", () => {
     const { runtime, read } = setup();
     runtime.beginDetection("fullpage");

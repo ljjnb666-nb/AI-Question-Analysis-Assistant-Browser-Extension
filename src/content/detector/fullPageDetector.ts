@@ -56,6 +56,8 @@ export interface ScanProgress {
   domDiagnostics?: DomCandidateDiagnostics;
   /** True only when the fixed scroll budget ends before actual page bottom. */
   budgetExhausted?: boolean;
+  /** A scroll command did not advance the live root, leaving content unscanned. */
+  scrollStalled?: boolean;
 }
 
 /**
@@ -130,7 +132,20 @@ export async function detectCandidatesFullPage(
       const metrics = getScrollMetrics(root);
       // A scroll trap or fixed-position container must not repeatedly parse
       // the same viewport while claiming forward progress.
-      if (previousTop !== null && metrics.scrollTop <= previousTop) break;
+      if (previousTop !== null && metrics.scrollTop <= previousTop) {
+        // A blocked scroll must not be reported as complete or as budget
+        // exhaustion. Re-publish the same bounded step with terminal evidence;
+        // no extra detection pass or scroll mutation is authorized.
+        if (metrics.scrollTop + metrics.clientHeight < metrics.scrollHeight - 10) {
+          onProgress({
+            progress: Math.min(Math.round((step / totalSteps) * 100), 99),
+            found: allBlocks.length, currentStep: step, totalScrollSteps: totalSteps,
+            observedCandidates, retainedCandidates: allBlocks.length, scrollStalled: true,
+            domDiagnostics: { ...domDiagnostics, rejected: { ...domDiagnostics.rejected } },
+          });
+        }
+        break;
+      }
 
       let viewportBlocks = detectCandidatesInViewport(domDiagnostics);
       // A delayed question mount may occur on a later scroll position too.
