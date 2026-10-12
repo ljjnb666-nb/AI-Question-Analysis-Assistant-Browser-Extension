@@ -429,6 +429,55 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it("Issue102 R14 keeps two distant reading questions with the same first 96 characters", async () => {
+    pageHeight = 1800; // scan positions 0, 600 and 1200
+    const sharedMaterial = "阅读下面的材料，分析其中的实验步骤与观察记录。".repeat(8);
+    const first = sharedMaterial + " 第一问：哪项准备正确？ A. 检查设备 B. 跳过检查 C. 忽略异常 D. 放弃记录";
+    const second = sharedMaterial + " 第二问：哪项记录正确？ A. 随意删改 B. 保留原始数据 C. 混合样本 D. 忽略时间";
+    expect(first.replace(/[^\\u4e00-\\u9fa5A-Za-z0-9]/g, "").slice(0, 96))
+      .toBe(second.replace(/[^\\u4e00-\\u9fa5A-Za-z0-9]/g, "").slice(0, 96));
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      const previewText = top === 0 ? first : top === 1200 ? second : null;
+      if (!previewText) return [];
+      return [{
+        id: top === 0 ? "reading-question-one" : "reading-question-two",
+        bbox: { x: 40, y: 130, width: 680, height: 320 },
+        previewText, questionTypeGuess: "single_choice", confidence: 0.94,
+        hasImage: false, source: "auto_dom",
+      }];
+    });
+    const progress: ScanProgress[] = [];
+    const run = detectCandidatesFullPage(p => progress.push(p));
+    await vi.runAllTimersAsync();
+    const candidates = await run;
+    expect(candidates).toHaveLength(2);
+    expect(candidates.map(c => c.previewText)).toEqual(expect.arrayContaining([first, second]));
+    expect(new Set(candidates.map(c => c.bbox.y)).size).toBe(2);
+    expect(progress.map(p => p.currentStep)).toEqual([1, 2, 3]);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R14 still deduplicates the same question seen in overlapping scroll windows", async () => {
+    pageHeight = 1200; // positions 0 and 600 both contain the same absolute card at y=450
+    const text = "在安全实验中应如何操作？ A. 先检查设备 B. 随意接线 C. 关闭报警 D. 跳过验证";
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => [{
+      id: `repeat-at-${top}`,
+      bbox: { x: 40, y: 450 - top, width: 680, height: 180 },
+      previewText: text, questionTypeGuess: "single_choice", confidence: 0.93,
+      hasImage: false, source: "auto_dom",
+    }]);
+    const progress: ScanProgress[] = [];
+    const run = detectCandidatesFullPage(p => progress.push(p));
+    await vi.runAllTimersAsync();
+    const candidates = await run;
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.bbox.y).toBe(450);
+    expect(progress.map(p => p.currentStep)).toEqual([1, 2]);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("preserves cancellation safety when the page grows during a run", async () => {
     vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
       pageHeight = 120_000;

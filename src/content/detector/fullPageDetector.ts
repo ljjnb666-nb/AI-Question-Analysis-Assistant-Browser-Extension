@@ -436,21 +436,17 @@ function upsertCandidate(target: QuestionBlock[], block: QuestionBlock): void {
 function postProcessCandidates(blocks: QuestionBlock[]): QuestionBlock[] {
   const byRank = [...blocks].sort((a, b) => candidateRank(b) - candidateRank(a));
   const kept: QuestionBlock[] = [];
-  const fingerprintSet = new Set<string>();
-
+  // A 96-character prefix is not a global question identity: separate
+  // comprehension questions can share all introductory material. Retain
+  // spatially distinct candidates and deduplicate only with the same-question
+  // geometry/text evidence already used during viewport accumulation.
   for (const block of byRank) {
     // Blocks have already passed the complete-text preview gate before
     // truncation to 420 characters. Revalidating the truncated preview can
     // drop a legitimate choice question whose D option appears after 420.
     const text = normalizePreviewText(block.previewText);
-    const fp = textFingerprint(text);
-    if (fp.length >= 28 && fingerprintSet.has(fp)) continue;
-
-    const isDuplicate = kept.some((k) => isLikelySameQuestion(k, block));
-    if (isDuplicate) continue;
-
+    if (kept.some((k) => isLikelySameQuestion(k, block))) continue;
     kept.push({ ...block, previewText: text.slice(0, 420) });
-    if (fp.length >= 28) fingerprintSet.add(fp);
   }
 
   return kept;
