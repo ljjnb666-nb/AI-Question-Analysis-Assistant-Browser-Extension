@@ -661,7 +661,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     pageHeight = 1200;
     const shared = "根据考试研究材料、实验设备检测记录和安全评价报告，分析下列装置的正确操作步骤。".repeat(5);
     const first = shared + "应当如何操作？ A. 设备检查 B. 数据记录 C. 程序复核 D. 安全校验";
-    const second = shared + "应当如何操作？ A. 设备检查 B. 数据记录 C. 程序复核 D. 安全忽略";
+    const second = shared + "应当如何操作？ A. 设备检查 B. 数据记录 C. 程序复核 D. 安全检验";
     expect(first).not.toBe(second);
     vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
       {
