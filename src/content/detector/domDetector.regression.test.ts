@@ -670,6 +670,44 @@ describe("domDetector regressions", () => {
     expect(blocks[0].boundary?.clippedBottom).toBe(true);
   });
 
+  it("Issue102 R18 rejects an oversized shell whose actual question starts below the viewport", () => {
+    document.body.innerHTML = `
+      <article id="tall-blank-shell" class="question-item">
+        <p id="below-fold-stem">4. 下列哪一项属于合规的实验操作？</p>
+        <ul>
+          <li>A. 检查安全装置</li><li>B. 删除原始记录</li>
+          <li>C. 跳过审核</li><li>D. 忽略告警</li>
+        </ul>
+      </article>`;
+    const card = document.getElementById("tall-blank-shell")!;
+    setRect(card, { left: 90, top: 0, width: 760, height: 2100 });
+    setRect(document.getElementById("below-fold-stem")!, { left: 110, top: 1100, width: 710, height: 50 });
+    card.querySelectorAll("li").forEach((el, index) =>
+      setRect(el, { left: 110, top: 1180 + index * 46, width: 710, height: 40 }));
+    // The shell fills 900 px, but neither the stem nor its options are visible.
+    expect(detectCandidatesInViewport()).toHaveLength(0);
+  });
+
+  it("Issue102 R18 keeps an oversized card when its stem is still near the top edge", () => {
+    document.body.innerHTML = `
+      <article id="tall-visible-stem" class="question-item">
+        <p id="visible-stem">5. 实验室中的哪项操作满足安全要求？</p>
+        <ul>
+          <li>A. 检查设备</li><li>B. 删除记录</li>
+          <li>C. 忽略告警</li><li>D. 跳过审核</li>
+        </ul>
+      </article>`;
+    const card = document.getElementById("tall-visible-stem")!;
+    setRect(card, { left: 90, top: -30, width: 760, height: 2100 });
+    setRect(document.getElementById("visible-stem")!, { left: 110, top: 12, width: 710, height: 50 });
+    card.querySelectorAll("li").forEach((el, index) =>
+      setRect(el, { left: 110, top: 85 + index * 46, width: 710, height: 40 }));
+    const blocks = detectCandidatesInViewport();
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].previewText).toContain("实验室中的哪项操作");
+    expect(blocks[0].previewText).toContain("D.");
+  });
+
   it("Issue102 R18 still rejects an oversized card barely entering the bottom edge", () => {
     document.body.innerHTML = `
       <article id="tall-bottom" class="question-item">
