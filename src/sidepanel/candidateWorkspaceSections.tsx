@@ -1,7 +1,8 @@
 import React from "react";
 import { OrbitButton, OrbitSurface } from "@/shared/ui/orbitPrimitives";
 import { orbitColors, orbitRadius, orbitSpacing, orbitTypography, orbitTokens } from "@/shared/ui/orbitTokens";
-import type { DetectionPhase, FullPageDetectOutcome } from "@/shared/types";
+import type { DetectionPhase, DomCandidateDiagnostics, FullPageDetectOutcome } from "@/shared/types";
+import { viewportEmptyDiagnosticFeedback } from "./viewportDetectionFeedback.rcPilot03a";
 import type { UILang } from "./displayUtils";
 import type { CandidateViewFilter } from "./sidepanelCandidateMetrics";
 import { CANDIDATE_WORKSPACE_COPY } from "./candidateWorkspaceCopy";
@@ -332,11 +333,15 @@ export function CandidateEmptyState({
   phase,
   outcome,
   filteredEmpty = false,
+  viewportEmpty = false,
+  viewportEmptyDiagnostics,
 }: {
   lang: UILang;
   phase: DetectionPhase;
   outcome?: FullPageDetectOutcome;
   filteredEmpty?: boolean;
+  viewportEmpty?: boolean;
+  viewportEmptyDiagnostics?: DomCandidateDiagnostics;
 }) {
   const copy = CANDIDATE_WORKSPACE_COPY[lang];
   const message = filteredEmpty
@@ -349,7 +354,9 @@ export function CandidateEmptyState({
         ? outcome === "filtered_empty" ? copy.filteredCandidateEmpty
           : outcome === "postprocess_empty" ? copy.postprocessedEmpty : copy.incompleteEmpty
       : phase === "completed"
-        ? copy.completedEmpty
+        ? viewportEmpty
+          ? viewportEmptyDiagnosticFeedback(lang, viewportEmptyDiagnostics).message
+          : copy.completedEmpty
         : copy.notStarted;
 
   return (
