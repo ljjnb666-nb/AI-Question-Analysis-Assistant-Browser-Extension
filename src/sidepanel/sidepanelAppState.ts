@@ -1,5 +1,5 @@
 import type React from "react";
-import type { CandidateOrigin, CandidateWorkspaceSnapshot, DetectedCandidate, DetectionPhase, FullPageDetectOutcome } from "@/shared/types";
+import type { CandidateOrigin, CandidateWorkspaceSnapshot, DetectedCandidate, DetectionPhase, DomCandidateDiagnostics, FullPageDetectOutcome } from "@/shared/types";
 import type { WorkspaceHydrationStatus } from "./workspaceHydration";
 import { mapAutoSolveProgressMessage, mapFullPageProgressMessage, mergeCandidateSnapshots } from "./sidepanelStateSync";
 import { sameCandidateResultContext } from "./candidateAuthority";
@@ -18,6 +18,9 @@ export type SidePanelAppState = {
   workspaceOrigin: CandidateOrigin | undefined;
   detectionPhase: DetectionPhase;
   detectionOutcome: FullPageDetectOutcome | undefined;
+  /** Only validated, completed empty viewport snapshots can supply numeric diagnostics. */
+  viewportEmpty: boolean;
+  viewportEmptyDiagnostics: DomCandidateDiagnostics | undefined;
   uiLang: UILang;
   /** Server-validated session status; never derived from local storage. */
   authStatus: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
@@ -45,6 +48,8 @@ export const initialSidePanelAppState: SidePanelAppState = {
   workspaceOrigin: undefined,
   detectionPhase: "never_started",
   detectionOutcome: undefined,
+  viewportEmpty: false,
+  viewportEmptyDiagnostics: undefined,
   uiLang: "zh",
   authStatus: "loading",
   isAuthenticated: false,
@@ -86,6 +91,11 @@ export function sidePanelAppReducer(state: SidePanelAppState, action: SidePanelA
     return { ...state, hydrationStatus: action.status, workspaceOrigin: action.origin,
       detectionPhase: s?.detection.phase ?? "never_started",
       detectionOutcome: s?.detection.outcome, candidates,
+      viewportEmpty: action.status === "ready" && s?.detection.mode === "viewport"
+        && s.detection.phase === "completed" && s.candidates.length === 0,
+      viewportEmptyDiagnostics: action.status === "ready" && s?.detection.mode === "viewport"
+        && s.detection.phase === "completed" && s.candidates.length === 0
+        ? s.detection.diagnostics?.domDiagnostics : undefined,
       isDetecting: s?.detection.phase === "detecting" && s.detection.mode === "viewport",
       isFullPageScan: s?.fullPage.running ?? false,
       scanProgress: s?.fullPage.running && s.fullPage.progress ? mapFullPageProgressMessage({ ...s.fullPage.progress }) : null,
