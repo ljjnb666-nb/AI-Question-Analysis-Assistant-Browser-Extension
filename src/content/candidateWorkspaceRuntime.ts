@@ -88,7 +88,11 @@ export function createCandidateWorkspaceRuntime(options: {
         || !["detecting", "completed"].includes(state.detection.phase)
         || state.detection.requestId !== requestId) return false;
       ++detectionGeneration;
-      state = { ...state, detection: { phase: "never_started", mode: null }, candidates: [] };
+      // A matching tagged run failed. Keep only the request identity and
+      // terminal failure phase so independently opened Side Panels do not
+      // misrepresent the run as "never started". Clear all provisional
+      // candidates/diagnostics (including any earlier optimistic completion).
+      state = { ...state, detection: { phase: "failed", mode: "viewport", requestId }, candidates: [] };
       publish();
       return true;
     },
