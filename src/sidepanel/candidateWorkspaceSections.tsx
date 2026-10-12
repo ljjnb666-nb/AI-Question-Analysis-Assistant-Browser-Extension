@@ -351,7 +351,8 @@ export function CandidateEmptyState({
       : phase === "failed"
         ? copy.failedEmpty
       : phase === "incomplete"
-        ? outcome === "filtered_empty" ? copy.filteredCandidateEmpty
+        ? outcome === "budget_exhausted" ? copy.budgetExhaustedEmpty
+           : outcome === "filtered_empty" ? copy.filteredCandidateEmpty
           : outcome === "postprocess_empty" ? copy.postprocessedEmpty : copy.incompleteEmpty
       : phase === "completed"
         ? viewportEmpty

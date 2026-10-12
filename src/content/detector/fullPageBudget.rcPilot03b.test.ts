@@ -288,6 +288,8 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(progress.map((p) => p.currentStep)).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
     expect(progress.every((p) => p.totalScrollSteps === 15 && p.currentStep <= p.totalScrollSteps)).toBe(true);
     expect(progress.every((p) => p.progress >= 0 && p.progress <= 99)).toBe(true);
+    expect(progress.slice(0, -1).every((p) => p.budgetExhausted === undefined)).toBe(true);
+    expect(progress[progress.length - 1]?.budgetExhausted).toBe(true);
     expect(top).toBe(200); // a completed, current run still restores its scroll lease
     expect(isFullPageScanRunning()).toBe(false);
   });
@@ -307,6 +309,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(progress.length).toBeLessThanOrEqual(15);
     expect(progress.every((p) => p.totalScrollSteps === 15 && p.currentStep <= 15)).toBe(true);
     expect(viewCount).toBeLessThanOrEqual(15);
+    expect(progress.every((p) => p.budgetExhausted !== true)).toBe(true);
     expect(isFullPageScanRunning()).toBe(false);
   });
 
@@ -321,6 +324,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(1);
     expect(progress[0].currentStep).toBe(1);
     expect(progress[0].totalScrollSteps).toBe(15);
+    expect(progress[0].budgetExhausted).toBeUndefined();
     expect(isFullPageScanRunning()).toBe(false);
   });
 

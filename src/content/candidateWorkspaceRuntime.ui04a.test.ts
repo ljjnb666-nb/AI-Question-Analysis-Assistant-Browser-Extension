@@ -92,6 +92,13 @@ describe("UI-04A content snapshot authority", () => {
       expect(read().detection).toMatchObject({ phase: "incomplete", outcome, mode: "fullpage" });
     }
     runtime.beginDetection("fullpage");
+    runtime.observe({ type: "FULL_PAGE_DETECT_DONE", outcome: "budget_exhausted", candidates: [], totalFound: 0,
+      diagnostics: { observedCandidates: 0, retainedCandidates: 0, postprocessedCandidates: 0,
+        refinedCandidates: 0, budgetExhausted: true } });
+    expect(read().detection).toMatchObject({ phase: "incomplete", mode: "fullpage",
+      outcome: "budget_exhausted", diagnostics: { budgetExhausted: true } });
+    expect(read().fullPage.running).toBe(false);
+    runtime.beginDetection("fullpage");
     runtime.observe({ type: "FULL_PAGE_DETECT_DONE", outcome: "no_candidates", candidates: [], totalFound: 0 });
     expect(read().detection.phase).toBe("completed");
   });

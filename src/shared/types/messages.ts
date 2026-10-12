@@ -197,13 +197,15 @@ export interface FullPageDetectProgressMsg extends BaseMessage {
   currentStep: number;
 }
 
-export type FullPageDetectOutcome = "completed" | "no_candidates" | "filtered_empty" | "postprocess_empty" | "refinement_empty" | "failed";
+export type FullPageDetectOutcome = "completed" | "no_candidates" | "budget_exhausted" | "filtered_empty" | "postprocess_empty" | "refinement_empty" | "failed";
 export type FullPageDetectFailureStage = "scanning" | "refining" | "publishing";
 export interface FullPageDetectDiagnostics {
   observedCandidates: number;
   retainedCandidates: number;
   postprocessedCandidates: number;
   refinedCandidates: number;
+  /** Content-owned proof the original scan budget left page content unscanned. */
+  budgetExhausted?: boolean;
   domDiagnostics?: DomCandidateDiagnostics;
 }
 

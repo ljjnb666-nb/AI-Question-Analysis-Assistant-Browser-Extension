@@ -54,6 +54,8 @@ export interface ScanProgress {
   observedCandidates?: number;
   retainedCandidates?: number;
   domDiagnostics?: DomCandidateDiagnostics;
+  /** True only when the fixed scroll budget ends before actual page bottom. */
+  budgetExhausted?: boolean;
 }
 
 /**
@@ -158,6 +160,11 @@ export async function detectCandidatesFullPage(
 
       step++;
       if (!isCurrent()) break;
+      // The page may grow after the immutable step budget was captured.
+      // Check actual scroll coverage instead of clipping a display counter.
+      const remainingMetrics = step >= totalSteps ? getScrollMetrics(root) : null;
+      const budgetExhausted = !!remainingMetrics
+        && remainingMetrics.scrollTop + remainingMetrics.clientHeight < remainingMetrics.scrollHeight - 10;
       onProgress({
         progress: Math.min(Math.round((step / totalSteps) * 100), 99),
         found: allBlocks.length,
@@ -165,6 +172,7 @@ export async function detectCandidatesFullPage(
         totalScrollSteps: totalSteps,
         observedCandidates,
         retainedCandidates: allBlocks.length,
+        ...(budgetExhausted ? { budgetExhausted: true } : {}),
         domDiagnostics: { ...domDiagnostics, rejected: { ...domDiagnostics.rejected } },
       });
       // User handlers may synchronously CANCEL or change the route.
