@@ -79,7 +79,8 @@ describe("UI-04 candidate workspace behavior", () => {
   it("Issue102 R11 keeps partial coverage visible even if candidate filters hide found questions", () => {
     render(<Workspace initial={[candidate("found")]} phase="incomplete" outcome="budget_exhausted" />);
     fireEvent.click(screen.getByRole("button", { name: "Selected" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Only part of this page was scanned");
+    // Filtering adds a separate empty-filter role=status: target only the coverage notice.
+    expect(screen.getByText(/Only part of this page was scanned/)).toHaveAttribute("data-scan-coverage", "partial");
     expect(screen.getByText("No questions match this filter.")).toBeVisible();
     expect(articles()).toHaveLength(0);
   });
