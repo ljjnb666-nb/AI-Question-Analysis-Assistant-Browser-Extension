@@ -22,7 +22,7 @@ export type SidePanelAppState = {
   viewportEmpty: boolean;
   viewportEmptyDiagnostics: DomCandidateDiagnostics | undefined;
   /** Last verified content-owned viewport terminal ID; never a transport ACK. */
-  viewportTerminalRequestId?: string;
+  viewportTerminalRequestId: string | undefined;
   uiLang: UILang;
   /** Server-validated session status; never derived from local storage. */
   authStatus: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
