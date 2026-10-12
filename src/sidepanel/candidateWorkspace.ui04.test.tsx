@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { DetectedCandidate, ParseResult } from "@/shared/types";
+import type { DetectedCandidate, ParseResult, DetectionPhase, FullPageDetectOutcome } from "@/shared/types";
 import { CandidatesTab } from "./CandidatesTab";
 import { CandidateWorkspaceCard } from "./CandidateWorkspaceCard";
 import { computeCandidateMetrics, type CandidateViewFilter } from "./sidepanelCandidateMetrics";
@@ -26,14 +26,17 @@ const items = () => [candidate("idle"), candidate("solved", { selected: true, st
   candidate("review", { status: "success", result: { ...result, blockId: "review", confidence: 0.61 } }),
   candidate("failed", { status: "error", error: "provider threw SECRET_TOKEN stack trace" })];
 
-function Workspace({ initial = items(), lang = "en", running = false }: { initial?: DetectedCandidate[]; lang?: "zh" | "en"; running?: boolean }) {
+function Workspace({ initial = items(), lang = "en", running = false, phase = "never_started", outcome }: {
+  initial?: DetectedCandidate[]; lang?: "zh" | "en"; running?: boolean;
+  phase?: DetectionPhase; outcome?: FullPageDetectOutcome;
+}) {
   const [candidates, setCandidates] = useState(initial);
   const [filter, setFilter] = useState<CandidateViewFilter>("all");
   const metrics = computeCandidateMetrics(candidates, filter, isRiskyCandidate);
   const noop = () => {};
   return <CandidatesTab {...metrics} candidates={candidates} candidateViewFilter={filter} expandedIds={{}} fillFeedback={null}
     isAutoSolving={running} isBatchFilling={false} isBatchParsing={false} isDetecting={false} isFullPageScan={false} isRetryingRisky={false}
-    autoSolveProgress={null} scanProgress={null} detectionPhase="never_started" lang={lang}
+    autoSolveProgress={null} scanProgress={null} detectionPhase={phase} detectionOutcome={outcome} lang={lang}
     onCandidateFilterChange={setFilter} onToggleCandidate={id => setCandidates(previous => previous.map(item => item.block.id === id ? { ...item, selected: !item.selected } : item))}
     onClearSelection={() => setCandidates(previous => previous.map(item => ({ ...item, selected: false })))}
     onBatchFill={noop} onBatchParse={noop} onCancelFullPage={noop} onDetect={noop} onFillCandidate={noop} onFlashCandidate={noop} onFullPageDetect={noop}
@@ -62,6 +65,26 @@ describe("UI-04 candidate workspace behavior", () => {
     expect(screen.getByRole("status")).toHaveTextContent("后处理未能保留");
     rerender(<CandidateEmptyState lang="en" phase="completed" filteredEmpty />);
     expect(screen.getByRole("status")).toHaveTextContent("No questions match");
+  });
+  it("Issue102 R11 shows Chinese partial-coverage guidance without removing the detected cards", () => {
+    const { container } = render(<Workspace initial={[candidate("partial")]} lang="zh"
+      phase="incomplete" outcome="budget_exhausted" />);
+    expect(container.querySelector('[data-scan-coverage="partial"]')).toHaveTextContent("页面仍未全部覆盖");
+    expect(articles()).toHaveLength(1);
+    expect(articles()[0].dataset.candidateId).toBe("partial");
+  });
+  it("Issue102 R11 does not warn when a scan with candidates completed fully", () => {
+    const { container } = render(<Workspace initial={[candidate("complete")]} lang="en"
+      phase="completed" outcome="completed" />);
+    expect(container.querySelector('[data-scan-coverage="partial"]')).toBeNull();
+    expect(articles()).toHaveLength(1);
+  });
+  it("Issue102 R11 keeps the original zero-candidate budget-exhaustion warning", () => {
+    const { container } = render(<Workspace initial={[]} lang="zh"
+      phase="incomplete" outcome="budget_exhausted" />);
+    expect(container.querySelector('[data-scan-coverage="partial"]')).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("并非整页无题");
+    expect(articles()).toHaveLength(0);
   });
   it("UI04-02: cards render exactly the supplied authoritative candidates", () => {
     render(<Workspace />);

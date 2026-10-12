@@ -91,6 +91,24 @@ describe("RC03B R10 full-page terminal outcome and stage accounting", () => {
     expect((done(send)?.diagnostics as Record<string, unknown>)?.budgetExhausted).toBeUndefined();
   });
 
+  it("Issue102 R11 reports incomplete page coverage while retaining recognized questions", async () => {
+    const { send, detect, deps } = setup();
+    detect.mockImplementation(async (onProgress: (p: unknown) => void) => {
+      onProgress({ progress: 99, found: 1, currentStep: 15, totalScrollSteps: 15,
+        budgetExhausted: true, observedCandidates: 1, retainedCandidates: 1 });
+      return [sample()];
+    });
+    const commitBeforeDone = vi.fn();
+    deps.commitBeforeDone = commitBeforeDone;
+    await handleFullPageDetect(deps);
+    expect(done(send)).toMatchObject({ outcome: "budget_exhausted", totalFound: 1,
+      candidates: [expect.objectContaining({ id: "q1" })],
+      diagnostics: { budgetExhausted: true, observedCandidates: 1, refinedCandidates: 1 } });
+    expect(commitBeforeDone).toHaveBeenCalledWith(expect.objectContaining({
+      activeCandidates: [expect.objectContaining({ id: "q1" })],
+    }));
+  });
+
   it("R13A reports initial filtering instead of no candidates when DOM saw raw candidates", async () => {
     const { send, detect, deps } = setup();
     detect.mockImplementation(async (onProgress: (p: unknown) => void) => {
