@@ -23,6 +23,8 @@ export type SidePanelAppState = {
   viewportEmptyDiagnostics: DomCandidateDiagnostics | undefined;
   /** Last verified content-owned viewport terminal ID; never a transport ACK. */
   viewportTerminalRequestId: string | undefined;
+  /** Exact UUID of the latest ready, same-origin, content-owned viewport phase. */
+  viewportObservedRequestId: string | undefined;
   uiLang: UILang;
   /** Server-validated session status; never derived from local storage. */
   authStatus: "loading" | "validating" | "authenticated" | "unauthenticated" | "server_unavailable";
@@ -53,6 +55,7 @@ export const initialSidePanelAppState: SidePanelAppState = {
   viewportEmpty: false,
   viewportEmptyDiagnostics: undefined,
   viewportTerminalRequestId: undefined,
+  viewportObservedRequestId: undefined,
   uiLang: "zh",
   authStatus: "loading",
   isAuthenticated: false,
@@ -101,6 +104,12 @@ function reconcileViewportFeedback(
   return feedback;
 }
 
+const VERIFIED_VIEWPORT_FEEDBACK = new Set([
+  "VIEWPORT_DETECT_CANDIDATES", "VIEWPORT_DETECT_EMPTY",
+  "VIEWPORT_DETECT_NO_PROBES", "VIEWPORT_DETECT_FILTERED_EMPTY",
+  "VIEWPORT_DETECT_FAILED_CONFIRMED",
+]);
+
 export function sidePanelAppReducer(state: SidePanelAppState, action: SidePanelAppAction): SidePanelAppState {
   if (action.type === "hydrateWorkspace") {
     const s = action.snapshot;
@@ -113,6 +122,12 @@ export function sidePanelAppReducer(state: SidePanelAppState, action: SidePanelA
     return { ...state, hydrationStatus: action.status, workspaceOrigin: action.origin,
       detectionPhase: s?.detection.phase ?? "never_started",
       detectionOutcome: s?.detection.outcome, candidates,
+      // A newer detecting phase already invalidates an older terminal's
+      // callback result, even before this generation has reached a terminal.
+      viewportObservedRequestId: action.status === "ready" && s && action.origin?.url === s.originUrl
+        && s.detection.mode === "viewport"
+        && ["detecting", "completed", "failed"].includes(s.detection.phase)
+        ? s.detection.requestId : undefined,
       // Remember a terminal only for a ready snapshot from this exact URL.
       // A late UI timeout after this hydration must not overwrite its status.
       viewportTerminalRequestId: action.status === "ready" && s && action.origin?.url === s.originUrl
@@ -146,6 +161,16 @@ export function sidePanelAppReducer(state: SidePanelAppState, action: SidePanelA
     const feedback = nextValue as UserFeedback | null;
     if (feedback?.code === "VIEWPORT_DETECT_TIMEOUT" && feedback.viewportRequestId
       && feedback.viewportRequestId === state.viewportTerminalRequestId) return state;
+    // Verified result feedback can arrive after a newer content snapshot was
+    // hydrated. Reject it if its exact UUID or terminal phase is no longer
+    // current; leave untagged legacy/security messages unchanged.
+    if (feedback?.viewportRequestId && VERIFIED_VIEWPORT_FEEDBACK.has(feedback.code ?? "")
+      && state.viewportObservedRequestId) {
+      if (feedback.viewportRequestId !== state.viewportObservedRequestId) return state;
+      const correctPhase = feedback.code === "VIEWPORT_DETECT_FAILED_CONFIRMED"
+        ? state.detectionPhase === "failed" : state.detectionPhase === "completed";
+      if (!correctPhase) return state;
+    }
   }
   if (Object.is(previousValue, nextValue)) return state;
   return { ...state, [action.type]: nextValue };
