@@ -21,17 +21,17 @@ describe("Issue #101 R10 exact-UUID timeout feedback reconciliation", () => {
   it("retains a UI timeout while its content run is still detecting, then clears it only on verified completion", () => {
     const r = runtime();
     r.beginDetection("viewport", firstId);
-    let state = { ...initialSidePanelAppState,
+    const initial = { ...initialSidePanelAppState,
       fillFeedback: userFeedback("warning", "等待当前屏识别结果超时",
         { code: "VIEWPORT_DETECT_TIMEOUT", viewportRequestId: firstId }) };
-    state = hydrate(state, r);
-    expect(state.fillFeedback?.code).toBe("VIEWPORT_DETECT_TIMEOUT");
-    expect(state.isDetecting).toBe(true);
+    const during = hydrate(initial, r);
+    expect(during.fillFeedback?.code).toBe("VIEWPORT_DETECT_TIMEOUT");
+    expect(during.isDetecting).toBe(true);
     r.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [] });
-    state = hydrate(state, r);
-    expect(state.fillFeedback).toBeNull();
-    expect(state.detectionPhase).toBe("completed");
-    expect(state.viewportEmpty).toBe(true);
+    const completed = hydrate(during, r);
+    expect(completed.fillFeedback).toBeNull();
+    expect(completed.detectionPhase).toBe("completed");
+    expect(completed.viewportEmpty).toBe(true);
   });
 
   it("a matching failed terminal supersedes timeout without pretending it completed with zero questions", () => {
