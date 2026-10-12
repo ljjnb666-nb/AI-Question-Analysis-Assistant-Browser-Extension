@@ -18,6 +18,7 @@ import {
   type ProtectedWorkKind,
 } from "@/shared/auth/protectedWorkOwner";
 import { userFeedback, type UserFeedback } from "@/shared/ui/userFeedback";
+import { awaitViewportCommand, VIEWPORT_COMMAND_TIMEOUT_MS } from "@/shared/ui/viewportDetectionTimeout";
 import { orbitColors, orbitSpacing, orbitTypography } from "@/shared/ui/orbitTokens";
 import { createPopupAuthority } from "./popupAuthority";
 import { POPUP_COPY, type PopupLang } from "./popupCopy";
@@ -49,6 +50,7 @@ const KNOWN_POPUP_RECOVERY_CODES = new Set([
   "VIEWPORT_DETECT_FAILED",
   "INVALID_VIEWPORT_REQUEST",
   "VIEWPORT_RESPONSE_UNCONFIRMED",
+  "VIEWPORT_RESULT_TIMEOUT",
 ]);
 
 function extractKnownErrorCode(err: unknown): string | null {
@@ -109,6 +111,10 @@ export const PopupApp: React.FC = () => {
   // this generation; the mount continuation only applies its stale snapshot
   // when no toggle happened since the load started (P1-01 language race).
   const languageGenerationRef = useRef(0);
+  // A synchronous Popup-local gate prevents two clicks during awaited
+  // side-panel opening from dispatching separate viewport requests.
+  // The content runtime's single-flight remains the cross-surface authority.
+  const viewportActionInFlightRef = useRef(false);
 
   // AUTH-UI-INV-11 + INV-15 (popup side): when this surface observes the
   // session leave `authenticated`, any long-running protected work recorded
@@ -255,6 +261,11 @@ export const PopupApp: React.FC = () => {
       return;
     }
 
+    if (messageType === "START_AUTO_DETECT") {
+      if (viewportActionInFlightRef.current) return;
+      viewportActionInFlightRef.current = true;
+    }
+
     // AUTH-UI-INV-15: long-running protected work records its cross-surface
     // owner BEFORE dispatch, with the exact target tab, so an auth loss on
     // any surface can find and terminate the real owner. Hoisted so the
@@ -330,13 +341,23 @@ export const PopupApp: React.FC = () => {
         if (!tab?.id || !isInjectablePageUrl(tab.url)) throw new Error("PAGE_INJECTION_FAILED");
         const expectedUrl = tab.url!;
         const requestId = crypto.randomUUID();
-        const response = await sendToTabWithBootstrap<{
-          ok?: boolean; requestId?: string; error?: string;
-        }>(tab.id, { type: "START_AUTO_DETECT", requestId, expectedUrl }, isAuthenticatedNow);
+        let expired = false;
+        const terminal = await awaitViewportCommand(
+          sendToTabWithBootstrap<{
+            ok?: boolean; requestId?: string; error?: string;
+          }>(tab.id, { type: "START_AUTO_DETECT", requestId, expectedUrl },
+            () => !expired && isAuthenticatedNow()),
+          VIEWPORT_COMMAND_TIMEOUT_MS,
+          () => { expired = true; },
+        );
         if (!isAuthenticatedNow()) throw new Error("AUTHORITY_LOST");
         const currentTab = await chrome.tabs.get(tab.id);
         if (!isAuthenticatedNow()) throw new Error("AUTHORITY_LOST");
         if (currentTab.url !== expectedUrl) throw new Error("STALE_VIEWPORT_ORIGIN");
+        // This is a UI timeout, NOT cancellation of the content-owned run.
+        // A late result never closes the Popup or clears the content flight.
+        if (terminal.timedOut) throw new Error("VIEWPORT_RESULT_TIMEOUT");
+        const response = terminal.value;
         if (!response?.ok || response.requestId !== requestId) {
           const code = response?.error && KNOWN_POPUP_RECOVERY_CODES.has(response.error)
             ? response.error : "VIEWPORT_RESPONSE_UNCONFIRMED";
@@ -359,11 +380,17 @@ export const PopupApp: React.FC = () => {
       if (messageType === "START_AUTO_DETECT" && [
         "WORK_ALREADY_RUNNING", "STALE_VIEWPORT_ORIGIN", "VIEWPORT_RESULT_NOT_CURRENT",
         "VIEWPORT_DETECT_FAILED", "INVALID_VIEWPORT_REQUEST", "VIEWPORT_RESPONSE_UNCONFIRMED",
+        "VIEWPORT_RESULT_TIMEOUT",
       ].includes(knownCode)) {
         const busy = knownCode === "WORK_ALREADY_RUNNING";
         const stale = knownCode === "STALE_VIEWPORT_ORIGIN" || knownCode === "VIEWPORT_RESULT_NOT_CURRENT";
-        setFeedback(userFeedback(busy || stale ? "warning" : "error",
-          busy
+        const timedOut = knownCode === "VIEWPORT_RESULT_TIMEOUT";
+        setFeedback(userFeedback(busy || stale || timedOut ? "warning" : "error",
+          timedOut
+            ? lang === "en"
+              ? "Waiting for current-screen detection timed out. The page may still be processing; check the workspace before retrying."
+              : "等待当前屏识别结果超时，页面可能仍在处理。请先查看工作台状态，避免重复启动。"
+            : busy
             ? lang === "en"
               ? "A current-screen detection is already running on this page. Wait for it to finish."
               : "当前页面已有识别任务正在运行，请等待结束后重试。"
@@ -406,6 +433,8 @@ export const PopupApp: React.FC = () => {
         );
       }
       setActiveFeature(null);
+    } finally {
+      if (messageType === "START_AUTO_DETECT") viewportActionInFlightRef.current = false;
     }
   };
 
