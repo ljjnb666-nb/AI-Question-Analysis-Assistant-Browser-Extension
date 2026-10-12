@@ -123,4 +123,55 @@ describe("RC-PILOT-03A current-screen verified feedback", () => {
     expect(value.message).toContain("1 candidate question");
     expect(value.message).not.toContain(value.code!);
   });
+
+  it("R12 reports an exact-UUID content-owned failed terminal as failure, never unknown or zero questions", () => {
+    const id = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    const runtime = createCandidateWorkspaceRuntime({ url: () => origin.url, send: vi.fn() });
+    runtime.beginDetection("viewport", id);
+    expect(runtime.failViewportDetection(id)).toBe(true);
+    const value = viewportDetectionSnapshotFeedback("zh", origin, runtime.snapshot(origin.url), id);
+    expect(value.code).toBe("VIEWPORT_DETECT_FAILED_CONFIRMED");
+    expect(value.tone).toBe("error");
+    expect(value.message).toContain("识别已失败");
+    expect(value.message).not.toContain("0 道");
+    expect(value.message).not.toContain(value.code!);
+    expect(viewportDetectionSnapshotFeedback("en", origin, runtime.snapshot(origin.url), id).message)
+      .toContain("detection failed");
+  });
+
+  it("R12 never attributes a failed terminal to a different UUID", () => {
+    const id = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    const runtime = createCandidateWorkspaceRuntime({ url: () => origin.url, send: vi.fn() });
+    runtime.beginDetection("viewport", id);
+    runtime.failViewportDetection(id);
+    expect(viewportDetectionSnapshotFeedback("zh", origin, runtime.snapshot(origin.url),
+      "18aabcde-0ee2-4e98-8e12-48fdce879013").code)
+      .toBe("VIEWPORT_DETECT_RESULT_UNCONFIRMED");
+  });
+
+  it("R12 never treats an invalid source, disposed runtime, or wrong mode as a verified failure", () => {
+    const id = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    const runtime = createCandidateWorkspaceRuntime({ url: () => origin.url, send: vi.fn() });
+    runtime.beginDetection("viewport", id);
+    runtime.failViewportDetection(id);
+    const s = runtime.snapshot(origin.url).snapshot!;
+    for (const response of [
+      { ok: false, snapshot: s },
+      { ok: true, snapshot: { ...s, disposed: true } },
+      { ok: true, snapshot: { ...s, detection: { ...s.detection, mode: "fullpage" } } },
+    ]) {
+      expect(viewportDetectionSnapshotFeedback("zh", origin, response as never, id).code)
+        .toBe("VIEWPORT_DETECT_RESULT_UNCONFIRMED");
+    }
+    expect(viewportDetectionSnapshotFeedback("zh", { ...origin, url: "https://quiz.example/other" },
+      { ok: true, snapshot: s }, id).code).toBe("VIEWPORT_DETECT_RESULT_UNCONFIRMED");
+  });
+
+  it("R12 retains unconfirmed state while the exact matching request is still detecting", () => {
+    const id = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    const runtime = createCandidateWorkspaceRuntime({ url: () => origin.url, send: vi.fn() });
+    runtime.beginDetection("viewport", id);
+    expect(viewportDetectionSnapshotFeedback("zh", origin, runtime.snapshot(origin.url), id).code)
+      .toBe("VIEWPORT_DETECT_RESULT_UNCONFIRMED");
+  });
 });

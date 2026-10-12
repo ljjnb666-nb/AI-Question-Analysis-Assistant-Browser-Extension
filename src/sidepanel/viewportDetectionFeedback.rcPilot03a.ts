@@ -15,19 +15,32 @@ export function viewportDetectionSnapshotFeedback(
   expectedRequestId?: string,
 ): UserFeedback {
   const snapshot = response?.snapshot;
+  const unconfirmed = () => userFeedback(
+    "warning",
+    lang === "en"
+      ? "The current-screen request was received, but a verified detection result is not available. Try syncing the workspace again."
+      : "已发送当前屏识别请求，但尚未取得可验证的结果。请重新同步工作区后重试。",
+    { code: "VIEWPORT_DETECT_RESULT_UNCONFIRMED" },
+  );
+  // Trust only a valid, current, exact-request viewport snapshot. A START ACK
+  // or an unrelated generation must never be interpreted as proof of failure.
   if (!response?.ok || !isWorkspaceSnapshot(snapshot) || snapshot.disposed
     || snapshot.originUrl !== origin.url
     || (expectedRequestId !== undefined && snapshot.detection.requestId !== expectedRequestId)
-    || snapshot.detection.mode !== "viewport"
-    || snapshot.detection.phase !== "completed") {
+    || snapshot.detection.mode !== "viewport") return unconfirmed();
+
+  // A content-owned failed terminal is neither an uncertain transport result
+  // nor a successful zero-question scan. Preserve that distinction in copy.
+  if (snapshot.detection.phase === "failed") {
     return userFeedback(
-      "warning",
+      "error",
       lang === "en"
-        ? "The current-screen request was received, but a verified detection result is not available. Try syncing the workspace again."
-        : "已发送当前屏识别请求，但尚未取得可验证的结果。请重新同步工作区后重试。",
-      { code: "VIEWPORT_DETECT_RESULT_UNCONFIRMED" },
+        ? "Current-screen detection failed. No verified question result was produced. Check the page and retry detection."
+        : "当前屏识别已失败，本次未取得可信的题目结果。请检查页面后重新识别。",
+      { code: "VIEWPORT_DETECT_FAILED_CONFIRMED" },
     );
   }
+  if (snapshot.detection.phase !== "completed") return unconfirmed();
 
   const count = snapshot.candidates.length;
   if (count === 0) return viewportEmptyDiagnosticFeedback(lang, snapshot.detection.diagnostics?.domDiagnostics);
