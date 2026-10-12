@@ -102,6 +102,13 @@ describe("RC-PILOT-03A-02 current-screen request authority", () => {
     expect(f.workspace.snapshot(url).snapshot?.detection).toEqual({ phase: "failed", mode: "viewport", requestId });
     expect(f.workspace.snapshot(url).snapshot?.candidates).toEqual([]);
     expect(JSON.stringify(f.workspace.snapshot(url).snapshot)).not.toContain("highlight rendering failed");
+    // A delayed legacy event is untagged and cannot resurrect a failed UUID's
+    // provisional candidates or turn its persisted phase back into success.
+    expect(f.workspace.observe({ type: "AUTO_DETECT_RESULT_READY",
+      candidates: [{ block: { id: "late-q1", previewText: "Late candidate" }, status: "idle", selected: false }],
+    })).toBe(false);
+    expect(f.workspace.snapshot(url).snapshot?.detection).toEqual({ phase: "failed", mode: "viewport", requestId });
+    expect(f.workspace.snapshot(url).snapshot?.candidates).toEqual([]);
   });
 
   it("a failed older completion cannot clear an already completed newer request", async () => {
