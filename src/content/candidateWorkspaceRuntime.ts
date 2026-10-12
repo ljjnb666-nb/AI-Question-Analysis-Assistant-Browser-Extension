@@ -117,6 +117,10 @@ export function createCandidateWorkspaceRuntime(options: {
       ensureRoute();
       switch (message.type) {
         case "AUTO_DETECT_RESULT_READY": {
+          // A late untagged compatibility emission has no request authority to
+          // resurrect a tagged run already marked failed. Only beginDetection
+          // can establish a new generation and reopen candidate projection.
+          if (state.detection.phase === "failed" && state.detection.mode === "viewport") return false;
           const candidates = message.candidates as CandidateSnapshot[];
           const diagnostic = message.domDiagnostics as DomCandidateDiagnostics | undefined;
           // The optional diagnostic is emitted only at the detector's owning
