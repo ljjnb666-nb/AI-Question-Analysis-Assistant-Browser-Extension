@@ -78,6 +78,21 @@ describe("RC-PILOT-03A-02 current-screen request authority", () => {
     expect(f.workspace.snapshot(url).ok).toBe(false);
   });
 
+  it("RC03A-R9 incomplete terminal completion persists failed state rather than stuck detecting", async () => {
+    const f = fixture();
+    f.options.handleAutoDetect = vi.fn(async (id?: string) => {
+      f.workspace.beginDetection("viewport", id);
+      // The content run resolves but no terminal candidate result was committed.
+    });
+    expect((await f.call()).value).toEqual({
+      ok: false, requestId, error: "VIEWPORT_RESULT_NOT_CURRENT",
+    });
+    expect(f.workspace.snapshot(url).snapshot?.detection).toEqual({
+      phase: "failed", mode: "viewport", requestId,
+    });
+    expect(f.workspace.snapshot(url).snapshot?.candidates).toEqual([]);
+  });
+
   it("maps thrown detection errors to a stable code and persists a safe failed phase", async () => {
     const f = fixture();
     f.options.handleAutoDetect = vi.fn(async (id?: string) => {
@@ -146,8 +161,11 @@ describe("RC-PILOT-03A-02 current-screen request authority", () => {
     expect((await second).value).toEqual({ ok: false, requestId: nextId, error: "VIEWPORT_RESULT_NOT_CURRENT" });
     rejectOld(new Error("old generation failed"));
     expect((await first).value).toEqual({ ok: false, requestId, error: "VIEWPORT_DETECT_FAILED" });
-    expect(f.workspace.snapshot(url).snapshot?.detection.requestId).toBe(nextId);
-    expect(f.workspace.snapshot(url).snapshot?.detection.phase).toBe("detecting");
+    // The newer request itself never committed a result: it should be failed,
+    // while the old rejection must never clear or rewrite its UUID.
+    expect(f.workspace.snapshot(url).snapshot?.detection).toEqual({
+      phase: "failed", mode: "viewport", requestId: nextId,
+    });
   });
 
   it("runtime disposal before completion never returns a successful count", async () => {
