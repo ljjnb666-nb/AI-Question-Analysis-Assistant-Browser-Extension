@@ -462,6 +462,14 @@ function isLikelySameQuestion(a: QuestionBlock, b: QuestionBlock): boolean {
   const ta = normalizePreviewText(a.previewText);
   const tb = normalizePreviewText(b.previewText);
   if (!ta || !tb) return false;
+  // DOM candidates publish a display-only preview capped at 420 characters.
+  // Never treat that prefix as complete question identity: a decisive option
+  // or negation may occur after the truncation boundary. The full original
+  // source text, when present on both observations, can disprove equality.
+  const fullA = normalizePreviewText(a.identitySourceText ?? "");
+  const fullB = normalizePreviewText(b.identitySourceText ?? "");
+  if (fullA && fullB && fullA !== fullB) return false;
+  if ((!fullA || !fullB) && (ta.length >= 420 || tb.length >= 420)) return false;
   // A near-identical reading passage is not question identity. Changing one
   // decisive character ("正确" vs "错误") can preserve >0.86 Bigram similarity.
   // Without a trusted native question ID, fail open: retain both candidates.
