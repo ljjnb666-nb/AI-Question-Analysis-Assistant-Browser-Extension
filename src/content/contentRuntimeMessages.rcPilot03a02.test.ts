@@ -78,14 +78,15 @@ describe("RC-PILOT-03A-02 current-screen request authority", () => {
     expect(f.workspace.snapshot(url).ok).toBe(false);
   });
 
-  it("maps thrown detection errors to a stable code and clears its own running phase", async () => {
+  it("maps thrown detection errors to a stable code and persists a safe failed phase", async () => {
     const f = fixture();
     f.options.handleAutoDetect = vi.fn(async (id?: string) => {
       f.workspace.beginDetection("viewport", id);
       throw new Error("sensitive selector failure");
     });
     expect((await f.call()).value).toEqual({ ok: false, requestId, error: "VIEWPORT_DETECT_FAILED" });
-    expect(f.workspace.snapshot(url).snapshot?.detection.phase).toBe("never_started");
+    expect(f.workspace.snapshot(url).snapshot?.detection).toEqual({ phase: "failed", mode: "viewport", requestId });
+    expect(JSON.stringify(f.workspace.snapshot(url).snapshot)).not.toContain("sensitive selector failure");
   });
 
   it("rolls back an already emitted candidate snapshot when a downstream render step fails", async () => {
@@ -98,7 +99,15 @@ describe("RC-PILOT-03A-02 current-screen request authority", () => {
       throw new Error("highlight rendering failed");
     });
     expect((await f.call()).value).toEqual({ ok: false, requestId, error: "VIEWPORT_DETECT_FAILED" });
-    expect(f.workspace.snapshot(url).snapshot?.detection.phase).toBe("never_started");
+    expect(f.workspace.snapshot(url).snapshot?.detection).toEqual({ phase: "failed", mode: "viewport", requestId });
+    expect(f.workspace.snapshot(url).snapshot?.candidates).toEqual([]);
+    expect(JSON.stringify(f.workspace.snapshot(url).snapshot)).not.toContain("highlight rendering failed");
+    // A delayed legacy event is untagged and cannot resurrect a failed UUID's
+    // provisional candidates or turn its persisted phase back into success.
+    expect(f.workspace.observe({ type: "AUTO_DETECT_RESULT_READY",
+      candidates: [{ block: { id: "late-q1", previewText: "Late candidate" }, status: "idle", selected: false }],
+    })).toBe(false);
+    expect(f.workspace.snapshot(url).snapshot?.detection).toEqual({ phase: "failed", mode: "viewport", requestId });
     expect(f.workspace.snapshot(url).snapshot?.candidates).toEqual([]);
   });
 

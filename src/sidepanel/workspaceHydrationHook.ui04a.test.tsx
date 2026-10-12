@@ -142,6 +142,24 @@ describe("UI-04A real hydration hook/reducer contract", () => {
     expect(screen.queryByText(/未探测到顶层 DOM/)).toBeNull();
   });
 
+  it("RC03A-R8 content-owned viewport failure remains visible after Side Panel hydration", async () => {
+    const ownRequest = "18aabcde-0ee2-4e98-8e12-48fdce879012";
+    runtime.beginDetection("viewport", ownRequest);
+    expect(runtime.failViewportDetection(ownRequest)).toBe(true);
+    expect(runtime.snapshot(url).snapshot?.detection).toEqual({
+      phase: "failed", mode: "viewport", requestId: ownRequest,
+    });
+    render(<Workspace />);
+    await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"));
+    expect(screen.getByTestId("detection")).toHaveTextContent("failed");
+    expect(screen.getByText(/扫描过程中发生错误/)).toBeInTheDocument();
+    expect(screen.queryByText(/先用“当前屏”/)).toBeNull();
+    await act(async () => { runtime.resetDetection(); });
+    await waitFor(() => expect(screen.getByTestId("detection")).toHaveTextContent("never_started"));
+    expect(screen.getByText(/先用“当前屏”/)).toBeInTheDocument();
+    expect(screen.queryByText(/扫描过程中发生错误/)).toBeNull();
+  });
+
   it("UI04A-10 pending snapshot shows runtime syncing, not authentication-server-unavailable or Ready", () => {
     response = new Promise(() => undefined);
     render(<Workspace />);

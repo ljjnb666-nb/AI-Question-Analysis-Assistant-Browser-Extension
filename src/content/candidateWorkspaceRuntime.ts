@@ -78,17 +78,17 @@ export function createCandidateWorkspaceRuntime(options: {
         candidates: [], fullPage: { running: mode === "fullpage", progress: null } };
       publish();
     },
-    /** A failed viewport run may reset ONLY its matching generation. Its
-     * completion message may already have been projected before a later
-     * highlight/render step throws, so even a "completed" snapshot is not
-     * final until the tagged command returns success. */
+    /** A failed viewport run may invalidate ONLY its matching generation. Its
+     * completion may already have been projected before highlight/render throws.
+     * Roll back provisional candidates but persist a content-owned failed phase
+     * so reopening Side Panel cannot mislabel an executed failure as "never started". */
     failViewportDetection(requestId: string) {
       if (state.disposed || state.originUrl !== options.url()
         || state.detection.mode !== "viewport"
         || !["detecting", "completed"].includes(state.detection.phase)
         || state.detection.requestId !== requestId) return false;
       ++detectionGeneration;
-      state = { ...state, detection: { phase: "never_started", mode: null }, candidates: [] };
+      state = { ...state, detection: { phase: "failed", mode: "viewport", requestId }, candidates: [] };
       publish();
       return true;
     },
@@ -117,6 +117,10 @@ export function createCandidateWorkspaceRuntime(options: {
       ensureRoute();
       switch (message.type) {
         case "AUTO_DETECT_RESULT_READY": {
+          // A late untagged compatibility emission has no request authority to
+          // resurrect a tagged run already marked failed. Only beginDetection
+          // can establish a new generation and reopen candidate projection.
+          if (state.detection.phase === "failed" && state.detection.mode === "viewport") return false;
           const candidates = message.candidates as CandidateSnapshot[];
           const diagnostic = message.domDiagnostics as DomCandidateDiagnostics | undefined;
           // The optional diagnostic is emitted only at the detector's owning
