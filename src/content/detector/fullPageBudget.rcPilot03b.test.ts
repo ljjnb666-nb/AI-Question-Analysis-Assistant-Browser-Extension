@@ -628,6 +628,62 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it("Issue102 R17 keeps high-overlap correct/incorrect questions despite high Bigram similarity", async () => {
+    pageHeight = 1200;
+    const shared = "阅读下面的自然科学调查分析、实验原理、定量测量和安全操作材料，依据观察记录与统计结果选择合适的结论。".repeat(5);
+    const first = shared + "以下说法哪项正确？ A. 检查设备 B. 保持记录 C. 关注安全 D. 遵守规程";
+    const second = shared + "以下说法哪项错误？ A. 检查设备 B. 保持记录 C. 关注安全 D. 遵守规程";
+    expect(first).not.toBe(second);
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "correct-choice", bbox: { x: 40, y: 140, width: 690, height: 340 },
+        previewText: first, questionTypeGuess: "single_choice",
+        confidence: 0.95, hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "incorrect-choice", bbox: { x: 50, y: 160, width: 650, height: 300 },
+        previewText: second, questionTypeGuess: "single_choice",
+        confidence: 0.95, hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const progress: ScanProgress[] = [];
+    const run = detectCandidatesFullPage(p => progress.push(p));
+    await vi.runAllTimersAsync();
+    const blocks = await run;
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map(b => b.previewText)).toEqual(expect.arrayContaining([first, second]));
+    expect(progress.map(p => p.currentStep)).toEqual([1, 2]);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R17 retains distinct one-character option variants inside overlapping reading cards", async () => {
+    pageHeight = 1200;
+    const shared = "根据考试研究材料、实验设备检测记录和安全评价报告，分析下列装置的正确操作步骤。".repeat(5);
+    const first = shared + "应当如何操作？ A. 设备检查 B. 数据记录 C. 程序复核 D. 安全校验";
+    const second = shared + "应当如何操作？ A. 设备检查 B. 数据记录 C. 程序复核 D. 安全忽略";
+    expect(first).not.toBe(second);
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => top === 0 ? [
+      {
+        id: "option-variant-one", bbox: { x: 40, y: 140, width: 690, height: 340 },
+        previewText: first, questionTypeGuess: "single_choice",
+        confidence: 0.94, hasImage: false, source: "auto_dom",
+      },
+      {
+        id: "option-variant-two", bbox: { x: 50, y: 160, width: 650, height: 300 },
+        previewText: second, questionTypeGuess: "single_choice",
+        confidence: 0.94, hasImage: false, source: "auto_dom",
+      },
+    ] : []);
+    const run = detectCandidatesFullPage(() => undefined);
+    await vi.runAllTimersAsync();
+    const blocks = await run;
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map(b => b.previewText)).toEqual(expect.arrayContaining([first, second]));
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("preserves cancellation safety when the page grows during a run", async () => {
     vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
       pageHeight = 120_000;

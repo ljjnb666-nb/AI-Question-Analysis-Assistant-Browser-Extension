@@ -462,7 +462,11 @@ function isLikelySameQuestion(a: QuestionBlock, b: QuestionBlock): boolean {
   const ta = normalizePreviewText(a.previewText);
   const tb = normalizePreviewText(b.previewText);
   if (!ta || !tb) return false;
-  if (ta !== tb && textSimilarity(ta, tb) <= 0.86) return false;
+  // A near-identical reading passage is not question identity. Changing one
+  // decisive character ("正确" vs "错误") can preserve >0.86 Bigram similarity.
+  // Without a trusted native question ID, fail open: retain both candidates.
+  // Whitespace-normalized *exact* preview remains safe for re-observations.
+  if (ta !== tb) return false;
 
   // Strongly overlapping observations of the same text may be merged even
   // when minor layout shifts move their top-left corner.
@@ -519,20 +523,3 @@ function isLikelyUsefulPreview(text: string, questionType: QuestionBlock["questi
   return true;
 }
 
-function textSimilarity(a: string, b: string): number {
-  const setA = makeBigramSet(a);
-  const setB = makeBigramSet(b);
-  if (!setA.size || !setB.size) return 0;
-  let inter = 0;
-  for (const item of setA) if (setB.has(item)) inter++;
-  return inter / Math.max(setA.size, setB.size);
-}
-
-function makeBigramSet(text: string): Set<string> {
-  const compact = text.replace(/\s+/g, "");
-  const grams = new Set<string>();
-  for (let i = 0; i < compact.length - 1; i++) {
-    grams.add(compact.slice(i, i + 2));
-  }
-  return grams;
-}
