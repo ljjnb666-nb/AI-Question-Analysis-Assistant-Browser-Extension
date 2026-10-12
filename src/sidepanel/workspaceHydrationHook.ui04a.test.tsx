@@ -7,6 +7,7 @@ import { markProtectedWorkOwner, readProtectedWorkOwners, terminateRecordedProte
 import { useCandidateWorkspaceHydration } from "./useCandidateWorkspaceHydration";
 import type { WorkspaceHydrationStatus } from "./workspaceHydration";
 import { initialSidePanelAppState, sidePanelAppReducer } from "./sidepanelAppState";
+import { CandidateEmptyState } from "./candidateWorkspaceSections";
 import { deriveSidePanelWorkspaceStatus } from "./sidePanelWorkspaceState";
 
 const listeners = new Set<(message: Record<string, unknown>, sender: chrome.runtime.MessageSender) => void>();
@@ -47,7 +48,9 @@ function Workspace() {
   const publish = useCallback((status: WorkspaceHydrationStatus, snapshot?: CandidateWorkspaceSnapshot, origin?: CandidateOrigin) => dispatch({ type: "hydrateWorkspace", status, snapshot, origin }), []);
   useCandidateWorkspaceHydration(session, publish);
   const status = deriveSidePanelWorkspaceStatus({ ...state, authStatus: auth === "authenticated" ? "authenticated" : "unauthenticated", isAuthenticated: auth === "authenticated" });
-  return <div><output data-testid="hydration">{state.hydrationStatus}</output><output data-testid="status">{status}</output><output data-testid="detection">{state.detectionPhase}</output><output data-testid="running">{String(state.isAutoSolving)}</output></div>;
+  return <div><output data-testid="hydration">{state.hydrationStatus}</output><output data-testid="status">{status}</output><output data-testid="detection">{state.detectionPhase}</output><output data-testid="running">{String(state.isAutoSolving)}</output>
+    {state.hydrationStatus === "ready" && state.candidates.length === 0 ? <CandidateEmptyState lang={state.uiLang} phase={state.detectionPhase} outcome={state.detectionOutcome} viewportEmpty={state.viewportEmpty} viewportEmptyDiagnostics={state.viewportEmptyDiagnostics} /> : null}
+  </div>;
 }
 
 describe("UI-04A real hydration hook/reducer contract", () => {
@@ -110,6 +113,35 @@ describe("UI-04A real hydration hook/reducer contract", () => {
     await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"));
     expect(screen.getByTestId("detection")).toHaveTextContent("completed");
   });
+  it("RC03A-R7 hydrated completed-empty preserves numeric reasons, not a generic false no-question claim", async () => {
+    runtime.beginDetection("viewport", "18aabcde-0ee2-4e98-8e12-48fdce879012");
+    runtime.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [], domDiagnostics: {
+      probedElements: 8, acceptedCandidates: 0,
+      rejected: { geometry: 1, text: 0, controls: 0, navigation: 0, signal: 1, confidence: 0, completeness: 6 },
+    } });
+    render(<Workspace />);
+    await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"));
+    expect(screen.getByRole("status")).toHaveTextContent("进行了 8 次顶层 DOM");
+    expect(screen.getByRole("status")).toHaveTextContent("题目完整性（6 次）");
+    expect(screen.getByRole("status")).not.toHaveTextContent("页面没有题目");
+    expect(screen.getByTestId("detection")).toHaveTextContent("completed");
+  });
+
+  it("RC03A-R7 zero DOM probes and route reset keep independent, fail-closed user feedback", async () => {
+    runtime.beginDetection("viewport");
+    runtime.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [], domDiagnostics: {
+      probedElements: 0, acceptedCandidates: 0,
+      rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0 },
+    } });
+    render(<Workspace />);
+    await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"));
+    expect(screen.getByRole("status")).toHaveTextContent("未探测到顶层 DOM");
+    await act(async () => { runtime.resetDetection(); });
+    await waitFor(() => expect(screen.getByTestId("detection")).toHaveTextContent("never_started"));
+    expect(screen.getByRole("status")).toHaveTextContent("先用“当前屏”");
+    expect(screen.getByRole("status")).not.toHaveTextContent("未探测到顶层 DOM");
+  });
+
   it("UI04A-10 pending snapshot shows runtime syncing, not authentication-server-unavailable or Ready", () => {
     response = new Promise(() => undefined);
     render(<Workspace />);
