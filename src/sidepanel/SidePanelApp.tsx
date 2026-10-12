@@ -518,6 +518,8 @@ export const SidePanelApp: React.FC = () => {
             <CandidatesTab
               detectionPhase={state.detectionPhase}
               detectionOutcome={state.detectionOutcome}
+              viewportEmpty={state.viewportEmpty}
+              viewportEmptyDiagnostics={state.viewportEmptyDiagnostics}
               workspaceOrigin={state.workspaceOrigin}
               autoSolveProgress={state.autoSolveProgress}
               candidateViewFilter={state.candidateViewFilter}
