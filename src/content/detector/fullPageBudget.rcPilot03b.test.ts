@@ -1187,4 +1187,120 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(scrollTo).toHaveBeenCalledTimes(1); // initial scroll; no next mutation/restoration
     expect(isFullPageScanRunning()).toBe(false);
   });
+
+  it("Issue102 R23 captures a late second question in a nonempty one-viewport SPA without adding steps", async () => {
+    pageHeight = 600;
+    top = 0;
+    const question = (n: number) => ({
+      id: `r23-in-viewport-${n}`,
+      bbox: { x: 40, y: n === 1 ? 50 : 300, width: 680, height: 200 },
+      previewText: `第${n}道设备检查题哪个操作正确？ A. 检查设备 B. 略过测试 C. 忽略报警 D. 删除记录`,
+      questionTypeGuess: "single_choice" as const, confidence: 0.95,
+      source: "auto_dom" as const, hasImage: false,
+    });
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => [
+      question(1),
+      ...(document.querySelector("[data-r23-late]") ? [question(2)] : []),
+    ]);
+    const progress: ScanProgress[] = [];
+    const run = detectCandidatesFullPage((p) => progress.push(p));
+    setTimeout(() => {
+      const card = document.createElement("article");
+      card.setAttribute("data-r23-late", "");
+      document.querySelector("main")!.append(card);
+    }, 450);
+    await vi.runAllTimersAsync();
+    const blocks = await run;
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map((b) => b.previewText)).toEqual(expect.arrayContaining([
+      expect.stringContaining("第1道设备检查题"),
+      expect.stringContaining("第2道设备检查题"),
+    ]));
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(2);
+    expect(progress.map((p) => p.currentStep)).toEqual([1]);
+    expect(progress[0]?.totalScrollSteps).toBe(1);
+    expect(progress[0]?.budgetExhausted).toBeUndefined();
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R23 reports incomplete coverage if a nonempty single viewport gains an offscreen tail", async () => {
+    pageHeight = 600;
+    top = 0;
+    vi.mocked(detectCandidatesInViewport).mockReturnValue([{
+      id: "r23-known-question",
+      bbox: { x: 40, y: 100, width: 680, height: 250 },
+      previewText: "什么操作符合设备规程？ A. 逐项检查 B. 省略验证 C. 绕过告警 D. 删除日志",
+      questionTypeGuess: "single_choice", confidence: 0.95,
+      source: "auto_dom", hasImage: false,
+    }]);
+    const progress: ScanProgress[] = [];
+    const run = detectCandidatesFullPage((p) => progress.push(p));
+    setTimeout(() => {
+      const newTail = document.createElement("section");
+      newTail.setAttribute("data-r23-tail", "");
+      document.querySelector("main")!.append(newTail);
+      pageHeight = 1200;
+    }, 450);
+    await vi.runAllTimersAsync();
+    expect(await run).toHaveLength(1);
+    expect(progress.map((p) => p.currentStep)).toEqual([1]);
+    expect(progress[0]?.totalScrollSteps).toBe(1);
+    expect(progress[0]?.budgetExhausted).toBe(true);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledOnce();
+    expect(top).toBe(0);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R23 STOP during terminal coverage observation fences late DOM and scroll restore", async () => {
+    pageHeight = 600;
+    top = 0;
+    vi.mocked(detectCandidatesInViewport).mockReturnValue([{
+      id: "r23-stop-question",
+      bbox: { x: 40, y: 120, width: 680, height: 250 },
+      previewText: "设备维护的安全顺序是哪种？ A. 检查电源 B. 直接拆卸 C. 跳过确认 D. 忽略异常",
+      questionTypeGuess: "single_choice", confidence: 0.95,
+      source: "auto_dom", hasImage: false,
+    }]);
+    const progress: ScanProgress[] = [];
+    const run = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(isFullPageScanRunning()).toBe(true);
+    cancelFullPageScan();
+    const scrollsAtStop = scrollTo.mock.calls.length;
+    setTimeout(() => {
+      const card = document.createElement("section");
+      document.querySelector("main")!.append(card);
+      pageHeight = 1200;
+    }, 100);
+    await vi.runAllTimersAsync();
+    await run;
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledOnce();
+    expect(progress).toHaveLength(0);
+    expect(scrollTo).toHaveBeenCalledTimes(scrollsAtStop);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R23 extension overlay churn cannot invent another nonempty terminal probe", async () => {
+    pageHeight = 600;
+    top = 0;
+    vi.mocked(detectCandidatesInViewport).mockReturnValue([{
+      id: "r23-stable-question",
+      bbox: { x: 40, y: 100, width: 680, height: 250 },
+      previewText: "正确的检查程序是什么？ A. 记录结果 B. 跳过确认 C. 删除告警 D. 忽略异常",
+      questionTypeGuess: "single_choice", confidence: 0.95,
+      source: "auto_dom", hasImage: false,
+    }]);
+    const overlay = document.createElement("div");
+    overlay.id = "qs-overlay-root";
+    document.body.append(overlay);
+    const progress: ScanProgress[] = [];
+    const run = detectCandidatesFullPage((p) => progress.push(p));
+    setTimeout(() => { overlay.className = "qs-visible"; }, 450);
+    await vi.runAllTimersAsync();
+    expect(await run).toHaveLength(1);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledOnce();
+    expect(progress.map((p) => p.currentStep)).toEqual([1]);
+    expect(progress[0]?.budgetExhausted).toBeUndefined();
+  });
+
 });
