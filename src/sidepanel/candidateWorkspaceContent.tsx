@@ -1,7 +1,7 @@
 import React, { useId, useState, type CSSProperties } from "react";
 import { OrbitButton } from "@/shared/ui/orbitPrimitives";
 import type { ParseResult, QuestionBlock } from "@/shared/types";
-import { readManualChoiceStructure } from "@/shared/ai/manualChoiceStructure";
+import { readManualChoiceStructureForDisplay } from "@/shared/ai/manualChoiceStructure";
 import { orbitColors, orbitRadius, orbitSpacing, orbitTypography } from "@/shared/ui/orbitTokens";
 import { DisplaySegmentsView } from "./candidateViewParts";
 import {
@@ -117,9 +117,7 @@ export function CandidateQuestionContent({ block, result, lang }: { block: Quest
   const normalized = cleanCandidatePreviewText(block.previewText || "");
   // A screenshot has no trustworthy DOM option authority. Reuse only the
   // display-only DTO extracted from the explicitly labeled vision text.
-  const visionChoice = block.source === "manual_capture"
-    ? readManualChoiceStructure(result?.structuredChoice)
-    : undefined;
+  const visionChoice = readManualChoiceStructureForDisplay(block, result);
   const choice = splitStemAndOptions(normalized);
   const blanks = splitStemAndBlanks(normalized);
   const judge = splitJudgeStemAndOptions(normalized);
@@ -128,19 +126,20 @@ export function CandidateQuestionContent({ block, result, lang }: { block: Quest
   // Keep the complete source stem. Image-oriented compact previews are not
   // sufficient for reviewing an answer and must not hide available text.
   const stem =
-    block.questionTypeGuess === "fill_blank"
+    visionChoice?.stem ??
+    (block.questionTypeGuess === "fill_blank"
       ? ensureBlankPlaceholders(blanks.stem || normalized, blanks.blanks.length)
       : block.questionTypeGuess === "judge"
         ? judge.stem || normalized
-        : visionChoice?.stem || choice.stem || normalized;
+        : choice.stem || normalized);
 
   const options =
-    block.questionTypeGuess === "judge"
-      ? judge.options
-      : block.questionTypeGuess === "fill_blank"
-        ? blanks.blanks.map((blank, index) => ({ key: copy.blank(index + 1), value: blank.hint }))
-        : visionChoice
-          ? visionChoice.options.map(option => ({ key: option.key, value: option.text }))
+    visionChoice
+      ? visionChoice.options.map(option => ({ key: option.key, value: option.text }))
+      : block.questionTypeGuess === "judge"
+        ? judge.options
+        : block.questionTypeGuess === "fill_blank"
+          ? blanks.blanks.map((blank, index) => ({ key: copy.blank(index + 1), value: blank.hint }))
           : choice.options;
 
   const fallbackImage = segments.some(segment => segment.type === "image") ? "" : getDisplayQuestionImageFromBlock(block);

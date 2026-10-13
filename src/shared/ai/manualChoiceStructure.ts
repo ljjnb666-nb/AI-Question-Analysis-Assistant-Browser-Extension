@@ -1,4 +1,5 @@
-import type { ManualChoiceStructure } from "../types/parse";
+import type { ManualChoiceStructure, ParseResult } from "../types/parse";
+import type { QuestionBlock } from "../types/question";
 
 const REQUIRED_KEYS = ["A", "B", "C", "D"] as const;
 const EXPLICIT_LABEL_RE = /(^|[\s?？。:：；;])([A-D])[.．、:：)）][ \t]*/g;
@@ -48,4 +49,20 @@ export function readManualChoiceStructure(value: unknown): ManualChoiceStructure
     options.push({ key: REQUIRED_KEYS[i], text: entry.text });
   }
   return { version: 1, evidence: "vision_text_labels_unverified", stem: raw.stem, options };
+}
+
+/** Gate display-only evidence on the owning block and final parse route/type.
+ * A stale candidate result or persisted record must not project a different
+ * question's model-derived option structure. Never confers Fill authority.
+ */
+export function readManualChoiceStructureForDisplay(
+  block: Pick<QuestionBlock, "id" | "source">,
+  result?: ParseResult,
+): ManualChoiceStructure | undefined {
+  if (!result || block.source !== "manual_capture" || result.blockId !== block.id ||
+    (result.routeUsed !== "vision" && result.routeUsed !== "hybrid") ||
+    (result.questionType !== "single_choice" && result.questionType !== "multi_choice")) {
+    return undefined;
+  }
+  return readManualChoiceStructure(result.structuredChoice);
 }

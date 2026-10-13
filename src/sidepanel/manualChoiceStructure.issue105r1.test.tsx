@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { HistoryEntry, QuestionBlock } from "@/shared/types";
 import { buildResult } from "@/shared/ai/parseResult";
+import { readManualChoiceStructureForDisplay } from "@/shared/ai/manualChoiceStructure";
 import { CandidateQuestionContent } from "./candidateWorkspaceContent";
 import { HistoryRecordCard } from "./historyTabSections";
 
@@ -17,8 +18,8 @@ const screenshotBlock: QuestionBlock = {
   questionTypeGuess: "single_choice",
   confidence: 0.9,
 };
-function visionResult(recognizedText = visionText) {
-  return buildResult(screenshotBlock, "vision", JSON.stringify({
+function visionResult(recognizedText = visionText, block: QuestionBlock = screenshotBlock) {
+  return buildResult(block, "vision", JSON.stringify({
     questionType: "single_choice", answer: "A", confidence: 0.92,
     recognizedText, briefExplanation: "设备异常时应核查安全装置",
     detailedExplanation: "先检查、报告并按规定处理。",
@@ -99,4 +100,41 @@ describe("Issue #105 R1: canonical screenshot-choice structure and consistent di
     expect(r.structuredChoice?.options[0]).toEqual({ key: "A", text: "阅读说明\n并检查电源状态" });
     expect(r.structuredChoice?.options).toHaveLength(4);
   });
+  it("105-R1-08 prefers final parsed choice over an incorrect initial fill-blank guess in both surfaces", () => {
+    const block: QuestionBlock = {
+      ...screenshotBlock,
+      questionTypeGuess: "fill_blank",
+      previewText: "截图被误猜为填空题：____",
+    };
+    const result = visionResult(visionText, block);
+    expect(result.questionType).toBe("single_choice");
+    expect(result.structuredChoice?.options).toHaveLength(4);
+
+    const candidateView = render(<CandidateQuestionContent block={block} result={result} lang="zh" />);
+    expect(screen.getByText("根据实验室规定，面对异常设备应该采取哪项措施？")).toBeInTheDocument();
+    expect(screen.getByText("核查安全装置")).toBeInTheDocument();
+    expect(screen.queryByText(/截图被误猜为填空题/)).not.toBeInTheDocument();
+    candidateView.unmount();
+
+    render(<HistoryRecordCard entry={{ ...history(result), block }} lang="zh" onToggleDetails={() => undefined} showDetails={false} />);
+    expect(screen.getByText("根据实验室规定，面对异常设备应该采取哪项措施？")).toBeInTheDocument();
+    expect(screen.getByText("核查安全装置")).toBeInTheDocument();
+  });
+
+  it("105-R1-09 rejects stale block ownership, non-vision route, and non-choice result at both display gates", () => {
+    const valid = visionResult();
+    expect(readManualChoiceStructureForDisplay(screenshotBlock, valid)).toEqual(valid.structuredChoice);
+    for (const invalid of [
+      { ...valid, blockId: "another-question" },
+      { ...valid, routeUsed: "text" as const },
+      { ...valid, questionType: "fill_blank" as const },
+    ]) {
+      expect(readManualChoiceStructureForDisplay(screenshotBlock, invalid)).toBeUndefined();
+    }
+    expect(readManualChoiceStructureForDisplay({ ...screenshotBlock, source: "auto_dom" }, valid)).toBeUndefined();
+
+    render(<CandidateQuestionContent block={screenshotBlock} result={{ ...valid, blockId: "stale" }} lang="zh" />);
+    expect(screen.queryByText("核查安全装置")).not.toBeInTheDocument();
+  });
+
 });

@@ -1,6 +1,6 @@
 import React from "react";
 import type { HistoryEntry, QuestionType } from "@/shared/types";
-import { readManualChoiceStructure } from "@/shared/ai/manualChoiceStructure";
+import { readManualChoiceStructureForDisplay } from "@/shared/ai/manualChoiceStructure";
 import { UiButton } from "@/shared/ui/extensionUi";
 import {
   ensureBlankPlaceholders,
@@ -70,9 +70,7 @@ export const HistoryRecordCard: React.FC<{
   const prettySourceText = formatQuestionTextForDisplay(rawSourceText);
   // New screenshot records replay the same canonical display DTO used by
   // the candidate workspace. Old history preserves its legacy text fallback.
-  const visionChoice = entry.block.source === "manual_capture"
-    ? readManualChoiceStructure(entry.result.structuredChoice)
-    : undefined;
+  const visionChoice = readManualChoiceStructureForDisplay(entry.block, entry.result);
   const { stem, options } = visionChoice
     ? { stem: visionChoice.stem, options: visionChoice.options.map(option => ({ key: option.key, value: option.text })) }
     : splitStemAndOptions(sourceText);
