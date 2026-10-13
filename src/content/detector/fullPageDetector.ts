@@ -7,6 +7,7 @@
 
 import type { QuestionBlock, DomCandidateDiagnostics } from "@/shared/types";
 import { detectCandidatesInViewport } from "./domDetector";
+import { rootAttachmentOf } from "../roots/rootContext";
 import { isExtensionUiElement, isLikelyControlPanelText } from "./domDetectorShared";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -186,7 +187,7 @@ export async function detectCandidatesFullPage(
         }
       }
 
-      let viewportBlocks = detectCandidatesInViewport(domDiagnostics);
+      let viewportBlocks = detectCandidatesInViewport(domDiagnostics, { includeAccessibleRoots: true });
       // A virtual list may recycle its previous question DOM while mounting
       // the next item. A non-empty old question is NOT proof this viewport
       // is ready: detect exact repeated source text and use the SAME single
@@ -204,11 +205,11 @@ export async function detectCandidatesFullPage(
         if (isPageContentPending()) {
           await pause(650);
           if (!isCurrent()) break;
-          viewportBlocks = detectCandidatesInViewport(domDiagnostics);
+          viewportBlocks = detectCandidatesInViewport(domDiagnostics, { includeAccessibleRoots: true });
         } else if (await observeUnmarkedViewportMutation(650)) {
           // Wait only for DOM presence changes, not question text or URLs.
           if (!isCurrent()) break;
-          viewportBlocks = detectCandidatesInViewport(domDiagnostics);
+          viewportBlocks = detectCandidatesInViewport(domDiagnostics, { includeAccessibleRoots: true });
         }
       }
       if (!isCurrent()) break;
@@ -235,7 +236,7 @@ export async function detectCandidatesFullPage(
         if (changed) {
           // Only the normal detector can admit a late in-viewport candidate.
           // An observed mutation alone never grants question validity.
-          collectViewportBlocks(detectCandidatesInViewport(domDiagnostics));
+          collectViewportBlocks(detectCandidatesInViewport(domDiagnostics, { includeAccessibleRoots: true }));
         }
         if (!isCurrent()) break;
         // Even a layout-only height increase changes coverage authority.
@@ -570,6 +571,11 @@ function postProcessCandidates(blocks: QuestionBlock[]): QuestionBlock[] {
 }
 
 function isLikelySameQuestion(a: QuestionBlock, b: QuestionBlock): boolean {
+  // Root identities are the dedup boundary. Identical content/geometry in
+  // sibling iframes or shadow roots represents distinct question instances.
+  const aRoot = rootAttachmentOf(a);
+  const bRoot = rootAttachmentOf(b);
+  if (aRoot.rootKey !== bRoot.rootKey || aRoot.rootGeneration !== bRoot.rootGeneration) return false;
   const overlap = overlapRatio(a.bbox, b.bbox);
   // Geometry is a necessary but not sufficient identity signal. An enclosing
   // reading-material card can overlap a distinct nested question almost
