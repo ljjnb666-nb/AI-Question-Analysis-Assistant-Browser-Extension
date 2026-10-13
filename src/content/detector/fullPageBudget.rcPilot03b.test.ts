@@ -1235,12 +1235,9 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     }]);
     const progress: ScanProgress[] = [];
     const run = detectCandidatesFullPage((p) => progress.push(p));
-    setTimeout(() => {
-      const newTail = document.createElement("section");
-      newTail.setAttribute("data-r23-tail", "");
-      document.querySelector("main")!.append(newTail);
-      pageHeight = 1200;
-    }, 450);
+    // A deferred layout/media expansion may change scroll geometry without
+    // any observable DOM mutation. This must change coverage, not re-probe DOM.
+    setTimeout(() => { pageHeight = 1200; }, 450);
     await vi.runAllTimersAsync();
     expect(await run).toHaveLength(1);
     expect(progress.map((p) => p.currentStep)).toEqual([1]);
