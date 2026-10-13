@@ -273,8 +273,10 @@ function isPageContentPending(): boolean {
 
 /**
  * An empty SPA viewport may not expose aria-busy or a loading element.
- * Observe only DOM presence changes for a bounded interval; never collect
- * text, identifiers, or URLs, and always disconnect after the lease window.
+ * A mounted question may also become visible through a hidden/class/style/
+ * aria-hidden update without adding nodes or changing text. Observe only
+ * DOM structural, text-node and visibility-affecting attribute changes for
+ * one bounded window; never collect page text, attribute values, IDs or URLs.
  * Extension overlay churn must not manufacture a page-readiness signal.
  */
 async function observeUnmarkedViewportMutation(ms: number): Promise<boolean> {
@@ -297,7 +299,13 @@ async function observeUnmarkedViewportMutation(ms: number): Promise<boolean> {
       }
     }
   });
-  observer.observe(document.body, { childList: true, characterData: true, subtree: true });
+  // Attribute-only SPA reveals (e.g. hidden → visible) do not emit childList
+  // or characterData mutations. Do not watch unrelated attributes such as
+  // href/value/data-* or record their values.
+  observer.observe(document.body, {
+    childList: true, characterData: true, attributes: true, subtree: true,
+    attributeFilter: ["hidden", "aria-hidden", "class", "style"],
+  });
   try {
     await pause(ms);
   } finally {

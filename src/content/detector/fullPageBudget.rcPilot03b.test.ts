@@ -100,6 +100,118 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it.each(["hidden", "aria-hidden", "class", "style"] as const)(
+    "Issue102 R22 recognizes a question revealed only through %s changes",
+    async (attribute) => {
+      pageHeight = 600; // One immutable viewport, no scroll budget extension.
+      top = 0; // A non-scrollable 600px document cannot start at scrollTop=200.
+      const card = document.createElement("article");
+      const main = document.querySelector("main")!;
+      main.append(card); // Node exists BEFORE the MutationObserver starts.
+      if (attribute === "hidden") card.setAttribute("hidden", "");
+      if (attribute === "aria-hidden") card.setAttribute("aria-hidden", "true");
+      if (attribute === "class") card.className = "question-hidden";
+      if (attribute === "style") card.style.display = "none";
+      const visible = () => attribute === "hidden" ? !card.hasAttribute("hidden")
+        : attribute === "aria-hidden" ? card.getAttribute("aria-hidden") === "false"
+          : attribute === "class" ? card.classList.contains("question-visible")
+            : card.style.display !== "none";
+      vi.mocked(detectCandidatesInViewport).mockImplementation(() => visible() ? [{
+        id: `r22-${attribute}-question`,
+        bbox: { x: 40, y: 140, width: 680, height: 310 },
+        previewText: "哪种方法能保证设备安全？ A. 事先检查 B. 忽略告警 C. 跳过确认 D. 删除记录",
+        questionTypeGuess: "single_choice" as const,
+        confidence: 0.94, source: "auto_dom" as const, hasImage: false,
+      }] : []);
+      const progress: ScanProgress[] = [];
+      const scan = detectCandidatesFullPage((p) => progress.push(p));
+      setTimeout(() => {
+        if (attribute === "hidden") card.removeAttribute("hidden");
+        if (attribute === "aria-hidden") card.setAttribute("aria-hidden", "false");
+        if (attribute === "class") card.className = "question-visible";
+        if (attribute === "style") card.style.display = "block";
+      }, 450); // Between the initial 300ms and the sole 650ms readiness check.
+      await vi.runAllTimersAsync();
+      const blocks = await scan;
+      expect(blocks).toHaveLength(1);
+      expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(2);
+      expect(progress.map((p) => p.currentStep)).toEqual([1]);
+      expect(progress[0].totalScrollSteps).toBe(1);
+      expect(top).toBe(0);
+      expect(isFullPageScanRunning()).toBe(false);
+    },
+  );
+
+  it("Issue102 R22 refreshes a recycled virtual question on class-only visibility change", async () => {
+    pageHeight = 1800; // Fixed three-step budget.
+    const existing = document.createElement("article");
+    document.querySelector("main")!.append(existing);
+    const firstText = "第一题哪项最安全？ A. 先检查 B. 跳过检查 C. 删除日志 D. 忽略告警";
+    const secondText = "第二题哪项最安全？ A. 核验记录 B. 忽略异常 C. 隐瞒错误 D. 关闭监控";
+    const thirdText = "第三题哪项最安全？ A. 正确备份 B. 任意删除 C. 不记日志 D. 跳过复核";
+    const visited: number[] = [];
+    const choice = (previewText: string) => ({
+      id: "r22-recycled-question", bbox: { x: 40, y: 150, width: 680, height: 270 },
+      previewText, questionTypeGuess: "single_choice" as const,
+      confidence: 0.94, source: "auto_dom" as const, hasImage: false,
+    });
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      visited.push(top);
+      if (top === 0) return [choice(firstText)];
+      if (top === 600) return [choice(existing.classList.contains("new-question") ? secondText : firstText)];
+      return top === 1200 ? [choice(thirdText)] : [];
+    });
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    setTimeout(() => { existing.classList.add("new-question"); }, 800);
+    await vi.runAllTimersAsync();
+    expect(visited).toEqual([0, 600, 600, 1200]);
+    expect((await scan).map((b) => b.previewText)).toEqual([firstText, secondText, thirdText]);
+    expect(progress.map((p) => p.currentStep)).toEqual([1, 2, 3]);
+    expect(progress.every((p) => p.totalScrollSteps === 3 && p.currentStep <= 3)).toBe(true);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R22 ignores extension overlays and irrelevant data attributes as readiness", async () => {
+    pageHeight = 600;
+    const pageCard = document.createElement("article");
+    document.querySelector("main")!.append(pageCard);
+    const overlay = document.createElement("div");
+    overlay.id = "qs-floating-host";
+    overlay.className = "old-overlay";
+    document.body.append(overlay);
+    const scan = detectCandidatesFullPage(() => undefined);
+    setTimeout(() => {
+      overlay.className = "new-overlay";
+      overlay.setAttribute("hidden", "");
+      pageCard.setAttribute("data-r22-irrelevant", "new");
+    }, 450);
+    await vi.runAllTimersAsync();
+    expect(await scan).toEqual([]);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(1);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R22 STOP during attribute-only readiness cannot revive the old scan", async () => {
+    pageHeight = 600;
+    const card = document.createElement("article");
+    card.setAttribute("hidden", "");
+    document.querySelector("main")!.append(card);
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.advanceTimersByTimeAsync(350); // Already in the only bounded readiness window.
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(1);
+    cancelFullPageScan();
+    card.removeAttribute("hidden");
+    await vi.runAllTimersAsync();
+    expect(await scan).toEqual([]);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(1);
+    expect(progress).toHaveLength(0);
+    expect(scrollTo).toHaveBeenCalledTimes(1); // Only the initial scroll, no stale restore.
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("R8B-02 does not re-probe a genuinely unchanged first viewport", async () => {
     pageHeight = 600;
     const progress: ScanProgress[] = [];
