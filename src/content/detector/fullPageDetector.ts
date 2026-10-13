@@ -173,11 +173,17 @@ export async function detectCandidatesFullPage(
       }
 
       let viewportBlocks = detectCandidatesInViewport(domDiagnostics);
-      // A delayed question mount may occur on a later scroll position too.
-      // The first empty viewport retains its existing bounded readiness
-      // window. Only the FIRST later empty viewport may use another window.
-      // Neither window consumes an extra scroll step or bypasses STOP/route.
-      if (viewportBlocks.length === 0 && (step === 0 || !laterViewportReadinessUsed)) {
+      // A virtual list may recycle its previous question DOM while mounting
+      // the next item. A non-empty old question is NOT proof this viewport
+      // is ready: detect exact repeated source text and use the SAME single
+      // later-viewport readiness window as the empty-case recovery.
+      // This is strictly a recheck hint, never a global deduplication rule:
+      // legitimate repeated questions on distant cards remain separate.
+      const recycledPreviousCandidate = step > 0
+        && viewportBlocks.length > 0
+        && viewportBlocks.every((candidate) => isExactPreviouslyObservedQuestion(candidate, allBlocks));
+      if ((viewportBlocks.length === 0 || recycledPreviousCandidate)
+        && (step === 0 || !laterViewportReadinessUsed)) {
         if (step > 0) laterViewportReadinessUsed = true;
         if (isPageContentPending()) {
           await pause(650);
@@ -301,6 +307,25 @@ async function observeUnmarkedViewportMutation(ms: number): Promise<boolean> {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * A recycled virtual-list card can still display the previous viewport's
+ * question after scrollTop advances. Only use exact, untruncated content
+ * agreement as a bounded readiness signal; never drop legitimate repeated
+ * questions or equate the first 420 characters of distinct long questions.
+ */
+function isExactPreviouslyObservedQuestion(candidate: QuestionBlock, accepted: QuestionBlock[]): boolean {
+  const preview = normalizePreviewText(candidate.previewText);
+  const fullSource = normalizePreviewText(candidate.identitySourceText ?? "");
+  return accepted.some((prior) => {
+    if (candidate.questionTypeGuess !== prior.questionTypeGuess) return false;
+    const priorFull = normalizePreviewText(prior.identitySourceText ?? "");
+    if (fullSource && priorFull) return fullSource === priorFull;
+    const priorPreview = normalizePreviewText(prior.previewText);
+    return preview.length > 0 && preview.length < 420
+      && priorPreview.length < 420 && preview === priorPreview;
+  });
+}
 
 /** Convert a viewport-relative block to page-absolute coordinates */
 function toAbsoluteCoords(block: QuestionBlock, scrollRoot: ScanScrollRoot): QuestionBlock {
