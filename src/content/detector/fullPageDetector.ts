@@ -135,27 +135,41 @@ export async function detectCandidatesFullPage(
       : 1;
     let step = 0;
     let previousTop: number | null = null;
+    // A virtualized page may apply scrollTop after the normal 300ms render
+    // pause. Allow one bounded read-only settling window per scan, not one
+    // retry per viewport. This neither resends a scroll nor consumes a step.
+    let delayedScrollSettleUsed = false;
     // At most ONE later empty-viewport readiness window per scan, in
     // addition to the existing first-viewport window. Never multiply the
     // advertised scroll budget by repeated SPA polling.
     let laterViewportReadinessUsed = false;
     while (isCurrent() && step < totalSteps) {
-      const metrics = getScrollMetrics(root);
+      let metrics = getScrollMetrics(root);
       // A scroll trap or fixed-position container must not repeatedly parse
-      // the same viewport while claiming forward progress.
+      // the same viewport while claiming forward progress. Some virtual lists
+      // commit the requested scroll *after* the initial render pause, though:
+      // wait at most once per scan before declaring a genuine stall.
       if (previousTop !== null && metrics.scrollTop <= previousTop) {
-        // A blocked scroll must not be reported as complete or as budget
-        // exhaustion. Re-publish the same bounded step with terminal evidence;
-        // no extra detection pass or scroll mutation is authorized.
-        if (metrics.scrollTop + metrics.clientHeight < metrics.scrollHeight - 10) {
-          onProgress({
-            progress: Math.min(Math.round((step / totalSteps) * 100), 99),
-            found: allBlocks.length, currentStep: step, totalScrollSteps: totalSteps,
-            observedCandidates, retainedCandidates: allBlocks.length, scrollStalled: true,
-            domDiagnostics: { ...domDiagnostics, rejected: { ...domDiagnostics.rejected } },
-          });
+        if (!delayedScrollSettleUsed
+          && metrics.scrollTop + metrics.clientHeight < metrics.scrollHeight - 10) {
+          delayedScrollSettleUsed = true;
+          await pause(650);
+          if (!isCurrent()) break;
+          metrics = getScrollMetrics(root);
         }
-        break;
+        if (metrics.scrollTop <= previousTop) {
+          // No retry-scroll, candidate re-probe or invented step is allowed.
+          // A blocked scroll is not complete and is not budget exhaustion.
+          if (metrics.scrollTop + metrics.clientHeight < metrics.scrollHeight - 10) {
+            onProgress({
+              progress: Math.min(Math.round((step / totalSteps) * 100), 99),
+              found: allBlocks.length, currentStep: step, totalScrollSteps: totalSteps,
+              observedCandidates, retainedCandidates: allBlocks.length, scrollStalled: true,
+              domDiagnostics: { ...domDiagnostics, rejected: { ...domDiagnostics.rejected } },
+            });
+          }
+          break;
+        }
       }
 
       let viewportBlocks = detectCandidatesInViewport(domDiagnostics);
