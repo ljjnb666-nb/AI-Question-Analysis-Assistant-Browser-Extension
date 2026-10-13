@@ -1,6 +1,7 @@
 import React, { useId, useState, type CSSProperties } from "react";
 import { OrbitButton } from "@/shared/ui/orbitPrimitives";
-import type { QuestionBlock } from "@/shared/types";
+import type { ParseResult, QuestionBlock } from "@/shared/types";
+import { readManualChoiceStructure } from "@/shared/ai/manualChoiceStructure";
 import { orbitColors, orbitRadius, orbitSpacing, orbitTypography } from "@/shared/ui/orbitTokens";
 import { DisplaySegmentsView } from "./candidateViewParts";
 import {
@@ -111,9 +112,14 @@ function CandidateStem({ text, lang }: { text: string; lang: UILang }) {
   );
 }
 
-export function CandidateQuestionContent({ block, lang }: { block: QuestionBlock; lang: UILang }) {
+export function CandidateQuestionContent({ block, result, lang }: { block: QuestionBlock; result?: ParseResult; lang: UILang }) {
   const copy = CANDIDATE_WORKSPACE_COPY[lang];
   const normalized = cleanCandidatePreviewText(block.previewText || "");
+  // A screenshot has no trustworthy DOM option authority. Reuse only the
+  // display-only DTO extracted from the explicitly labeled vision text.
+  const visionChoice = block.source === "manual_capture"
+    ? readManualChoiceStructure(result?.structuredChoice)
+    : undefined;
   const choice = splitStemAndOptions(normalized);
   const blanks = splitStemAndBlanks(normalized);
   const judge = splitJudgeStemAndOptions(normalized);
@@ -126,21 +132,30 @@ export function CandidateQuestionContent({ block, lang }: { block: QuestionBlock
       ? ensureBlankPlaceholders(blanks.stem || normalized, blanks.blanks.length)
       : block.questionTypeGuess === "judge"
         ? judge.stem || normalized
-        : choice.stem || normalized;
+        : visionChoice?.stem || choice.stem || normalized;
 
   const options =
     block.questionTypeGuess === "judge"
       ? judge.options
       : block.questionTypeGuess === "fill_blank"
         ? blanks.blanks.map((blank, index) => ({ key: copy.blank(index + 1), value: blank.hint }))
-        : choice.options;
+        : visionChoice
+          ? visionChoice.options.map(option => ({ key: option.key, value: option.text }))
+          : choice.options;
 
   const fallbackImage = segments.some(segment => segment.type === "image") ? "" : getDisplayQuestionImageFromBlock(block);
   const hasImage = !!fallbackImage || segments.some(segment => segment.type === "image");
 
   return (
     <div style={{ display: "grid", gap: orbitSpacing[2], ...CANDIDATE_TEXT_STYLE }}>
-      {segments.length > 0 ? (
+      {visionChoice ? (
+        <>
+          <CandidateStem text={formatQuestionTextForDisplay(stem)} lang={lang} />
+          {segments.some(segment => segment.type === "image") && (
+            <DisplaySegmentsView segments={segments.filter(segment => segment.type === "image")} lang={lang} />
+          )}
+        </>
+      ) : segments.length > 0 ? (
         <DisplaySegmentsView segments={segments} lang={lang} />
       ) : (
         <CandidateStem text={formatQuestionTextForDisplay(stem)} lang={lang} />
