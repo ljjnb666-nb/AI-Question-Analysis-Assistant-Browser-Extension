@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { readManualChoiceStructure, readManualChoiceStructureForDisplay } from "../../src/shared/ai/manualChoiceStructure.ts";
+import { validateScreenshotPixels } from "./imageEvidence.mjs";
 
 export const VERSION = "issue105-r2a-v1";
 const KEYS = ["A", "B", "C", "D"];
@@ -14,9 +15,6 @@ const present = x => x !== undefined && x !== null;
 const norm = x => String(x).replace(/\r\n?/g, "\n").trim();
 const exact = (a,b) => norm(a) === norm(b);
 const ratio = (numerator, denominator) => ({ numerator, denominator, rate: denominator ? numerator / denominator : null });
-const isPngOrJpeg = bytes =>
-  bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ||
-  (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255);
 
 function checkOptions(options, label) {
   if (!Array.isArray(options) || options.length !== 4) fail(label + " must contain four options");
@@ -47,11 +45,13 @@ function verifyImage(sample, datasetPath) {
   if (!child || child === ".." || child.startsWith(".." + sep) || isAbsolute(child)) {
     fail(id + ": screenshot escapes dataset directory");
   }
-  if (!/\.(png|jpe?g)$/i.test(file)) fail(id + ": unsupported image suffix");
+  if (!/\.png$/i.test(file)) fail(id + ": only PNG can pass strict pixel-integrity gate");
   const len = statSync(file).size;
   if (len < 8 || len > 20*1024*1024) fail(id + ": screenshot size out of bounds");
   const bytes = readFileSync(file);
-  if (!isPngOrJpeg(bytes)) fail(id + ": invalid image signature");
+  if (bytes.length !== len || bytes.length > 20*1024*1024)
+    fail(id + ": screenshot changed while reading");
+  validateScreenshotPixels(bytes);
   if (createHash("sha256").update(bytes).digest("hex") !== ev.sha256) fail(id + ": screenshot SHA256 mismatch");
 }
 

@@ -12,7 +12,7 @@ const BASE = "e861b254bb66d5c52d0e03e2a8fb530c9d090874";
 const OPT = [{key:"A",text:"检查安全阀"},{key:"B",text:"绕开保护"},{key:"C",text:"无视告警"},{key:"D",text:"删除记录"}];
 const TRUTH={status:"readable",stem:"设备异常应如何处理？",options:OPT};
 const parsed=(o=TRUTH)=>JSON.parse(JSON.stringify(o));
-const imageBytes=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from("synthetic-unit-test-not-real-image")]);
+const imageBytes=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNQcGj4DwADRAHgMqq/hAAAAABJRU5ErkJggg==","base64");
 const imageSha=createHash("sha256").update(imageBytes).digest("hex");
 
 function realSample(id="r2b-1"){
