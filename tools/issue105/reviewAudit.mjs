@@ -9,7 +9,6 @@ export const REVIEW_VERSION = "issue105-r2b-review-v1";
 const SHA256 = /^[a-f0-9]{64}$/;
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
 const ALIAS = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/;
-const own = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const invalid = reason => { throw new Error("ISSUE105_REVIEW_GATE_INVALID: " + reason); };
 const canonicalText = value => typeof value === "string" ? value.replace(/\r\n?/g, "\n").trim() : null;
