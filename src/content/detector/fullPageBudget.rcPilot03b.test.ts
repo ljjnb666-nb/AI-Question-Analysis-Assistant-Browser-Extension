@@ -507,7 +507,10 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     const scan = detectCandidatesFullPage(p => progress.push(p));
     await vi.runAllTimersAsync();
     expect(await scan).toEqual([]);
-    expect(visited).toEqual([0, 600, 840]); // Dynamic stride, never 0,600,1200.
+    // The viewport shrank to 240 during detection. Advancing by the old
+    // 600px stride would skip an unobserved region [240, 600].
+    expect(visited).toEqual([0, 240, 480]);
+    expect(visited.slice(1).every((pos, i) => pos - visited[i] <= 240)).toBe(true);
     expect(progress.map(p => p.currentStep)).toEqual([1, 2, 3]);
     expect(progress.every(p => p.totalScrollSteps === 3)).toBe(true);
     expect(progress[2].budgetExhausted).toBe(true); // Shrink reduced coverage, not authority.
