@@ -202,6 +202,124 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it("Issue102 R21 replaces recycled stale question after a bounded next-viewport DOM mount", async () => {
+    pageHeight = 1800; // Immutable 3-step budget.
+    const firstText = "第一题哪项符合实验规范？ A. 检查仪器 B. 删除记录 C. 忽略异常 D. 跳过复核";
+    const secondText = "第二题哪项属于安全操作？ A. 核对清单 B. 跳过检查 C. 丢弃证据 D. 忽略报警";
+    const thirdText = "第三题哪项符合现场要求？ A. 完整记录 B. 随意操作 C. 隐瞒结果 D. 关闭防护";
+    const observed: number[] = [];
+    const choice = (text: string) => ({
+      id: "virtualized-recycled-card",
+      bbox: { x: 40, y: 160, width: 680, height: 270 },
+      previewText: text, questionTypeGuess: "single_choice" as const,
+      confidence: 0.94, hasImage: false, source: "auto_dom" as const,
+    });
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      observed.push(top);
+      if (top === 0) return [choice(firstText)];
+      if (top === 600) {
+        return [choice(document.querySelector("[data-r21-next-mounted]") ? secondText : firstText)];
+      }
+      return top === 1200 ? [choice(thirdText)] : [];
+    });
+    // Step 2 begins at 600ms, after the 300ms scroll render pause. The
+    // existing card remains visible but is replaced at 800ms, so "nonempty"
+    // is not a reliable readiness signal on a recycled virtualized node.
+    setTimeout(() => document.querySelector("main")!.append(
+      Object.assign(document.createElement("article"), { id: "r21-mount-evidence" }),
+    ), 800);
+    setTimeout(() => document.getElementById("r21-mount-evidence")!.setAttribute(
+      "data-r21-next-mounted", "",
+    ), 800);
+    // Mutation evidence must come from the DOM, not from an attribute alone.
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.runAllTimersAsync();
+    const result = await scan;
+    expect(observed).toEqual([0, 600, 600, 1200]);
+    expect(result).toHaveLength(3);
+    expect(result.map((v) => v.previewText)).toEqual([firstText, secondText, thirdText]);
+    expect(result.filter((v) => v.previewText === firstText)).toHaveLength(1);
+    expect(progress.map((p) => p.currentStep)).toEqual([1, 2, 3]);
+    expect(progress.every((p) => p.totalScrollSteps === 3 && p.currentStep <= 3)).toBe(true);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R21 retains a genuine repeated question on a separate page position", async () => {
+    pageHeight = 1200;
+    const previewText = "两处完全相同的题目哪项正确？ A. 检查安全 B. 放弃记录 C. 隐瞒异常 D. 忽略警报";
+    const observed: number[] = [];
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      observed.push(top);
+      return [{
+        id: `r21-repeated-${top}`,
+        bbox: { x: 45, y: 160, width: 660, height: 180 },
+        previewText, questionTypeGuess: "single_choice" as const,
+        confidence: 0.94, hasImage: false, source: "auto_dom" as const,
+      }];
+    });
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.runAllTimersAsync();
+    const result = await scan;
+    expect(observed).toEqual([0, 600]); // No DOM mutation: no second detect.
+    expect(result).toHaveLength(2);
+    expect(result.map((q) => q.bbox.y)).toEqual([160, 760]);
+    expect(progress.map((p) => p.currentStep)).toEqual([1, 2]);
+    expect(progress.every((p) => p.totalScrollSteps === 2)).toBe(true);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R21 STOP during recycled-card mutation window forbids stale scan progress", async () => {
+    pageHeight = 1200;
+    const first = {
+      id: "r21-old-owner",
+      bbox: { x: 40, y: 150, width: 680, height: 270 },
+      previewText: "回收前的第一题应选什么？ A. 留存日志 B. 删除数据 C. 跳过检查 D. 忽略异常",
+      questionTypeGuess: "single_choice" as const,
+      confidence: 0.94, hasImage: false, source: "auto_dom" as const,
+    };
+    vi.mocked(detectCandidatesInViewport).mockReturnValue([first]);
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.advanceTimersByTimeAsync(650); // Second viewport in its 650ms window.
+    expect(progress.map((p) => p.currentStep)).toEqual([1]);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(2);
+    cancelFullPageScan();
+    document.querySelector("main")!.append(document.createElement("article"));
+    await vi.runAllTimersAsync();
+    expect(await scan).toHaveLength(1);
+    expect(progress.map((p) => p.currentStep)).toEqual([1]);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(2);
+    expect(scrollTo).toHaveBeenCalledTimes(2); // STOP forbids scroll restoration.
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R21 does not mistake two capped long previews for one recycled question", async () => {
+    pageHeight = 1200;
+    const prefix = "阅读并分析以下详细材料，判断给出的选项是否符合要求。".repeat(23);
+    const first = prefix + " 第一问：应如何操作？ A. 检查设备 B. 跳过检查 C. 忽略异常 D. 删除日志";
+    const second = prefix + " 第二问：应如何记录？ A. 保存凭证 B. 隐瞒异常 C. 放弃审计 D. 删除备份";
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => [{
+      id: `r21-long-${top}`,
+      bbox: { x: 40, y: 140, width: 680, height: 280 },
+      previewText: top === 0 ? first : second,
+      questionTypeGuess: "single_choice" as const,
+      confidence: 0.93, hasImage: false, source: "auto_dom" as const,
+    }]);
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.runAllTimersAsync();
+    const blocks = await scan;
+    expect(prefix.length).toBeGreaterThan(420);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(2);
+    expect(blocks).toHaveLength(2);
+    expect(progress.map((p) => p.currentStep)).toEqual([1, 2]);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("R9A-03 later readiness stays bounded when all 15 scan steps remain empty", async () => {
     pageHeight = 9000;
     let probes = 0;
