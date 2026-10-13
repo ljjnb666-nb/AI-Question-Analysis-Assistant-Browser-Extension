@@ -413,6 +413,68 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it("Issue102 R20 waits once for a delayed virtual-scroll position without a new scan step", async () => {
+    pageHeight = 1200; // Fixed budget: 2 steps.
+    const visited: number[] = [];
+    scrollTo.mockImplementation((...args: unknown[]) => {
+      const requested = (args[0] as ScrollToOptions).top ?? top;
+      if (requested === 0 || requested === 200) {
+        top = requested;
+      } else {
+        // The virtual page commits scroll after the ordinary 300ms render pause.
+        setTimeout(() => { top = requested; }, 480);
+      }
+    });
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      visited.push(top);
+      return [{
+        id: `r20-delayed-question-${top}`,
+        bbox: { x: 40, y: 150, width: 680, height: 300 },
+        previewText: top === 0
+          ? "第一道规范题中哪项正确？ A. 检查安全装置 B. 忽略告警 C. 跳过复核 D. 删除日志"
+          : "第二道规范题中哪项正确？ A. 核验记录 B. 拒绝检查 C. 跳过监控 D. 隐瞒故障",
+        questionTypeGuess: "single_choice" as const,
+        confidence: 0.95, hasImage: false, source: "auto_dom" as const,
+      }];
+    });
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.runAllTimersAsync();
+    const blocks = await scan;
+    expect(visited).toEqual([0, 600]);
+    expect(blocks).toHaveLength(2);
+    expect(progress.map((p) => p.currentStep)).toEqual([1, 2]);
+    expect(progress.every((p) => p.totalScrollSteps === 2 && !p.scrollStalled)).toBe(true);
+    expect(scrollTo).toHaveBeenCalledTimes(3); // Top, advance, restore; NO resend.
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R20 STOP during the delayed-scroll settle forbids late progress and restoration", async () => {
+    pageHeight = 1200;
+    scrollTo.mockImplementation((...args: unknown[]) => {
+      const requested = (args[0] as ScrollToOptions).top ?? top;
+      if (requested === 0) top = 0; // The later scroll remains blocked.
+    });
+    vi.mocked(detectCandidatesInViewport).mockReturnValue([{
+      id: "r20-stop-first-question",
+      bbox: { x: 40, y: 150, width: 680, height: 300 },
+      previewText: "停止扫描前已识别的问题是哪项？ A. 保存记录 B. 删除数据 C. 跳过检查 D. 忽略告警",
+      questionTypeGuess: "single_choice", confidence: 0.95, hasImage: false, source: "auto_dom",
+    }]);
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.advanceTimersByTimeAsync(650); // 300ms initial + 300ms step + 50ms settle.
+    expect(progress.map((p) => p.currentStep)).toEqual([1]);
+    expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(1);
+    cancelFullPageScan();
+    await vi.runAllTimersAsync();
+    expect(await scan).toHaveLength(1);
+    expect(progress.map((p) => p.currentStep)).toEqual([1]);
+    expect(scrollTo).toHaveBeenCalledTimes(2); // No stale restore or scroll resend.
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("Issue102 R12 preserves a recognized choice question even when scroll motion is blocked", async () => {
     scrollTo.mockImplementation(() => undefined);
     vi.mocked(detectCandidatesInViewport).mockReturnValue([{
