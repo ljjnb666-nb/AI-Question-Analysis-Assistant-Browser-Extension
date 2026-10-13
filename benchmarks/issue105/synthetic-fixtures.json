@@ -1,0 +1,114 @@
+{
+  "version": "issue105-r2a-v1",
+  "datasetId": "synthetic-contract-smoke-v1",
+  "samples": [
+    {
+      "caseId": "fixture-01",
+      "siteId": "synthetic-site-a",
+      "evidence": {
+        "kind": "synthetic_fixture",
+        "fixtureId": "fixture-01"
+      },
+      "truth": {
+        "status": "readable",
+        "stem": "下列哪项正确？",
+        "options": [
+          {
+            "key": "A",
+            "text": "检查设备"
+          },
+          {
+            "key": "B",
+            "text": "无视告警"
+          },
+          {
+            "key": "C",
+            "text": "跳过登记"
+          },
+          {
+            "key": "D",
+            "text": "忽略风险"
+          }
+        ]
+      },
+      "observation": {
+        "blockId": "q1",
+        "resultBlockId": "q1",
+        "blockSource": "manual_capture",
+        "routeUsed": "vision",
+        "questionType": "single_choice",
+        "structuredChoice": {
+          "version": 1,
+          "evidence": "vision_text_labels_unverified",
+          "stem": "下列哪项正确？",
+          "options": [
+            {
+              "key": "A",
+              "text": "检查设备"
+            },
+            {
+              "key": "B",
+              "text": "无视告警"
+            },
+            {
+              "key": "C",
+              "text": "跳过登记"
+            },
+            {
+              "key": "D",
+              "text": "忽略风险"
+            }
+          ]
+        },
+        "history": {
+          "structuredChoice": {
+            "version": 1,
+            "evidence": "vision_text_labels_unverified",
+            "stem": "下列哪项正确？",
+            "options": [
+              {
+                "key": "A",
+                "text": "检查设备"
+              },
+              {
+                "key": "B",
+                "text": "无视告警"
+              },
+              {
+                "key": "C",
+                "text": "跳过登记"
+              },
+              {
+                "key": "D",
+                "text": "忽略风险"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "caseId": "fixture-02",
+      "siteId": "synthetic-site-a",
+      "evidence": {
+        "kind": "synthetic_fixture",
+        "fixtureId": "fixture-02"
+      },
+      "truth": {
+        "status": "unreadable",
+        "reason": "missing_labels"
+      },
+      "observation": {
+        "blockId": "q2",
+        "resultBlockId": "q2",
+        "blockSource": "manual_capture",
+        "routeUsed": "vision",
+        "questionType": "single_choice",
+        "structuredChoice": null,
+        "history": {
+          "structuredChoice": null
+        }
+      }
+    }
+  ]
+}
