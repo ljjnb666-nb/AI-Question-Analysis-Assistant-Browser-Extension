@@ -10,6 +10,7 @@ import {
   resolveStableChoiceResolution,
 } from "./parseResultChoice";
 import { normalizeRecognizedQuestionText, sanitizeModelText } from "./parseResultNormalization";
+import { extractExplicitManualChoiceStructure } from "./manualChoiceStructure";
 import { buildPreferredQuestionText } from "./questionPromptText";
 // ---- Result Builder ----
 
@@ -198,6 +199,17 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     ].filter(Boolean).join(" ");
   }
 
+  // Only explicit labels from a vision-route recognizedText can produce a
+  // display DTO. Never promote model-suggested optionSelections into image proof.
+  const structuredChoice =
+    block.source === "manual_capture" &&
+    Boolean(block.imageDataUrl) &&
+    (route === "vision" || route === "hybrid") &&
+    (questionType === "single_choice" || questionType === "multi_choice") &&
+    !manualChoiceWithoutEvidence
+      ? extractExplicitManualChoiceStructure(parsedRecognized)
+      : undefined;
+
   return {
     blockId: block.id,
     questionType,
@@ -208,6 +220,7 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     recognizedText,
     routeUsed: route,
     optionSelections,
+    structuredChoice,
     ocrQualityScore: 0.85,
     warning: mergedWarning || undefined,
   };

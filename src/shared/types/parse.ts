@@ -14,6 +14,18 @@ export type ChoiceSelectionMap = Partial<Record<"A" | "B" | "C" | "D" | "E" | "F
  */
 export type ParseResultSource = "provider" | "mock";
 
+/**
+ * Display-only structure derived from explicit labels in vision-model text.
+ * NOT independent proof of image pixels and never a Fill authorization.
+ * Optional to keep old parse history backwards compatible.
+ */
+export type ManualChoiceStructure = {
+  version: 1;
+  evidence: "vision_text_labels_unverified";
+  stem: string;
+  options: Array<{ key: "A" | "B" | "C" | "D"; text: string }>;
+};
+
 export interface ParseResult {
   blockId: string;
   questionType: QuestionType;
@@ -24,6 +36,7 @@ export interface ParseResult {
   recognizedText: string;
   routeUsed: RouteUsed;
   optionSelections?: ChoiceSelectionMap;
+  structuredChoice?: ManualChoiceStructure;
   ocrQualityScore?: number;
   warning?: string;
   resultSource?: ParseResultSource;
