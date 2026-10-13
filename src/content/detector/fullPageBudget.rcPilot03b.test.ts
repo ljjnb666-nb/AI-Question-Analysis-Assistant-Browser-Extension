@@ -104,6 +104,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     "Issue102 R22 recognizes a question revealed only through %s changes",
     async (attribute) => {
       pageHeight = 600; // One immutable viewport, no scroll budget extension.
+      top = 0; // A non-scrollable 600px document cannot start at scrollTop=200.
       const card = document.createElement("article");
       const main = document.querySelector("main")!;
       main.append(card); // Node exists BEFORE the MutationObserver starts.
@@ -136,7 +137,7 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
       expect(vi.mocked(detectCandidatesInViewport)).toHaveBeenCalledTimes(2);
       expect(progress.map((p) => p.currentStep)).toEqual([1]);
       expect(progress[0].totalScrollSteps).toBe(1);
-      expect(top).toBe(200);
+      expect(top).toBe(0);
       expect(isFullPageScanRunning()).toBe(false);
     },
   );
