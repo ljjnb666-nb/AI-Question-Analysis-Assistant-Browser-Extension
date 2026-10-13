@@ -415,6 +415,27 @@ function isNavigationScrollPane(el: HTMLElement): boolean {
     && !el.querySelector(".question-item,.questionBox,.base-question-component");
 }
 
+/**
+ * SPA routers may keep an offscreen/cached paper with question nodes and a
+ * large scrollHeight. It must not gain scroll authority over the live paper.
+ * A child's nonzero rect alone cannot prove ancestor layout visibility.
+ * Avoid reading any page text or attributes other than hidden-state markers.
+ */
+function isHiddenScrollPane(el: HTMLElement, candidateStyle: CSSStyleDeclaration): boolean {
+  if (el.closest('[hidden],[inert],[aria-hidden="true"]')) return true;
+  // Computed visibility is inherited, but can legitimately be overridden by
+  // a visible descendant. Judge the candidate's own computed visibility.
+  const visibility = candidateStyle.visibility;
+  if (visibility === "hidden" || visibility === "collapse") return true;
+  // Ancestor display:none is not inherited in getComputedStyle(el).display.
+  // A cached pane may keep its measured/client size while its parent is gone.
+  for (let node: HTMLElement | null = el; node; node = node.parentElement) {
+    if (window.getComputedStyle(node).display === "none") return true;
+    if (node === document.body) break;
+  }
+  return false;
+}
+
 export function resolveFullPageScrollRoot(): ScanScrollRoot {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -434,6 +455,8 @@ export function resolveFullPageScrollRoot(): ScanScrollRoot {
     const rect = el.getBoundingClientRect();
     if (rect.width < Math.max(320, vw * 0.3)) continue;
     if (rect.height < Math.max(220, vh * 0.3)) continue;
+    // Only credible scrolling panes pay the ancestor-style traversal cost.
+    if (isHiddenScrollPane(el, style)) continue;
     if (isNavigationScrollPane(el)) continue;
 
     // Prefer a question-bearing pane even when a generic layout scroller is
