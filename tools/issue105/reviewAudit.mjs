@@ -73,6 +73,18 @@ export function auditRealReviewEvidence(dataset, { datasetBytes, reviews } = {})
   if (createHash("sha256").update(datasetBytes).digest("hex") !== reviews.datasetSha256) {
     invalid("review bundle dataset SHA256 mismatch");
   }
+  // The caller must use the SAME parsed snapshot as the bytes being attested.
+  // Otherwise a local file update or an altered in-memory object can silently
+  // decouple the reviewed truth from the bytes covered by datasetSha256.
+  let boundDataset;
+  try {
+    boundDataset = JSON.parse(datasetBytes.toString("utf8"));
+  } catch {
+    invalid("review-bound dataset bytes are not valid JSON");
+  }
+  if (JSON.stringify(boundDataset) !== JSON.stringify(dataset)) {
+    invalid("dataset object differs from bound bytes");
+  }
   if (reviews.entries.length !== real.length * 2) invalid("expected exactly two reviews per real case");
   const map = new Map(), caseIds = new Set(real.map(s => s.caseId));
   for (const entry of reviews.entries) {

@@ -47,6 +47,11 @@ function fixture(sample=realSample()){
   return {dataset,bytes,reviews};
 }
 const audit=x=>auditRealReviewEvidence(x.dataset,{datasetBytes:x.bytes,reviews:x.reviews});
+const rebindDatasetBytes=x=>{
+  x.bytes=Buffer.from(JSON.stringify(x.dataset,null,2)+"\n","utf8");
+  x.reviews.datasetSha256=createHash("sha256").update(x.bytes).digest("hex");
+  return x;
+};
 
 test("R2B-01 two independent, image-bound matching annotations are required",()=>{
   const x=fixture();
@@ -82,8 +87,10 @@ test("R2B-05 changing dataset bytes or screenshot hash fails closed",()=>{
 });
 test("R2B-06 incorrect Edge capture claims, nonmanual routes and predating reviews fail closed",()=>{
   const x=fixture();x.dataset.samples[0].capture.client="chrome";
+  rebindDatasetBytes(x);
   assert.throws(()=>audit(x),/incomplete Edge capture/);
   const y=fixture();y.dataset.samples[0].observation.routeUsed="text";
+  rebindDatasetBytes(y);
   assert.throws(()=>audit(y),/manual visual route/);
   const z=fixture();z.reviews.entries[0].reviewedAt="2026-10-13T10:59:59Z";
   assert.throws(()=>audit(z),/review predates capture/);
@@ -132,4 +139,17 @@ test("R2B-10 CLI cannot overwrite old reports; explicit output works for synthet
     assert.equal(JSON.parse(first.stdout).reviewAudit.state,"NO_REAL_SAMPLES");
     const second=run();assert.equal(second.status,2);assert.match(second.stderr,/EEXIST/);
   }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test("R2B-11 rejects a mutated parsed dataset even when reviews agree with the altered object",()=>{
+  const x=fixture();
+  x.dataset.samples[0].truth.stem="已经篡改的数据集题干";
+  for(const entry of x.reviews.entries)entry.truth.stem="已经篡改的数据集题干";
+  assert.throws(()=>audit(x),/dataset object differs from bound bytes/);
+});
+test("R2B-12 rejects non-JSON bound bytes even when a matching review hash is provided",()=>{
+  const x=fixture();
+  x.bytes=Buffer.from("not-json","utf8");
+  x.reviews.datasetSha256=createHash("sha256").update(x.bytes).digest("hex");
+  assert.throws(()=>audit(x),/not valid JSON/);
 });

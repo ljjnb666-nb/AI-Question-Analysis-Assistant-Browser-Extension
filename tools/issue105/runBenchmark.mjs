@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { evaluateChoiceBenchmark, loadChoiceBenchmarkDataset } from "./benchmarkEngine.mjs";
+import { evaluateChoiceBenchmark } from "./benchmarkEngine.mjs";
 import { auditRealReviewEvidence, readReviewBundle } from "./reviewAudit.mjs";
 
 const args=process.argv.slice(2);
@@ -19,8 +19,14 @@ if(!datasetArg||invalidArgs){
 }else{
   try{
     const datasetPath=resolve(datasetArg);
-    const dataset=loadChoiceBenchmarkDataset(datasetPath);
+    // Parse from the exact bytes whose SHA256 is checked by the review gate.
+    // Two separate file reads could otherwise be raced by a local file change.
+    const fileSize=statSync(datasetPath).size;
+    if(fileSize<2||fileSize>2*1024*1024)throw new Error("ISSUE105_BENCHMARK_INVALID: dataset JSON size out of bounds");
     const datasetBytes=readFileSync(datasetPath);
+    if(datasetBytes.length<2||datasetBytes.length>2*1024*1024)
+      throw new Error("ISSUE105_BENCHMARK_INVALID: dataset JSON size out of bounds");
+    const dataset=JSON.parse(datasetBytes.toString("utf8"));
     const reviews=reviewArg?readReviewBundle(resolve(reviewArg)):undefined;
     // Always enforce review provenance BEFORE calculating any real metrics.
     const audit=auditRealReviewEvidence(dataset,{datasetBytes,reviews});
