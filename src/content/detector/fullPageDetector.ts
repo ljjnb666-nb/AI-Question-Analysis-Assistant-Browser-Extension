@@ -415,6 +415,27 @@ function isNavigationScrollPane(el: HTMLElement): boolean {
     && !el.querySelector(".question-item,.questionBox,.base-question-component");
 }
 
+/**
+ * SPA routers may keep an offscreen/cached paper with question nodes and a
+ * large scrollHeight. It must not gain scroll authority over the live paper.
+ * A child's nonzero rect alone cannot prove ancestor layout visibility.
+ * Avoid reading any page text or attributes other than hidden-state markers.
+ */
+function isHiddenScrollPane(el: HTMLElement): boolean {
+  if (el.closest('[hidden],[inert],[aria-hidden="true"]')) return true;
+  // Computed visibility is inherited, but can legitimately be overridden by
+  // a visible descendant. Judge the candidate's own computed visibility.
+  const visibility = window.getComputedStyle(el).visibility;
+  if (visibility === "hidden" || visibility === "collapse") return true;
+  // Ancestor display:none is not inherited in getComputedStyle(el).display.
+  // A cached pane may keep its measured/client size while its parent is gone.
+  for (let node: HTMLElement | null = el; node; node = node.parentElement) {
+    if (window.getComputedStyle(node).display === "none") return true;
+    if (node === document.body) break;
+  }
+  return false;
+}
+
 export function resolveFullPageScrollRoot(): ScanScrollRoot {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -426,6 +447,7 @@ export function resolveFullPageScrollRoot(): ScanScrollRoot {
   for (const el of nodes) {
     if (!el.isConnected) continue;
     if (el.id === "qs-highlight-layer" || el.closest("#qs-highlight-layer, #qs-overlay-root, #qs-floating-host, #qs-capture-toolbar")) continue;
+    if (isHiddenScrollPane(el)) continue;
     const style = window.getComputedStyle(el);
     if (!/(auto|scroll|overlay)/.test(style.overflowY)) continue;
     const scrollDelta = el.scrollHeight - el.clientHeight;
