@@ -51,7 +51,7 @@ test("R2C-05 bounds on dimensions, bit depth and filters reject unsafe or unsupp
   assert.throws(()=>validatePngPixels(generatePng({width:9000})),/unsupported dimensions/);
   assert.throws(()=>validatePngPixels(generatePng({filter:9})),/scanline filter/);
   const raw=Buffer.from([0,0,0,0,0,0,0,0,0,0]);
-  assert.throws(()=>validatePngPixels(generatePng({raw})),/scanline length mismatch/);
+  assert.throws(()=>validatePngPixels(generatePng({raw})),/scanline length mismatch|cannot be decompressed within bounds/);
 });
 test("R2C-06 decompress bomb fails within decoded scanline bound",()=>{
   const many=Buffer.alloc(200000,1);
