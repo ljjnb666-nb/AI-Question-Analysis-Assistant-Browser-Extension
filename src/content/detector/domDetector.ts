@@ -75,9 +75,14 @@ export function watchForPageChanges(
  * and dedupes runtime instances by root-scoped identity.
  */
 export function detectCandidatesAcrossRoots(diagnostics?: DomCandidateDiagnostics): QuestionBlock[] {
+  return appendAccessibleRootCandidates(detectCandidatesInViewport(diagnostics));
+}
+
+/** Reuse the existing bounded root registry for a full-page viewport probe. */
+function appendAccessibleRootCandidates(topCandidates: QuestionBlock[]): QuestionBlock[] {
   const registry = sharedRootRegistry();
   registry.reconcile(document);
-  const merged: QuestionBlock[] = [...detectCandidatesInViewport(diagnostics)];
+  const merged: QuestionBlock[] = [...topCandidates];
   const seen = new Set(merged.map((block) => `${block.identity?.stableId ?? block.id}`));
   for (const root of registry.list()) {
     if (root.kind === "top-document") continue;
@@ -103,14 +108,20 @@ export function createDomCandidateDiagnostics(): DomCandidateDiagnostics {
     rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0 } };
 }
 
-export function detectCandidatesInViewport(diagnostics?: DomCandidateDiagnostics): QuestionBlock[] {
+export function detectCandidatesInViewport(
+  diagnostics?: DomCandidateDiagnostics,
+  options?: { includeAccessibleRoots?: boolean },
+): QuestionBlock[] {
   const probe = () => { if (diagnostics) diagnostics.probedElements++; };
   const reject = (reason: keyof DomCandidateDiagnostics["rejected"]) => {
     if (diagnostics) diagnostics.rejected[reason]++;
   };
   const finish = (blocks: QuestionBlock[]) => {
-    if (diagnostics) diagnostics.acceptedCandidates += blocks.length;
-    return blocks;
+    // Only full-page scanning opts in. The normal viewport and revision-watch
+    // contracts keep their existing root-local semantics.
+    const collected = options?.includeAccessibleRoots ? appendAccessibleRootCandidates(blocks) : blocks;
+    if (diagnostics) diagnostics.acceptedCandidates += collected.length;
+    return collected;
   };
   const vw = window.innerWidth;
   const vh = window.innerHeight;
