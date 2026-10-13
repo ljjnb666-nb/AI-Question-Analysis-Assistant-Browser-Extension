@@ -299,6 +299,86 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it("Issue102 R19 keeps scanning when a temporarily short scroll root regrows during candidate detection", async () => {
+    pageHeight = 1800; // Immutable budget: 3 steps.
+    const views: number[] = [];
+    const makeQuestion = (n: number) => ({
+      id: `r19-question-${n}`,
+      bbox: { x: 40, y: 140, width: 680, height: 320 },
+      previewText: `第${n}道安全操作题哪项符合要求？ A. 检查仪器 B. 删除记录 C. 忽略报警 D. 取消复核`,
+      questionTypeGuess: "single_choice" as const,
+      confidence: 0.95, source: "auto_dom" as const, hasImage: false,
+    });
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      views.push(top);
+      if (top === 0) {
+        pageHeight = 1200; // SPA temporarily shrinks before the second sample.
+        return [makeQuestion(1)];
+      }
+      if (top === 600) {
+        pageHeight = 1800; // The second viewport looked like the bottom on entry.
+        return [makeQuestion(2)];
+      }
+      return top === 1200 ? [makeQuestion(3)] : [];
+    });
+
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.runAllTimersAsync();
+    const questions = await scan;
+
+    expect(views).toEqual([0, 600, 1200]);
+    expect(questions).toHaveLength(3);
+    expect(questions.map((q) => q.previewText)).toEqual(expect.arrayContaining([
+      expect.stringContaining("第1道安全操作题"),
+      expect.stringContaining("第2道安全操作题"),
+      expect.stringContaining("第3道安全操作题"),
+    ]));
+    expect(progress.map((p) => p.currentStep)).toEqual([1, 2, 3]);
+    expect(progress.every((p) => p.totalScrollSteps === 3 && p.currentStep <= 3)).toBe(true);
+    expect(progress.some((p) => p.budgetExhausted === true)).toBe(false);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
+  it("Issue102 R19 observes regrowth during the bounded SPA readiness window without inventing steps", async () => {
+    pageHeight = 1800; // Immutable budget: 3 steps.
+    const visited: number[] = [];
+    const makeQuestion = (n: number) => ({
+      id: `r19-late-question-${n}`,
+      bbox: { x: 40, y: 140, width: 680, height: 320 },
+      previewText: `第${n}道现场考核题正确答案是哪项？ A. 核查设备 B. 随意操作 C. 丢弃日志 D. 忽视异常`,
+      questionTypeGuess: "single_choice" as const,
+      confidence: 0.95, source: "auto_dom" as const, hasImage: false,
+    });
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      visited.push(top);
+      if (top === 0) {
+        pageHeight = 1200;
+        return [makeQuestion(1)];
+      }
+      if (top === 600) return document.querySelector("[data-r19-spa-ready]") ? [makeQuestion(2)] : [];
+      return top === 1200 ? [makeQuestion(3)] : [];
+    });
+    // After the second viewport enters its 650ms bounded unmarked SPA window,
+    // question content mounts and the page expands again.
+    setTimeout(() => {
+      const ready = document.createElement("article");
+      ready.setAttribute("data-r19-spa-ready", "");
+      document.querySelector("main")!.append(ready);
+      pageHeight = 1800;
+    }, 850);
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.runAllTimersAsync();
+
+    expect((await scan).map((b) => b.previewText)).toHaveLength(3);
+    expect(visited).toEqual([0, 600, 600, 1200]);
+    expect(progress.map((p) => p.currentStep)).toEqual([1, 2, 3]);
+    expect(progress.every((p) => p.totalScrollSteps === 3 && p.currentStep <= 3)).toBe(true);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("does not loop beyond the original step budget when the page shrinks", async () => {
     let viewCount = 0;
     vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
