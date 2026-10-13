@@ -80,13 +80,17 @@ describe("Issue #102 R26: hidden SPA scroll panes cannot own a full-page scan", 
     expect(resolveFullPageScrollRoot()).toBe(live);
   });
 
-  it("R26-06 leaves a visible aria-hidden=false question pane eligible", () => {
-    const { live } = twoPanes('aria-hidden="false"');
-    // Make the cached pane too short to compete; this test guards against
-    // incorrectly rejecting all ancestors with any aria-hidden attribute.
-    const cached = document.getElementById("cached-scroll")!;
-    setPaneMetrics(cached, 600);
-    expect(resolveFullPageScrollRoot()).toBe(live);
+  it("R26-06 keeps aria-hidden=false panes eligible rather than rejecting every aria-hidden attribute", () => {
+    const { cached } = twoPanes('aria-hidden="false"');
+    // The visible cached pane has the larger legitimate scroll region;
+    // rejecting all aria-hidden values would incorrectly select the live pane.
+    expect(resolveFullPageScrollRoot()).toBe(cached);
+  });
+
+  it("R26-06B accepts an explicitly visible child overriding inherited CSS visibility:hidden", () => {
+    const { cached } = twoPanes('style="visibility:hidden"');
+    cached.style.visibility = "visible";
+    expect(resolveFullPageScrollRoot()).toBe(cached);
   });
 
   it("R26-07 uses window when the only eligible-looking pane is hidden", () => {
