@@ -316,13 +316,22 @@ async function observeUnmarkedViewportMutation(ms: number): Promise<boolean> {
   const observer = new MutationObserver((records) => {
     if (changed) return;
     for (const record of records) {
+      // A removed child loses its ancestry before this callback executes.
+      // The mutation target is the authoritative owning container: ignore
+      // extension subtree churn even when its detached child has no qs- id.
+      const owner = record.target.nodeType === Node.ELEMENT_NODE
+        ? record.target as Element
+        : record.target.parentElement;
+      if (owner && isExtensionUiElement(owner)) continue;
       const nodes = record.type === "childList"
         ? [...record.addedNodes, ...record.removedNodes]
         : [record.target];
       for (const node of nodes) {
         const element = node.nodeType === Node.ELEMENT_NODE
           ? node as Element
-          : node.parentElement;
+          : node.parentElement ?? (record.type === "childList" ? owner : null);
+        // Detached site text nodes also lose parentElement. Resolve their
+        // owner through record.target, without reading node text or attributes.
         if (element && !isExtensionUiElement(element)) {
           changed = true;
           return;
