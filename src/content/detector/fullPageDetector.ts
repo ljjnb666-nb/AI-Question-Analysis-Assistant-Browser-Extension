@@ -186,10 +186,13 @@ export async function detectCandidatesFullPage(
 
       step++;
       if (!isCurrent()) break;
-      // The page may grow after the immutable step budget was captured.
-      // Check actual scroll coverage instead of clipping a display counter.
-      const remainingMetrics = step >= totalSteps ? getScrollMetrics(root) : null;
-      const budgetExhausted = !!remainingMetrics
+      // A SPA may change scrollHeight while its question content is mounted
+      // or during the bounded readiness recheck. The metrics sampled BEFORE
+      // detection are not authoritative for the end-of-page decision: a pane
+      // that was at bottom can grow and expose another legitimate viewport.
+      // Keep totalSteps immutable; only refresh coverage/advance geometry.
+      const remainingMetrics = getScrollMetrics(root);
+      const budgetExhausted = step >= totalSteps
         && remainingMetrics.scrollTop + remainingMetrics.clientHeight < remainingMetrics.scrollHeight - 10;
       onProgress({
         progress: Math.min(Math.round((step / totalSteps) * 100), 99),
@@ -203,17 +206,21 @@ export async function detectCandidatesFullPage(
       });
       // User handlers may synchronously CANCEL or change the route.
       if (!isCurrent()) break;
-      if (metrics.scrollTop + metrics.clientHeight >= metrics.scrollHeight - 10) break;
+      // Use post-detection metrics, not the stale pre-readiness snapshot.
+      if (remainingMetrics.scrollTop + remainingMetrics.clientHeight >= remainingMetrics.scrollHeight - 10) break;
       // The immutable budget is an execution limit, not just a UI total.
       if (step >= totalSteps) break;
 
       if (!isCurrent()) break;
       // If the viewport shrinks during a run, shrink the stride as well.
       // Keep the original totalSteps immutable; exhaustion then reports partial coverage.
-      const nextTop = Math.min(metrics.scrollTop + Math.min(scanStepPx, boundedScanStep(metrics.clientHeight)), metrics.scrollHeight);
-      if (nextTop <= metrics.scrollTop) break;
-      previousTop = metrics.scrollTop;
-      setScrollPosition(root, nextTop, metrics.scrollLeft);
+      const nextTop = Math.min(
+        remainingMetrics.scrollTop + Math.min(scanStepPx, boundedScanStep(remainingMetrics.clientHeight)),
+        remainingMetrics.scrollHeight,
+      );
+      if (nextTop <= remainingMetrics.scrollTop) break;
+      previousTop = remainingMetrics.scrollTop;
+      setScrollPosition(root, nextTop, remainingMetrics.scrollLeft);
       await pause(SCROLL_PAUSE_MS);
     }
 
