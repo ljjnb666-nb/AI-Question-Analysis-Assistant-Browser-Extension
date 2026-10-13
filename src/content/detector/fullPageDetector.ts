@@ -111,6 +111,16 @@ export async function detectCandidatesFullPage(
     scrollRoot = root;
     if (!isCurrent()) return [];
 
+    const collectViewportBlocks = (blocks: QuestionBlock[]): void => {
+      observedCandidates += blocks.length;
+      for (const block of blocks) {
+        const absoluteBlock = toAbsoluteCoords(block, root);
+        const normalizedPreview = normalizePreviewText(absoluteBlock.previewText);
+        if (!isLikelyUsefulPreview(normalizedPreview, absoluteBlock.questionTypeGuess)) continue;
+        upsertCandidate(allBlocks, { ...absoluteBlock, previewText: normalizedPreview.slice(0, 420) });
+      }
+    };
+
     originalTop = getScrollTop(root);
     originalLeft = getScrollLeft(root);
 
@@ -143,6 +153,10 @@ export async function detectCandidatesFullPage(
     // addition to the existing first-viewport window. Never multiply the
     // advertised scroll budget by repeated SPA polling.
     let laterViewportReadinessUsed = false;
+    // One bounded terminal-coverage observation per scan. A nonempty SPA
+    // viewport may look like the bottom before its next page or second card
+    // mounts. Never turn this window into another scroll step or a polling loop.
+    let terminalCoverageRecheckUsed = false;
     while (isCurrent() && step < totalSteps) {
       let metrics = getScrollMetrics(root);
       // A scroll trap or fixed-position container must not repeatedly parse
@@ -182,8 +196,10 @@ export async function detectCandidatesFullPage(
       const recycledPreviousCandidate = step > 0
         && viewportBlocks.length > 0
         && viewportBlocks.every((candidate) => isExactPreviouslyObservedQuestion(candidate, allBlocks));
+      let readinessCheckedThisViewport = false;
       if ((viewportBlocks.length === 0 || recycledPreviousCandidate)
         && (step === 0 || !laterViewportReadinessUsed)) {
+        readinessCheckedThisViewport = true;
         if (step > 0) laterViewportReadinessUsed = true;
         if (isPageContentPending()) {
           await pause(650);
@@ -196,13 +212,7 @@ export async function detectCandidatesFullPage(
         }
       }
       if (!isCurrent()) break;
-      observedCandidates += viewportBlocks.length;
-      for (const block of viewportBlocks) {
-        const absoluteBlock = toAbsoluteCoords(block, root);
-        const normalizedPreview = normalizePreviewText(absoluteBlock.previewText);
-        if (!isLikelyUsefulPreview(normalizedPreview, absoluteBlock.questionTypeGuess)) continue;
-        upsertCandidate(allBlocks, { ...absoluteBlock, previewText: normalizedPreview.slice(0, 420) });
-      }
+      collectViewportBlocks(viewportBlocks);
 
       step++;
       if (!isCurrent()) break;
@@ -211,7 +221,27 @@ export async function detectCandidatesFullPage(
       // detection are not authoritative for the end-of-page decision: a pane
       // that was at bottom can grow and expose another legitimate viewport.
       // Keep totalSteps immutable; only refresh coverage/advance geometry.
-      const remainingMetrics = getScrollMetrics(root);
+      let remainingMetrics = getScrollMetrics(root);
+      if (!terminalCoverageRecheckUsed && !readinessCheckedThisViewport
+        && viewportBlocks.length > 0
+        && remainingMetrics.scrollTop + remainingMetrics.clientHeight >= remainingMetrics.scrollHeight - 10) {
+        terminalCoverageRecheckUsed = true;
+        // R23: a valid question in the last visible viewport does not prove
+        // the SPA has completed appending questions or increasing page height.
+        // Observe once using the same filtered, privacy-preserving evidence
+        // window as the empty/recycled-card readiness path.
+        const changed = await observeUnmarkedViewportMutation(650);
+        if (!isCurrent()) break;
+        if (changed) {
+          // Only the normal detector can admit a late in-viewport candidate.
+          // An observed mutation alone never grants question validity.
+          collectViewportBlocks(detectCandidatesInViewport(domDiagnostics));
+        }
+        if (!isCurrent()) break;
+        // Even a layout-only height increase changes coverage authority.
+        // Re-evaluate bottom/budget without adding a new scroll instruction.
+        remainingMetrics = getScrollMetrics(root);
+      }
       const budgetExhausted = step >= totalSteps
         && remainingMetrics.scrollTop + remainingMetrics.clientHeight < remainingMetrics.scrollHeight - 10;
       onProgress({
