@@ -421,11 +421,11 @@ function isNavigationScrollPane(el: HTMLElement): boolean {
  * A child's nonzero rect alone cannot prove ancestor layout visibility.
  * Avoid reading any page text or attributes other than hidden-state markers.
  */
-function isHiddenScrollPane(el: HTMLElement): boolean {
+function isHiddenScrollPane(el: HTMLElement, candidateStyle: CSSStyleDeclaration): boolean {
   if (el.closest('[hidden],[inert],[aria-hidden="true"]')) return true;
   // Computed visibility is inherited, but can legitimately be overridden by
   // a visible descendant. Judge the candidate's own computed visibility.
-  const visibility = window.getComputedStyle(el).visibility;
+  const visibility = candidateStyle.visibility;
   if (visibility === "hidden" || visibility === "collapse") return true;
   // Ancestor display:none is not inherited in getComputedStyle(el).display.
   // A cached pane may keep its measured/client size while its parent is gone.
@@ -447,7 +447,6 @@ export function resolveFullPageScrollRoot(): ScanScrollRoot {
   for (const el of nodes) {
     if (!el.isConnected) continue;
     if (el.id === "qs-highlight-layer" || el.closest("#qs-highlight-layer, #qs-overlay-root, #qs-floating-host, #qs-capture-toolbar")) continue;
-    if (isHiddenScrollPane(el)) continue;
     const style = window.getComputedStyle(el);
     if (!/(auto|scroll|overlay)/.test(style.overflowY)) continue;
     const scrollDelta = el.scrollHeight - el.clientHeight;
@@ -456,6 +455,8 @@ export function resolveFullPageScrollRoot(): ScanScrollRoot {
     const rect = el.getBoundingClientRect();
     if (rect.width < Math.max(320, vw * 0.3)) continue;
     if (rect.height < Math.max(220, vh * 0.3)) continue;
+    // Only credible scrolling panes pay the ancestor-style traversal cost.
+    if (isHiddenScrollPane(el, style)) continue;
     if (isNavigationScrollPane(el)) continue;
 
     // Prefer a question-bearing pane even when a generic layout scroller is
