@@ -95,3 +95,13 @@ test("R2C-11 corrupt files fail closed before the CLI can emit any success JSON"
     assert.equal(run.stdout,"");
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+test("R2C-12 indexed PNG rejects out-of-range palette index after actual scanline reconstruction",()=>{
+  const ihdr=Buffer.alloc(13);
+  ihdr.writeUInt32BE(1,0);ihdr.writeUInt32BE(1,4);ihdr[8]=8;ihdr[9]=3;
+  const palette=chunk("PLTE",Buffer.from([10,20,30]));
+  const png=index=>Buffer.concat([SIG,chunk("IHDR",ihdr),palette,
+    chunk("IDAT",deflateSync(Buffer.from([0,index]))),chunk("IEND")]);
+  assert.equal(validatePngPixels(png(0)).format,"png");
+  assert.throws(()=>validatePngPixels(png(1)),/missing palette entry/);
+});

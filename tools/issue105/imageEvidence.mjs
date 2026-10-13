@@ -34,7 +34,7 @@ export function validatePngPixels(bytes){
     invalid("invalid PNG signature or truncated file");
   }
   let offset=8,seenIHDR=false,seenIDAT=false,endedIDAT=false,seenIEND=false;
-  let seenPLTE=false, width=0,height=0,channels=0,colorType=-1;
+  let seenPLTE=false, paletteEntries=0, width=0,height=0,channels=0,colorType=-1;
   const idats=[];
   while(offset<bytes.length){
     if(bytes.length-offset<12)invalid("truncated PNG chunk header");
@@ -57,7 +57,7 @@ export function validatePngPixels(bytes){
       }
     }else if(type==="PLTE"){
       if(seenPLTE||seenIDAT||len===0||len%3!==0||len>768)invalid("invalid PNG palette");
-      seenPLTE=true;
+      seenPLTE=true;paletteEntries=len/3;
     }else if(type==="IDAT"){
       if(endedIDAT)invalid("non-contiguous PNG IDAT chunks");
       if(len===0)invalid("empty IDAT chunk");
@@ -92,6 +92,8 @@ export function validatePngPixels(bytes){
       const predict=filter===0?0:filter===1?a:filter===2?b:filter===3?Math.floor((a+b)/2):paeth(a,b,c);
       row[i]=(x+predict)&255;
     }
+    if(colorType===3 && row.some(index=>index>=paletteEntries))
+      invalid("indexed PNG references missing palette entry");
     [previous,row]=[row,previous];
   }
   return {format:"png",width,height,pixelIntegrity:"PNG_CRC_INFLATE_FILTERS_VERIFIED"};
