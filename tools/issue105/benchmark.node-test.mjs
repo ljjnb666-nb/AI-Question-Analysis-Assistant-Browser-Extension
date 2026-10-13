@@ -82,8 +82,8 @@ test("R2A-06 malformed schemas and duplicate samples fail closed",()=>{
 test("R2A-07 real-image SHA is checked against bytes; no real-sample inflation",()=>{
   const dir=mkdtempSync(join(tmpdir(),"quiz-issue105-"));
   try{
-    // Synthetic byte payload with a PNG signature: only tests hash-binding, not image decoding/pixel accuracy.
-    const bytes=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from("not-real-png-image")]);
+    // Real decodable PNG payload generated offline, not a real Edge screenshot or pixel Ground Truth.
+    const bytes=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNQcGj4DwADRAHgMqq/hAAAAABJRU5ErkJggg==","base64");
     writeFileSync(join(dir,"test.png"),bytes);
     const s=sample("real-test");
     s.evidence={kind:"real_edge_screenshot",relativePath:"test.png",
