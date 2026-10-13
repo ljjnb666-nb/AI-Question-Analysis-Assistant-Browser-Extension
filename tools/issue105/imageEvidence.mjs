@@ -79,9 +79,14 @@ export function validatePngPixels(bytes){
   if(colorType===0||colorType===4){if(seenPLTE)invalid("grayscale PNG cannot have palette");}
   const rowBytes=width*channels,expected=(rowBytes+1)*height;
   if(expected>MAX_RAW)invalid("decoded PNG exceeds resource limit");
-  let inflated;
-  try {inflated=inflateSync(Buffer.concat(idats),{maxOutputLength:expected+1});}
-  catch {invalid("PNG compressed pixels cannot be decompressed within bounds");}
+  const compressed=Buffer.concat(idats);
+  let inflated,consumed;
+  try {
+    const output=inflateSync(compressed,{maxOutputLength:expected+1,info:true});
+    inflated=output.buffer;
+    consumed=output.engine.bytesWritten;
+  } catch {invalid("PNG compressed pixels cannot be decompressed within bounds");}
+  if(consumed!==compressed.length)invalid("PNG compressed stream has trailing unconsumed data");
   if(inflated.length!==expected)invalid("PNG decoded scanline length mismatch");
   let previous=Buffer.alloc(rowBytes),row=Buffer.alloc(rowBytes);
   for(let y=0;y<height;y++){

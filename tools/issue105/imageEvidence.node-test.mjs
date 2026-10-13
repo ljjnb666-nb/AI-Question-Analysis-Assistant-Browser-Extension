@@ -105,3 +105,12 @@ test("R2C-12 indexed PNG rejects out-of-range palette index after actual scanlin
   assert.equal(validatePngPixels(png(0)).format,"png");
   assert.throws(()=>validatePngPixels(png(1)),/missing palette entry/);
 });
+
+test("R2C-13 PNG IDAT with valid chunk CRC but trailing unconsumed compressed data fails closed",()=>{
+  const ihdr=chunk("IHDR",REAL_PNG_BYTES.subarray(16,29));
+  const pixelData=deflateSync(Buffer.from([0,32,64,128,255]));
+  const extra=Buffer.concat([pixelData,Buffer.from("trailing-garbage")]);
+  const invalidStream=Buffer.concat([SIG,ihdr,chunk("IDAT",extra),chunk("IEND")]);
+  assert.throws(()=>validatePngPixels(invalidStream),/trailing unconsumed data/);
+  assert.deepEqual(validatePngPixels(generatePng()),{format:"png",width:1,height:1,pixelIntegrity:"PNG_CRC_INFLATE_FILTERS_VERIFIED"});
+});
