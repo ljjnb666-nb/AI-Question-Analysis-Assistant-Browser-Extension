@@ -517,6 +517,36 @@ describe("RC-PILOT-03B immutable full-page scan budget", () => {
     expect(isFullPageScanRunning()).toBe(false);
   });
 
+  it("Issue102 R19 detects a question that an obsolete pre-resize stride would skip", async () => {
+    pageHeight = 1800;
+    const visited: number[] = [];
+    vi.mocked(detectCandidatesInViewport).mockImplementation(() => {
+      visited.push(top);
+      if (top === 0) {
+        Object.defineProperty(window, "innerHeight", { configurable: true, value: 240 });
+      }
+      return top === 240 ? [{
+        id: "r19-resize-question",
+        bbox: { x: 40, y: 60, width: 680, height: 140 },
+        previewText: "设备检查时以下哪项符合要求？ A. 上电前检查 B. 忽略异常 C. 跳过验证 D. 丢弃日志",
+        questionTypeGuess: "single_choice" as const,
+        confidence: 0.95, source: "auto_dom" as const, hasImage: false,
+      }] : [];
+    });
+    const progress: ScanProgress[] = [];
+    const scan = detectCandidatesFullPage((p) => progress.push(p));
+    await vi.runAllTimersAsync();
+    const candidates = await scan;
+    expect(visited).toEqual([0, 240, 480]);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].previewText).toContain("上电前检查");
+    expect(progress.map(p => p.currentStep)).toEqual([1, 2, 3]);
+    expect(progress.every(p => p.totalScrollSteps === 3 && p.currentStep <= 3)).toBe(true);
+    expect(progress[2].budgetExhausted).toBe(true);
+    expect(top).toBe(200);
+    expect(isFullPageScanRunning()).toBe(false);
+  });
+
   it("Issue102 R14 keeps two distant reading questions with the same first 96 characters", async () => {
     pageHeight = 1800; // scan positions 0, 600 and 1200
     const sharedMaterial = "阅读下面的材料，分析其中的实验步骤与观察记录。".repeat(8);
