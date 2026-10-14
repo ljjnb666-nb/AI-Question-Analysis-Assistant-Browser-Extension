@@ -33,6 +33,18 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
       parsed = extractFieldsFromLooseJsonLikeText(extractedJson || clean);
       parsedByFallback = Object.keys(parsed).length > 0;
     }
+    // Essay fallback: the model often returns plain prose for long
+    // short_answer questions instead of the requested JSON. When nothing
+    // structured could be extracted, the cleaned raw response IS the answer.
+    if (Object.keys(parsed).length === 0 && !parsedByFallback
+      && (block.questionTypeGuess === "short_answer" || block.questionTypeGuess === "fill_blank")) {
+      const prose = sanitizeModelText(clean).trim();
+      // Skip JSON fragments and trivially short outputs.
+      if (prose.length >= 20 && !/^[{[]/.test(prose)) {
+        parsed = { answer: prose, confidence: 0.7 };
+        parsedByFallback = true;
+      }
+    }
   }
 
   let questionType = (parsed.questionType as ParseResult["questionType"]) ?? "unknown";

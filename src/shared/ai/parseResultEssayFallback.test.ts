@@ -1,0 +1,36 @@
+import { describe, expect, it } from "vitest";
+import { buildResult } from "./parseResult";
+import type { QuestionBlock } from "../types";
+
+function makeBlock(overrides: Partial<QuestionBlock> = {}): QuestionBlock {
+  return {
+    id: "test-1",
+    bbox: { x: 0, y: 0, width: 100, height: 100 },
+    previewText: "请撰写一份产品开发设计方案，字数不少于500字。",
+    questionTypeGuess: "short_answer",
+    confidence: 0.9,
+    source: "auto_dom",
+    ...overrides,
+  } as QuestionBlock;
+}
+
+describe("buildResult essay fallback (2026-10-14 device test)", () => {
+  it("uses plain-text prose as the answer when JSON parsing fails for short_answer", () => {
+    const prose = "一、产品名称及简介：本产品为美白保湿霜，具有温和不刺激的优点，与市场上同类产品比较……（此处省略400字）";
+    const result = buildResult(makeBlock(), "text", prose);
+    expect(result.answer).toContain("一、产品名称及简介");
+    expect(result.answer).not.toBe("—");
+  });
+
+  it("does not apply the prose fallback to choice questions", () => {
+    const prose = "这道题考察的是产品开发的基本流程，需要从多个方面进行分析。";
+    const result = buildResult(makeBlock({ questionTypeGuess: "single_choice" }), "text", prose);
+    // Choice questions keep the strict behavior: no A-D found -> placeholder.
+    expect(result.answer).toBe("—");
+  });
+
+  it("does not use trivially short prose as the answer", () => {
+    const result = buildResult(makeBlock(), "text", "好的");
+    expect(result.answer).toBe("—");
+  });
+});
