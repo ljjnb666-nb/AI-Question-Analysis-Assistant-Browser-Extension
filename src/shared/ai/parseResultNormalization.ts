@@ -180,3 +180,36 @@ function stripModelTrailingNoise(text: string): string {
   }
   return (cut >= 0 ? t.slice(0, cut) : t).trim();
 }
+
+/** Strip conversational wrappers ("我来为你写一份…", "希望对你有帮助") around an essay answer.
+ * Conservative: only trims leading/trailing paragraphs that match wrapper
+ * patterns; the substantive core is never modified. */
+export function stripConversationalWrappers(text: string): string {
+  const input = String(text || "").replace(/\r/g, "");
+  if (!input.trim()) return "";
+  const paras = input.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  if (paras.length <= 1) return input.trim();
+
+  const isPreamble = (p: string): boolean => {
+    if (p.length > 80) return false;
+    return /^(好的[，,]?|嗯[，,]?|我来为|我将为|以下[是为]?|下面[是为]?|接下来[是为]?|根据(你的|题目|以上)?要求|针对本?题|关于本?题)/.test(p)
+      || /^(这里|这[是里])是.{0,20}(方案|答案|正文|内容)[：:]?$/.test(p);
+  };
+  const isPostscript = (p: string): boolean => {
+    if (p.length > 80) return false;
+    return /^(希望|祝|加油|以上|如需|如果需要|需要.{0,10}(调整|修改|补充)|总之.{0,10}(希望|祝))/.test(p);
+  };
+  // A paragraph is substantive if it has essay structure or real length.
+  const isSubstantive = (p: string): boolean =>
+    p.length > 120
+    || /^(一|二|三|四|五|六|七|八|九|十)[、.．:]/.test(p)
+    || /^\d+[、.．:）)]/.test(p)
+    || /^#{1,3}\s/.test(p)
+    || /^[（(](一|二|三|\d+)[）)]/.test(p);
+
+  let start = 0;
+  while (start < paras.length - 1 && isPreamble(paras[start]) && !isSubstantive(paras[start])) start++;
+  let end = paras.length;
+  while (end > start + 1 && isPostscript(paras[end - 1]) && !isSubstantive(paras[end - 1])) end--;
+  return paras.slice(start, end).join("\n\n").trim();
+}

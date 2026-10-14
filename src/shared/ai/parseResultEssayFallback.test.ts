@@ -53,3 +53,38 @@ describe("buildResult essay fallback with partial JSON (2026-10-14)", () => {
     expect(result.answer).not.toBe("—");
   });
 });
+
+describe("stripConversationalWrappers (2026-10-14)", () => {
+  it("removes preamble and postscript but keeps the essay core", async () => {
+    const { stripConversationalWrappers } = await import("./parseResultNormalization");
+    const input = [
+      "好的，我来为你撰写这份产品开发设计方案：",
+      "",
+      "一、产品名称及简介：本产品为美白保湿霜，具有温和不刺激的优点。",
+      "",
+      "二、原料配方：包括中药和基质原料及其他辅助原料。",
+      "",
+      "希望以上内容对你有帮助，祝你取得好成绩！",
+    ].join("\n");
+    const out = stripConversationalWrappers(input);
+    expect(out).not.toContain("我来为你");
+    expect(out).not.toContain("希望以上内容");
+    expect(out).toContain("一、产品名称及简介");
+    expect(out).toContain("二、原料配方");
+  });
+
+  it("leaves single-paragraph answers untouched", async () => {
+    const { stripConversationalWrappers } = await import("./parseResultNormalization");
+    const input = "本产品为美白保湿霜，具有温和不刺激的优点。";
+    expect(stripConversationalWrappers(input)).toBe(input);
+  });
+
+  it("does not strip substantive paragraphs that look like wrappers", async () => {
+    const { stripConversationalWrappers } = await import("./parseResultNormalization");
+    const longPreambleLike = "好的，" + "本产品经过严格的安全性评价，包括急性经口毒性试验、多次皮肤刺激性试验等。".repeat(5);
+    const input = [longPreambleLike, "", "一、结论：安全可靠。"].join("\n");
+    const out = stripConversationalWrappers(input);
+    // Long paragraph is substantive -> kept even though it starts with 好的.
+    expect(out).toContain("安全性评价");
+  });
+});

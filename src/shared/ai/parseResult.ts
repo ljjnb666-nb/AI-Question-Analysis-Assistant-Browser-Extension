@@ -9,7 +9,7 @@ import {
   normalizeAnswer,
   resolveStableChoiceResolution,
 } from "./parseResultChoice";
-import { normalizeRecognizedQuestionText, sanitizeModelText } from "./parseResultNormalization";
+import { normalizeRecognizedQuestionText, sanitizeModelText, stripConversationalWrappers } from "./parseResultNormalization";
 import { buildPreferredQuestionText } from "./questionPromptText";
 // ---- Result Builder ----
 
@@ -40,7 +40,7 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     const hasUsableAnswer = typeof parsed.answer === "string" && parsed.answer.trim().length > 0;
     if (!hasUsableAnswer
       && (block.questionTypeGuess === "short_answer" || block.questionTypeGuess === "fill_blank")) {
-      const prose = sanitizeModelText(clean).trim();
+      const prose = stripConversationalWrappers(sanitizeModelText(clean)).trim();
       // Skip JSON fragments and trivially short outputs.
       if (prose.length >= 20 && !/^[{[]/.test(prose)) {
         parsed.answer = prose;
