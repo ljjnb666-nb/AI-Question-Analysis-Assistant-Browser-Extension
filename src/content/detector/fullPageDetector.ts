@@ -101,7 +101,7 @@ export async function detectCandidatesFullPage(
   // Scoped to one scan lease including its bounded readiness recheck.
   const domDiagnostics: DomCandidateDiagnostics = {
     probedElements: 0, acceptedCandidates: 0,
-    rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0 },
+    rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0, grouped: 0, fragment: 0, duplicate: 0 },
   };
   let originalTop = 0;
   let originalLeft = 0;

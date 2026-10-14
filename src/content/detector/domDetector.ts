@@ -79,7 +79,7 @@ export function detectCandidatesAcrossRoots(diagnostics?: DomCandidateDiagnostic
 }
 
 /** Reuse the existing bounded root registry for a full-page viewport probe. */
-function appendAccessibleRootCandidates(topCandidates: QuestionBlock[]): QuestionBlock[] {
+function appendAccessibleRootCandidates(topCandidates: QuestionBlock[], diagnostics?: DomCandidateDiagnostics): QuestionBlock[] {
   const registry = sharedRootRegistry();
   registry.reconcile(document);
   const merged: QuestionBlock[] = [...topCandidates];
@@ -88,7 +88,7 @@ function appendAccessibleRootCandidates(topCandidates: QuestionBlock[]): Questio
     if (root.kind === "top-document") continue;
     let blocks: QuestionBlock[] = [];
     try {
-      blocks = detectCandidatesInRoot(root.root, root);
+      blocks = detectCandidatesInRoot(root.root, root, diagnostics);
     } catch (err) {
       logWarn("Root detection failed", "detectCandidatesAcrossRoots", { error: String(err) });
     }
@@ -105,7 +105,7 @@ function appendAccessibleRootCandidates(topCandidates: QuestionBlock[]): Questio
 /** Numeric-only diagnostics; each viewport may be probed again after a bounded readiness retry. */
 export function createDomCandidateDiagnostics(): DomCandidateDiagnostics {
   return { probedElements: 0, acceptedCandidates: 0,
-    rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0 } };
+    rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0, grouped: 0, fragment: 0, duplicate: 0 } };
 }
 
 export function detectCandidatesInViewport(
@@ -119,7 +119,7 @@ export function detectCandidatesInViewport(
   const finish = (blocks: QuestionBlock[]) => {
     // Only full-page scanning opts in. The normal viewport and revision-watch
     // contracts keep their existing root-local semantics.
-    const collected = options?.includeAccessibleRoots ? appendAccessibleRootCandidates(blocks) : blocks;
+    const collected = options?.includeAccessibleRoots ? appendAccessibleRootCandidates(blocks, diagnostics) : blocks;
     if (diagnostics) diagnostics.acceptedCandidates += collected.length;
     return collected;
   };
@@ -205,15 +205,15 @@ export function detectCandidatesInViewport(
   const hasAcceptedDirectCard = preferDirectCardMode && grouped.size > 0;
   if (!hasAcceptedDirectCard) {
     if (pintiaQuestionListBlocks.length > 0) {
-      return finish(filterFragmentBlocks(deduplicateBlocks(pintiaQuestionListBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness));
+      return finish(filterFragmentBlocks(deduplicateBlocks(pintiaQuestionListBlocks, diagnostics).sort((a, b) => a.bbox.y - b.bbox.y), diagnostics).map(withQuestionCompleteness));
     }
     const stableContainerBlocks = buildStableStructuredContainerCandidates(stableQuestionCards, hostRightCutX, vw, vh);
     if (diagnostics) diagnostics.probedElements += stableQuestionCards.length;
     if (stableContainerBlocks.length > 0) {
-      return finish(filterFragmentBlocks(deduplicateBlocks(stableContainerBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness));
+      return finish(filterFragmentBlocks(deduplicateBlocks(stableContainerBlocks, diagnostics).sort((a, b) => a.bbox.y - b.bbox.y), diagnostics).map(withQuestionCompleteness));
     }
     if (pintiaCodeProblemBlocks.length > 0 && !hasStructuredContainers) {
-      return finish(filterFragmentBlocks(deduplicateBlocks(pintiaCodeProblemBlocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness));
+      return finish(filterFragmentBlocks(deduplicateBlocks(pintiaCodeProblemBlocks, diagnostics).sort((a, b) => a.bbox.y - b.bbox.y), diagnostics).map(withQuestionCompleteness));
     }
   }
 
@@ -280,8 +280,13 @@ export function detectCandidatesInViewport(
         const rank = completenessScore(candidate.previewText, candidateType, score.confidence);
         const prev = groupRank.get(gid) ?? -Infinity;
         if (rank > prev) {
+          // DG-001: the displaced winner was also a probed candidate; count it
+          // instead of dropping it silently.
+          if (grouped.has(gid)) reject("grouped");
           groupRank.set(gid, rank);
           grouped.set(gid, candidate);
+        } else {
+          reject("grouped");
         }
       }
       if (grouped.size > 0) break;
@@ -297,8 +302,8 @@ export function detectCandidatesInViewport(
     return finish(blocks.sort((a, b) => a.bbox.y - b.bbox.y).map(withQuestionCompleteness));
   }
 
-  const merged = mergeAdjacentQuestionBlocks(deduplicateBlocks(blocks).sort((a, b) => a.bbox.y - b.bbox.y));
-  return finish(filterFragmentBlocks(merged).map(withQuestionCompleteness));
+  const merged = mergeAdjacentQuestionBlocks(deduplicateBlocks(blocks, diagnostics).sort((a, b) => a.bbox.y - b.bbox.y));
+  return finish(filterFragmentBlocks(merged, diagnostics).map(withQuestionCompleteness));
 }
 
 function buildStableStructuredContainerCandidates(
@@ -536,7 +541,7 @@ if (!isHtmlElementNode(child)) continue;
  * document, bounded generic fallback, coordinates projected into top-tab
  * viewport space, and runtime root attachment on every candidate.
  */
-export function detectCandidatesInRoot(root: TraversableRoot, context: RootContext): QuestionBlock[] {
+export function detectCandidatesInRoot(root: TraversableRoot, context: RootContext, diagnostics?: DomCandidateDiagnostics): QuestionBlock[] {
   const vh = window.innerHeight;
   const registry = sharedRootRegistry();
   const projector = createTopViewportProjector(registry, context);
@@ -614,7 +619,7 @@ if (!isHtmlElementNode(hostContainer)) continue;
     }
   }
 
-  return filterFragmentBlocks(deduplicateBlocks(blocks).sort((a, b) => a.bbox.y - b.bbox.y)).map(withQuestionCompleteness);
+  return filterFragmentBlocks(deduplicateBlocks(blocks, diagnostics).sort((a, b) => a.bbox.y - b.bbox.y), diagnostics).map(withQuestionCompleteness);
 }
 
 function getStableQuestionCardContainers(searchRoot: Document | ShadowRoot = document): Element[] {

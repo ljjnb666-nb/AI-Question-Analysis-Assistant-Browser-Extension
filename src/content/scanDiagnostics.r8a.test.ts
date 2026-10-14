@@ -6,7 +6,7 @@ import { isWorkspaceSnapshot } from "@/sidepanel/workspaceHydration";
 
 const diagnostic = (): DomCandidateDiagnostics => ({
   probedElements: 6, acceptedCandidates: 0,
-  rejected: { geometry: 1, text: 0, controls: 0, navigation: 1, signal: 1, confidence: 0, completeness: 3 },
+  rejected: { geometry: 1, text: 0, controls: 0, navigation: 1, signal: 1, confidence: 0, completeness: 3, grouped: 0, fragment: 0, duplicate: 0 },
 });
 
 describe("R8A diagnostics preserve workspace authority and privacy", () => {

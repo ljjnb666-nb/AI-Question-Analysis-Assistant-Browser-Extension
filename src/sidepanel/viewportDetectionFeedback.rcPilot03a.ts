@@ -47,11 +47,22 @@ export function viewportDetectionSnapshotFeedback(
     ...viewportEmptyDiagnosticFeedback(lang, snapshot.detection.diagnostics?.domDiagnostics),
     ...(snapshot.detection.requestId ? { viewportRequestId: snapshot.detection.requestId } : {}),
   };
+  // DG-003: partial misses used to be invisible — a clean "N candidates" hid
+  // swallowed questions. Surface a hint when lossy filters dropped candidates
+  // (group competition / fragment filter / dedup); other reject reasons are
+  // mostly true negatives and stay quiet to avoid noise.
+  const dom = snapshot.detection.diagnostics?.domDiagnostics?.rejected;
+  const dropped = dom ? dom.grouped + dom.fragment + dom.duplicate : 0;
+  const partialHint = dropped > 0
+    ? (lang === "en"
+      ? ` ${dropped} candidate(s) were dropped during filtering/dedup; some questions may have been missed. If the count looks off, try manual capture.`
+      : ` 另有 ${dropped} 个候选在筛选/去重中被舍去，可能存在未识别的题目；如题数不符，可尝试手动框选。`)
+    : "";
   return userFeedback(
     "success",
     lang === "en"
-      ? `The workspace currently reports ${count} candidate question(s). Please review before parsing or filling.`
-      : `工作区当前识别到 ${count} 道候选题。请核对题目后再解析或填写。`,
+      ? `The workspace currently reports ${count} candidate question(s). Please review before parsing or filling.${partialHint}`
+      : `工作区当前识别到 ${count} 道候选题。请核对题目后再解析或填写。${partialHint}`,
     { code: "VIEWPORT_DETECT_CANDIDATES", viewportRequestId: snapshot.detection.requestId },
   );
 }
@@ -72,6 +83,9 @@ export function viewportEmptyDiagnosticFeedback(lang: UILang, probes?: DomCandid
         ["controls", "页面控件", "controls"], ["navigation", "导航元素", "navigation"],
         ["signal", "题目信号", "question signal"], ["confidence", "置信度", "confidence"],
         ["completeness", "题目完整性", "question completeness"],
+        ["grouped", "同组竞争", "group competition"],
+        ["fragment", "片段过滤", "fragment filter"],
+        ["duplicate", "重复去除", "duplicate removal"],
       ] as const;
       const topReason = reasons.map(([key, zh, en]) => ({ n: probes.rejected[key], zh, en }))
         .sort((a, b) => b.n - a.n)[0];

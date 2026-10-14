@@ -9,7 +9,7 @@ const request = "18aabcde-0ee2-4e98-8e12-48fdce879012";
 
 function diagnostic(): DomCandidateDiagnostics {
   return { probedElements: 5, acceptedCandidates: 0,
-    rejected: { geometry: 1, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 4 } };
+    rejected: { geometry: 1, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 4, grouped: 0, fragment: 0, duplicate: 0 } };
 }
 
 describe("RC-PILOT-03A-R2 viewport numeric diagnostics", () => {

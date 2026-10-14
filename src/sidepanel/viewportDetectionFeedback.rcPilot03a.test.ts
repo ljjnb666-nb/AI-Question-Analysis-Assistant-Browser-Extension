@@ -92,7 +92,7 @@ describe("RC-PILOT-03A current-screen verified feedback", () => {
     runtime.beginDetection("viewport", id);
     runtime.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [], domDiagnostics: {
       probedElements: 8, acceptedCandidates: 0,
-      rejected: { geometry: 1, text: 0, controls: 0, navigation: 0, signal: 1, confidence: 0, completeness: 6 },
+      rejected: { geometry: 1, text: 0, controls: 0, navigation: 0, signal: 1, confidence: 0, completeness: 6, grouped: 0, fragment: 0, duplicate: 0 },
     } });
     const payload = runtime.snapshot(origin.url);
     const feedback = viewportDetectionSnapshotFeedback("zh", origin, payload, id);
@@ -110,7 +110,7 @@ describe("RC-PILOT-03A current-screen verified feedback", () => {
     runtime.beginDetection("viewport");
     runtime.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [], domDiagnostics: {
       probedElements: 0, acceptedCandidates: 0,
-      rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0 },
+      rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0, grouped: 0, fragment: 0, duplicate: 0 },
     } });
     const value = viewportDetectionSnapshotFeedback("zh", origin, runtime.snapshot(origin.url));
     expect(value.code).toBe("VIEWPORT_DETECT_NO_PROBES");

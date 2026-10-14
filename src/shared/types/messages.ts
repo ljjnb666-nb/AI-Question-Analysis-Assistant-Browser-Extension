@@ -181,6 +181,12 @@ export interface DomCandidateDiagnostics {
     signal: number;
     confidence: number;
     completeness: number;
+    /** Lost the per-container group competition (DG-001); previously uncounted. */
+    grouped: number;
+    /** Dropped as a text/geometry fragment of a kept candidate (DG-002). */
+    fragment: number;
+    /** Dropped as a near-duplicate of a kept candidate (DG-002). */
+    duplicate: number;
   };
 }
 

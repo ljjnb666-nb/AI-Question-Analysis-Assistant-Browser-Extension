@@ -1,4 +1,4 @@
-import type { BoundingBox, QuestionBlock, QuestionType } from "@/shared/types";
+import type { BoundingBox, DomCandidateDiagnostics, QuestionBlock, QuestionType } from "@/shared/types";
 import { CIRCLED_RE, OPTION_RE, QUESTION_RE, inferQuestionType, normalizeText } from "./domText";
 import { isLikelyControlPanelText } from "./domDetectorShared";
 import { attachQuestionIdentity } from "../questionIdentity";
@@ -56,7 +56,7 @@ export function completenessScore(text: string, type: QuestionType, confidence: 
   return score;
 }
 
-export function filterFragmentBlocks(blocks: QuestionBlock[]): QuestionBlock[] {
+export function filterFragmentBlocks(blocks: QuestionBlock[], diagnostics?: DomCandidateDiagnostics): QuestionBlock[] {
   const sorted = [...blocks].sort((a, b) => candidateQualityScore(b) - candidateQualityScore(a));
   const kept: QuestionBlock[] = [];
   for (const block of sorted) {
@@ -66,7 +66,12 @@ export function filterFragmentBlocks(blocks: QuestionBlock[]): QuestionBlock[] {
       const sameCol = Math.abs(k.bbox.x - block.bbox.x) < 120;
       return yNear && sameCol && normalizeText(k.previewText).includes(text);
     });
-    if (!contained) kept.push(block);
+    // DG-002: fragments used to vanish without a trace; count them.
+    if (contained) {
+      if (diagnostics) diagnostics.rejected.fragment++;
+      continue;
+    }
+    kept.push(block);
   }
   return kept.sort((a, b) => a.bbox.y - b.bbox.y);
 }
@@ -96,7 +101,7 @@ export function withQuestionCompleteness(block: QuestionBlock): QuestionBlock {
   return { ...result, completeness: evaluateQuestionCompleteness(result) };
 }
 
-export function deduplicateBlocks(blocks: QuestionBlock[]): QuestionBlock[] {
+export function deduplicateBlocks(blocks: QuestionBlock[], diagnostics?: DomCandidateDiagnostics): QuestionBlock[] {
   const out: QuestionBlock[] = [];
   for (const b of blocks) {
     const overlapIndex = out.findIndex((k) => {
@@ -111,6 +116,8 @@ export function deduplicateBlocks(blocks: QuestionBlock[]): QuestionBlock[] {
       out.push(b);
       continue;
     }
+    // DG-002: the loser used to vanish without a trace; count it.
+    if (diagnostics) diagnostics.rejected.duplicate++;
     if (candidateQualityScore(b) > candidateQualityScore(out[overlapIndex])) {
       out[overlapIndex] = b;
     }

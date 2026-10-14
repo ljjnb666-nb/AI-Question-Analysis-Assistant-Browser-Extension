@@ -117,7 +117,7 @@ describe("UI-04A real hydration hook/reducer contract", () => {
     runtime.beginDetection("viewport", "18aabcde-0ee2-4e98-8e12-48fdce879012");
     runtime.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [], domDiagnostics: {
       probedElements: 8, acceptedCandidates: 0,
-      rejected: { geometry: 1, text: 0, controls: 0, navigation: 0, signal: 1, confidence: 0, completeness: 6 },
+      rejected: { geometry: 1, text: 0, controls: 0, navigation: 0, signal: 1, confidence: 0, completeness: 6, grouped: 0, fragment: 0, duplicate: 0 },
     } });
     render(<Workspace />);
     await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"));
@@ -131,7 +131,7 @@ describe("UI-04A real hydration hook/reducer contract", () => {
     runtime.beginDetection("viewport");
     runtime.observe({ type: "AUTO_DETECT_RESULT_READY", candidates: [], domDiagnostics: {
       probedElements: 0, acceptedCandidates: 0,
-      rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0 },
+      rejected: { geometry: 0, text: 0, controls: 0, navigation: 0, signal: 0, confidence: 0, completeness: 0, grouped: 0, fragment: 0, duplicate: 0 },
     } });
     render(<Workspace />);
     await waitFor(() => expect(screen.getByTestId("hydration")).toHaveTextContent("ready"));

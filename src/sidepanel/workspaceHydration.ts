@@ -32,7 +32,7 @@ function isDomCandidateDiagnostics(value: unknown): value is DomCandidateDiagnos
   if (!value || typeof value !== "object") return false;
   if (Array.isArray(value)) return false;
   const d = value as DomCandidateDiagnostics;
-  const rejectionKeys = ["geometry", "text", "controls", "navigation", "signal", "confidence", "completeness"] as const;
+  const rejectionKeys = ["geometry", "text", "controls", "navigation", "signal", "confidence", "completeness", "grouped", "fragment", "duplicate"] as const;
   const ownKeysExactly = (obj: object, keys: readonly string[]) => {
     const own = Object.keys(obj);
     return own.length === keys.length && own.every((key) => keys.includes(key));
