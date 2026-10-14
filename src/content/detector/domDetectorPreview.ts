@@ -32,7 +32,7 @@ export function buildPreviewText(el: Element, fallbackText: string): string {
   if (!normalized) return "";
 
   const pieces = normalized
-    .split(/(?=[A-D][\.\):\uFF1A\u3001])|(?=[\u2460\u2461\u2462\u2463])|(?=\d+[\.、\)）])/)
+    .split(/(?=[A-D][\.\):\uFF1A\u3001])|(?=[\u2460\u2461\u2462\u2463])|(?<!\d)(?=\d+[\.、\)）](?!\d))/)
     .map((s) => s.trim())
     .filter(Boolean)
     .filter((s) => !/^(答案\s*[:：]|查看解析|收藏|试题篮|难度\s*[:：])/.test(s));

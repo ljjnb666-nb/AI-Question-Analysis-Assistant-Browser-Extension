@@ -33,6 +33,13 @@ export const HistoryTab: React.FC<{ lang: UILang }> = ({ lang }) => {
   }, []);
 
   const handleClear = async () => {
+    // HA-002: clearing history is irreversible — require explicit confirmation.
+    const confirmed = window.confirm(
+      lang === "en"
+        ? "Clear all history records? This cannot be undone."
+        : "确定要清空全部历史记录吗？此操作不可撤销。",
+    );
+    if (!confirmed) return;
     await clearHistory();
     setHistory([]);
     setExpandedIds({});

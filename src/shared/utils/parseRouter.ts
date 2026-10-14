@@ -82,7 +82,20 @@ export async function parseQuestion(
   // provider call. Manual/legacy capture intentionally remains on its old path.
   if (block.source !== "manual_capture" && block.mediaAssets?.length) {
     if (block.completeness?.state !== "complete") throw new Error("QUESTION_NOT_ELIGIBLE");
-    const built = await buildSolverQuestionPackage(block, { signal: runtimeContext?.signal });
+    // VB-002: forward the screenshot fallback so a media-materialization failure
+    // degrades to the question screenshot instead of failing the whole question.
+    // The questionId/contentFingerprint guard mirrors providerMediaPreparation's
+    // fallbackOrFailure: never use a screenshot taken for a different revision.
+    const screenshotFallback = runtimeContext?.screenshotFallback;
+    const fallbackQuestionId = block.identity?.stableId ?? block.id;
+    const fallbackFingerprint = block.identity?.contentFingerprint ?? block.id;
+    const screenshotFallbackDataUrl =
+      screenshotFallback &&
+      screenshotFallback.questionId === fallbackQuestionId &&
+      screenshotFallback.contentFingerprint === fallbackFingerprint
+        ? screenshotFallback.dataUrl
+        : undefined;
+    const built = await buildSolverQuestionPackage(block, { signal: runtimeContext?.signal, screenshotFallbackDataUrl });
     if (isRuntimeContextStale(block, runtimeContext)) throw new StaleQuestionRevisionError();
     if (!built.ok) throw new Error(built.code);
     return parseQuestionCore(block, settings, onStream, built.package, runtimeContext, runtime);

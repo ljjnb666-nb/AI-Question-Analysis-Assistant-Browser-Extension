@@ -256,7 +256,7 @@ export async function runManualCapturePipeline(
       Boolean(block.imageDataUrl) &&
       !forceVision;
 
-    if (!controller.signal.aborted && canRetryWithVision && /text[- ]?only|鏂囨湰妯″瀷|鏂囨湰璺嚎|image question/i.test(msg)) {
+    if (!controller.signal.aborted && canRetryWithVision && /text[- ]?only|文本模型|文本路线|image question/i.test(msg)) {
       try {
         setStreamingText("检测到当前配置与图片题不匹配，正在自动切换视觉解析...");
         const visionResult = await deps.parseWithTieredRetries(

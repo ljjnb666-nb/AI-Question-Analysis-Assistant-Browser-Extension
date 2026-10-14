@@ -1,6 +1,6 @@
 import type { QuestionType } from "@/shared/types";
 
-export const OPTION_RE = /[A-D][\.\):\uFF1A\u3001]/g;
+export const OPTION_RE = /[A-D][\.\):\uFF1A\u3001]/gi;
 export const CIRCLED_RE = /[\u2460\u2461\u2462\u2463]/g;
 export const QUESTION_RE = /[?\uFF1F]|下列|哪项|正确的是|错误的是|属于|不属于/;
 const JUDGE_HEADER_RE = /\d{1,3}\s*[\.、\)]\s*[\[【]?判断题[\]】]?\s*\(\d+分\)/g;
