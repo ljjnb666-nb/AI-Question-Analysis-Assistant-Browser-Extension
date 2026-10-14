@@ -34,3 +34,22 @@ describe("buildResult essay fallback (2026-10-14 device test)", () => {
     expect(result.answer).toBe("—");
   });
 });
+
+describe("buildResult essay fallback with partial JSON (2026-10-14)", () => {
+  it("uses raw prose when JSON has fields but no usable answer", async () => {
+    const { buildResult } = await import("./parseResult");
+    const block = {
+      id: "test-2",
+      bbox: { x: 0, y: 0, width: 100, height: 100 },
+      previewText: "请简述产品开发流程。",
+      questionTypeGuess: "short_answer",
+      confidence: 0.9,
+      source: "auto_dom",
+    } as never;
+    // JSON with recognizedText but no answer field.
+    const raw = `{"recognizedText": "请简述产品开发流程。", "briefExplanation": "(解析提取失败)"}\n\n一、产品名称及简介：本产品为美白保湿霜……（正文）`;
+    const result = buildResult(block, "text", raw);
+    expect(result.answer).toContain("一、产品名称及简介");
+    expect(result.answer).not.toBe("—");
+  });
+});

@@ -34,14 +34,17 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
       parsedByFallback = Object.keys(parsed).length > 0;
     }
     // Essay fallback: the model often returns plain prose for long
-    // short_answer questions instead of the requested JSON. When nothing
-    // structured could be extracted, the cleaned raw response IS the answer.
-    if (Object.keys(parsed).length === 0 && !parsedByFallback
+    // short_answer questions instead of the requested JSON, or JSON with
+    // fields but no usable answer. When there's no usable answer, the
+    // cleaned raw response IS the answer.
+    const hasUsableAnswer = typeof parsed.answer === "string" && parsed.answer.trim().length > 0;
+    if (!hasUsableAnswer
       && (block.questionTypeGuess === "short_answer" || block.questionTypeGuess === "fill_blank")) {
       const prose = sanitizeModelText(clean).trim();
       // Skip JSON fragments and trivially short outputs.
       if (prose.length >= 20 && !/^[{[]/.test(prose)) {
-        parsed = { answer: prose, confidence: 0.7 };
+        parsed.answer = prose;
+        if (typeof parsed.confidence !== "number") parsed.confidence = 0.7;
         parsedByFallback = true;
       }
     }
