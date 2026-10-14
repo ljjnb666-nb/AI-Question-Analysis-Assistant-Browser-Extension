@@ -100,17 +100,20 @@ export function setTextControlValueOnly(target: HTMLElement, value: string): boo
  * the filled answer survives the page's own submit/sync flow. Same-document
  * contenteditables are the real control and need no mirror.
  */
-function syncIframeEditorBackingTextarea(editorBody: HTMLElement, value: string): void {
+function syncIframeEditorBackingTextarea(editorBody: HTMLElement, value: string): boolean {
   const frame = editorBody.ownerDocument.defaultView?.frameElement as HTMLElement | null;
-  if (!frame) return;
-  const host = frame.closest(".eidtDiv, .stem_answer") ?? frame.parentElement;
-  const textarea = host?.querySelector("textarea");
-  if (!textarea || !isHTMLTextAreaInOwnerRealm(textarea)) return;
-  if (textarea.value === value) return;
+  if (!frame) return false;
+  const host = frame.closest(".eidtDiv, .editDiv, .stem_answer") ?? frame.parentElement;
+  // Prefer the exact answer field (answer{quid}) over the first textarea.
+  const textarea = host?.querySelector("textarea[name^='answer'], textarea[id^='answer']")
+    ?? host?.querySelector("textarea");
+  if (!textarea || !isHTMLTextAreaInOwnerRealm(textarea)) return false;
+  if (textarea.value === value) return true;
   setNativeTextareaValue(textarea, value);
   const view = textarea.ownerDocument.defaultView ?? window;
   textarea.dispatchEvent(new view.Event("input", { bubbles: true }));
   textarea.dispatchEvent(new view.Event("change", { bubbles: true }));
+  return textarea.value === value;
 }
 
 /** Dispatch exactly one legacy text event; callers re-resolve before the next event. */

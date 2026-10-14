@@ -339,6 +339,10 @@ export async function callOpenAICompat(
     // 1024 truncates long essays mid-JSON, yielding unparseable responses.
     const needsLongOutput = block.questionTypeGuess === "short_answer" || block.questionTypeGuess === "fill_blank";
     requestBody.max_tokens = needsLongOutput ? 4096 : 1024;
+    // Structured output: ask the model for JSON directly instead of relying
+    // on prompt text alone. Low temperature for format compliance.
+    requestBody.response_format = { type: "json_object" };
+    requestBody.temperature = 0.2;
   }
 
   return fetchWithTimeout(auth.url, {
@@ -351,8 +355,14 @@ export async function callOpenAICompat(
       const text = await consumeOpenAIStream(res.body, partial => onStream!(redactRequestSecret(partial, context.credential)), signal);
       return buildResult(block, route, redactRequestSecret(text, context.credential));
     }
-    const data = await readProviderJson<{ choices: Array<{ message: { content: string } }> }>(res);
-    return buildResult(block, route, redactRequestSecret(data.choices?.[0]?.message?.content ?? "{}", context.credential));
+    const data = await readProviderJson<{ choices: Array<{ message: { content: string }, finish_reason?: string }> }>(res);
+    const finishReason = data.choices?.[0]?.finish_reason;
+    const result = buildResult(block, route, redactRequestSecret(data.choices?.[0]?.message?.content ?? "{}", context.credential));
+    if (finishReason === "length") {
+      // Truncated: don't present a partial answer as complete.
+      return { ...result, confidence: Math.min(result.confidence, 0.5), warning: [result.warning, "回答被截断（超出长度上限），内容可能不完整。"].filter(Boolean).join(" ") };
+    }
+    return result;
   });
 }
 

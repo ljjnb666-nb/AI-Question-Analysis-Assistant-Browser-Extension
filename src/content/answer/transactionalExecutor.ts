@@ -531,7 +531,11 @@ function isSelected(ref: ControlRef): boolean {
 function readRaw(ref: ControlRef): string | boolean { return ref.role === "option" ? isSelected(ref) : readValue(ref); }
 function readValue(ref: ControlRef): string {
   const element = controlRegistry.get(ref.controlId);
-  return isHTMLInputInOwnerRealm(element) || isHTMLTextAreaInOwnerRealm(element) ? element.value : element?.textContent ?? "";
+  if (isHTMLInputInOwnerRealm(element) || isHTMLTextAreaInOwnerRealm(element)) return element.value;
+  // contenteditable: textContent drops block boundaries ("a\nb" -> "ab" when
+  // rendered as <p>a</p><p>b</p>). innerText preserves them.
+  if (element?.isContentEditable) return (element as HTMLElement).innerText ?? element.textContent ?? "";
+  return element?.textContent ?? "";
 }
 function normalize(value: string): string { return String(value).normalize("NFC").replace(/\r\n?/g, "\n").trim(); }
 function sameSnapshot(left: SemanticControlSnapshot, right: SemanticControlSnapshot): boolean {

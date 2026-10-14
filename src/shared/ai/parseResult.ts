@@ -40,9 +40,11 @@ export function buildResult(block: QuestionBlock, route: RouteUsed, rawText: str
     const hasUsableAnswer = typeof parsed.answer === "string" && parsed.answer.trim().length > 0;
     if (!hasUsableAnswer
       && (block.questionTypeGuess === "short_answer" || block.questionTypeGuess === "fill_blank")) {
-      const prose = stripConversationalWrappers(sanitizeModelText(clean)).trim();
-      // Skip JSON fragments and trivially short outputs.
-      if (prose.length >= 20 && !/^[{[]/.test(prose)) {
+      // Strip wrappers BEFORE sanitizeModelText: sanitize removes blank lines,
+      // which would collapse paragraphs into one and defeat wrapper detection.
+      const prose = sanitizeModelText(stripConversationalWrappers(clean)).trim();
+      // Skip JSON fragments, error messages, and trivially short outputs.
+      if (prose.length >= 20 && !/^[{[]/.test(prose) && !looksLikeProviderError(prose)) {
         parsed.answer = prose;
         if (typeof parsed.confidence !== "number") parsed.confidence = 0.7;
         parsedByFallback = true;
@@ -689,6 +691,13 @@ function unescapeLooseJsonString(s: string): string {
     .replace(/\\t/g, "\t")
     .replace(/\\\\/g, "\\")
     .trim();
+}
+
+/** Reject provider error/refusal text from becoming an essay answer. */
+function looksLikeProviderError(text: string): boolean {
+  const t = String(text || "").slice(0, 500);
+  return /insufficient|balance|recharge|rate.?limit|quota|unauthorized|invalid[_\s]?(api|key|model)|internal error|service unavailable|overloaded/i.test(t)
+    || /抱歉|无法(帮你|完成|直接)|不能(帮你|直接)|拒绝|违反|违规/.test(t);
 }
 
 function inferAnswerFromRawText(raw: string): string {

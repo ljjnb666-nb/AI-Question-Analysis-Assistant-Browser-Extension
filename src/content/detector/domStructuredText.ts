@@ -119,6 +119,17 @@ if (isHtmlElementNode(node)) {
 }
 
 export function extractStructuredQuestionText(container: Element): string {
+  // Answer areas (e.g. Chaoxing's UEditor) are input surface, not question
+  // content, and their DOM mutates independently (toolbar state, user input).
+  // Including them makes the identity unstable ("page changed" on every edit).
+  // Clone-and-strip is cheap: only done when answer areas exist.
+  const ANSWER_AREA_SELECTOR = ".stem_answer, .eidtDiv, .editDiv, [id^='edui']";
+  let scope: Element = container;
+  if (scope.querySelector(ANSWER_AREA_SELECTOR)) {
+    const clone = container.cloneNode(true) as Element;
+    clone.querySelectorAll(ANSWER_AREA_SELECTOR).forEach((n) => n.remove());
+    scope = clone;
+  }
   const pieces: string[] = [];
   const push = (value: string) => {
     const normalized = normalizeText(value);
@@ -127,12 +138,12 @@ export function extractStructuredQuestionText(container: Element): string {
     pieces.splice(0, pieces.length, ...next);
   };
 
-  const titleBox = container.querySelector(".title-box,.questionTit,.question-title,[id='title'],[id$='-title'],[id*='question-title']");
+  const titleBox = scope.querySelector(".title-box,.questionTit,.question-title,[id='title'],[id$='-title'],[id*='question-title']");
 if (isHtmlElementNode(titleBox)) {
     push(titleBox.innerText || titleBox.textContent || "");
   }
 
-  const stemNode = container.querySelector(
+  const stemNode = scope.querySelector(
     ".qeustion-content,.questionContent,.question-content,.stem,.question-body,.content,[id$='-content'],[id='question-content'],[id='content']",
   );
   if (stemNode) {
@@ -142,8 +153,8 @@ if (isHtmlElementNode(titleBox)) {
     // <ul> of punctuated A./B./C./D. options. Extracting only the option
     // nodes used to discard this real stem and reject the entire candidate.
     // Never promote option-inner paragraphs or trailing explanations.
-    const firstOption = container.querySelector(".option-item,li,label");
-    const leadingParagraph = Array.from(container.querySelectorAll("p")).find((paragraph) =>
+    const firstOption = scope.querySelector(".option-item,li,label");
+    const leadingParagraph = Array.from(scope.querySelectorAll("p")).find((paragraph) =>
       !paragraph.closest(".option-item,li,label,nav,header,footer,aside")
       && (!firstOption || !!(paragraph.compareDocumentPosition(firstOption) & Node.DOCUMENT_POSITION_FOLLOWING))
       && normalizeText(extractReadableNodeText(paragraph)).length >= 18,
@@ -151,12 +162,12 @@ if (isHtmlElementNode(titleBox)) {
     if (leadingParagraph) push(extractReadableNodeText(leadingParagraph));
   }
 
-  const tableNodes = Array.from(container.querySelectorAll("table"));
+  const tableNodes = Array.from(scope.querySelectorAll("table"));
   for (const tableNode of tableNodes) {
     push(extractReadableNodeText(tableNode));
   }
 
-  const optionNodes = Array.from(container.querySelectorAll(".option-item, li, label"))
+  const optionNodes = Array.from(scope.querySelectorAll(".option-item, li, label"))
     .filter((node) => {
 if (!isHtmlElementNode(node)) return false;
       if (!isElementVisible(node)) return false;
@@ -177,7 +188,7 @@ push(isHtmlElementNode(container) ? ((container.innerText || container.textConte
     const restored = recoverDetachedChoiceLabels(original);
     // Plain innerText has no image alt text, math semantics or table structure.
     // Do not let a label recovery silently downgrade rich question evidence.
-    const hasRichSemanticNodes = !!container.querySelector(
+    const hasRichSemanticNodes = !!scope.querySelector(
       "img,svg,math,mjx-container,.MathJax,.katex,embed,canvas,table",
     );
     if (restored !== original && !hasRichSemanticNodes

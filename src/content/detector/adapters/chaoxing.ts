@@ -100,7 +100,10 @@ export function buildChaoxingCandidates(
     const rect = applyRightCutToRect(stemRect, hostRightCutX);
     if (!rect) continue;
     if (!inViewport(rect, vw, vh)) continue;
-    if (rect.width < 200 || rect.height < 80) continue;
+    // Chaoxing separates stem from the answer area, so the stem rect is exact.
+    // 80px kills short judge/fill questions (1-2 lines ≈ 40-60px); 40px is enough
+    // to filter slivers while keeping real questions.
+    if (rect.width < 200 || rect.height < 40) continue;
     if (getVisibleVerticalRatio(stemRect, vh) < 0.15) continue;
 
     const text = extractChaoxingStemText(el);
@@ -109,7 +112,16 @@ export function buildChaoxingCandidates(
     const typename = el.getAttribute("typename") || "";
     const questionType = chaoxingTypeFromTypename(typename, text);
     const previewText = sanitizePreviewTextByType(text, questionType);
-    if (!isLikelyCompleteQuestionText(previewText, questionType)) continue;
+    // Chaoxing's typename is authoritative. For choice questions, count real
+    // radio/checkbox inputs — options may render without "A./B./C./D." text
+    // markers (styled via CSS), which the generic text heuristic would miss.
+    const isChoice = questionType === "single_choice" || questionType === "multi_choice";
+    const inputOptionCount = isChoice
+      ? el.querySelectorAll("input[type='radio'], input[type='checkbox']").length
+      : 0;
+    if (isChoice && inputOptionCount >= 2) {
+      // typename + real inputs: complete by construction, skip text heuristic.
+    } else if (!isLikelyCompleteQuestionText(previewText, questionType)) continue;
 
     // Identity must round-trip through observeLiveQuestion(): the exact
     // structured projection is what the authority check re-derives, so
