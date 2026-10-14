@@ -335,7 +335,10 @@ export async function callOpenAICompat(
       requestBody.reasoning_split = true;
     }
   } else {
-    requestBody.max_tokens = 1024;
+    // Essays need room: 500 CJK chars ≈ 750+ tokens plus JSON overhead.
+    // 1024 truncates long essays mid-JSON, yielding unparseable responses.
+    const needsLongOutput = block.questionTypeGuess === "short_answer" || block.questionTypeGuess === "fill_blank";
+    requestBody.max_tokens = needsLongOutput ? 4096 : 1024;
   }
 
   return fetchWithTimeout(auth.url, {
