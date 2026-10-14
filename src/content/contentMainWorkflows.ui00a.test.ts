@@ -104,6 +104,7 @@ function createWorkflowsOptions() {
       finalBBox: { x: 0, y: 0, width: 0, height: 0 },
       previewText: "",
       matchedCandidate: null,
+      snapRejected: false,
     }),
     sendAutoSolveDone: vi.fn(),
     sendAutoSolveProgress: vi.fn(),

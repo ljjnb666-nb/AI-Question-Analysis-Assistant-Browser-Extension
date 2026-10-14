@@ -202,3 +202,20 @@ function createRuntimeQuestionHandle(): string | null {
   const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
   return `rqh_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
+
+/**
+ * VB-001: re-anchor a block's crop box to the live DOM just before screenshotting.
+ * Detection-time bboxes go stale when the page scrolls or re-lays out between
+ * detection and capture; cropping with a stale box makes the vision model look
+ * at a neighboring question while the answer is filled back into this one.
+ * Returns null when the block has no live owner (callers fall back to the
+ * detection-time bbox, preserving previous behavior).
+ */
+export function reanchorBlockBbox(block: QuestionBlock): QuestionBlock["bbox"] | null {
+  const record = readRuntimeQuestionHandle(block);
+  const owner = record?.owner;
+  if (!owner || !owner.isConnected) return null;
+  const rect = (owner as Element).getBoundingClientRect();
+  if (!rect || rect.width < 2 || rect.height < 2) return null;
+  return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+}

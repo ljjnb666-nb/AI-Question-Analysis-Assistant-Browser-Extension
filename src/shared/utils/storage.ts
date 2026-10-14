@@ -244,6 +244,23 @@ export function sanitizeHistoryEntry(entry: HistoryEntry): HistoryEntry {
   };
 }
 
+/**
+ * HA-001: drop older records of the same question+answer so re-parsing the
+ * same question doesn't stack visually identical entries (double-clicking
+ * "parse" used to produce two). The newest record wins. Different answers for
+ * the same question are kept — comparing model outputs is legitimate.
+ */
+export function dedupeHistoryEntries(history: HistoryEntry[], incoming: HistoryEntry): HistoryEntry[] {
+  const key = historyDedupKey(incoming);
+  return history.filter((existing) => historyDedupKey(existing) !== key);
+}
+
+function historyDedupKey(entry: HistoryEntry): string {
+  const question = entry.block.identity?.stableId
+    || `${entry.host}|${entry.block.questionTypeGuess}|${entry.block.previewText}`;
+  return `${question}|${entry.result.answer}`;
+}
+
 export async function loadSettings(): Promise<AppSettings> {
   ensureSettingsCacheListener();
   if (cachedSettings) {
@@ -291,8 +308,9 @@ async function writeHistoryEntry(
     await pruneIfNeeded();
   }
   const history = await loadHistory();
+  const sanitized = sanitizeHistoryEntry(entry);
   const updated = trimHistoryEntries(
-    [sanitizeHistoryEntry(entry), ...history.map(sanitizeHistoryEntry)],
+    [sanitized, ...dedupeHistoryEntries(history.map(sanitizeHistoryEntry), sanitized)],
     MAX_HISTORY,
     HISTORY_SOFT_LIMIT_BYTES,
   );

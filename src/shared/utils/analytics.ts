@@ -24,6 +24,7 @@ export type AnalyticsEvent =
   | "manual_capture_completed"
   | "manual_capture_cancelled"
   | "manual_capture_submitted"
+  | "manual_capture_snap_rejected"
   | "auto_detect_started"
   | "auto_detect_candidates_found"
   | "auto_detect_candidate_selected"

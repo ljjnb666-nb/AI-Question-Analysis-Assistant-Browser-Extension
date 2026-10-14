@@ -53,6 +53,7 @@ type AutoSolveBridgeDeps = {
     finalBBox: QuestionBlock["bbox"];
     previewText: string;
     matchedCandidate: QuestionBlock | null;
+    snapRejected: boolean;
   };
   sendAutoSolveDoneCore: typeof sendAutoSolveDoneCore;
   sendAutoSolveProgressCore: typeof sendAutoSolveProgressCore;

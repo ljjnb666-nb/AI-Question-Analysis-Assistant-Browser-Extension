@@ -91,6 +91,7 @@ type AutoSolveDeps = {
     finalBBox: QuestionBlock["bbox"];
     previewText: string;
     matchedCandidate: QuestionBlock | null;
+    snapRejected: boolean;
   };
   resolveQuestionAdvance: (previousFingerprint: string, previousOrder: number | null, timeoutMs?: number) => Promise<boolean>;
   resolveScrollRoot: () => ScanScrollRoot;

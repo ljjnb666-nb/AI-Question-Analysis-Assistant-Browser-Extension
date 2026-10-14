@@ -25,6 +25,7 @@ type ManualCapturePipelineDeps = {
     finalBBox: QuestionBlock["bbox"];
     previewText: string;
     matchedCandidate: QuestionBlock | null;
+    snapRejected: boolean;
   };
   extractQuestionImageUrlFromBBox: (bbox: QuestionBlock["bbox"]) => string | null;
   screenshotWithRetry: () => Promise<string | null>;

@@ -170,6 +170,30 @@ export const SidePanelApp: React.FC = () => {
     protectedWorkRef.current[kind] = { active: false };
   }, []);
 
+  // WF1-001: a closed/crashed tab can never send AUTO_SOLVE_DONE, so without
+  // this the panel stays stuck on "running" with a dead stop button. Watch
+  // for the tab's death and reset locally instead of waiting for a receipt
+  // that will never arrive.
+  useEffect(() => {
+    const onRemoved = (tabId: number) => {
+      const work = protectedWorkRef.current.autoSolve;
+      if (!work.active || work.tabId !== tabId) return;
+      protectedWorkRef.current.autoSolve = { active: false };
+      setIsAutoSolving(false);
+      setAutoSolveProgress(null);
+      const en = stateRef.current.uiLang === "en";
+      setFillFeedback({
+        tone: "warning",
+        message: en
+          ? "The tab running auto-solve was closed. Auto-solve has been stopped."
+          : "运行自动做题的标签页已关闭，自动做题已停止。",
+        code: "AUTO_SOLVE_TAB_CLOSED",
+      });
+    };
+    chrome.tabs?.onRemoved?.addListener(onRemoved);
+    return () => chrome.tabs?.onRemoved?.removeListener(onRemoved);
+  }, [setIsAutoSolving, setAutoSolveProgress, setFillFeedback]);
+
   const markProtectedWorkGeneration = useCallback(async (kind: "autoSolve" | "fullPage", tabId: number) => {
     const intent = { active: true, tabId };
     protectedWorkRef.current[kind] = intent;

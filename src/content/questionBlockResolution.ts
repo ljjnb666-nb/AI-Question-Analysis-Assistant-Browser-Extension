@@ -15,6 +15,8 @@ export type ResolvedQuestionBlock = {
   finalBBox: BoundingBox;
   previewText: string;
   matchedCandidate: QuestionBlock | null;
+  /** A detected candidate matched the box but was rejected as an unsafe snap target (MC-001). */
+  snapRejected: boolean;
 };
 
 export function resolveQuestionBlockFromBBox(
@@ -30,6 +32,7 @@ export function resolveQuestionBlockFromBBox(
 
   let previewText = deps.extractTextFromBBox(refinedBBox);
   let finalBBox = refinedBBox;
+  let snapRejected = false;
   if (deps.looksLikeNavigationText(previewText)) {
     const fallbackBBox = deps.findLikelyQuestionBBoxNear(refinedBBox);
     if (fallbackBBox) {
@@ -40,8 +43,19 @@ export function resolveQuestionBlockFromBBox(
 
   const matchedCandidate = deps.findBestDetectedCandidateForBBox(finalBBox);
   if (matchedCandidate) {
-    finalBBox = matchedCandidate.bbox;
-    previewText = matchedCandidate.previewText || previewText;
+    // MC-001: never silently snap the user's precise box to a grossly larger
+    // candidate (e.g. a whole .card that collapsed several questions — exactly
+    // the case where the user is boxing to correct auto-detect). The refine
+    // step guards this at 2.6x; apply the same guard here instead of snapping
+    // unconditionally.
+    const candArea = Math.max(1, matchedCandidate.bbox.width * matchedCandidate.bbox.height);
+    const boxArea = Math.max(1, finalBBox.width * finalBBox.height);
+    if (candArea <= boxArea * 2.6) {
+      finalBBox = matchedCandidate.bbox;
+      previewText = matchedCandidate.previewText || previewText;
+    } else {
+      snapRejected = true;
+    }
   }
 
   return {
@@ -49,6 +63,7 @@ export function resolveQuestionBlockFromBBox(
     finalBBox,
     previewText,
     matchedCandidate,
+    snapRejected,
   };
 }
 

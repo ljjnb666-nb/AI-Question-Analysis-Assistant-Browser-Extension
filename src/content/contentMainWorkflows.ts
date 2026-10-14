@@ -151,6 +151,7 @@ type CreateContentMainWorkflowsOptions = {
         finalBBox: QuestionBlock["bbox"];
         previewText: string;
         matchedCandidate: QuestionBlock | null;
+        snapRejected: boolean;
       };
       shouldPreferViewportPreview: (
         rawPreviewText: string,
@@ -165,6 +166,7 @@ type CreateContentMainWorkflowsOptions = {
     finalBBox: QuestionBlock["bbox"];
     previewText: string;
     matchedCandidate: QuestionBlock | null;
+    snapRejected: boolean;
   };
   sendAutoSolveDone: (payload: {
     ok: boolean;

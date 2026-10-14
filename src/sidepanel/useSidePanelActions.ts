@@ -628,6 +628,12 @@ export function useSidePanelActions(options: UseSidePanelActionsOptions) {
       const best = await getBestActionTab();
       if (best?.id) await sendTabMessageWithBootstrap(best.id, { type: "STOP_AUTO_SOLVE_ALL" });
     }
+    // WF1-001: reset local state even when the tab is already gone. The old
+    // code depended entirely on the content script's DONE receipt, so closing
+    // the tab left the panel stuck on "running" with a dead stop button.
+    // (Mirrors handleCancelFullPage, which already resets locally.)
+    options.setIsAutoSolving(false);
+    options.setAutoSolveProgress(null);
   }, [options]);
 
   const handleClearSelection = useCallback(() => {

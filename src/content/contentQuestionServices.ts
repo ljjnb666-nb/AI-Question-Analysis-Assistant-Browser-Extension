@@ -6,7 +6,7 @@ import {
   hasVisibleAutoSolveMedia as hasVisibleAutoSolveMediaCore,
   inspectAutoSolveAnswerState as inspectAutoSolveAnswerStateCore,
 } from "./autoSolveDomState";
-import { findBestDetectedCandidateForBBox as findBestDetectedCandidateForBBoxCore, findLikelyQuestionBBoxNear as findLikelyQuestionBBoxNearCore, findStrictQuestionCardBBox as findStrictQuestionCardBBoxCore, looksLikeNavigationText as looksLikeNavigationTextCore, refineManualBBoxToQuestionContainer as refineManualBBoxToQuestionContainerCore, resolveQuestionBlockFromBBox as resolveQuestionBlockFromBBoxCore } from "./questionBlockResolution";
+import { findBestDetectedCandidateForBBox as findBestDetectedCandidateForBBoxCore, findLikelyQuestionBBoxNear as findLikelyQuestionBBoxNearCore, findStrictQuestionCardBBox as findStrictQuestionCardBBoxCore, looksLikeNavigationText as looksLikeNavigationTextCore, refineManualBBoxToQuestionContainer as refineManualBBoxToQuestionContainerCore, resolveQuestionBlockFromBBox as resolveQuestionBlockFromBBoxCore, type ResolvedQuestionBlock } from "./questionBlockResolution";
 import { extractQuestionImageUrlFromBBox as extractQuestionImageUrlFromBBoxCore, extractTextFromAnchoredContainer as extractTextFromAnchoredContainerCore, extractTextFromBBox as extractTextFromBBoxCore, findBestQuestionContainer as findBestQuestionContainerCore, pickAnchorElement as pickAnchorElementCore } from "./questionScope";
 import { collectTextFromContainer as collectTextFromContainerCore, collectTextFromRegion as collectTextFromRegionCore, extractReadableQuestionNodeText as extractReadableQuestionNodeTextCore, extractRichQuestionPreviewFromElement as extractRichQuestionPreviewFromElementCore, hasLikelyMultipleQuestionStarts as hasLikelyMultipleQuestionStartsCore, intersectionArea as intersectionAreaCore, isDecorativeQuestionImage as isDecorativeQuestionImageCore, isElementVisible as isElementVisibleCore, isExtensionUiElement as isExtensionUiElementCore, normalizeQuestionText as normalizeQuestionTextCore, scoreQuestionLikeText as scoreQuestionLikeTextCore } from "./questionText";
 import { findNearbySemanticFormulaTextForImage } from "./formulaEmbedFallback";
@@ -82,12 +82,7 @@ const detectedCandidateMatchDeps = {
   intersectionArea,
 };
 
-export function resolveQuestionBlockFromBBox(bbox: BoundingBox): {
-  refinedBBox: BoundingBox;
-  finalBBox: BoundingBox;
-  previewText: string;
-  matchedCandidate: QuestionBlock | null;
-} {
+export function resolveQuestionBlockFromBBox(bbox: BoundingBox): ResolvedQuestionBlock {
   return resolveQuestionBlockFromBBoxCore(bbox, {
     detectCandidatesInViewport,
     extractRichQuestionPreviewFromElement,

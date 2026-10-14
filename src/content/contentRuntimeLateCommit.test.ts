@@ -90,7 +90,7 @@ describe("runtime late completion fences", () => {
       { forceVision: false, pipelineTimeoutMs: 5_000, isRuntimeCurrent: () => current },
       {
         floatingMgr,
-        resolveQuestionBlockFromBBox: (bbox) => ({ refinedBBox: bbox, finalBBox: bbox, previewText: "question", matchedCandidate: null }),
+        resolveQuestionBlockFromBBox: (bbox) => ({ refinedBBox: bbox, finalBBox: bbox, previewText: "question", matchedCandidate: null, snapRejected: false }),
         extractQuestionImageUrlFromBBox: () => null,
         screenshotWithRetry: async () => null,
         cropScreenshot: async () => "",
@@ -133,7 +133,7 @@ it("RF01 manual pipeline timeout aborts nested work and rejects late UI/history/
   });
   const capture = runManualCapturePipeline(block.bbox, { forceVision: false, pipelineTimeoutMs: 100 }, {
     floatingMgr,
-    resolveQuestionBlockFromBBox: bbox => ({ refinedBBox: bbox, finalBBox: bbox, previewText: "question", matchedCandidate: null }),
+    resolveQuestionBlockFromBBox: bbox => ({ refinedBBox: bbox, finalBBox: bbox, previewText: "question", matchedCandidate: null, snapRejected: false }),
     extractQuestionImageUrlFromBBox: () => null, screenshotWithRetry: async () => "image",
     cropScreenshot: async () => "data:image/png;base64,abc",
     loadSettings: async () => DEFAULT_SETTINGS,

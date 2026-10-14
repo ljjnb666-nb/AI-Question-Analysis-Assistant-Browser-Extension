@@ -7,6 +7,7 @@ import {
   shouldRetryWithVisionForAuto,
   shouldUseVisionForAutoSolve,
 } from "./autoSolveHeuristics";
+import { reanchorBlockBbox } from "./roots/rootContext";
 
 type ProviderInfo = {
   supportsVision: boolean;
@@ -15,7 +16,7 @@ type ProviderInfo = {
 type AutoSolveParsingDeps = {
   loadSettings: () => Promise<ParsePreferences>;
   getRuntimeCaptureInfo: () => Promise<ProviderInfo>;
-  tryCaptureBlockImageForAutoSolve: (bbox: QuestionBlock["bbox"]) => Promise<string | null>;
+  tryCaptureBlockImageForAutoSolve: (bbox: QuestionBlock["bbox"], reanchor?: () => QuestionBlock["bbox"] | null) => Promise<string | null>;
   parseWithTieredRetries: (
     block: QuestionBlock,
     settings: ParsePreferences,
@@ -41,7 +42,8 @@ async function attachVisionImageIfAvailable(
   tryCaptureBlockImageForAutoSolve: AutoSolveParsingDeps["tryCaptureBlockImageForAutoSolve"],
 ): Promise<QuestionBlock> {
   if (!supportsVision) return block;
-  const imageDataUrl = await tryCaptureBlockImageForAutoSolve(block.bbox);
+  // VB-001: re-anchor to the live element just before the screenshot crop.
+  const imageDataUrl = await tryCaptureBlockImageForAutoSolve(block.bbox, () => reanchorBlockBbox(block));
   if (!imageDataUrl) return block;
   return { ...block, hasImage: true, imageDataUrl };
 }
@@ -84,7 +86,7 @@ export async function parseBlockForAutoSolve(
   );
 
   if (provider.supportsVision && shouldRetryWithVisionForAuto(result, block)) {
-    const imageDataUrl = parseBlock.imageDataUrl || await deps.tryCaptureBlockImageForAutoSolve(block.bbox);
+    const imageDataUrl = parseBlock.imageDataUrl || await deps.tryCaptureBlockImageForAutoSolve(block.bbox, () => reanchorBlockBbox(block));
     if (imageDataUrl) {
       parseBlock = { ...block, hasImage: true, imageDataUrl };
       result = await withParseTimeout(

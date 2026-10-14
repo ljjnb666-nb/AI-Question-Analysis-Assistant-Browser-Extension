@@ -4,9 +4,16 @@ import { normalizeTextLoose } from "./parseResultNormalization";
 export function normalizeAnswer(raw: string): string {
   const original = String(raw || "").trim();
   if (!original) return "—";
-  const s = original.toUpperCase();
+  // WS5-001: only treat the input as an answer when it is a clean option-letter
+  // set (modulo benign surrounding quotes/punctuation). Scraping [A-D] out of
+  // free prose ("I am not sure, possibly B" -> "A,B") fabricates answers out
+  // of uncertainty and even negation. Prose is returned unchanged so the
+  // downstream isOptionLetterSet check fails closed to "需人工确认".
+  const s = original
+    .toUpperCase()
+    .replace(/^[\s"“”'‘’「」【】(\[]+|[\s"“”'‘’」】)\].,，、。;；:：!！?？]+$/g, "");
+  if (!isOptionLetterSet(s)) return original;
   const letters = s.match(/[A-D]/g) || [];
-  if (letters.length === 0) return original;
   const uniqueSorted = Array.from(new Set(letters)).sort();
   return uniqueSorted.length > 1 ? uniqueSorted.join(",") : uniqueSorted[0];
 }
@@ -130,7 +137,11 @@ export function resolveStableChoiceResolution(
     return { answer: "" };
   }
 
-  const uncertainty = /(无法|不确定|看不清|信息不足|题干不完整|暂无法确认|不能确定|缺少)/.test(explanationText);
+  // WS5-001: the uncertainty gate used to be Chinese-only, so English
+  // hedging ("I am not sure, possibly B") sailed through and got filled.
+  // English patterns stay tightly scoped to hedging to avoid nuking confident
+  // explanations that merely eliminate an option ("this cannot be B").
+  const uncertainty = /(无法|不确定|看不清|信息不足|题干不完整|暂无法确认|不能确定|缺少|not\s+sure|uncertain|do\s+not\s+know|don't\s+know|no\s+idea|cannot\s+(determine|tell|confirm)|can't\s+(determine|tell|confirm)|insufficient\s+information)/i.test(explanationText);
   if (uncertainty) {
     return { answer: "" };
   }

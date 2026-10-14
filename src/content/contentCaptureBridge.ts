@@ -13,9 +13,9 @@ type CaptureImageDeps = {
 
 export function createCaptureBridge(captureImageDeps: CaptureImageDeps) {
   return {
-    captureBlockImage: (bbox: BoundingBox) => captureBlockImageCore(bbox, captureImageDeps),
+    captureBlockImage: (bbox: BoundingBox, reanchor?: () => BoundingBox | null) => captureBlockImageCore(bbox, captureImageDeps, reanchor),
     screenshotWithRetry: (maxAttempts = 3) => screenshotWithRetryCore(captureImageDeps, maxAttempts),
-    tryCaptureBlockImageForAutoSolve: (bbox: BoundingBox) => tryCaptureBlockImageForAutoSolveCore(bbox, captureImageDeps),
+    tryCaptureBlockImageForAutoSolve: (bbox: BoundingBox, reanchor?: () => BoundingBox | null) => tryCaptureBlockImageForAutoSolveCore(bbox, captureImageDeps, reanchor),
   };
 }
 

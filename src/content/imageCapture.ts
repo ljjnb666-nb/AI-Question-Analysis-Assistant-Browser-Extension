@@ -1,6 +1,6 @@
 import type { BoundingBox, ExtMessage } from "@/shared/types";
 
-type ImageCaptureDeps = {
+export type ImageCaptureDeps = {
   sendToBackgroundWithTimeout: <R>(message: ExtMessage, timeoutMs: number) => Promise<R | null>;
   cropScreenshot: (dataUrl: string, bbox: BoundingBox, scale: number) => Promise<string>;
 };
@@ -34,18 +34,23 @@ export async function screenshotWithRetry(
 export async function captureBlockImage(
   bbox: BoundingBox,
   deps: ImageCaptureDeps,
+  reanchor?: () => BoundingBox | null,
 ): Promise<string | null> {
   const dataUrl = await screenshotWithRetry(deps);
   if (!dataUrl) return null;
-  return await deps.cropScreenshot(dataUrl, bbox, window.devicePixelRatio);
+  // VB-001: re-anchor to the live DOM just before cropping; the detection-time
+  // bbox may be stale after scroll/relayout. Null falls back to the old bbox.
+  const fresh = reanchor?.() ?? null;
+  return await deps.cropScreenshot(dataUrl, fresh ?? bbox, window.devicePixelRatio);
 }
 
 export async function tryCaptureBlockImageForAutoSolve(
   bbox: BoundingBox,
   deps: ImageCaptureDeps,
+  reanchor?: () => BoundingBox | null,
 ): Promise<string | null> {
   try {
-    return await captureBlockImage(bbox, deps);
+    return await captureBlockImage(bbox, deps, reanchor);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (/activeTab/i.test(message) || /has not been in invoked/i.test(message)) {

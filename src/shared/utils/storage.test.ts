@@ -78,7 +78,9 @@ function createLargeHistoryEntry(id: string): HistoryEntry {
     timestamp: Date.now(),
     block: {
       ...mockBlock,
-      previewText: "P".repeat(1400),
+      // Distinct per entry: the compaction test is about oversized entries,
+      // not about 49 identical questions (which HA-001 dedup now collapses).
+      previewText: `Q${id} ` + "P".repeat(1400),
       displaySegments: Array.from({ length: 12 }, (_, index) => ({
         type: "text" as const,
         text: `segment-${index}-${"S".repeat(500)}`,
@@ -369,6 +371,72 @@ describe("storage", () => {
       expect(savedHistory[0].id).toBe("new-1");
       expect(savedHistory.length).toBeLessThan(50);
       expect(savedHistory.length).toBeGreaterThanOrEqual(10);
+    });
+
+    it("HA-001: re-parsing the same question does not stack duplicate records", async () => {
+      const questionBlock = {
+        ...mockBlock,
+        identity: { stableId: "q-stable-1", contentFingerprint: "fp-1", identityVersion: 1 as const, strategy: "content-only" as const, signals: { nativeId: false, content: true, options: false, media: false, structure: false } },
+        previewText: "1. [单选题] 中国的首都是？",
+      };
+      const existingHistory: HistoryEntry[] = [
+        {
+          id: "old-1",
+          timestamp: Date.now() - 1000,
+          block: questionBlock,
+          result: { ...mockResult, answer: "B" },
+          host: "example.com",
+        },
+      ];
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({
+        parseHistory: existingHistory,
+      } as never);
+
+      // Same question, same answer, new runtime id (double-click parse).
+      await addHistoryEntry({
+        id: "new-1",
+        timestamp: Date.now(),
+        block: { ...questionBlock, id: "auto-xyz-2" },
+        result: { ...mockResult, answer: "B" },
+        host: "example.com",
+      });
+
+      const savedHistory = vi.mocked(chrome.storage.local.set).mock.calls[0][0].parseHistory;
+      expect(savedHistory).toHaveLength(1);
+      expect(savedHistory[0].id).toBe("new-1");
+    });
+
+    it("HA-001: same question with a different answer keeps both records", async () => {
+      const questionBlock = {
+        ...mockBlock,
+        identity: { stableId: "q-stable-2", contentFingerprint: "fp-2", identityVersion: 1 as const, strategy: "content-only" as const, signals: { nativeId: false, content: true, options: false, media: false, structure: false } },
+        previewText: "2. [单选题] 世界上面积最大的国家是？",
+      };
+      const existingHistory: HistoryEntry[] = [
+        {
+          id: "old-1",
+          timestamp: Date.now() - 1000,
+          block: questionBlock,
+          result: { ...mockResult, answer: "C" },
+          host: "example.com",
+        },
+      ];
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({
+        parseHistory: existingHistory,
+      } as never);
+
+      await addHistoryEntry({
+        id: "new-1",
+        timestamp: Date.now(),
+        block: questionBlock,
+        result: { ...mockResult, answer: "B" },
+        host: "example.com",
+      });
+
+      const savedHistory = vi.mocked(chrome.storage.local.set).mock.calls[0][0].parseHistory;
+      expect(savedHistory).toHaveLength(2);
+      expect(savedHistory[0].id).toBe("new-1");
+      expect(savedHistory[1].id).toBe("old-1");
     });
   });
 

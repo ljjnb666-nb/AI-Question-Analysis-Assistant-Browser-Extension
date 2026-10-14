@@ -23,6 +23,7 @@ type ManualCaptureDeps = {
     finalBBox: QuestionBlock["bbox"];
     previewText: string;
     matchedCandidate: QuestionBlock | null;
+    snapRejected: boolean;
   };
   extractQuestionImageUrlFromBBox: (bbox: QuestionBlock["bbox"]) => string | null;
   screenshotWithRetry: () => Promise<string | null>;
@@ -99,6 +100,18 @@ export async function runManualCapturePipeline(
 
   if (!isRuntimeCurrent()) return;
   deps.floatingMgr.open(block);
+
+  // MC-001: the user's precise box was kept over a much larger detected
+  // candidate — say so instead of silently snapping to the wrong box.
+  if (resolved.snapRejected) {
+    deps.logEvent("manual_capture_snap_rejected", {
+      bboxW: bbox.width,
+      bboxH: bbox.height,
+      candidateW: resolved.matchedCandidate?.bbox.width,
+      candidateH: resolved.matchedCandidate?.bbox.height,
+    });
+    setStreamingText("检测到的候选框过大，已保留您的精确框选。");
+  }
 
   try {
     const dataUrl = await deps.screenshotWithRetry();

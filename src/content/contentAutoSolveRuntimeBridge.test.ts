@@ -90,7 +90,7 @@ function createBridge(
       isExtensionUiElement: () => false,
       isElementVisible: () => true,
     },
-    resolveQuestionBlockFromBBox: (bbox) => ({ refinedBBox: bbox, finalBBox: bbox, previewText: block.previewText, matchedCandidate: null }),
+    resolveQuestionBlockFromBBox: (bbox) => ({ refinedBBox: bbox, finalBBox: bbox, previewText: block.previewText, matchedCandidate: null, snapRejected: false }),
     sendAutoSolveDoneCore: () => {},
     sendAutoSolveProgressCore: () => {},
     stopRequestedRef: () => false,

@@ -12,7 +12,7 @@ type RegisterContentRuntimeMessageHandlersOptions = {
   cancelFullPageScan: (generationId?: string) => boolean | void;
   cancelManualCapture: () => void;
   candidateStatusMap: CandidateStatusMap;
-  captureBlockImage: (bbox: BoundingBox) => Promise<string | null>;
+  captureBlockImage: (bbox: BoundingBox, reanchor?: () => BoundingBox | null) => Promise<string | null>;
   closeFloatingResult: () => void;
   clearHighlightLayer: () => void;
   fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options?: { mode?: "auto" | "manual"; expectedUrl?: string; isRuntimeCurrent?: () => boolean }) => Promise<unknown>;

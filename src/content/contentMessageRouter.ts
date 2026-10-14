@@ -7,7 +7,7 @@ type MessageResponse = (response: unknown) => void;
 type ContentMessageRouterDeps = {
   cancelFullPageScan: (generationId?: string) => boolean | void;
   cancelManualCapture: () => void;
-  captureBlockImage: (bbox: BoundingBox) => Promise<string | null>;
+  captureBlockImage: (bbox: BoundingBox, reanchor?: () => BoundingBox | null) => Promise<string | null>;
   clearHighlights: () => void;
   closeFloatingResult: () => void;
   fillParsedAnswerInPage: (block: QuestionBlock, result: ParseResult, options: { mode: "manual"; expectedUrl?: string }) => Promise<unknown>;
