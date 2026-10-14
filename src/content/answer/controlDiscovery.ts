@@ -8,13 +8,43 @@ const SELECTOR = "input[type=radio],input[type=checkbox],input:not([type]),input
 
 /** O(N) in the supplied question owner subtree; it deliberately never scans document. */
 export function discoverControls(owner: Element): DiscoveredControl[] {
-  return Array.from(owner.querySelectorAll(SELECTOR)).filter((node): node is HTMLElement =>isHtmlElementNode( node)).map((element) => ({
+  const direct = Array.from(owner.querySelectorAll(SELECTOR)).filter((node): node is HTMLElement =>isHtmlElementNode( node)).map((element) => ({
     element,
     controlType: getControlType(element),
     visible: isVisible(element) && !element.hidden && element.getAttribute("aria-hidden") !== "true",
     enabled: !isDisabled(element),
     text: normalizeText(controlText(element)),
   }));
+  return [...direct, ...discoverEditorIframeBodies(owner)];
+}
+
+/**
+ * Rich-text editors (UEditor/TinyMCE/CKEditor/Quill/…) render the editable
+ * surface inside a same-origin iframe; the host page only keeps a hidden
+ * textarea. querySelectorAll never descends into iframe documents, so without
+ * this, subjective questions on such pages have no fillable control at all.
+ */
+const EDITOR_IFRAME_HINT = /ueditor|edui|tinymce|cke_|ckeditor|quill|froala|kindeditor|nicedit|wangEditor/i;
+
+function discoverEditorIframeBodies(owner: Element): DiscoveredControl[] {
+  const out: DiscoveredControl[] = [];
+  for (const node of owner.querySelectorAll("iframe")) {
+    if (!isHtmlElementNode(node)) continue;
+    const iframe = node as HTMLIFrameElement;
+    let doc: Document | null = null;
+    try {
+      doc = iframe.contentDocument;
+    } catch {
+      continue; // Cross-origin: not readable, not fillable.
+    }
+    const body = doc?.body;
+    if (!body) continue;
+    const hint = `${iframe.id} ${iframe.name} ${iframe.className} ${iframe.title}`;
+    if (!EDITOR_IFRAME_HINT.test(hint) && !body.isContentEditable && doc?.designMode !== "on") continue;
+    if (!isVisible(iframe) || !isVisible(body)) continue;
+    out.push({ element: body, controlType: "contenteditable", visible: true, enabled: true, text: "" });
+  }
+  return out;
 }
 
 function getControlType(el: HTMLElement): ControlType {

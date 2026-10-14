@@ -1,14 +1,13 @@
 import { isHtmlElementNode } from "../domDetectorShared";
 import type { QuestionBlock, QuestionType } from "@/shared/types";
 import { inferQuestionType, normalizeText, sanitizePreviewTextByType } from "../domText";
-import { extractReadableNodeText } from "../domStructuredText";
+import { extractReadableNodeText, extractStructuredQuestionText } from "../domStructuredText";
 import { isLikelyCompleteQuestionText } from "../domDetectorPostprocess";
 import { bindDomQuestionBlockToOwner as attachDetectedQuestionIdentity } from "../../domQuestionBinding";
 import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "../domDetectorVisual";
 import {
   applyRightCutToRect,
   boundaryFromRawRect,
-  clampRectToBbox,
   getVisibleVerticalRatio,
   inViewport,
 } from "../domCandidateGeometry";
@@ -54,6 +53,18 @@ function extractChaoxingStemText(el: HTMLElement): string {
   return normalizeText(extractReadableNodeText(clone));
 }
 
+/** Stem-only rect: the UEditor answer area (.stem_answer) is input surface, not
+ * question text — the highlight/parse box must not cover it. */
+function stemRectExcludingAnswer(el: HTMLElement, rawRect: DOMRect): DOMRect {
+  const answer = el.querySelector(".stem_answer");
+  if (!answer || !isHtmlElementNode(answer)) return rawRect;
+  const aRect = answer.getBoundingClientRect();
+  if (Number.isFinite(aRect.top) && aRect.top > rawRect.top + 40 && aRect.top < rawRect.bottom) {
+    return new DOMRect(rawRect.left, rawRect.top, rawRect.width, Math.max(1, aRect.top - rawRect.top));
+  }
+  return rawRect;
+}
+
 export function buildChaoxingCandidates(
   hostRightCutX: number | null,
   vw: number,
@@ -65,11 +76,12 @@ export function buildChaoxingCandidates(
 
   for (const [index, el] of items.entries()) {
     const rawRect = el.getBoundingClientRect();
-    const rect = applyRightCutToRect(rawRect, hostRightCutX);
+    const stemRect = stemRectExcludingAnswer(el, rawRect);
+    const rect = applyRightCutToRect(stemRect, hostRightCutX);
     if (!rect) continue;
     if (!inViewport(rect, vw, vh)) continue;
     if (rect.width < 200 || rect.height < 80) continue;
-    if (getVisibleVerticalRatio(rawRect, vh) < 0.15) continue;
+    if (getVisibleVerticalRatio(stemRect, vh) < 0.15) continue;
 
     const text = extractChaoxingStemText(el);
     if (!text || text.length < 10) continue;
@@ -79,10 +91,23 @@ export function buildChaoxingCandidates(
     const previewText = sanitizePreviewTextByType(text, questionType);
     if (!isLikelyCompleteQuestionText(previewText, questionType)) continue;
 
+    // Identity must round-trip through observeLiveQuestion(): the exact
+    // structured projection is what the authority check re-derives, so
+    // identifyObservationSource() proves "structured" and later re-observation
+    // yields the identical fingerprint. Without this the parse/fill authority
+    // check fails and the UI reports "页面已变化". The noise-stripped stem
+    // text stays preview/AI-only.
+    const structuredText = extractStructuredQuestionText(el);
+    const identityText = structuredText && structuredText.length >= 10 ? structuredText : text;
+
     const qid = el.getAttribute("data") || el.id || `chaoxing-${index}`;
+    // Deliberately unclamped stem box: full-page accumulation converts each
+    // scroll step to absolute coords, so every observation yields the same box
+    // and merges into one complete box. Per-viewport clamping produced partial
+    // slices that never merged (each step kept a different slice).
     out.push(attachDetectedQuestionIdentity({
       id: `auto-chaoxing-${Date.now()}-${index}`,
-      bbox: clampRectToBbox(rect, vw, vh),
+      bbox: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
       previewText: previewText.slice(0, 900),
       hasImage: hasMeaningfulVisualContent(el),
       questionImageUrl: pickQuestionImageFromElement(el) ?? undefined,
@@ -91,8 +116,11 @@ export function buildChaoxingCandidates(
       source: "auto_dom",
       identitySourceText: text,
       runtimeOwnerKey: `chaoxing-${qid}`,
-      boundary: boundaryFromRawRect(rawRect, vh),
-    }, el, { identityText: text }));
+      boundary: boundaryFromRawRect(stemRect, vh),
+    // Note: no explicit nativeQuestionId — observeLiveQuestion() re-derives
+    // identity via extractNativeQuestionId(), so bind-time and observe-time
+    // must use the same extraction or stableId mismatches ("页面已变化").
+    }, el, { identityText }));
   }
 
   return out;

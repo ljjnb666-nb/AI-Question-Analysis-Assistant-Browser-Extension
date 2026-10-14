@@ -25,6 +25,7 @@ export function applyTextValue(control: HTMLElement, value: string): boolean {
     if (!replaceContentEditableText(control, value)) {
       control.textContent = value;
     }
+    syncIframeEditorBackingTextarea(control, value);
     dispatchTextEvents(control);
     return true;
   }
@@ -87,9 +88,29 @@ export function setTextControlValueOnly(target: HTMLElement, value: string): boo
   if (target.isContentEditable) {
     if ((target.textContent || "") === value) return false;
     if (!replaceContentEditableText(target, value)) target.textContent = value;
+    syncIframeEditorBackingTextarea(target, value);
     return true;
   }
   return false;
+}
+
+/**
+ * UEditor-style editors keep a hidden textarea that the host page reads on
+ * submit (the visible surface lives in an iframe). Mirror the value there so
+ * the filled answer survives the page's own submit/sync flow. Same-document
+ * contenteditables are the real control and need no mirror.
+ */
+function syncIframeEditorBackingTextarea(editorBody: HTMLElement, value: string): void {
+  const frame = editorBody.ownerDocument.defaultView?.frameElement as HTMLElement | null;
+  if (!frame) return;
+  const host = frame.closest(".eidtDiv, .stem_answer") ?? frame.parentElement;
+  const textarea = host?.querySelector("textarea");
+  if (!textarea || !isHTMLTextAreaInOwnerRealm(textarea)) return;
+  if (textarea.value === value) return;
+  setNativeTextareaValue(textarea, value);
+  const view = textarea.ownerDocument.defaultView ?? window;
+  textarea.dispatchEvent(new view.Event("input", { bubbles: true }));
+  textarea.dispatchEvent(new view.Event("change", { bubbles: true }));
 }
 
 /** Dispatch exactly one legacy text event; callers re-resolve before the next event. */

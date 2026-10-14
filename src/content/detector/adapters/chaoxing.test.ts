@@ -82,3 +82,55 @@ describe("chaoxing adapter", () => {
     expect(found[0].questionTypeGuess).not.toBe("fill_blank");
   });
 });
+
+describe("chaoxing adapter regression (2026-10-14 device test)", () => {
+  function setTallChaoxingFixture(): { block: HTMLElement; answer: HTMLElement } {
+    setChaoxingPage();
+    document.body.innerHTML = `
+      <div class="padBom50 questionLi fontLabel singleQuesId" typename="其它" id="question406016455" data="406016455" tabindex="0" role="option" aria-label="题目 1. ">
+        <h3 class="mark_name colorDeep fontLabel workTextWrap">1.<span class="colorShallow">(其它)</span></h3>
+        <div><p>请撰写一份产品开发设计方案，字数不少于500字，条理清晰。</p></div>
+        <div class="stem_answer">
+          <div class="eidtDiv">
+            <div id="edui1"><div class="edui-toolbar">清除格式 加粗 斜体</div></div>
+            <textarea id="answer406016455" style="display:none"></textarea>
+          </div>
+        </div>
+      </div>`;
+    const block = document.querySelector(".questionLi") as HTMLElement;
+    const answer = document.querySelector(".stem_answer") as HTMLElement;
+    // Tall stem (1600) + editor (300): total element 1900, viewport 900.
+    setRect(block, { left: 100, top: 120, width: 900, height: 1900 });
+    setRect(answer, { left: 100, top: 1720, width: 900, height: 300 });
+    setRect(document.body, { left: 0, top: 0, width: 1600, height: 900 });
+    return { block, answer };
+  }
+
+  it("bbox covers the stem only, excluding the .stem_answer editor area", () => {
+    setTallChaoxingFixture();
+    const found = detectCandidatesInViewport();
+    expect(found).toHaveLength(1);
+    // Stem is 120..1720; the editor (1720..2020) must not be boxed.
+    expect(found[0].bbox.y).toBe(120);
+    expect(found[0].bbox.y + found[0].bbox.height).toBeLessThanOrEqual(1720);
+  });
+
+  it("bbox is the full unclamped stem (full-page slices merge instead of partial boxes)", () => {
+    setTallChaoxingFixture();
+    const found = detectCandidatesInViewport();
+    expect(found).toHaveLength(1);
+    // Full stem height 1600 — must NOT be clamped to the 900px viewport.
+    expect(found[0].bbox.height).toBe(1600);
+  });
+
+  it("identity round-trips: authority check passes (no false 页面已变化)", async () => {
+    setTallChaoxingFixture();
+    const { isCurrentRuntimeQuestionBlock } = await import("../../liveQuestionObservation");
+    const found = detectCandidatesInViewport();
+    expect(found).toHaveLength(1);
+    const b = found[0] as unknown as Record<string, unknown>;
+    expect(b["identityObservationSource"]).toBe("structured");
+    expect(b["runtimeQuestionHandle"]).toBeTruthy();
+    expect(isCurrentRuntimeQuestionBlock(found[0])).toBe(true);
+  });
+});
