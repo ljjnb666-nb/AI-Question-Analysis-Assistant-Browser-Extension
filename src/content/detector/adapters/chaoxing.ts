@@ -4,7 +4,7 @@ import { inferQuestionType, normalizeText, sanitizePreviewTextByType } from "../
 import { extractReadableNodeText, extractStructuredQuestionText } from "../domStructuredText";
 import { isLikelyCompleteQuestionText } from "../domDetectorPostprocess";
 import { bindDomQuestionBlockToOwner as attachDetectedQuestionIdentity } from "../../domQuestionBinding";
-import { hasMeaningfulVisualContent, pickQuestionImageFromElement } from "../domDetectorVisual";
+import { hasMeaningfulVisualContent, isDecorativeQuestionImage, pickQuestionImageFromElement } from "../domDetectorVisual";
 import {
   applyRightCutToRect,
   boundaryFromRawRect,
@@ -65,6 +65,26 @@ function stemRectExcludingAnswer(el: HTMLElement, rawRect: DOMRect): DOMRect {
   return rawRect;
 }
 
+/** True when the stem (excluding the answer editor) contains media elements.
+ * The UEditor answer area is input surface: toolbar sprites/icons there are UI
+ * chrome, not question figures. The media pipeline scans the full owner, so a
+ * text-only question gets hasImage=true from editor chrome, and parsing then
+ * hard-fails trying to fetch a "question image" that doesn't exist. */
+function stemHasMedia(el: HTMLElement): boolean {
+  const editor = el.querySelector(".stem_answer");
+  for (const node of el.querySelectorAll("img,canvas,figure,picture")) {
+    if (editor && editor.contains(node)) continue;
+    if (node.tagName.toLowerCase() === "img" && isDecorativeQuestionImage(node)) continue;
+    return true;
+  }
+  // Inline SVGs outside the editor (e.g. stem diagrams).
+  for (const node of el.querySelectorAll("svg")) {
+    if (editor && editor.contains(node)) continue;
+    return true;
+  }
+  return false;
+}
+
 export function buildChaoxingCandidates(
   hostRightCutX: number | null,
   vw: number,
@@ -105,7 +125,7 @@ export function buildChaoxingCandidates(
     // scroll step to absolute coords, so every observation yields the same box
     // and merges into one complete box. Per-viewport clamping produced partial
     // slices that never merged (each step kept a different slice).
-    out.push(attachDetectedQuestionIdentity({
+    const bound = attachDetectedQuestionIdentity({
       id: `auto-chaoxing-${Date.now()}-${index}`,
       bbox: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
       previewText: previewText.slice(0, 900),
@@ -120,7 +140,18 @@ export function buildChaoxingCandidates(
     // Note: no explicit nativeQuestionId — observeLiveQuestion() re-derives
     // identity via extractNativeQuestionId(), so bind-time and observe-time
     // must use the same extraction or stableId mismatches ("页面已变化").
-    }, el, { identityText }));
+    }, el, { identityText });
+    // The binding collects media from the full owner, including UEditor
+    // toolbar chrome inside .stem_answer. When the stem itself has no media,
+    // those assets are false positives that make parsing hard-fail fetching a
+    // non-existent "question image" — drop them so text questions parse as text.
+    out.push(stemHasMedia(el) ? bound : {
+      ...bound,
+      hasImage: false,
+      questionImageUrl: undefined,
+      mediaAssets: [],
+      primaryMediaAssetId: undefined,
+    });
   }
 
   return out;

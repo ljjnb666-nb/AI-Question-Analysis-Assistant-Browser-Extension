@@ -134,3 +134,51 @@ describe("chaoxing adapter regression (2026-10-14 device test)", () => {
     expect(isCurrentRuntimeQuestionBlock(found[0])).toBe(true);
   });
 });
+
+describe("chaoxing adapter media scoping (2026-10-14 device test)", () => {
+  it("drops editor-toolbar false-positive media on text-only questions", () => {
+    setChaoxingPage();
+    document.body.innerHTML = `
+      <div class="padBom50 questionLi fontLabel singleQuesId" typename="其它" id="question406016455" data="406016455">
+        <h3 class="mark_name">1.(其它)</h3>
+        <div><p>请撰写一份产品开发设计方案，字数不少于500字。</p></div>
+        <div class="stem_answer">
+          <div class="eidtDiv">
+            <div id="edui1"><div class="edui-toolbar">
+              <img class="edui-icon edui-for-bold" src="https://chaoxing.com/ueditor/icons.png" width="20" height="20">
+            </div></div>
+            <textarea id="answer406016455" style="display:none"></textarea>
+          </div>
+        </div>
+      </div>`;
+    const block = document.querySelector(".questionLi") as HTMLElement;
+    setRect(block, { left: 100, top: 120, width: 900, height: 600 });
+    setRect(document.body, { left: 0, top: 0, width: 1600, height: 900 });
+
+    const found = detectCandidatesInViewport();
+    expect(found).toHaveLength(1);
+    // Toolbar chrome must not mark a text question as having an image —
+    // otherwise parsing hard-fails fetching a non-existent "question image".
+    expect(found[0].hasImage).toBe(false);
+    expect(found[0].mediaAssets ?? []).toHaveLength(0);
+  });
+
+  it("keeps real stem images", () => {
+    setChaoxingPage();
+    document.body.innerHTML = `
+      <div class="padBom50 questionLi fontLabel singleQuesId" typename="其它" id="question1" data="1">
+        <h3 class="mark_name">1.(其它)</h3>
+        <div><p>请根据下图描述电路的工作原理，字数不少于100字。</p><img src="https://chaoxing.com/question/circuit.png" width="300" height="200"></div>
+        <div class="stem_answer"><div class="eidtDiv"><textarea style="display:none"></textarea></div></div>
+      </div>`;
+    const block = document.querySelector(".questionLi") as HTMLElement;
+    setRect(block, { left: 100, top: 120, width: 900, height: 600 });
+    const img = block.querySelector("img") as HTMLImageElement;
+    setRect(img, { left: 120, top: 300, width: 300, height: 200 });
+    setRect(document.body, { left: 0, top: 0, width: 1600, height: 900 });
+
+    const found = detectCandidatesInViewport();
+    expect(found).toHaveLength(1);
+    expect(found[0].hasImage).toBe(true);
+  });
+});
