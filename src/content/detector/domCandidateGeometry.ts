@@ -1,6 +1,7 @@
 import { isElementNode, isHtmlElementNode } from "./domDetectorShared";
 import type { BoundingBox, QuestionType } from "@/shared/types";
 import { CIRCLED_RE, OPTION_RE, QUESTION_RE, normalizeText } from "./domText";
+import { classifyViewportBoundary } from "./questionBoundary";
 
 type RectItem = { rect: DOMRect; text: string; score: number };
 
@@ -337,4 +338,50 @@ function isLikelyActionText(text: string): boolean {
   const t = normalizeText(text);
   if (!t) return false;
   return /提交作业|上一题|下一题|返回|标记此题|查看解析|收藏|试题篮|组卷预览|登录|注册|首页/.test(t);
+}
+
+/* Moved from domDetector.ts (strangler step 1): shared viewport-geometry
+ * primitives used by both the generic engine and site adapters. */
+export function boundaryFromRawRect(rect: Pick<DOMRect, "top" | "height">, viewportHeight: number) {
+  const evidence = classifyViewportBoundary({ y: rect.top, height: rect.height }, { innerHeight: viewportHeight } as Window);
+  return {
+    state: evidence.state === "fully-visible" ? "complete" as const : evidence.state === "clipped-top" ? "partial-top" as const : evidence.state === "clipped-bottom" ? "partial-bottom" as const : "partial-both" as const,
+    clippedTop: evidence.clippedTop, clippedBottom: evidence.clippedBottom, confidence: evidence.visibleRatio,
+    reasons: [evidence.clippedTop ? "Q_BOUNDARY_PARTIAL_TOP" : "", evidence.clippedBottom ? "Q_BOUNDARY_PARTIAL_BOTTOM" : ""].filter(Boolean),
+  };
+}
+
+export function inViewport(rect: DOMRect, vw: number, vh: number): boolean {
+  if (rect.bottom < 0 || rect.top > vh) return false;
+  if (rect.right < 0 || rect.left > vw) return false;
+  return true;
+}
+
+export function clampRect(rect: DOMRect, vw: number, vh: number): BoundingBox {
+  return {
+    x: Math.max(0, rect.left),
+    y: Math.max(0, rect.top),
+    width: Math.min(rect.width, vw - rect.left),
+    height: Math.min(rect.height, vh - rect.top),
+  };
+}
+
+export function clampRectToBbox(rect: DOMRect, vw: number, vh: number): BoundingBox {
+  return clampRect(rect, vw, vh);
+}
+
+export function getVisibleVerticalRatio(rect: DOMRect, vh: number): number {
+  if (rect.height <= 1) return 0;
+  const visibleTop = Math.max(0, rect.top);
+  const visibleBottom = Math.min(vh, rect.bottom);
+  return Math.max(0, visibleBottom - visibleTop) / rect.height;
+}
+
+export function applyRightCutToRect(rect: DOMRect, cutX: number | null): DOMRect | null {
+  if (!Number.isFinite(cutX as number)) return rect;
+  const rightLimit = (cutX as number) - 10;
+  if (rect.left >= rightLimit) return null;
+  if (rect.right <= rightLimit) return rect;
+  const w = Math.max(10, rightLimit - rect.left);
+  return new DOMRect(rect.left, rect.top, w, rect.height);
 }

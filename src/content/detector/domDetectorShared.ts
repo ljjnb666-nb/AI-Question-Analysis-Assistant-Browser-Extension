@@ -50,3 +50,13 @@ export function isElementNode(node: unknown): node is Element {
 export function isHtmlElementNode(node: unknown): node is HTMLElement {
   return isHTMLElementInOwnerRealm(node);
 }
+
+/* Moved from domDetector.ts (strangler step 1). */
+export function isElementVisible(el: HTMLElement): boolean {
+  const style = getComputedStyle(el);
+  if (style.visibility === "hidden" || style.display === "none") return false;
+  if (style.opacity === "0") return false;
+  if (el.offsetParent !== null) return true;
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
