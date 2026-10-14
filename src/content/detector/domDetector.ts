@@ -612,7 +612,30 @@ function scoreElement(el: Element, text: string): { confidence: number; type: Qu
 
 
 function countBlankControls(el: Element): number {
-  return el.querySelectorAll("input:not([type='radio']):not([type='checkbox']):not([type='hidden']):not([type='button']):not([type='submit']),textarea,[contenteditable='true']").length;
+  const nodes = el.querySelectorAll("input:not([type='radio']):not([type='checkbox']):not([type='hidden']):not([type='button']):not([type='submit']),textarea,[contenteditable='true']");
+  let count = 0;
+  for (const node of nodes) {
+    if (!isHtmlElementNode(node)) continue;
+    // A rich-text answer editor (UEditor/TinyMCE/Quill/…) is an essay box,
+    // not a fill-in-the-blank control. Its hidden source textarea must not
+    // flip the question type to fill_blank (cf. Chaoxing 简答题).
+    if (isInsideRichTextEditor(node)) continue;
+    if (node.hasAttribute("hidden")) continue;
+    if (node.style && node.style.display === "none") continue;
+    count++;
+  }
+  return count;
+}
+
+/** True when the node lives inside a rich-text editor widget. */
+function isInsideRichTextEditor(node: Element): boolean {
+  let cur: Element | null = node;
+  for (let i = 0; i < 8 && cur; i++) {
+    const marker = `${String((cur as HTMLElement).className || "")} ${String((cur as HTMLElement).id || "")}`;
+    if (/(edui|ueditor|tinymce|\bmce-|\bquill\b|ckeditor|wangEditor|\bw-e-|\bfroala\b|kindeditor|nicEdit)/i.test(marker)) return true;
+    cur = cur.parentElement;
+  }
+  return false;
 }
 
 function countJudgeControls(el: Element): number {
