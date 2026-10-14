@@ -121,12 +121,16 @@ export function buildChaoxingCandidates(
     const identityText = structuredText && structuredText.length >= 10 ? structuredText : text;
 
     const qid = el.getAttribute("data") || el.id || `chaoxing-${index}`;
+    // Stable block id: the sidepanel merges re-detections by block.id, so a
+    // Date.now() id orphans parse results whenever the page re-detects
+    // (scroll/interaction). The qid is stable per question on this page.
+    const blockId = `auto-chaoxing-${qid}`;
     // Deliberately unclamped stem box: full-page accumulation converts each
     // scroll step to absolute coords, so every observation yields the same box
     // and merges into one complete box. Per-viewport clamping produced partial
     // slices that never merged (each step kept a different slice).
     const bound = attachDetectedQuestionIdentity({
-      id: `auto-chaoxing-${Date.now()}-${index}`,
+      id: blockId,
       bbox: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
       previewText: previewText.slice(0, 900),
       hasImage: hasMeaningfulVisualContent(el),

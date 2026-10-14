@@ -28,8 +28,12 @@ export function resolveResultAnswerForDisplay(result: ParseResult, dtype: Questi
 
 export function isStructuredAnswerExtractionFailed(result: ParseResult): boolean {
   const raw = String(result.answer || "").trim();
-  const brief = String(result.briefExplanation || "").trim();
-  return looksLikePlaceholderDisplayAnswer(raw) || looksLikeNarrativeCodeDisplayAnswer(raw) || /解析提取失败/.test(brief);
+  // The answer is what gets filled. A missing briefExplanation (common when the
+  // model returns plain text for long essays instead of JSON) must not
+  // invalidate a real answer. Placeholder detection on the answer itself
+  // already covers the "extraction failed" case.
+  if (!raw || raw === "—") return true;
+  return looksLikePlaceholderDisplayAnswer(raw) || looksLikeNarrativeCodeDisplayAnswer(raw);
 }
 
 export function normalizeHistoryAnswer(entry: HistoryItem, dtype: QuestionType): string {
