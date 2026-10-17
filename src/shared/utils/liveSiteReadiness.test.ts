@@ -86,6 +86,35 @@ describe("Phase13A unowned public SPA content-ready retry gate", () => {
     expect(ready).not.toHaveBeenCalled();
   });
 
+  it("ISSUE83_GRACE_RETRY_07 stops before a destructive revisit while SPA scripts are pending", async () => {
+    const navigate = vi.fn().mockResolvedValue(http(200));
+    const ready = vi.fn().mockRejectedValue(new Error("content still loading"));
+    const betweenAttempts = vi.fn(async () => undefined);
+    const stopIfContentPending = vi.fn(() => true);
+    const result = await visitLiveTargetUntilReady(navigate, ready, {
+      maxAttempts: 3, betweenAttempts, stopIfContentPending,
+    });
+    expect(result).toMatchObject({ ready: false, attemptsUsed: 1, statusCodes: [200] });
+    expect(navigate).toHaveBeenCalledOnce();
+    expect(ready).toHaveBeenCalledOnce();
+    expect(betweenAttempts).not.toHaveBeenCalled();
+    expect(stopIfContentPending).toHaveBeenCalledOnce();
+  });
+
+  it("ISSUE83_GRACE_RETRY_08 retries only when no scripts are pending", async () => {
+    const navigate = vi.fn().mockResolvedValue(http(200));
+    const ready = vi.fn().mockRejectedValue(new Error("page shell without problem"));
+    const betweenAttempts = vi.fn(async () => undefined);
+    const stopIfContentPending = vi.fn(() => false);
+    const result = await visitLiveTargetUntilReady(navigate, ready, {
+      maxAttempts: 3, betweenAttempts, stopIfContentPending,
+    });
+    expect(result).toMatchObject({ ready: false, attemptsUsed: 3, statusCodes: [200, 200, 200] });
+    expect(navigate).toHaveBeenCalledTimes(3);
+    expect(betweenAttempts).toHaveBeenCalledTimes(2);
+    expect(stopIfContentPending).toHaveBeenCalledTimes(3);
+  });
+
   it("PHASE13A_RETRY_06 rejects unbounded retries", async () => {
     const navigate = vi.fn();
     const ready = vi.fn();

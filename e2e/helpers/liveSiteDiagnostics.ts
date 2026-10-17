@@ -104,6 +104,7 @@ export function formatLiveSiteReadinessDiagnostic(input: {
       bodyTextLength: boundedInt(snapshot.bodyTextLength),
       scriptCount: boundedInt(snapshot.scriptCount),
       pendingScriptRequests: boundedInt(snapshot.pendingScriptRequests),
+      pendingScriptGraceUsed: snapshot.pendingScriptGraceUsed === true,
       documentTitleSha256: typeof snapshot.documentTitleSha256 === "string" && /^[a-f0-9]{64}$/.test(snapshot.documentTitleSha256)
         ? snapshot.documentTitleSha256 : "",
     })),
