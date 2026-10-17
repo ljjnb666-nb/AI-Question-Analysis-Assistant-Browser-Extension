@@ -1,5 +1,4 @@
-import type { Page } from "@playwright/test";
-import { expect } from "@playwright/test";
+import { errors, type Page } from "@playwright/test";
 
 /**
  * Only recover after the normal live-title assertion has timed out and a
@@ -9,6 +8,9 @@ import { expect } from "@playwright/test";
  * This is a one-shot bounded grace, shared across all visits in one test.
  * Even after recovery, success still requires the actual expected title in
  * the live DOM; neither HTTP 200 nor pending-script telemetry can PASS.
+ *
+ * Unexpected page/context errors are not readiness timeouts and must never
+ * consume the grace budget or be disguised as an upstream script stall.
  */
 export function createLiveSiteTitleVerifier(options: {
   page: Page;
@@ -27,25 +29,27 @@ export function createLiveSiteTitleVerifier(options: {
   }
 
   let usedGrace = false;
-  const titleVisible = async () => {
-    const body = options.page.locator("body");
-    if (await body.count() === 0) return false;
-    return (await body.innerText()).includes(options.expectedTitle);
-  };
   const verifyWithBudget = async (timeout: number) => {
-    await expect.poll(titleVisible, {
-      timeout,
-      intervals: [100, 250, 500, 1_000],
-    }).toBe(true);
+    // waitForFunction exposes Playwright's typed TimeoutError. expect.poll
+    // also rejects on non-timeout failures, which cannot safely authorize
+    // another grace interval when the browser context has been lost.
+    const handle = await options.page.waitForFunction(
+      (expectedTitle: string) => Boolean(document.body?.innerText.includes(expectedTitle)),
+      options.expectedTitle,
+      { timeout, polling: 100 },
+    );
+    await handle.dispose();
   };
   return {
     async verify() {
       try {
         await verifyWithBudget(options.baseTimeoutMs);
       } catch (error) {
-        if (usedGrace || options.pendingScriptCount() <= 0) throw error;
-        // Use the extension only once, and only if script work is in flight.
-        // A perpetual loader still fails: never convert a shell into success.
+        if (!(error instanceof errors.TimeoutError) || usedGrace || options.pendingScriptCount() <= 0) {
+          throw error;
+        }
+        // Use the extension only once, only for a real content timeout,
+        // and only if script work is in flight. A perpetual loader fails.
         usedGrace = true;
         await verifyWithBudget(options.graceTimeoutMs);
       }
