@@ -19,6 +19,8 @@ export async function visitLiveTargetUntilReady<T extends { status(): number }>(
   options: {
     maxAttempts: number;
     betweenAttempts: () => Promise<void>;
+    /** Do not destructively revisit while the current SPA still loads scripts. */
+    stopIfContentPending?: () => boolean;
   },
 ): Promise<LiveTargetVisitResult<T>> {
   if (!Number.isSafeInteger(options.maxAttempts) || options.maxAttempts < 1 || options.maxAttempts > 5) {
@@ -44,6 +46,11 @@ export async function visitLiveTargetUntilReady<T extends { status(): number }>(
         return { response, ready: true, attemptsUsed: attempt, statusCodes };
       } catch {
         // The expected content did not become visible in this visit.
+        // A second navigation cancels in-flight scripts and may prevent
+        // hydration from ever completing. Preserve an honest failure.
+        if (options.stopIfContentPending?.()) {
+          return { response, ready: false, attemptsUsed: attempt, statusCodes };
+        }
       }
     }
     if (attempt < options.maxAttempts) await options.betweenAttempts();
