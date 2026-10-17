@@ -26,18 +26,22 @@ export function discoverControls(owner: Element): DiscoveredControl[] {
  */
 const EDITOR_IFRAME_HINT = /ueditor|edui|tinymce|cke_|ckeditor|quill|froala|kindeditor|nicedit|wangEditor/i;
 
+function getReadableIframeDocument(iframe: HTMLIFrameElement): Document | null {
+  try {
+    return iframe.contentDocument;
+  } catch {
+    return null; // Cross-origin: not readable, not fillable.
+  }
+}
+
 function discoverEditorIframeBodies(owner: Element): DiscoveredControl[] {
   const out: DiscoveredControl[] = [];
   for (const node of owner.querySelectorAll("iframe")) {
     if (!isHtmlElementNode(node)) continue;
     const iframe = node as HTMLIFrameElement;
-    let doc: Document | null = null;
-    try {
-      doc = iframe.contentDocument;
-    } catch {
-      continue; // Cross-origin: not readable, not fillable.
-    }
-    const body = doc?.body;
+    const doc = getReadableIframeDocument(iframe);
+    if (!doc) continue;
+    const body = doc.body;
     if (!body) continue;
     const hint = `${iframe.id} ${iframe.name} ${iframe.className} ${iframe.title}`;
     if (!EDITOR_IFRAME_HINT.test(hint) && !body.isContentEditable && doc?.designMode !== "on") continue;
