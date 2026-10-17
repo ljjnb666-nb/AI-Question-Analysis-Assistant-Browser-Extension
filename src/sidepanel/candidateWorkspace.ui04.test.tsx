@@ -73,6 +73,20 @@ describe("UI-04 candidate workspace behavior", () => {
     expect(articles()).toHaveLength(1);
     expect(articles()[0].dataset.candidateId).toBe("partial");
   });
+  it("Issue102 R11 keeps partial-coverage warning across filters without losing a found question", () => {
+    const { container } = render(<Workspace initial={[candidate("partial-filter")]} lang="zh"
+      phase="incomplete" outcome="budget_exhausted" />);
+    expect(articles().map(article => article.dataset.candidateId)).toEqual(["partial-filter"]);
+    fireEvent.click(screen.getByRole("button", { name: "已选中" }));
+    expect(articles()).toHaveLength(0);
+    const coverage = container.querySelector('[data-scan-coverage="partial"]');
+    expect(coverage).toHaveAttribute("role", "status");
+    expect(coverage).toHaveTextContent("页面仍未全部覆盖");
+    expect(screen.getByText("当前筛选条件下没有题目。")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "全部" }));
+    expect(articles().map(article => article.dataset.candidateId)).toEqual(["partial-filter"]);
+    expect(container.querySelector('[data-scan-coverage="partial"]')).toBeVisible();
+  });
   it("Issue102 R12 displays blocked-scroll partial coverage while keeping candidates", () => {
     const { container } = render(<Workspace initial={[candidate("blocked")]} lang="zh"
       phase="incomplete" outcome="scroll_stalled" />);
