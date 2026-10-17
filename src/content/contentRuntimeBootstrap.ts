@@ -51,6 +51,7 @@ import { createContentMainBridges } from "./contentMainBridges";
 import { createContentRuntimeState } from "./contentRuntimeState";
 import { createContentMainWorkflows } from "./contentMainWorkflows";
 import { createProtectedWorkRunAuthority } from "./protectedWorkRunAuthority";
+import { stopAutoSolveAndReleaseRunning } from "./stopAutoSolveAndReleaseRunning";
 import { beginContentRuntimeGeneration } from "./contentRuntimeLifecycle";
 import { startContentRouteLifecycleWatch } from "./revision/contentRouteLifecycle";
 import { controlRegistry } from "./answer/controlRegistry";
@@ -308,12 +309,17 @@ export function bootstrapContentRuntime(options: { onShutdown?: () => void } = {
     },
     startManualCapture,
     stopAutoSolveAll: (generationId?: string) => {
-      // Keep the START slot occupied until the old async workflow settles.
-      // All subsequent mutation gates observe the permanently revoked lease.
-      if (!runAuthority.revoke("autoSolve", generationId)) return false;
-      runtimeState.setAutoSolveStopRequested(true);
-      abortCurrentSolveAttempt();
-      return true;
+      // Revocation fences old writes, but the old Provider promise may not
+      // settle before a different tagged generation STARTs. Release the
+      // shared UI running gate synchronously after exact revocation.
+      return stopAutoSolveAndReleaseRunning(runAuthority, generationId, {
+        requestStop: () => runtimeState.setAutoSolveStopRequested(true),
+        releaseRunning: () => {
+          runtimeState.setAutoSolveRunning(false);
+          workspace.setAutoSolveRunning(false);
+        },
+        abortCurrentAttempt: abortCurrentSolveAttempt,
+      });
     },
     stopSpaWatch: runtimeState.stopSpaWatch,
     verifyParsedAnswerInPage,
