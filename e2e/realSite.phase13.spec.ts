@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { BrowserContext, Page, Worker } from "@playwright/test";
@@ -29,7 +29,18 @@ type LiveCandidate = {
 };
 
 type WorkspaceSnapshot = {
-  detection: { phase: "never_started" | "detecting" | "completed"; mode: "viewport" | "fullpage" | null };
+  detection: {
+    phase: "never_started" | "detecting" | "completed";
+    mode: "viewport" | "fullpage" | null;
+    requestId?: string;
+    diagnostics?: {
+      domDiagnostics?: {
+        probedElements: number;
+        acceptedCandidates: number;
+        rejected: Record<string, number>;
+      };
+    };
+  };
   candidates: LiveCandidate[];
   originUrl: string;
   runtimeInstanceId: string;
@@ -98,11 +109,15 @@ async function installProductionContentRuntime(worker: Worker, tabId: number): P
   }, tabId);
 }
 
-async function startViewportDetection(worker: Worker, tabId: number): Promise<void> {
-  const response = await worker.evaluate(async (id) => {
-    return await chrome.tabs.sendMessage(id, { type: "START_AUTO_DETECT" });
-  }, tabId);
-  expect(response).toMatchObject({ ok: true });
+async function startViewportDetection(worker: Worker, tabId: number, expectedUrl: string, requestId: string): Promise<void> {
+  // Match the Popup/Side Panel terminal contract, rather than accepting the
+  // legacy transport ACK from a different/older viewport run.
+  const response = await worker.evaluate(async ({ id, url, generation }) => {
+    return await chrome.tabs.sendMessage(id, {
+      type: "START_AUTO_DETECT", requestId: generation, expectedUrl: url,
+    });
+  }, { id: tabId, url: expectedUrl, generation: requestId });
+  expect(response).toMatchObject({ ok: true, requestId });
 }
 
 async function getWorkspaceSnapshot(worker: Worker, tabId: number, expectedUrl: string): Promise<WorkspaceResponse> {
@@ -336,12 +351,15 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     const before = await readPageProbe(page);
     const tabId = await resolvePintiaTabId(worker);
     await installProductionContentRuntime(worker, tabId);
-    await startViewportDetection(worker, tabId);
+    const requestId = randomUUID();
+    await startViewportDetection(worker, tabId, page.url(), requestId);
 
     await expect.poll(
       async () => {
-        const snapshot = await getWorkspaceSnapshot(worker, tabId, page.url());
-        return snapshot.ok === true && snapshot.snapshot?.detection.phase === "completed";
+        const read = await getWorkspaceSnapshot(worker, tabId, page.url());
+        const detection = read.snapshot?.detection;
+        return read.ok === true && detection?.phase === "completed"
+          && detection.mode === "viewport" && detection.requestId === requestId;
       },
       { timeout: 30_000, intervals: [200, 500, 1_000, 2_000] },
     ).toBe(true);
@@ -351,6 +369,49 @@ test("@phase13 LIVE_PINTIA_PUBLIC_READONLY_DETECTION proves production detection
     const snapshot = workspaceResponse.snapshot;
     expect(snapshot).toBeTruthy();
     expect(snapshot!.originUrl).toBe(page.url());
+    expect(snapshot!.detection.requestId).toBe(requestId);
+
+    if (snapshot!.candidates.length === 0) {
+      // Fail-only numeric evidence, not an alternative pass path. No page
+      // text, URL query, request UUID, user input or credential is persisted.
+      const pageState = await page.evaluate((expectedTitle: string) => ({
+        expectedTitleStillVisible: document.body?.innerText.includes(expectedTitle) === true,
+        bodyTextLength: document.body?.innerText.length ?? 0,
+        readyState: document.readyState,
+        codeElements: document.querySelectorAll("pre,code").length,
+        forms: document.forms.length,
+        inputControls: document.querySelectorAll("input,textarea,select").length,
+        questionLikeElements: document.querySelectorAll(
+          "[class*='question'],[class*='problem'],[data-testid*='question']",
+        ).length,
+      }), PINTIA_EXPECTED_TITLE).catch(() => null);
+      const dom = snapshot!.detection.diagnostics?.domDiagnostics;
+      const rejectionKeys = [
+        "geometry", "text", "controls", "navigation", "signal",
+        "confidence", "completeness", "grouped", "fragment", "duplicate",
+      ] as const;
+      const bounded = (n: unknown) =>
+        typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? Math.min(n, 1_000_000) : 0;
+      const evidence = {
+        schemaVersion: 1,
+        outcome: "LIVE_PINTIA_COMPLETED_ZERO_CANDIDATES",
+        requestMatched: snapshot!.detection.requestId === requestId,
+        detectionPhase: snapshot!.detection.phase,
+        detectionMode: snapshot!.detection.mode,
+        runtimeGeneration: bounded(snapshot!.runtimeGeneration),
+        routeEpoch: bounded(snapshot!.routeEpoch),
+        candidateCount: 0,
+        dom: dom ? {
+          probedElements: bounded(dom.probedElements),
+          acceptedCandidates: bounded(dom.acceptedCandidates),
+          rejected: Object.fromEntries(rejectionKeys.map(key => [key, bounded(dom.rejected[key])])),
+        } : null,
+        page: pageState,
+      };
+      console.error("PHASE13_ZERO_CANDIDATE_DIAG " + JSON.stringify(evidence));
+      await writeFile(path.join(evidenceDir, "pintia-zero-candidate-diagnostic.json"),
+        `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
+    }
     expect(snapshot!.candidates.length).toBeGreaterThanOrEqual(1);
 
     const titleCandidate = snapshot!.candidates.find(({ block }) =>
