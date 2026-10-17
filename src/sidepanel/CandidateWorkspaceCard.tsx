@@ -159,7 +159,7 @@ export function CandidateWorkspaceCard({
       </div>
 
       {/* Question Content: Stem, Media, Options */}
-      <CandidateQuestionContent block={cand.block} lang={lang} />
+      <CandidateQuestionContent block={cand.block} result={cand.result} lang={lang} />
 
       {/* Review Alert Notice */}
       {presentation.reasons.length > 0 && (

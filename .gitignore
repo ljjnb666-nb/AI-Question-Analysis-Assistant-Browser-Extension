@@ -17,3 +17,4 @@ test-results/
 .mimosa/
 rc-manifest.json
 quiz-solver-analytics-image.tar.gz
+/benchmarks/issue105/private/
