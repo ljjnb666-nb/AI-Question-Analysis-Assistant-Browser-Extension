@@ -17,6 +17,7 @@ const sentRuntimeMessages: string[] = [];
 const sentTabTargets: Array<{ tabId: number; type: string }> = [];
 const sentStartGenerations: Array<string | undefined> = [];
 const sentViewportRequests: Array<{ tabId: number; requestId?: string; expectedUrl?: string }> = [];
+let viewportSnapshotReplyOverride: ((requestId: string | undefined) => unknown) | null = null;
 let viewportReplyOverride: ((requestId: string | undefined) => Promise<unknown>) | null = null;
 let viewportGuard: (() => boolean) | undefined;
 
@@ -28,6 +29,9 @@ vi.mock("@/shared/utils/messaging", () => ({
   // The popup dispatches long-running work straight to the recorded owner
   // tab; keep that channel observable too.
   sendToTabWithBootstrap: vi.fn(async (tabId: number, message: { type: string; generationId?: string; requestId?: string; expectedUrl?: string }, guard?: () => boolean) => {
+    if (message.type === "GET_CANDIDATE_WORKSPACE_SNAPSHOT") {
+      return viewportSnapshotReplyOverride?.(sentViewportRequests[sentViewportRequests.length - 1]?.requestId) ?? { ok: false };
+    }
     sentRuntimeMessages.push(message.type);
     sentTabTargets.push({ tabId, type: message.type });
     sentStartGenerations.push(message.generationId);
@@ -132,6 +136,25 @@ vi.stubGlobal("fetch", vi.fn(async (_url: string | URL, init?: { headers?: Recor
 }) as Response));
 
 import { PopupApp } from "./PopupApp";
+import { createCandidateWorkspaceRuntime } from "@/content/candidateWorkspaceRuntime";
+
+function verifiedViewportSnapshot(requestId: string | undefined, count: number) {
+  if (!requestId) return { ok: false };
+  const originUrl = "https://quiz.example.com/exam";
+  const runtime = createCandidateWorkspaceRuntime({
+    url: () => originUrl, send: vi.fn(), runtimeInstanceId: "popup-issue101-r14", runtimeGeneration: 1,
+  });
+  runtime.beginDetection("viewport", requestId);
+  runtime.observe({
+    type: "AUTO_DETECT_RESULT_READY",
+    candidates: Array.from({ length: count }, (_, i) => ({
+      block: { id: `popup-q-${i}`, previewText: `Synthetic question ${i}` },
+      selected: false, status: "idle" as const,
+    })),
+  });
+  return runtime.snapshot(originUrl);
+}
+
 import { __resetStorageCacheForTests } from "@/shared/utils/storage";
 import { readProtectedWorkOwners } from "@/shared/auth/protectedWorkOwner";
 import { awaitViewportCommand } from "@/shared/ui/viewportDetectionTimeout";
@@ -147,6 +170,7 @@ beforeEach(async () => {
   sentStartGenerations.length = 0;
   sentViewportRequests.length = 0;
   viewportReplyOverride = null;
+  viewportSnapshotReplyOverride = null;
   viewportGuard = undefined;
   vi.mocked(awaitViewportCommand).mockImplementation(
     (operation, timeoutMs, onTimeout) =>
@@ -214,6 +238,7 @@ describe("PopupApp protected dispatch authority", () => {
   });
 
   it("AUTH_UI_32_POPUP_DISPATCH_TOCTOU dispatch still flows while the session stays valid", { timeout: 20_000 }, async () => {
+    viewportSnapshotReplyOverride = id => verifiedViewportSnapshot(id, 2);
     render(<PopupApp />);
     await screen.findByText(/当前屏识别|Detect Current View/, {}, { timeout: 10_000 });
 
@@ -228,7 +253,8 @@ describe("PopupApp protected dispatch authority", () => {
       tabId: 5, expectedUrl: "https://quiz.example.com/exam",
     });
     expect(sentViewportRequests[0]?.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27,}$/);
-    await waitFor(() => expect(window.close).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText(/工作区当前识别到 2 道候选题/)).toBeInTheDocument());
+    expect(window.close).not.toHaveBeenCalled();
   });
 
   it("RC03A_R5_POPUP_ACK_ONLY never closes on a transport ACK without exact completion", async () => {
@@ -306,12 +332,13 @@ describe("PopupApp protected dispatch authority", () => {
     await act(async () => { deferredSidePanelOpen?.(); deferredSidePanelOpen = null; });
     await waitFor(() => expect(sentViewportRequests).toHaveLength(1));
     expect(sentRuntimeMessages).toEqual(["START_AUTO_DETECT"]);
-    // Drain this test's own terminal continuation before the next test spies
-    // on window.close. An unawaited close contaminates later assertions.
-    await waitFor(() => expect(window.close).toHaveBeenCalledTimes(1));
+    // No verified content snapshot: never pretend the terminal ACK proves a count.
+    await waitFor(() => expect(screen.getByText(/尚未取得可验证的结果/)).toBeInTheDocument());
+    expect(window.close).not.toHaveBeenCalled();
   });
 
   it("RC03A_R5_POPUP_IN_FLIGHT waits for terminal completion and does not dispatch twice", async () => {
+    viewportSnapshotReplyOverride = id => verifiedViewportSnapshot(id, 0);
     let release!: (value: unknown) => void;
     viewportReplyOverride = async () => new Promise(resolve => { release = resolve; });
     render(<PopupApp />);
@@ -323,8 +350,21 @@ describe("PopupApp protected dispatch authority", () => {
     await act(async () => {
       release({ ok: true, requestId: sentViewportRequests[0]?.requestId });
     });
-    await waitFor(() => expect(window.close).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText(/当前屏未识别到可用题目/)).toBeInTheDocument());
+    expect(window.close).not.toHaveBeenCalled();
     expect(sentViewportRequests).toHaveLength(1);
+  });
+
+  it("ISSUE101_R14_POPUP_REJECT_STALE_SNAPSHOT never displays the previous UUID count", async () => {
+    viewportSnapshotReplyOverride = () => verifiedViewportSnapshot(
+      "18aabcde-0ee2-4e98-8e12-48fdce879013", 3,
+    );
+    render(<PopupApp />);
+    await screen.findByText(/当前屏识别|Detect Current View/);
+    fireEvent.click(screen.getByText(/当前屏识别|Detect Current View/));
+    await waitFor(() => expect(screen.getByText(/尚未取得可验证的结果/)).toBeInTheDocument());
+    expect(screen.queryByText(/3 道候选题/)).not.toBeInTheDocument();
+    expect(window.close).not.toHaveBeenCalled();
   });
 });
 
