@@ -30,7 +30,7 @@ vi.mock("@/shared/utils/messaging", () => ({
   // tab; keep that channel observable too.
   sendToTabWithBootstrap: vi.fn(async (tabId: number, message: { type: string; generationId?: string; requestId?: string; expectedUrl?: string }, guard?: () => boolean) => {
     if (message.type === "GET_CANDIDATE_WORKSPACE_SNAPSHOT") {
-      return viewportSnapshotReplyOverride?.(sentViewportRequests.at(-1)?.requestId) ?? { ok: false };
+      return viewportSnapshotReplyOverride?.(sentViewportRequests[sentViewportRequests.length - 1]?.requestId) ?? { ok: false };
     }
     sentRuntimeMessages.push(message.type);
     sentTabTargets.push({ tabId, type: message.type });
