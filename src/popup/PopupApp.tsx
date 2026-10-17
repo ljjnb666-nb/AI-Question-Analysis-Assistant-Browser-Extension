@@ -4,7 +4,8 @@ import {
   sendToActiveTab,
   sendToTabWithBootstrap,
 } from "@/shared/utils/messaging";
-import type { ExtMessage } from "@/shared/types";
+import type { ExtMessage, WorkspaceSnapshotResponse } from "@/shared/types";
+import { viewportDetectionSnapshotFeedback } from "@/sidepanel/viewportDetectionFeedback.rcPilot03a";
 import { sendAIConnectionCommand } from "@/shared/utils/aiConnectionClient";
 import { getProviderShortName } from "@/shared/ai/providers";
 import { getAIConnectionReadiness } from "@/shared/utils/aiSolvePreferences";
@@ -363,6 +364,37 @@ export const PopupApp: React.FC = () => {
             ? response.error : "VIEWPORT_RESPONSE_UNCONFIRMED";
           throw new Error(code);
         }
+
+        // A terminal START reply proves completion of the exact content
+        // request, not its retained candidate count. Never silently close
+        // the only visible feedback surface on that reply. Read the
+        // content-owned, versioned snapshot for this same tab / URL / UUID.
+        // A missing/late/malformed snapshot is "unconfirmed", not zero.
+        let snapshot: WorkspaceSnapshotResponse | null = null;
+        try {
+          const read = await awaitViewportCommand(
+            sendToTabWithBootstrap<WorkspaceSnapshotResponse>(
+              tab.id,
+              { type: "GET_CANDIDATE_WORKSPACE_SNAPSHOT", expectedUrl },
+              isAuthenticatedNow,
+            ),
+            VIEWPORT_COMMAND_TIMEOUT_MS,
+          );
+          if (!read.timedOut) snapshot = read.value;
+        } catch {
+          // Transport errors do not establish either an empty scan or success.
+          // Re-check auth and origin after this optional read.
+        }
+        if (!isAuthenticatedNow()) throw new Error("AUTHORITY_LOST");
+        const afterRead = await chrome.tabs.get(tab.id);
+        if (!isAuthenticatedNow()) throw new Error("AUTHORITY_LOST");
+        if (afterRead.url !== expectedUrl) throw new Error("STALE_VIEWPORT_ORIGIN");
+
+        setFeedback(viewportDetectionSnapshotFeedback(
+          lang, { tabId: tab.id, url: expectedUrl }, snapshot, requestId,
+        ));
+        setActiveFeature(null);
+        return; // Keep Popup open: the user must see the verified terminal result.
       } else {
         await sendToActiveTab({ type: messageType }, isAuthenticatedNow);
       }
