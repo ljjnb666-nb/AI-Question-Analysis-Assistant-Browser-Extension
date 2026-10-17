@@ -19,6 +19,7 @@ jobs:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Assert checked-out source SHA
         id: source
@@ -55,6 +56,8 @@ jobs:
         run: npm run verify:permissions
 
       - name: Run quality gate
+        env:
+          SECURITY_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: npm run check
 
   build_artifact:

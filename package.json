@@ -16,7 +16,7 @@
     "lint:fix": "eslint src admin-console analytics-server e2e playwright.config.ts tools/build-extension.mjs tools/verify-admin-artifact.mjs tools/verify-admin-artifact.node-test.mjs tools/generate-rc-manifest.mjs tools/generate-rc-manifest.node-test.mjs vite.admin.config.ts vite.contentRuntime.config.ts eslint.config.mjs --fix tools/issue105/benchmarkEngine.mjs tools/issue105/runBenchmark.mjs tools/issue105/benchmark.node-test.mjs tools/issue105/reviewAudit.mjs tools/issue105/reviewAudit.node-test.mjs tools/issue105/imageEvidence.mjs tools/issue105/imageEvidence.node-test.mjs tools/issue105/verifyScreenshot.mjs",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
-    "check": "npm run lint && npm run typecheck && npm run test:run && npm run test:phase13b:contracts && npm run test:issue105:benchmark",
+    "check": "npm run test:security:gate && npm run security:scan && npm run lint && npm run typecheck && npm run test:run && npm run test:phase13b:contracts && npm run test:issue105:benchmark",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tooling.json",
     "test": "node --disable-warning=ExperimentalWarning ./node_modules/vitest/vitest.mjs",
     "test:ui": "node --disable-warning=ExperimentalWarning ./node_modules/vitest/vitest.mjs --ui",
@@ -36,7 +36,9 @@
     "test:phase13b:contracts": "node --check tools/phase13b-auth-readonly.mjs && node --test tools/phase13b-authority.node-test.mjs",
     "accept:phase13b:local": "node tools/phase13b-auth-readonly.mjs",
     "test:soak:popup": "node tools/phase14a-popup-soak.mjs",
-    "test:issue105:benchmark": "node --test tools/issue105/benchmark.node-test.mjs tools/issue105/reviewAudit.node-test.mjs tools/issue105/imageEvidence.node-test.mjs"
+    "test:issue105:benchmark": "node --test tools/issue105/benchmark.node-test.mjs tools/issue105/reviewAudit.node-test.mjs tools/issue105/imageEvidence.node-test.mjs",
+    "test:security:gate": "node --test tools/credential-ingress-guard.node-test.mjs",
+    "security:scan": "node tools/credential-ingress-guard.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
