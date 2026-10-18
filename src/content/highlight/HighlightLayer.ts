@@ -105,8 +105,10 @@ export class HighlightLayer {
       el.style.boxSizing = "border-box";
       el.style.borderRadius = "4px";
       el.style.transition = "background 0.2s, border-color 0.2s";
-      el.style.cursor = "pointer";
-      el.style.pointerEvents = "all";
+      // Click-through: the box must not swallow clicks on the page underneath
+      // (e.g. the question's own option radios). Only the badge stays clickable
+      // as the selection toggle; badge clicks bubble to this listener.
+      el.style.pointerEvents = "none";
       el.addEventListener("click", () => {
         const current = this.states.get(blockId);
         this.onSelect?.(blockId, !(current?.selected ?? false));
@@ -123,13 +125,13 @@ export class HighlightLayer {
 
     const qt = state.questionType === "unknown" ? "?" : state.questionType.replace("_choice", "选").replace("judge", "判");
     el.innerHTML = `
-      <div style="
+      <div title="点击选中 / 取消选中该题" style="
         position:absolute; top:-1px; left:-1px;
         background:${BORDER_COLORS[key] ?? BORDER_COLORS.pending};
         color:#1e1e2e; font-size:10px; font-weight:700;
         padding:1px 5px; border-radius:3px 0 3px 0;
         font-family:system-ui,sans-serif; line-height:16px;
-        pointer-events:none;
+        pointer-events:all; cursor:pointer;
       ">${state.selected ? "✓" : "○"} ${qt}</div>
     `;
   }
