@@ -1,0 +1,64 @@
+name: Local Edge No Login (TEST ONLY - NEVER PUBLISH)
+
+on:
+  push:
+    branches:
+      - test/local-edge-nologin-20261018-r2
+
+permissions:
+  contents: read
+
+jobs:
+  local_edge_test_artifact:
+    if: github.ref == 'refs/heads/test/local-edge-nologin-20261018-r2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      QUIZ_SOLVER_LOCAL_EDGE_BUILD: LOCAL_EDGE_UI_ONLY_I_ACKNOWLEDGE
+    steps:
+      - name: Checkout isolated test branch (never main)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Confirm isolated build ref
+        shell: bash
+        run: |
+          test "${GITHUB_REF}" = "refs/heads/test/local-edge-nologin-20261018-r2"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          echo "Local-only branch confirmed: ${GITHUB_SHA}"
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      - name: Use lockfile-compatible npm
+        run: npm install --global npm@11.6.2
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Prepare test-only UI simulation in ephemeral checkout
+        run: node tools/build-local-edge-nologin.mjs
+
+      - name: Type check simulated test build
+        run: npm run typecheck
+
+      - name: Build local Edge extension
+        run: npm run build
+
+      - name: Verify normal extension structure and permissions
+        run: npm run verify:artifact
+
+      - name: Verify output is clearly marked test-only and contains mock session
+        run: node tools/build-local-edge-nologin.mjs --verify
+
+      - name: Upload unpackable Edge test extension ZIP (never publish)
+        uses: actions/upload-artifact@v4
+        with:
+          name: quiz-solver-LOCAL-EDGE-NO-LOGIN-DO-NOT-PUBLISH
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
