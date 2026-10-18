@@ -41,7 +41,18 @@ export function buildControlMapping(block: QuestionBlock, owner: Element): Contr
   const lifecycleToken = controlRegistry.lifecycleToken(questionId, controlRootKey, controlRootGeneration);
   if (lifecycleToken === null) return { ok: false, code: "CONTROL_MAPPING_CHANGED", message: "Control registry scope capacity is exhausted" };
   for (const found of discoverControls(semanticOwner)) {
-    if (found.controlType === "custom-choice" && found.element.querySelector("input[type=radio],input[type=checkbox]")) continue;
+    if (found.controlType === "custom-choice") {
+      // A wrapper containing a native choice input is only redundant when that
+      // input is itself usable (it registers as its own control). When the
+      // inner input is visually hidden (e.g. Element Plus opacity:0 original),
+      // the wrapper IS the click target and must be kept.
+      const innerChoice = found.element.querySelector("input[type=radio],input[type=checkbox]");
+      if (innerChoice instanceof HTMLElement) {
+        const innerDisabled = (innerChoice as HTMLInputElement).disabled || innerChoice.getAttribute("aria-disabled") === "true";
+        if (innerDisabled) continue;
+        if (isVisible(innerChoice)) continue;
+      }
+    }
     if (!found.visible || !found.enabled) continue;
     const key = normalizeOptionKey(found.text);
     const role = found.controlType === "radio" || found.controlType === "checkbox" || found.controlType === "custom-choice" ? "option" : found.controlType === "text" || found.controlType === "textarea" || found.controlType === "contenteditable" ? "blank" : null;

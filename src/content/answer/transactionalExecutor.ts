@@ -525,7 +525,8 @@ function blankKey(index: number): string { return `blank:${index}`; }
 
 function isSelected(ref: ControlRef): boolean {
   const element = controlRegistry.get(ref.controlId);
-  return isHTMLInputInOwnerRealm(element) ? element.checked : element?.getAttribute("aria-checked") === "true" || Boolean(element?.classList.contains("is-choose") || element?.classList.contains("selected") || element?.classList.contains("active"));
+  // Element Plus marks the selected label with .is-checked (not .is-choose).
+  return isHTMLInputInOwnerRealm(element) ? element.checked : element?.getAttribute("aria-checked") === "true" || Boolean(element?.classList.contains("is-choose") || element?.classList.contains("is-checked") || element?.classList.contains("selected") || element?.classList.contains("active"));
 }
 
 function readRaw(ref: ControlRef): string | boolean { return ref.role === "option" ? isSelected(ref) : readValue(ref); }

@@ -8,14 +8,53 @@ const SELECTOR = "input[type=radio],input[type=checkbox],input:not([type]),input
 
 /** O(N) in the supplied question owner subtree; it deliberately never scans document. */
 export function discoverControls(owner: Element): DiscoveredControl[] {
-  const direct = Array.from(owner.querySelectorAll(SELECTOR)).filter((node): node is HTMLElement =>isHtmlElementNode( node)).map((element) => ({
-    element,
-    controlType: getControlType(element),
-    visible: isVisible(element) && !element.hidden && element.getAttribute("aria-hidden") !== "true",
-    enabled: !isDisabled(element),
-    text: normalizeText(controlText(element)),
-  }));
-  return [...direct, ...discoverEditorIframeBodies(owner)];
+  const seen = new Set<Element>();
+  const out: DiscoveredControl[] = [];
+  const push = (element: HTMLElement, controlType: ControlType) => {
+    if (seen.has(element)) return;
+    seen.add(element);
+    out.push({
+      element,
+      controlType,
+      visible: isVisible(element) && !element.hidden && element.getAttribute("aria-hidden") !== "true",
+      enabled: !isDisabled(element),
+      text: normalizeText(controlText(element)),
+    });
+  };
+  for (const node of owner.querySelectorAll(SELECTOR)) {
+    if (!isHtmlElementNode(node)) continue;
+    const element = node as HTMLElement;
+    const controlType = getControlType(element);
+    // Visually-hidden native choice input (e.g. Element Plus .el-radio__original
+    // with opacity:0): the input itself can never be the click target, but its
+    // visible <label> wrapper is. Register the label as the proxy control.
+    if ((controlType === "radio" || controlType === "checkbox") && isTransparentlyHidden(element)) {
+      const proxy = choiceLabelProxy(element);
+      if (proxy) {
+        push(proxy, "custom-choice");
+        continue;
+      }
+    }
+    push(element, controlType);
+  }
+  return [...out, ...discoverEditorIframeBodies(owner)];
+}
+
+/**
+ * Rendered but fully transparent (opacity:0), e.g. Element Plus choice inputs.
+ * display:none elements are excluded: they are not activation targets either.
+ */
+function isTransparentlyHidden(el: HTMLElement): boolean {
+  const style = (el.ownerDocument?.defaultView ?? window).getComputedStyle(el);
+  return style.display !== "none" && style.visibility !== "hidden" && style.opacity === "0";
+}
+
+/** Nearest visible <label> wrapping a transparently-hidden choice input. */
+function choiceLabelProxy(el: HTMLElement): HTMLElement | null {
+  if ((el as HTMLInputElement).disabled) return null;
+  const label = el.closest("label");
+  if (label && isHtmlElementNode(label) && isVisible(label) && !label.hidden) return label;
+  return null;
 }
 
 /**
